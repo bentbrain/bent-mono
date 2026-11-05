@@ -4,6 +4,8 @@ import subprocess
 import json
 import os
 import re
+from ha_config import load_config
+from ha_bridge import HATransport
 
 root = Path(__file__).resolve().parents[1]
 
@@ -44,7 +46,7 @@ def verify_public_release(sha):
 
 
 def main():
-    from ha_config import checkout
+    config = load_config()
     sha = source_revision()
     release_env = {**os.environ, 'HOME_RELEASE_SHA': sha}
     run('bun', 'run', 'typecheck')
@@ -52,13 +54,15 @@ def main():
     run('bun', 'run', 'test')
     run('python3', '-m', 'unittest', 'discover', '-s', 'tests')
     run('bun', 'run', 'build:card', env=release_env)
+    # Read-only private-route authentication must pass before public mutation.
+    HATransport(config).preflight()
     require_release_checks(sha)
     # The public Vite target strips HA bindings even when the private card's
     # operator environment contains them. Both targets pin the same source SHA.
     run('bun', 'run', 'deploy:public', env=release_env)
     verify_public_release(sha)
     require_release_checks(sha)
-    run('python3', 'scripts/prepare_ha_release.py', str(checkout))
+    run('python3', 'scripts/prepare_ha_release.py', str(config.checkout))
     (root / 'runs/furniture-audit').mkdir(parents=True, exist_ok=True)
     run('python3', 'scripts/deploy_ha_release.py')
     run('python3', 'scripts/verify_ha_release.py')

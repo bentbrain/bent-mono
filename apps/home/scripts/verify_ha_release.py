@@ -1,11 +1,20 @@
-from ha_config import checkout, bridge, bridge_checkout, ssh_identity, ssh_target, ssh_command, ha_url
-"""Verify every deployed asset over the same HA HTTP endpoint used by the dashboard."""
-import pathlib,json,subprocess
-root=pathlib.Path(__file__).resolve().parents[1];expected=json.loads((root/'runs/furniture-audit/deployed-files.json').read_text())
-script='import urllib.request,hashlib,json\nbase_url='+repr(ha_url+'/local/apartment-hotel/')+'\nexpected='+repr(expected)+'''\nfor path,want in expected.items():
- data=urllib.request.urlopen(base_url+path,timeout=10).read()
- got=hashlib.sha256(data).hexdigest()
- if got!=want:raise RuntimeError('Mismatch: '+path)
-print('Verified',len(expected),'served files by SHA-256')
-'''
-subprocess.run(['ssh',bridge,'python3 -'],input=script,text=True,check=True)
+"""Verify every prepared asset through the existing bridge's HA HTTP route."""
+import json
+from pathlib import Path
+from ha_bridge import HATransport
+from ha_config import load_config
+
+root = Path(__file__).resolve().parents[1]
+
+
+def main():
+    expected = json.loads((root / 'runs/furniture-audit/deployed-files.json').read_text())
+    release = json.loads((root / 'dist-card/release.json').read_text())
+    result = HATransport(load_config()).invoke('verify', release=release, expected=expected)
+    if result.get('verified') != len(expected):
+        raise RuntimeError('Not every prepared asset was verified')
+    print('Verified all served apartment assets by SHA-256.')
+
+
+if __name__ == '__main__':
+    main()
