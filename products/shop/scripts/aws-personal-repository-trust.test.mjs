@@ -135,7 +135,7 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
     const directory = await mkdtemp(join(tmpdir(), "shop-trust-synthetic-"));
     t.after(async () => { process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(baseConfig); await rm(directory, { recursive: true, force: true }); });
     const { baseline } = fixture(stage);
-    const currentState = structuredClone(baseline.state), permissions = structuredClone(baseline.permissions), commands = [], events = [];
+    const currentState = structuredClone(baseline.state), permissions = structuredClone(baseline.permissions), commands = [], events = [], inventories = [];
     const object = structuredClone(baseline.object);
     await write(join(directory, "original-repository-receipt.json"), original);
     const config = { ...baseConfig };
@@ -170,6 +170,7 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
         environment: { HOME: directory, AWS_ACCESS_KEY_ID: "must-strip", TF_CLI_ARGS: "-target=must-strip", NODE_OPTIONS: "must-strip" },
         execute: async (args, env) => {
             assert.equal(env.AWS_ACCESS_KEY_ID, undefined); assert.equal(env.AWS_CONFIG_FILE, PERSONAL_CONFIG_PATH);
+            assert.deepEqual(args.slice(-7), ["--profile", "personal-dev", "--region", "ap-southeast-2", "--output", "json", "--no-cli-pager"]);
             if (args[0] === "sts") return JSON.stringify({ Account: account, Arn: `arn:aws:sts::${account}:assumed-role/AWSReservedSSO_AdministratorAccess_synthetic/session` });
             if (args[0] === "s3api") {
                 assert.deepEqual(args.slice(0, -7), ["s3api", "head-object", "--bucket", backend.config.bucket,
@@ -177,7 +178,17 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
                 events.push("owner-head");
                 return JSON.stringify(object);
             }
-            return JSON.stringify(await iam(args.slice(0, -7), permissions));
+            const request = args.slice(0, -7);
+            if (["list-role-policies", "list-attached-role-policies"].includes(request[1])) {
+                // CLI auto-pagination aggregates only the result key. A native
+                // single-page call retains the service's completeness flag.
+                const singlePage = request.at(-1) === "--no-paginate";
+                const response = await iam(singlePage ? request.slice(0, -1) : request, permissions);
+                if (!singlePage) delete response.IsTruncated;
+                inventories.push({ request, response });
+                return JSON.stringify(response);
+            }
+            return JSON.stringify(await iam(request, permissions));
         },
         executeTerraformCapture: async (args, env, cwd) => {
             commands.push(args); events.push(args[0]);
@@ -205,13 +216,47 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
             assert.fail(`Forbidden synthetic command ${args}`);
         },
     };
-    return { directory, baseline, dependencies, commands, events, config, backend, currentState, permissions, object,
+    return { directory, baseline, dependencies, commands, events, inventories, config, backend, currentState, permissions, object,
         invoke: args => runPersonalTerraform(["bootstrap", "repository-trust", ...args], dependencies),
         approve: result => {
             Object.assign(config, { [`trust_${stage}_approvedPlanSha256`]: result.planSha256, [`trust_${stage}_approvedReviewSha256`]: result.reviewSha256, [`trust_${stage}_approvedSourceSha256`]: result.sourceSha256 });
             process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
         } };
 }
+test("guarded IAM pagination preserves explicit completeness through read-only discovery", async t => {
+    const h = await harness(t);
+    const result = JSON.parse(await h.invoke(["development", "discover"]));
+    const discovery = JSON.parse(await readFile(join(result.discoveryDirectory, "discovery.json")));
+    assert.deepEqual(discovery.permissions, h.baseline.permissions);
+    assert.equal(h.inventories.length, 4);
+    for (const { request, response } of h.inventories) {
+        assert.deepEqual(request.slice(4), ["--no-paginate"]);
+        assert.equal(response.IsTruncated, false);
+    }
+    assert.deepEqual(h.commands.filter(args => ["plan", "apply"].includes(args[0])), []);
+});
+test("guarded IAM inventories reject aggregate, ambiguous, truncated, continuing and unexpected policies", async t => {
+    const faults = [
+        page => { delete page.IsTruncated; },
+        ...[true, null, "false", 0].map(flag => page => { page.IsTruncated = flag; }),
+        ...["Marker", "NextToken"].flatMap(key => ["synthetic-continuation", "", null].map(value => page => { page[key] = value; })),
+        page => { if (page.PolicyNames) page.PolicyNames = ["synthetic-wrong-policy"]; else page.AttachedPolicies = [{ PolicyArn: "arn:aws:iam::aws:policy/ReadOnlyAccess", PolicyName: "synthetic-attachment" }]; },
+        page => { if (page.PolicyNames) page.PolicyNames.push("synthetic-extra-policy"); else delete page.AttachedPolicies; },
+        page => { if (page.PolicyNames) page.PolicyNames = []; else page.AttachedPolicies = null; },
+    ];
+    for (const spec of Object.values(trustEnvironments)) for (const operation of ["list-role-policies", "list-attached-role-policies"]) for (const [index, fault] of faults.entries()) {
+        const h = await harness(t), execute = h.dependencies.execute;
+        h.dependencies.execute = async (args, env) => {
+            const page = JSON.parse(await execute(args, env));
+            if (args[1] === operation && args[3] === spec.name) fault(page);
+            return JSON.stringify(page);
+        };
+        await assert.rejects(h.invoke(["development", "discover"]), /complete exact inline and empty attached policies/, `${spec.environment} ${operation} fault ${index}`);
+        assert.equal(h.commands.filter(args => args[0] === "state").length, 1);
+        assert.deepEqual(h.commands.filter(args => ["plan", "apply"].includes(args[0])), []);
+        await assert.rejects(stat(join(h.directory, "development-started.json")), { code: "ENOENT" });
+    }
+});
 // CI supplies the pinned binary; local runs opt in with the exact installed tool.
 // No credentials, provider download or
 // backend configuration can run: the deliberately unknown attribute stops init

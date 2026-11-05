@@ -180,11 +180,12 @@ function backendIdentity(backend) {
 }
 async function collectTrustPermissions(call) {
     const result = {};
+    const complete = page => page?.IsTruncated === false && ["Marker", "NextToken"].every(key => !Object.hasOwn(page, key));
     for (const [key, spec] of Object.entries(trustEnvironments)) {
         const role = (await call(["iam", "get-role", "--role-name", spec.name])).Role;
         const list = await call(["iam", "list-role-policies", "--role-name", spec.name]);
         const attached = await call(["iam", "list-attached-role-policies", "--role-name", spec.name]);
-        check(list.IsTruncated === false && same(list.PolicyNames, [spec.inline]) && attached.IsTruncated === false && same(attached.AttachedPolicies, []), "complete exact inline and empty attached policies.");
+        check(complete(list) && same(list.PolicyNames, [spec.inline]) && complete(attached) && same(attached.AttachedPolicies, []), "complete exact inline and empty attached policies.");
         const inline = await call(["iam", "get-role-policy", "--role-name", spec.name, "--policy-name", spec.inline]);
         const boundaryArn = `arn:aws:iam::${PERSONAL_ACCOUNT}:policy/${spec.name}-boundary`;
         const boundary = (await call(["iam", "get-policy", "--policy-arn", boundaryArn])).Policy;

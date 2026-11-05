@@ -94,7 +94,8 @@ export function validatePersonalArguments(args) {
         const roles = ["forever-tee-video-development-ci", "forever-tee-video-production-ci"];
         const roleIndex = roles.indexOf(args[3]);
         const policies = ["development-state-and-inspection", "production-foundation"];
-        const trustRead = (["list-role-policies", "list-attached-role-policies"].includes(args[1]) && args.length === 4 && args[2] === "--role-name" && roleIndex >= 0) ||
+        const trustList = ["list-role-policies", "list-attached-role-policies"].includes(args[1]);
+        const trustRead = (trustList && args.length === 4 && args[2] === "--role-name" && roleIndex >= 0) ||
             (args[1] === "get-role-policy" && args.length === 6 && args[2] === "--role-name" && roleIndex >= 0 && args[4] === "--policy-name" && args[5] === policies[roleIndex]) ||
             (args[1] === "get-policy-version" && args.length === 6 && args[2] === "--policy-arn" &&
                 roles.some(role => args[3] === `arn:aws:iam::${PERSONAL_ACCOUNT}:policy/${role}-boundary`) && args[4] === "--version-id" && /^v[1-9][0-9]*$/.test(args[5]));
@@ -112,7 +113,7 @@ export function validatePersonalArguments(args) {
         };
         const target = Object.hasOwn(discovery, args[1]) ? discovery[args[1]]
             : ["--user-name", "forever-tee-video-development-invoker"];
-        if (!trustRead && !productionRead && (args.length !== 4 || args[2] !== target[0] || args[3] !== target[1])) {
+        if (!trustRead && (trustList || (!productionRead && (args.length !== 4 || args[2] !== target[0] || args[3] !== target[1])))) {
             throw new Error("IAM operations are limited to the exact Development invoker and bootstrap discovery targets.");
         }
     }
@@ -165,5 +166,8 @@ export async function guardedPersonalCall(args, { config, environment, execute, 
     validatePersonalIdentity(JSON.parse(identityText));
     if (args[0] === "sts")
         return identityText;
-    return execute([...args, ...options], env);
+    // Preserve native IsTruncated/Marker evidence for the two exact IAM trust
+    // inventories. CLI auto-pagination drops these fields from aggregated JSON.
+    const pagination = args[0] === "iam" && ["list-role-policies", "list-attached-role-policies"].includes(args[1]) ? ["--no-paginate"] : [];
+    return execute([...args, ...pagination, ...options], env);
 }
