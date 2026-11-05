@@ -51,6 +51,58 @@ test("validates personal identity before the requested operation", async () => {
     });
     assert.deepEqual(calls, [["sts", "get-caller-identity"], ["lambda", "get-account-settings"]]);
 });
+test("only exact IAM trust inventories receive internal single-page output after identity validation", async () => {
+    const options = ["--profile", "personal-dev", "--region", "ap-southeast-2", "--output", "json", "--no-cli-pager"];
+    const roles = ["forever-tee-video-development-ci", "forever-tee-video-production-ci"];
+    const operations = ["list-role-policies", "list-attached-role-policies"];
+    for (const role of roles) for (const operation of operations) {
+        const args = ["iam", operation, "--role-name", role], calls = [];
+        await guardedPersonalCall(args, {
+            config, environment: { AWS_PROFILE: "work", AWS_ACCESS_KEY_ID: "must-strip", AWS_ENDPOINT_URL: "https://work.invalid" },
+            execute: async (actual, env) => {
+                assert.equal(env.AWS_ACCESS_KEY_ID, undefined); assert.equal(env.AWS_ENDPOINT_URL, undefined);
+                assert.equal(env.AWS_CONFIG_FILE, PERSONAL_CONFIG_PATH); assert.equal(env.AWS_SHARED_CREDENTIALS_FILE, "/dev/null");
+                calls.push(actual);
+                return JSON.stringify(identity);
+            },
+        });
+        assert.deepEqual(calls, [["sts", "get-caller-identity", ...options], [...args, "--no-paginate", ...options]]);
+        for (const fault of ["wrong-account", "expired"]) {
+            let denied = 0;
+            await assert.rejects(guardedPersonalCall(args, {
+                config, environment: {}, execute: async actual => {
+                    denied++;
+                    assert.deepEqual(actual, ["sts", "get-caller-identity", ...options]);
+                    if (fault === "expired") throw new Error("synthetic expired SSO");
+                    return JSON.stringify({ ...identity, Account: "111111111111" });
+                },
+            }));
+            assert.equal(denied, 1);
+        }
+    }
+    for (const args of [["iam", "get-role", "--role-name", roles[0]], ["service-quotas", "list-service-quotas", "--service-code", "lambda"],
+        ["sso", "login"], ["lambda", "get-account-settings"]]) {
+        const calls = [];
+        await guardedPersonalCall(args, { config, environment: {}, execute: async actual => { calls.push(actual); return JSON.stringify(identity); } });
+        assert.deepEqual(calls.at(-1), [...args, ...options]);
+        assert.equal(calls.some(actual => actual.includes("--no-paginate")), false);
+    }
+});
+test("IAM inventory callers cannot change pagination, scope or global options", async () => {
+    for (const role of ["forever-tee-video-development-ci", "forever-tee-video-production-ci"]) for (const operation of ["list-role-policies", "list-attached-role-policies"]) {
+        const args = ["iam", operation, "--role-name", role];
+        const overrides = [["--no-paginate"], ["--paginate"], ["--no-pag"], ["--max-items", "1"], ["--page-size", "1"], ["--starting-token", "synthetic-token"],
+            ["--marker", "synthetic-marker"], ["--path-prefix", "/synthetic/"], ["--query", "PolicyNames"], ["--cli-input-json", "{}"], ["--cli-input-yaml", "{}"],
+            ["--profile", "work"], ["--prof=work"], ["--region", "us-east-1"], ["--endpoint-url", "https://example.invalid"], ["--endpoint=https://example.invalid"],
+            ["--no-sign-request"], ["--output", "text"], ["--debug"], ["--role-name", "foreign"], ["--", "--no-paginate"]];
+        for (const invalid of [...overrides.map(extra => [...args, ...extra]), ["iam", operation, "--role-name", "foreign"],
+            ["iam", operation, "--user-name", "forever-tee-video-development-invoker"], ["iam", operation, "--role-name", `arn:aws:iam::111111111111:role/${role}`]]) {
+            let calls = 0;
+            await assert.rejects(guardedPersonalCall(invalid, { config, environment: {}, execute: async () => { calls++; return "{}"; } }));
+            assert.equal(calls, 0, JSON.stringify(invalid));
+        }
+    }
+});
 test("IAM service-key operations cannot target other users or override inputs", () => {
     for (const operation of ["get-user", "list-access-keys", "create-access-key"]) {
         validatePersonalArguments(["iam", operation, "--user-name", "forever-tee-video-development-invoker"]);

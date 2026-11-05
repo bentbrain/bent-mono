@@ -252,6 +252,14 @@ for inspection, retaining that journal's hash. Review its private `discovery.jso
 and original receipt before preparing a baseline. No tracked fixture contains
 operational values.
 
+The guarded wrapper adds `--no-paginate` internally only for the two exact CI
+role policy inventories, `list-role-policies` and `list-attached-role-policies`.
+AWS CLI aggregated JSON omits the service pagination flags. Native single-page
+output must instead contain `IsTruncated: false`, no `Marker` or `NextToken`,
+the exact expected inline policy, and no attachments. Truncated or ambiguous
+inventories stop discovery and every later permission check. Callers cannot
+supply pagination, scope, profile, region or endpoint overrides.
+
 Terraform 1.12.2 does not support `expected_bucket_owner` in its S3 backend.
 The guarded `s3api head-object --expected-bucket-owner` request independently
 attests the bucket owner. `allowed_account_ids` only pins the credential account.
