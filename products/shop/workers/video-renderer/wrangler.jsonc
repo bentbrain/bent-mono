@@ -1,0 +1,119 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "forever-tee-story-video-local",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-08-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "STORY_VIDEO_ASSETS",
+    "directory": "../../apps/web/public/mockups",
+    "run_worker_first": true
+  },
+  "containers": [
+    {
+      "class_name": "StoryVideoContainer",
+      "image": "./Dockerfile",
+      "instance_type": "standard-3",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "STORY_VIDEO_RENDERER",
+        "class_name": "StoryVideoContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["StoryVideoContainer"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DESIGN_ARTWORK",
+      "bucket_name": "forever-tee-design-artwork-local"
+    },
+    {
+      "binding": "STORY_VIDEOS",
+      "bucket_name": "forever-tee-story-videos-local"
+    }
+  ],
+  "env": {
+    "development": {
+      "name": "forever-tee-story-video-development",
+      "vars": { "STORY_VIDEO_LANES": "2" },
+      "assets": {
+        "binding": "STORY_VIDEO_ASSETS",
+        "directory": "../../apps/web/public/mockups",
+        "run_worker_first": true
+      },
+      "containers": [
+        {
+          "class_name": "StoryVideoContainer",
+          "image": "./Dockerfile",
+          "instance_type": "standard-3",
+          "max_instances": 4
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "STORY_VIDEO_RENDERER",
+            "class_name": "StoryVideoContainer"
+          }
+        ]
+      },
+      "r2_buckets": [
+        {
+          "binding": "DESIGN_ARTWORK",
+          "bucket_name": "forever-tee-design-artwork-development",
+          "remote": true
+        },
+        {
+          "binding": "STORY_VIDEOS",
+          "bucket_name": "forever-tee-story-videos-development",
+          "remote": true
+        }
+      ]
+    },
+    "production": {
+      "name": "forever-tee-story-video",
+      "assets": {
+        "binding": "STORY_VIDEO_ASSETS",
+        "directory": "../../apps/web/public/mockups",
+        "run_worker_first": true
+      },
+      "containers": [
+        {
+          "class_name": "StoryVideoContainer",
+          "image": "./Dockerfile",
+          "instance_type": "standard-3",
+          "max_instances": 2
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "STORY_VIDEO_RENDERER",
+            "class_name": "StoryVideoContainer"
+          }
+        ]
+      },
+      "r2_buckets": [
+        {
+          "binding": "DESIGN_ARTWORK",
+          "bucket_name": "forever-tee-design-artwork-production",
+          "remote": true
+        },
+        {
+          "binding": "STORY_VIDEOS",
+          "bucket_name": "forever-tee-story-videos-production",
+          "remote": true
+        }
+      ]
+    }
+  }
+}

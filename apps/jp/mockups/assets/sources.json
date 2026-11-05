@@ -1,0 +1,12 @@
+{
+  "tokyo.jpg": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?auto=format&fit=crop&w=1200&q=85",
+  "kyoto.jpg": "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=85",
+  "japan.jpg": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?auto=format&fit=crop&w=1200&q=85",
+  "d3.min.js": "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js",
+  "topojson.min.js": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js",
+  "countries.json": "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json",
+  "design-flat-black.webp": "https://shop.bent.build/api/configured-product-image/current/3d8ed467-55d4-45ed-ba9d-1eeb687fa5bc/black.webp?geometry=physical-print-area-v1&access=revocable-v1&width=768",
+  "design-flat-white.webp": "https://shop.bent.build/api/configured-product-image/current/3d8ed467-55d4-45ed-ba9d-1eeb687fa5bc/white.webp?geometry=physical-print-area-v1&access=revocable-v1&width=768",
+  "geist-mono.woff2": "@fontsource/geist-mono 5.3.0, geist-mono-latin-400-normal.woff2, SIL Open Font License",
+  "embla-carousel.umd.js": "embla-carousel 8.6.0, MIT, https://github.com/davidjerleke/embla-carousel"
+}

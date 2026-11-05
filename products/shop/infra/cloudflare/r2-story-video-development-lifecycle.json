@@ -1,0 +1,17 @@
+{
+  "rules": [
+    {
+      "id": "expire-development-benchmarks-after-seven-days",
+      "conditions": {
+        "prefix": "benchmarks/"
+      },
+      "enabled": true,
+      "deleteObjectsTransition": {
+        "condition": {
+          "maxAge": 604800,
+          "type": "Age"
+        }
+      }
+    }
+  ]
+}

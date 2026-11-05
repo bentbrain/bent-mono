@@ -1,0 +1,280 @@
+{% if gift_card.recipient %}
+  {% if gift_card.customer %}
+    {% if gift_card.customer.name != blank %}
+      {% assign sender_name = gift_card.customer.name %}
+    {% elsif gift_card.customer.email != blank %}
+      {% assign sender_name = gift_card.customer.email %}
+    {% else %}
+      {% assign sender_name = gift_card.customer.phone %}
+    {% endif %}
+  {% else %}
+    {% assign sender_name = shop.name %}
+  {% endif %}
+
+  {% if gift_card.recipient.nickname != blank %}
+    {% assign recipient_name = gift_card.recipient.nickname %}
+  {% elsif gift_card.recipient.name != blank %}
+    {% assign recipient_name = gift_card.recipient.name %}
+  {% else %}
+    {% assign recipient_name = gift_card.recipient.email %}
+  {% endif %}
+
+  {% capture email_title %}
+    Hi {{ recipient_name }}, you have received a gift card from {{ sender_name }}.
+  {% endcapture %}
+{% endif %}
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <title>{{ email_title }}</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width">
+  <link rel="stylesheet" type="text/css" href="/assets/notifications/styles.css">
+  <style>
+    .button__cell { background: {{ shop.email_accent_color }}; }
+    .actions-buttons .button__cell--primary { background-color: {{ shop.email_accent_color }}; }
+    a, a:hover, a:active, a:visited { color: {{ shop.email_accent_color }}; }
+  </style>
+</head>
+
+  <body>
+    <table align="center" class="body giftcard__body">
+      <tr>
+        <td class="empty-line">&nbsp;</td>
+      </tr>
+      <tr>
+        <td class="empty-line">&nbsp;</td>
+      </tr>
+      <tr>
+        <td>
+          <table class="row content">
+  <tr>
+    <td class="content__cell">
+      <center>
+        <table class="container">
+          <tr>
+            <td>
+              
+            {% if gift_card.recipient %}
+              
+{% if shop.email_logo_url %}
+  <table align="center" class="giftcard__doubletopmargin">
+    <tr>
+      <td>
+        <img src="{{shop.email_logo_url}}" alt="{{ shop.name }}" class="giftcard__logosize" width="{{ shop.email_logo_width }}">
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+  <table align="center" class="row giftcard__topmargin">
+    <tr>
+      <td class="giftcard__title">{{ email_title }}</td>
+    </tr>
+  </table>
+
+{% if gift_card.recipient and gift_card.message != blank %}
+  <table align="center" class="row giftcard__topmargin">
+    <tr>
+      <td class="giftcard__message">
+        "{{ gift_card.message }}"
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+<table align="center" class="giftcard__topmargin">
+  <tr>
+    <td class="giftcard__balance">{{ gift_card.initial_value | money_with_currency }}</td>
+  </tr>
+  {% if gift_card.expires_on %}
+    <tr>
+      <td class="giftcard__smalltext">
+        Expires {{ gift_card.expires_on | date: '%B %e, %Y' }}
+      </td>
+    </tr>
+  {% endif %}
+</table>
+
+<table align="center" class="giftcard__doubletopmargin">
+  <tr>
+    <td>
+      <img src="{{ 'gift-card/card.jpg' | shopify_asset_url }}" alt="Gift card image" width="240" height="160">
+    </td>
+  </tr>
+</table>
+
+<table align="center" class="row giftcard__topmargin">
+  <tr>
+    <td class="giftcard__shop_name">{{ shop.name }}</td>
+  </tr>
+</table>
+
+<table align="center" class="row giftcard__topmargin">
+  <tr>
+    <td class="giftcard__smalltext">
+      Use the gift card code online
+    </td>
+  </tr>
+  <tr>
+    <td class="giftcard__code">
+      {{ gift_card.code | format_code }}
+    </td>
+  </tr>
+</table>
+
+<table class="row actions">
+  <tr>
+    <td class="actions__cell">
+      <table align="center" class="button">
+        <tr>
+          <td class="button__cell"><a href="{{ shop.url }}" class="button__text">Visit online store</a></td>
+        </tr>
+      </table>
+      <table align="center" class="button">
+        <tr>
+          <td class="link__cell"><a href="{{ gift_card.url }}" class="link__text">View gift card balance</a></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+{% if gift_card.pass_url %}
+  <table align="center" class="row">
+    <tr>
+      <td class="giftcard__textcenter">
+        <a href="{{ gift_card.pass_url }}" class="apple-wallet-button">
+          <img src="{{ 'gift-card/add-to-apple-wallet.png' | shopify_asset_url }}" alt="Add to Apple Wallet" width="120" height="40">
+        </a>
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+            {% else %}
+              
+{% if shop.email_logo_url %}
+  <table align="center" class="giftcard__doubletopmargin">
+    <tr>
+      <td>
+        <img src="{{shop.email_logo_url}}" alt="{{ shop.name }}" class="giftcard__logosize" width="{{ shop.email_logo_width }}">
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+
+{% if gift_card.recipient and gift_card.message != blank %}
+  <table align="center" class="row giftcard__topmargin">
+    <tr>
+      <td class="giftcard__message">
+        "{{ gift_card.message }}"
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+<table align="center" class="giftcard__topmargin">
+  <tr>
+    <td class="giftcard__balance">{{ gift_card.initial_value | money_with_currency }}</td>
+  </tr>
+  {% if gift_card.expires_on %}
+    <tr>
+      <td class="giftcard__smalltext">
+        Expires {{ gift_card.expires_on | date: '%B %e, %Y' }}
+      </td>
+    </tr>
+  {% endif %}
+</table>
+
+<table align="center" class="giftcard__doubletopmargin">
+  <tr>
+    <td>
+      <img src="{{ 'gift-card/card.jpg' | shopify_asset_url }}" alt="Gift card image" width="240" height="160">
+    </td>
+  </tr>
+</table>
+
+<table align="center" class="row giftcard__topmargin">
+  <tr>
+    <td class="giftcard__shop_name">{{ shop.name }}</td>
+  </tr>
+</table>
+
+<table align="center" class="row giftcard__topmargin">
+  <tr>
+    <td class="giftcard__smalltext">
+      Use the gift card code online
+    </td>
+  </tr>
+  <tr>
+    <td class="giftcard__code">
+      {{ gift_card.code | format_code }}
+    </td>
+  </tr>
+</table>
+
+<table class="row actions">
+  <tr>
+    <td class="actions__cell">
+      <table align="center" class="button">
+        <tr>
+          <td class="button__cell"><a href="{{ shop.url }}" class="button__text">Visit online store</a></td>
+        </tr>
+      </table>
+      <table align="center" class="button">
+        <tr>
+          <td class="link__cell"><a href="{{ gift_card.url }}" class="link__text">View gift card balance</a></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+{% if gift_card.pass_url %}
+  <table align="center" class="row">
+    <tr>
+      <td class="giftcard__textcenter">
+        <a href="{{ gift_card.pass_url }}" class="apple-wallet-button">
+          <img src="{{ 'gift-card/add-to-apple-wallet.png' | shopify_asset_url }}" alt="Add to Apple Wallet" width="120" height="40">
+        </a>
+      </td>
+    </tr>
+  </table>
+{% endif %}
+
+            {% endif %}
+
+            </td>
+          </tr>
+        </table>
+      </center>
+    </td>
+  </tr>
+</table>
+          <table class="row footer">
+  <tr>
+    <td class="footer__cell">
+      <center>
+        <table class="container">
+          <tr>
+            <td>
+              
+              <p class="disclaimer__subtext">If you have any questions, reply to this email or contact us at <a href="mailto:{{ shop.email }}">{{ shop.email }}</a>.<!-- shopify-shop-marketplace-footer --></p>
+            </td>
+          </tr>
+        </table>
+      </center>
+    </td>
+  </tr>
+</table>
+
+<img src="{{ 'notifications/spacer.png' | shopify_asset_url }}" class="spacer" height="1" />
+
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Pixel Character"
+  short_description: "Create four-view animated pixel characters"
+  default_prompt: "Use $design-pixel-character to design and validate a new apartment character."

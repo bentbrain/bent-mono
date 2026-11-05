@@ -1,0 +1,51 @@
+name: Repair launch data incidents
+run-name: Launch data repair · ${{ inputs.operation }}
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inspect sources, execute the reviewed one-shot repair, or verify completion
+        type: choice
+        options: [plan, execute, verify]
+        required: true
+      plan_digest:
+        description: Exact successful plan digest required for execution
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/main' && github.repository_id == '{{SHOP:githubRepositoryId}}' && github.actor_id == '{{SHOP:githubOwnerId}}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: Production
+    env:
+      REPAIR_OPERATION: ${{ inputs.operation }}
+      REPAIR_PLAN_DIGEST: ${{ inputs.plan_digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/launch-data-repair.test.mjs
+      - name: Repair only verified historical unpaid artwork and the exact missing video pair
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node scripts/launch-data-repair.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: launch-data-repair-${{ github.run_id }}
+          path: launch-data-repair-output/
+          if-no-files-found: ignore
+          retention-days: 14

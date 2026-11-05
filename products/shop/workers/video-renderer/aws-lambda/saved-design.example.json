@@ -1,0 +1,24 @@
+{
+  "designId": "c2bf0318-784a-4dda-b82b-9534aed42903",
+  "artworkPath": "/absolute/path/to/saved-design-background-removed.png",
+  "settings": {
+    "staple-tee": {
+      "cropX": 0.48020833333333335,
+      "cropY": 0.61328125,
+      "cropZoom": 1.1683569979716024,
+      "depth": 5,
+      "placementX": 0.27167119387154753,
+      "placementY": 0.22145055477692505,
+      "placementWidth": 0.48
+    },
+    "cotton-tote": {
+      "cropX": 0.48020833333333335,
+      "cropY": 0.61328125,
+      "cropZoom": 1.1683569979716024,
+      "depth": 5,
+      "placementX": 0.290678,
+      "placementY": 0.244638,
+      "placementWidth": 0.440042
+    }
+  }
+}

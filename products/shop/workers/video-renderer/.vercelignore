@@ -1,0 +1,13 @@
+.env*
+.turbo
+.vercel
+.wrangler
+dist
+dist-check
+node_modules
+Dockerfile
+wrangler.jsonc
+src/*.test.mjs
+src/benchmark.mjs
+src/benchmark-remote.mjs
+src/worker.mjs

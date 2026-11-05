@@ -1,0 +1,24 @@
+{
+  "white": {
+    "prefix": "white-a53b35ee0ac96413",
+    "width": 768,
+    "height": 1024,
+    "lightTint": [
+      0.99,
+      0.995,
+      1
+    ],
+    "inkWidth": 597
+  },
+  "black": {
+    "prefix": "black-a1884606232843f0",
+    "width": 768,
+    "height": 1024,
+    "lightTint": [
+      0.99,
+      0.995,
+      1
+    ],
+    "inkWidth": 640
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "rooms": [
+    {
+      "roomId": "living-room",
+      "areaId": "living_room",
+      "entityIds": [
+        "light.living_room"
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "sceneObjectId": "standing-lamp",
+      "entityId": "light.living_room_floor_lamp"
+    }
+  ]
+}

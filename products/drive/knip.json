@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "project": []
+    },
+    "apps/web": {},
+    "packages/*": {},
+    "plugins/tesla-bridge": {
+      "entry": [
+        "src/{http,stdio,setup}.ts"
+      ]
+    },
+    "tooling/*": {}
+  }
+}

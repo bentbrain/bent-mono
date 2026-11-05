@@ -1,0 +1,32 @@
+{
+  "flats": {
+    "staple-tee-white": "flat-eaafbdbe5a20a84d.webp",
+    "staple-tee-black": "flat-6422f95a49f711c6.webp",
+    "cotton-tote-cream": "flat-71d16efeeeebc7aa.webp",
+    "cotton-tote-black": "flat-424d8d1408348701.webp"
+  },
+  "lifestyle": {
+    "white": {
+      "prefix": "white-a53b35ee0ac96413",
+      "width": 768,
+      "height": 1024,
+      "lightTint": [
+        0.99,
+        0.995,
+        1
+      ],
+      "inkWidth": 597
+    },
+    "black": {
+      "prefix": "black-a1884606232843f0",
+      "width": 768,
+      "height": 1024,
+      "lightTint": [
+        0.99,
+        0.995,
+        1
+      ],
+      "inkWidth": 640
+    }
+  }
+}

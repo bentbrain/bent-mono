@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "kitchen-overheads",
+  "displayName": "Timber overhead cupboards and rangehood",
+  "footprint": {
+    "width": 10,
+    "depth": 2
+  },
+  "heightPixels": 140,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/kitchen-overheads/kitchen-overheads-idle-north.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "east": {
+      "source": "assets/approved/kitchen-overheads/kitchen-overheads-idle-east.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "south": {
+      "source": "assets/approved/kitchen-overheads/kitchen-overheads-idle-south.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "west": {
+      "source": "assets/approved/kitchen-overheads/kitchen-overheads-idle-west.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    }
+  }
+}

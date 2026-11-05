@@ -1,0 +1,49 @@
+---
+import { getEmDashEntry } from 'emdash';
+import TripContent from '../../components/TripContent.astro';
+import Site from '../../layouts/Site.astro';
+import ShopAd from '../../components/ShopAd.astro';
+import PostMosaic from '../../components/PostMosaic.astro';
+import { tripMedia, tripStartDay } from '../../lib/content';
+import { correctTripTitle } from '../../lib/trip-days';
+import { formatDay, galleryIds } from '../../lib/model';
+const { slug } = Astro.params;
+if (!slug) return Astro.redirect('/404');
+const { entry: post, isPreview } = await getEmDashEntry('posts', slug);
+const owner = Astro.locals.user && Astro.locals.user.role >= 50;
+if (
+  !post ||
+  (isPreview && !owner) ||
+  (!isPreview && post.data.status !== 'published')
+)
+  return Astro.rewrite('/404');
+const media = await tripMedia();
+const title = correctTripTitle(
+  post.data.day,
+  await tripStartDay(media),
+  post.data.title,
+);
+---
+
+<Site title={`${title} / jp.bent.build`} privateContent={isPreview}>
+  <article class="single-post @container/post mx-auto max-w-[800px] [&_.post-body]:px-0 [&_.post-body]:py-4">
+    <div class="post-heading flex flex-col items-start justify-between gap-2.5 py-4 @min-[400px]/post:flex-row @min-[400px]/post:items-center [&_a]:no-underline">
+      <h1>{title}</h1>
+      <time datetime={post.data.day}>{formatDay(post.data.day)}</time>
+    </div>
+    <div class="post-body prose px-4 pb-0.5 [&_p]:mb-[17px] [&_h2]:mb-[15px] [&_h3]:mb-[15px] [&_a]:underline [&_img]:h-auto [&_img]:w-full [&_ul]:list-disc [&_ul]:pl-[23px] [&_ol]:list-decimal [&_ol]:pl-[23px] [&_ul]:pl-[23px] [&_ol]:pl-[23px]">
+      <TripContent value={post.data.content} media={media} />
+    </div>
+    <PostMosaic
+      title={title}
+      design={post.data.shop_design}
+      items={galleryIds(post.data.gallery).flatMap((id) => {
+        const item = media.find((m) => m.id === id);
+        return item ? [item] : [];
+      })}
+    />
+  </article>
+  <Fragment slot="after-newsletter">
+    {!post.data.shop_design && <ShopAd />}
+  </Fragment>
+</Site>

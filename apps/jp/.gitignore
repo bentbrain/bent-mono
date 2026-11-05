@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+review-data/
+artifacts/
+.env*
+
+.astro/
+.wrangler/
+dist/
+.env
+.dev.vars
+
+!.env.example
+.emdash/
+playwright-report/
+test-results/

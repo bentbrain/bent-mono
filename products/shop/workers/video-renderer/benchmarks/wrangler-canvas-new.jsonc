@@ -1,0 +1,21 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "forever-tee-story-video-benchmark-canvas-new",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-08-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [{
+    "class_name": "StoryVideoContainer",
+    "image": "registry.cloudflare.com/{{SHOP:cloudflareAccountId}}/story-renderer-benchmark:1beeed013e5a9fd5ac668c0307d03b028935d7bc-canvas-1.0.8",
+    "instance_type": "standard-3",
+    "max_instances": 1
+  }],
+  "durable_objects": {
+    "bindings": [{ "name": "STORY_VIDEO_RENDERER", "class_name": "StoryVideoContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoryVideoContainer"] }],
+  "r2_buckets": [{
+    "binding": "STORY_VIDEOS",
+    "bucket_name": "forever-tee-story-videos-development"
+  }]
+}

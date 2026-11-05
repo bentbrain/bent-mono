@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "kind": "character",
+  "id": "pearl-v3",
+  "displayName": "Pearl",
+  "footprint": {
+    "width": 1,
+    "depth": 4
+  },
+  "palette": "apartment-fixtures-v2",
+  "animations": {
+    "idle": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-idle-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-idle-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-idle-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-idle-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    },
+    "walk": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-walk-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 12
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-walk-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 12
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-walk-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 12
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-walk-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 12
+      }
+    },
+    "sit": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sit-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sit-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sit-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sit-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    },
+    "sleep": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sleep-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sleep-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sleep-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-sleep-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    },
+    "groom": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-groom-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-groom-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-groom-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-groom-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    },
+    "jump": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-jump-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-jump-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-jump-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-jump-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    },
+    "crouch": {
+      "north": {
+        "source": "assets/approved/pearl-v3/pearl-v3-crouch-north.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "east": {
+        "source": "assets/approved/pearl-v3/pearl-v3-crouch-east.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "south": {
+        "source": "assets/approved/pearl-v3/pearl-v3-crouch-south.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      },
+      "west": {
+        "source": "assets/approved/pearl-v3/pearl-v3-crouch-west.png",
+        "anchor": {
+          "x": 48,
+          "y": 72
+        },
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "frameCount": 8,
+        "framesPerSecond": 8
+      }
+    }
+  }
+}

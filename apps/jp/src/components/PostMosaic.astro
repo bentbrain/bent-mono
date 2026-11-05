@@ -1,0 +1,45 @@
+---
+import MediaTile from './MediaTile.astro';
+import Masonry from './Masonry.astro';
+import { PostDesign } from './PostDesign';
+import { type TripMedia } from '../lib/model';
+import { postMosaicImageSizes, postImageSizes } from '../lib/responsive-image';
+import { shopDesignSchema } from '../lib/shop-design';
+interface Props {
+  items: TripMedia[];
+  title: string;
+  design?: unknown;
+}
+const { items, title } = Astro.props;
+const parsed = shopDesignSchema.safeParse(Astro.props.design);
+const design = parsed.success ? parsed.data : undefined;
+const tileCount = items.length + (design ? 1 : 0);
+---
+
+{(items.length > 0 || design) && (
+  <section class="post-mosaic" aria-label={`${title} media`}>
+    <Masonry class="gap-[7px] min-[601px]:@min-[553px]/post:grid-cols-2">
+      {items.map((item, index) => {
+        const fullWidth = tileCount % 2 === 1 && index === 0;
+        return (
+          <div
+            class:list={[
+              'min-w-0 [&_.media-tile_img]:max-h-[70svh] [&_.media-tile_img]:object-contain [&_.media-tile_video]:max-h-[70svh] [&_.media-tile_video]:object-contain',
+              fullWidth && 'col-span-full',
+            ]}
+          >
+            <MediaTile
+              item={item}
+              sizes={fullWidth ? postImageSizes : postMosaicImageSizes}
+            />
+          </div>
+        );
+      })}
+      {design && (
+        <div class:list={['min-w-0', tileCount === 1 && 'col-span-full']}>
+          <PostDesign design={design} />
+        </div>
+      )}
+    </Masonry>
+  </section>
+)}

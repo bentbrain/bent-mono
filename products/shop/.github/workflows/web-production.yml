@@ -1,0 +1,103 @@
+name: Deploy web-only Production
+
+run-name: Storefront Production · ${{ github.ref_name }} · ${{ github.sha }} · [${{ inputs.coordination_id || 'manual' }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Optional exact main commit for coordinated releases
+        type: string
+      coordination_id:
+        description: Optional journal correlation ID
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      pull-requests: read
+      contents: read
+    env:
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Require main
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Reuse CI for the exact release commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/reuse-ci.mjs
+      - name: Check commit without existing CI
+        if: steps.ci.outputs.reused != 'true'
+        uses: ./.github/actions/check
+        env:
+          TURBO_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ github.ref == 'refs/heads/main' && vars.TURBO_TEAM || '' }}
+
+  release:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: Production
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+      FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+      FOREVER_TEE_API_URL: ${{ vars.WORKER_URL }}
+      FOREVER_TEE_ENFORCE_WORKER_RELEASE: "1"
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Require main
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify live Worker before installing deployment dependencies
+        run: node apps/web/scripts/verify-worker-release.mjs
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+      - name: Stage, verify and promote storefront
+        env:
+          WEB_RELEASE_EVIDENCE_DIR: ${{ runner.temp }}/web-production-evidence
+        run: node scripts/web-production-release.mjs
+      - name: Save release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-production-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/web-production-evidence
+          if-no-files-found: ignore
+          retention-days: 30

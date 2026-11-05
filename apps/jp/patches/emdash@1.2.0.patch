@@ -1,0 +1,230 @@
+diff --git a/dist/registry-DeZ27gVi.mjs b/dist/registry-DeZ27gVi.mjs
+index 72ca8417c5f44c92c9461e648ebe00a768cf6b5c..4dd9d850dd2822bb4b6ec81656f8790c1fadd57d 100644
+--- a/dist/registry-DeZ27gVi.mjs
++++ b/dist/registry-DeZ27gVi.mjs
+@@ -3,6 +3,7 @@ import { t as validateIdentifier } from "./validate-DANX1-Qi.mjs";
+ import { a as currentTimestamp, c as executeAtomicBatchIfSupported, m as listTablesLike, o as currentTimestampValue, p as listTableColumns, r as columnExists, s as detectDialect, u as isPostgres, y as tableExists } from "./dialect-helpers-7_IqPdh9.mjs";
+ import { i as isI18nEnabled } from "./config-CvmjJcVw.mjs";
+ import { getRequestContext } from "./request-context.mjs";
++import { t as after } from "./after-PcEvMY_6.mjs";
+ import { c as REPEATER_SUB_FIELD_TYPES, d as RESERVED_FIELD_SLUGS, f as isIndexableFieldType, i as MAX_BLOCKS_ITEMS, m as isStoragelessFieldRow, p as isStoragelessField, r as FIELD_TYPE_TO_COLUMN, u as RESERVED_COLLECTION_SLUGS } from "./types-BGmQ0uXs.mjs";
+ import { n as chunks, t as SQL_BATCH_SIZE } from "./chunks-Dr5Vr0zA.mjs";
+ import { c as encodeCursor, i as InvalidCursorError, s as decodeCursor } from "./types-C-Xp0CcN.mjs";
+@@ -4353,55 +4354,47 @@ async function deleteCanonicalContentSourcesIfAbsent(repo, observedSources, coll
+ 	};
+ }
+ async function withContentUsageLock(collectionSlug, contentId, fn) {
+-	const locks = getContentUsageLocks();
+-	const lockKey = `${collectionSlug}\0${contentId}`;
+-	const previous = locks.get(lockKey) ?? Promise.resolve();
+-	let releaseCurrent;
+-	const current = new Promise((resolve) => {
+-		releaseCurrent = resolve;
+-	});
+-	const next = previous.catch(() => {}).then(() => current);
+-	locks.set(lockKey, next);
+-	try {
+-		await previous.catch(() => {});
+-		return await fn();
+-	} finally {
+-		releaseCurrent();
+-		if (locks.get(lockKey) === next) locks.delete(lockKey);
+-	}
++	return withContentUsageQueue(getContentUsageLocks(), `${collectionSlug}\0${contentId}`, fn);
+ }
+ async function withContentUsageCollectionLock(collectionSlug, fn) {
+-	const locks = getContentUsageCollectionLocks();
+-	const previous = locks.get(collectionSlug) ?? Promise.resolve();
+-	let releaseCurrent;
+-	const current = new Promise((resolve) => {
+-		releaseCurrent = resolve;
+-	});
+-	const next = previous.catch(() => {}).then(() => current);
+-	locks.set(collectionSlug, next);
+-	try {
+-		await previous.catch(() => {});
+-		return await fn();
+-	} finally {
+-		releaseCurrent();
+-		if (locks.get(collectionSlug) === next) locks.delete(collectionSlug);
++	return withContentUsageQueue(getContentUsageCollectionLocks(), collectionSlug, fn);
++}
++function withContentUsageQueue(locks, key, fn) {
++	const queue = locks.get(key) ?? [];
++	locks.set(key, queue);
++	const token = Symbol();
++	queue.push(token);
++	const operation = (async () => {
++		try {
++			while (queue[0] !== token) await new Promise((resolve) => setTimeout(resolve, 5));
++			return await fn();
++		} finally {
++			const index = queue.indexOf(token);
++			if (index >= 0) queue.splice(index, 1);
++			if (queue.length === 0 && locks.get(key) === queue) locks.delete(key);
++		}
++	})();
++	after(() => operation.then(() => void 0, () => void 0));
++	return operation;
++}
++function isContentUsageLockQueues(value) {
++	return value instanceof Map && Array.from(value.entries()).every(([key, queue]) => typeof key === "string" && Array.isArray(queue) && queue.every((token) => typeof token === "symbol"));
++}
++function getContentUsageLockQueues(key) {
++	const existing = Reflect.get(globalThis, key);
++	if (existing !== void 0) {
++		if (!isContentUsageLockQueues(existing)) throw new Error("Invalid media-usage lock state");
++		return existing;
+ 	}
++	const locks = new Map();
++	Reflect.set(globalThis, key, locks);
++	return locks;
+ }
+ function getContentUsageLocks() {
+-	const global = globalThis;
+-	const existing = global[CONTENT_USAGE_LOCKS_KEY];
+-	if (existing instanceof Map) return existing;
+-	const locks = /* @__PURE__ */ new Map();
+-	global[CONTENT_USAGE_LOCKS_KEY] = locks;
+-	return locks;
++	return getContentUsageLockQueues(CONTENT_USAGE_LOCKS_KEY);
+ }
+ function getContentUsageCollectionLocks() {
+-	const global = globalThis;
+-	const existing = global[CONTENT_USAGE_COLLECTION_LOCKS_KEY];
+-	if (existing instanceof Map) return existing;
+-	const locks = /* @__PURE__ */ new Map();
+-	global[CONTENT_USAGE_COLLECTION_LOCKS_KEY] = locks;
+-	return locks;
++	return getContentUsageLockQueues(CONTENT_USAGE_COLLECTION_LOCKS_KEY);
+ }
+ 
+ //#endregion
+diff --git a/src/media/usage/content-refresh.ts b/src/media/usage/content-refresh.ts
+index 4d619ac7d030d24cda9d7ebf9c4e0bcc3e2c83fa..95646d3d9ae3ac1fb88719d540b596211266ddba 100644
+--- a/src/media/usage/content-refresh.ts
++++ b/src/media/usage/content-refresh.ts
+@@ -1,4 +1,5 @@
+ import { sql, type Kysely } from "kysely";
++import { after } from "../../after.js";
+ 
+ import {
+ 	type MediaUsageExistingSourceProjection,
+@@ -937,64 +938,69 @@ async function withContentUsageLock<T>(
+ 	contentId: string,
+ 	fn: () => Promise<T>,
+ ): Promise<T> {
+-	const locks = getContentUsageLocks();
+-	const lockKey = `${collectionSlug}\0${contentId}`;
+-	const previous = locks.get(lockKey) ?? Promise.resolve();
+-	let releaseCurrent!: () => void;
+-	const current = new Promise<void>((resolve) => {
+-		releaseCurrent = resolve;
+-	});
+-	const next = previous.catch(() => {}).then(() => current);
+-	locks.set(lockKey, next);
+-
+-	try {
+-		await previous.catch(() => {});
+-		return await fn();
+-	} finally {
+-		releaseCurrent();
+-		if (locks.get(lockKey) === next) locks.delete(lockKey);
+-	}
++	return withContentUsageQueue(getContentUsageLocks(), `${collectionSlug}\0${contentId}`, fn);
+ }
+ 
+ export async function withContentUsageCollectionLock<T>(
+ 	collectionSlug: string,
+ 	fn: () => Promise<T>,
+ ): Promise<T> {
+-	// Coarse by design: row refreshes and collection source deletes must not interleave.
+-	const locks = getContentUsageCollectionLocks();
+-	const previous = locks.get(collectionSlug) ?? Promise.resolve();
+-	let releaseCurrent!: () => void;
+-	const current = new Promise<void>((resolve) => {
+-		releaseCurrent = resolve;
+-	});
+-	const next = previous.catch(() => {}).then(() => current);
+-	locks.set(collectionSlug, next);
++	// Row refreshes and collection source deletes must not interleave.
++	return withContentUsageQueue(getContentUsageCollectionLocks(), collectionSlug, fn);
++}
+ 
+-	try {
+-		await previous.catch(() => {});
+-		return await fn();
+-	} finally {
+-		releaseCurrent();
+-		if (locks.get(collectionSlug) === next) locks.delete(collectionSlug);
+-	}
++type ContentUsageLockQueues = Map<string, symbol[]>;
++
++function withContentUsageQueue<T>(
++	locks: ContentUsageLockQueues,
++	key: string,
++	fn: () => Promise<T>,
++): Promise<T> {
++	const queue = locks.get(key) ?? [];
++	locks.set(key, queue);
++	const token = Symbol();
++	queue.push(token);
++	const operation = (async () => {
++		try {
++			// Only plain tokens cross request boundaries. Each waiter drives its own
++			// timer instead of awaiting another request's promise or async context.
++			while (queue[0] !== token)
++				await new Promise<void>((resolve) => setTimeout(resolve, 5));
++			return await fn();
++		} finally {
++			const index = queue.indexOf(token);
++			if (index >= 0) queue.splice(index, 1);
++			if (queue.length === 0 && locks.get(key) === queue) locks.delete(key);
++		}
++	})();
++	// Retain the operation and its release when the HTTP caller disconnects.
++	// The original caller still receives the operation's result or error.
++	after(() => operation.then(() => undefined, () => undefined));
++	return operation;
+ }
+ 
+-function getContentUsageLocks(): Map<string, Promise<void>> {
+-	const global = globalThis as typeof globalThis & Record<symbol, unknown>;
+-	const existing = global[CONTENT_USAGE_LOCKS_KEY];
+-	// eslint-disable-next-line typescript/no-unsafe-type-assertion -- globalThis symbol slot stores only this map
+-	if (existing instanceof Map) return existing as Map<string, Promise<void>>;
+-	const locks = new Map<string, Promise<void>>();
+-	global[CONTENT_USAGE_LOCKS_KEY] = locks;
+-	return locks;
++function isContentUsageLockQueues(value: unknown): value is ContentUsageLockQueues {
++	return value instanceof Map && Array.from(value.entries()).every(
++		([key, queue]: [unknown, unknown]) => typeof key === "string" &&
++			Array.isArray(queue) && queue.every((token: unknown) => typeof token === "symbol"),
++	);
+ }
+ 
+-function getContentUsageCollectionLocks(): Map<string, Promise<void>> {
+-	const global = globalThis as typeof globalThis & Record<symbol, unknown>;
+-	const existing = global[CONTENT_USAGE_COLLECTION_LOCKS_KEY];
+-	// eslint-disable-next-line typescript/no-unsafe-type-assertion -- globalThis symbol slot stores only this map
+-	if (existing instanceof Map) return existing as Map<string, Promise<void>>;
+-	const locks = new Map<string, Promise<void>>();
+-	global[CONTENT_USAGE_COLLECTION_LOCKS_KEY] = locks;
++function getContentUsageLockQueues(key: symbol): ContentUsageLockQueues {
++	const existing: unknown = Reflect.get(globalThis, key);
++	if (existing !== undefined) {
++		if (!isContentUsageLockQueues(existing)) throw new Error("Invalid media-usage lock state");
++		return existing;
++	}
++	const locks: ContentUsageLockQueues = new Map();
++	Reflect.set(globalThis, key, locks);
+ 	return locks;
+ }
++
++function getContentUsageLocks(): ContentUsageLockQueues {
++	return getContentUsageLockQueues(CONTENT_USAGE_LOCKS_KEY);
++}
++
++function getContentUsageCollectionLocks(): ContentUsageLockQueues {
++	return getContentUsageLockQueues(CONTENT_USAGE_COLLECTION_LOCKS_KEY);
++}

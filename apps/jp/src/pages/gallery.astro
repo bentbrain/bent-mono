@@ -1,0 +1,158 @@
+---
+import Site from '../layouts/Site.astro';
+import { buttonVariants } from '../components/ui/button';
+import MediaTile from '../components/MediaTile.astro';
+import Masonry from '../components/Masonry.astro';
+import ShopAd from '../components/ShopAd.astro';
+import CategoryIcon from '../components/CategoryIcon.astro';
+import { tripMedia } from '../lib/content';
+import { env } from 'cloudflare:workers';
+import { readyCategoryIcons } from '../lib/category-icon-jobs';
+import { currentPublishedCategoryNames } from '../lib/category-icon-access';
+import { normalizeCategory } from '../lib/category-icons';
+const category = Astro.url.searchParams.get('category') || 'all';
+const allMedia = await tripMedia();
+const filterCategories = [
+  ...new Set(allMedia.flatMap((item) => item.categories)),
+];
+const currentCategories = new Set(
+  (await currentPublishedCategoryNames(env.DB)).map((name) => name.normalized),
+);
+const icons = await readyCategoryIcons(
+  env,
+  filterCategories.filter((name) =>
+    currentCategories.has(normalizeCategory(name)?.normalized || ''),
+  ),
+);
+Astro.cache.set(false);
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+const media = allMedia.filter(
+  (item) => category === 'all' || item.categories.includes(category),
+);
+---
+
+<Site title="gallery / jp.bent.build">
+  <gallery-filter class="block">
+    {allMedia.length > 0 && (
+      <nav
+        class="filters mb-[18px] flex flex-wrap gap-2 [&_a]:inline-flex [&_a]:items-center [&_a]:gap-[7px] [&_a]:border [&_a]:px-3 [&_a]:py-2 [&_a]:no-underline [&_a[aria-current]]:bg-primary [&_a[aria-current]]:text-primary-foreground"
+        aria-label="Media categories"
+        data-feedback-id="gallery-filters"
+      >
+        {['all', ...filterCategories].map((name) => (
+          <a
+            class={buttonVariants({
+              variant: 'outline',
+            })}
+            data-category={name}
+            href={(() => {
+              const url = new URL(Astro.url);
+              if (name === 'all') url.searchParams.delete('category');
+              else url.searchParams.set('category', name);
+              return `${url.pathname}${url.search}${url.hash}`;
+            })()}
+            aria-current={category === name ? 'page' : undefined}
+          >
+            {name !== 'all' && (
+              <CategoryIcon
+                name={normalizeCategory(name)?.normalized || ''}
+                url={icons.get(normalizeCategory(name)?.normalized || '')}
+              />
+            )}
+            {name}
+          </a>
+        ))}
+      </nav>
+    )}
+    <Masonry
+      class="gallery-grid gap-[7px] min-[601px]:grid-cols-2 min-[901px]:grid-cols-3"
+      data-feedback-id="gallery-grid"
+    >
+      {allMedia.map((item) => (
+        <div
+          class="min-w-0"
+          data-categories={JSON.stringify(item.categories)}
+          hidden={category !== 'all' && !item.categories.includes(category)}
+        >
+          <MediaTile item={item} />
+        </div>
+      ))}
+    </Masonry>
+    <p data-gallery-empty hidden={media.length > 0}>
+      no photos yet
+    </p>
+  </gallery-filter>
+  <ShopAd slot="after-newsletter" />
+</Site>
+
+<script>
+  class GalleryFilter extends HTMLElement {
+    connectedCallback() {
+      this.addEventListener('click', this.filter);
+      window.addEventListener('popstate', this.sync);
+    }
+
+    disconnectedCallback() {
+      this.removeEventListener('click', this.filter);
+      window.removeEventListener('popstate', this.sync);
+    }
+
+    filter = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const link =
+        event.target instanceof Element
+          ? event.target.closest('a[data-category]')
+          : null;
+      if (
+        !(link instanceof HTMLAnchorElement) ||
+        link.target ||
+        link.hasAttribute('download')
+      )
+        return;
+      event.preventDefault();
+      const url = new URL(location.href);
+      const category = link.dataset.category || 'all';
+      if (category === 'all') url.searchParams.delete('category');
+      else url.searchParams.set('category', category);
+      if (url.href !== location.href) history.pushState(null, '', url);
+      this.sync();
+    };
+
+    sync = () => {
+      const category =
+        new URLSearchParams(location.search).get('category') || 'all';
+      let visible = 0;
+      for (const tile of this.querySelectorAll('[data-categories]')) {
+        if (!(tile instanceof HTMLElement)) continue;
+        const categories: unknown = JSON.parse(tile.dataset.categories || '[]');
+        const matches =
+          category === 'all' ||
+          (Array.isArray(categories) && categories.includes(category));
+        tile.hidden = !matches;
+        if (matches) visible++;
+      }
+      for (const link of this.querySelectorAll('a[data-category]')) {
+        if (!(link instanceof HTMLAnchorElement)) continue;
+        if (link.dataset.category === category)
+          link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+        const url = new URL(location.href);
+        if (link.dataset.category === 'all')
+          url.searchParams.delete('category');
+        else url.searchParams.set('category', link.dataset.category || 'all');
+        link.href = `${url.pathname}${url.search}${url.hash}`;
+      }
+      const empty = this.querySelector('[data-gallery-empty]');
+      if (empty instanceof HTMLElement) empty.hidden = visible > 0;
+    };
+  }
+  customElements.define('gallery-filter', GalleryFilter);
+</script>

@@ -1,0 +1,121 @@
+name: Measure deployed story video latency
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Production runs only the fresh-family smoke test
+        type: choice
+        default: development
+        options: [development, production]
+      family_only:
+        description: Skip raw comparisons and check one fresh four-video family
+        type: boolean
+        default: false
+      profile:
+        description: Require per-stage diagnostics from the queue trace
+        type: boolean
+        default: false
+      cold:
+        description: Verify stopped containers before the development family
+        type: boolean
+        default: false
+      source_revision:
+        description: Pin a saved two-product revision for comparable geometry
+        type: string
+        default: ""
+      configuration:
+        description: Development configuration experiment
+        type: choice
+        options: [sequential, family]
+        default: sequential
+      lanes:
+        description: Expected deployed render lanes, does not change capacity
+        type: choice
+        options: ["2", "4"]
+        default: "2"
+      notifications:
+        description: Expected deployed notification mode
+        type: choice
+        options: [poll, push]
+        default: poll
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        default: development
+      family_only:
+        type: boolean
+        default: false
+      profile:
+        type: boolean
+        default: false
+      cold:
+        type: boolean
+        default: false
+      source_revision:
+        type: string
+        default: ""
+      configuration:
+        type: string
+        default: sequential
+      lanes:
+        type: string
+        default: "2"
+      notifications:
+        type: string
+        default: poll
+
+permissions:
+  contents: read
+
+concurrency:
+  group: story-video-latency-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    env:
+      STORY_BENCHMARK_ENV: ${{ inputs.environment }}
+      STORY_LATENCY_FAMILY_ONLY: ${{ inputs.family_only && '1' || '0' }}
+      STORY_LATENCY_PROFILE: ${{ inputs.profile && '1' || '0' }}
+      STORY_LATENCY_COLD: ${{ inputs.cold && '1' || '0' }}
+      STORY_LATENCY_SOURCE_REVISION: ${{ inputs.source_revision }}
+      STORY_LATENCY_CONFIGURATION: ${{ inputs.configuration }}
+      STORY_LATENCY_LANES: ${{ inputs.lanes }}
+      STORY_LATENCY_NOTIFICATIONS: ${{ inputs.notifications }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+      WORKER_URL: ${{ vars.WORKER_URL }}
+      WEB_ORIGIN: ${{ inputs.environment == 'production' && 'https://shop.bent.build' || vars.WEB_ORIGIN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Require main for production smoke test
+        if: inputs.environment == 'production'
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: bun install --frozen-lockfile
+      - name: Measure fresh videos using a saved design
+        run: node workers/video-renderer/benchmarks/latency.mjs
+      - name: Verify idle renderer shutdown
+        env:
+          STORY_IDLE_TIMING_REPORT: /tmp/story-video-latency.json
+        run: node workers/video-renderer/benchmarks/check-idle.mjs
+      - name: Save timing report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: story-video-latency
+          path: /tmp/story-video-latency.json
+          retention-days: 7

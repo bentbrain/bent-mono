@@ -1,0 +1,47 @@
+---
+import Site from '../../layouts/Site.astro';
+import { OwnerPosts } from '../../components/OwnerPosts';
+import { tokyoDay } from '../../lib/model';
+import { beerCounts, tripStartDayFromContent } from '../../lib/content';
+import { correctTripTitle } from '../../lib/trip-days';
+import { z } from 'zod';
+const rowSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  data: z.object({ title: z.string(), day: z.string() }),
+});
+const posts: { id: string; title: string; day: string; status: string }[] = [];
+let cursor: string | undefined;
+do {
+  const result = await Astro.locals.emdash.handleContentList('posts', {
+    limit: 100,
+    orderBy: 'createdAt',
+    order: 'desc',
+    cursor,
+  });
+  if (!result.success) throw new Error('Could not load posts');
+  const page = z
+    .object({ items: z.array(rowSchema), nextCursor: z.string().optional() })
+    .parse(result.data);
+  posts.push(
+    ...page.items.map((item) => ({
+      id: item.id,
+      title: item.data.title,
+      day: item.data.day,
+      status: item.status,
+    })),
+  );
+  cursor = page.nextCursor;
+} while (cursor);
+const firstDay = await tripStartDayFromContent(Astro.locals.emdash);
+const displayPosts = posts.map((post) => ({
+  ...post,
+  title: correctTripTitle(post.day, firstDay, post.title),
+}));
+const day = tokyoDay(new Date()),
+  counts = await beerCounts(day);
+---
+
+<Site owner>
+  <OwnerPosts posts={displayPosts} day={day} beers={counts.today} client:load />
+</Site>

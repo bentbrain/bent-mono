@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "home-bent-build",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "r2_buckets": [
+    {
+      "binding": "PUBLIC_LAYOUT_BUCKET",
+      "bucket_name": "home-bent-build-layout"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "home.bent.build",
+      "custom_domain": true
+    }
+  ]
+}

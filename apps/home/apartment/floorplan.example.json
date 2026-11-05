@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "units": "meters",
+  "tileSizeMeters": 0.5,
+  "rooms": [
+    {
+      "id": "living-room",
+      "displayName": "Living Room",
+      "polygon": [
+        { "x": 0, "z": 0 },
+        { "x": 4.5, "z": 0 },
+        { "x": 4.5, "z": 3.5 },
+        { "x": 0, "z": 3.5 }
+      ]
+    }
+  ]
+}

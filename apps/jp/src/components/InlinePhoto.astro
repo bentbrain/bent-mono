@@ -1,0 +1,90 @@
+---
+import { z } from 'zod';
+import { env } from 'cloudflare:workers';
+import { responsiveImage, inlineImageSizes } from '../lib/responsive-image';
+import { mediaUrl } from '../lib/model';
+import { isPostInlinePhoto } from '../lib/post-inline-media';
+interface Props {
+  node: unknown;
+  columns?: number;
+}
+const parsed = z
+  .object({
+    asset: z.object({ _ref: z.string().optional(), id: z.string().optional() }),
+    alt: z.string().optional(),
+    caption: z.string().optional(),
+    link: z
+      .object({ href: z.string(), blank: z.boolean().optional() })
+      .optional(),
+  })
+  .safeParse(Astro.props.node);
+const node = parsed.success ? parsed.data : undefined;
+const reference = node?.asset._ref || node?.asset.id;
+const item = Astro.locals.publishedTripMedia?.find(
+  (media) => media.asset?.id === reference && media.kind === 'photo',
+);
+// Resolve only dedicated post displays, never a URL supplied by document data.
+// Their public file route separately checks the live published post reference.
+const stored =
+  (!item || !mediaUrl(item)) && reference
+    ? await env.DB.prepare(
+        'SELECT filename, mime_type, storage_key FROM media WHERE id=?',
+      )
+        .bind(reference)
+        .first<{ filename: string; mime_type: string; storage_key: string }>()
+    : undefined;
+const postPhoto =
+  stored &&
+  stored.storage_key.startsWith('trip-inline/') &&
+  isPostInlinePhoto({ filename: stored.filename, mimeType: stored.mime_type })
+    ? `/_emdash/api/media/file/${stored.storage_key}`
+    : undefined;
+const nativePhoto =
+  item && stored && !stored.storage_key.startsWith('trip-private/')
+    ? `/_emdash/api/media/file/${stored.storage_key}`
+    : undefined;
+const source = item ? mediaUrl(item) || nativePhoto : postPhoto;
+let href: string | undefined;
+if (node?.link) {
+  try {
+    const target = new URL(node.link.href, Astro.url);
+    if (['http:', 'https:'].includes(target.protocol)) href = node.link.href;
+  } catch {}
+}
+const singlePost = Astro.url.pathname.startsWith('/posts/');
+const columns = Astro.props.columns || 1;
+const sizes = inlineImageSizes(singlePost, columns);
+const photo = responsiveImage(item ? mediaUrl(item) : '', sizes);
+const blank = node?.link?.blank && !href?.startsWith('#');
+---
+
+{source && (
+  <figure class="my-4 space-y-2">
+    {href ? (
+      <a
+        href={href}
+        target={blank ? '_blank' : undefined}
+        rel={blank ? 'noopener noreferrer' : undefined}
+      >
+        <img
+          src={source}
+          srcset={Astro.locals.privateMediaRender ? undefined : photo.srcSet}
+          sizes={photo.sizes}
+          alt={node?.alt || item?.title || ''}
+          loading="lazy"
+          class="h-auto w-full"
+        />
+      </a>
+    ) : (
+      <img
+        src={source}
+        srcset={Astro.locals.privateMediaRender ? undefined : photo.srcSet}
+        sizes={photo.sizes}
+        alt={node?.alt || item?.title || ''}
+        loading="lazy"
+        class="h-auto w-full"
+      />
+    )}
+    {node?.caption && <figcaption class="text-xs">{node.caption}</figcaption>}
+  </figure>
+)}

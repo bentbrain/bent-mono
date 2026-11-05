@@ -1,0 +1,306 @@
+[
+  {
+    "id": "ikornnes",
+    "name": "IKORNNES leaning mirror",
+    "w": 0.52,
+    "d": 0.2,
+    "h": 1.67,
+    "finishes": [
+      {
+        "id": "ash",
+        "name": "Natural ash",
+        "color": "#b99363"
+      }
+    ]
+  },
+  {
+    "id": "fiddle-leaf",
+    "name": "Tall fiddle-leaf fig",
+    "w": 0.8,
+    "d": 0.72,
+    "h": 2.12,
+    "placement": "small",
+    "baseW": 0.3,
+    "baseD": 0.3,
+    "contactShape": "round"
+  },
+  {
+    "id": "plant-trolley",
+    "name": "Orange plant trolley",
+    "w": 0.42,
+    "d": 0.42,
+    "h": 0.32,
+    "supportHeight": 0.31
+  },
+  {
+    "id": "hang-it-all",
+    "name": "Eames Hang-It-All",
+    "w": 0.505,
+    "d": 0.17,
+    "h": 0.37,
+    "placement": "entry-door",
+    "defaultElevation": 1.55
+  },
+  {
+    "id": "orange-cat-clock",
+    "name": "Orange cat clock",
+    "w": 0.15,
+    "d": 0.07,
+    "h": 0.43,
+    "placement": "wall",
+    "defaultElevation": 1.42
+  },
+  {
+    "id": "forest-frame",
+    "name": "Framed forest print",
+    "w": 0.38,
+    "d": 0.025,
+    "h": 0.38,
+    "placement": "wall",
+    "defaultElevation": 1.47
+  },
+  {
+    "id": "dark-poster-frame",
+    "name": "Large dark picture frame",
+    "w": 0.55,
+    "d": 0.03,
+    "h": 0.79,
+    "placement": "wall",
+    "defaultElevation": 1.12
+  },
+  {
+    "id": "lighthouse-lamp",
+    "name": "Lighthouse lamp",
+    "w": 0.2,
+    "d": 0.2,
+    "h": 0.6,
+    "placement": "small",
+    "category": "Lighting",
+    "emitter": 0.49,
+    "contactShape": "round"
+  },
+  {
+    "id": "ceramic-pig",
+    "name": "Pink ceramic pig",
+    "w": 0.2,
+    "d": 0.22,
+    "h": 0.33,
+    "placement": "small"
+  },
+  {
+    "id": "sideboard-tablet",
+    "name": "Sideboard tablet",
+    "w": 0.25,
+    "d": 0.18,
+    "h": 0.012,
+    "placement": "small"
+  },
+  {
+    "id": "pastel-catchalls",
+    "name": "Pastel catchall vessels",
+    "w": 0.27,
+    "d": 0.14,
+    "h": 0.24,
+    "placement": "small"
+  },
+  {
+    "id": "black-ink-pot",
+    "name": "Black ceramic ink pot",
+    "w": 0.075,
+    "d": 0.075,
+    "h": 0.08,
+    "placement": "small"
+  },
+  {
+    "id": "sideboard-papers",
+    "name": "Prints and incense holder",
+    "w": 0.32,
+    "d": 0.19,
+    "h": 0.018,
+    "placement": "small"
+  },
+  {
+    "id": "shelf-plant",
+    "name": "Plant in blue floral pot",
+    "w": 0.24,
+    "d": 0.19,
+    "h": 0.37,
+    "placement": "small",
+    "baseW": 0.14,
+    "baseD": 0.14
+  },
+  {
+    "id": "amber-glassware",
+    "name": "Amber bottle and glasses",
+    "w": 0.3,
+    "d": 0.11,
+    "h": 0.23,
+    "placement": "small"
+  },
+  {
+    "id": "book-stack-pale",
+    "name": "Stack of pale books",
+    "w": 0.2,
+    "d": 0.23,
+    "h": 0.2,
+    "placement": "small"
+  },
+  {
+    "id": "book-stack-colour",
+    "name": "Stack of colourful books",
+    "w": 0.22,
+    "d": 0.23,
+    "h": 0.18,
+    "placement": "small"
+  },
+  {
+    "id": "large-art-book",
+    "name": "Large art magazine",
+    "w": 0.36,
+    "d": 0.25,
+    "h": 0.04,
+    "placement": "small"
+  },
+  {
+    "id": "orange-shelf-cubby",
+    "name": "Orange shelf cubby",
+    "w": 0.4,
+    "d": 0.26,
+    "h": 0.3,
+    "placement": "small"
+  },
+  {
+    "id": "eagle-display-plate",
+    "name": "Eagle display plate",
+    "w": 0.17,
+    "d": 0.08,
+    "h": 0.19,
+    "placement": "small"
+  },
+  {
+    "id": "shelf-figurines",
+    "name": "Shelf figurines",
+    "w": 0.6,
+    "d": 0.17,
+    "h": 0.25,
+    "placement": "small"
+  },
+  {
+    "id": "jewellery-tray",
+    "name": "Jewellery tray and white relief",
+    "w": 0.43,
+    "d": 0.2,
+    "h": 0.035,
+    "placement": "small"
+  },
+  {
+    "id": "shelf-shoes",
+    "name": "Shelf of six shoe pairs",
+    "w": 1.53,
+    "d": 0.27,
+    "h": 0.17,
+    "placement": "small",
+    "baseD": 0.24
+  },
+  {
+    "id": "breville-barista",
+    "name": "Breville espresso machine + knock box",
+    "w": 0.48,
+    "d": 0.42,
+    "h": 0.41,
+    "placement": "small"
+  },
+  {
+    "id": "delonghi-kettle",
+    "name": "DeLonghi blue kettle",
+    "w": 0.22,
+    "d": 0.24,
+    "h": 0.29,
+    "placement": "small"
+  },
+  {
+    "id": "island-fern",
+    "name": "Kitchen island fern",
+    "w": 0.31,
+    "d": 0.28,
+    "h": 0.55,
+    "baseW": 0.19,
+    "baseD": 0.19,
+    "placement": "small"
+  },
+  {
+    "id": "paper-towel",
+    "name": "Paper towel roll",
+    "w": 0.105,
+    "d": 0.105,
+    "h": 0.24,
+    "placement": "small"
+  },
+  {
+    "id": "carrot-scratcher",
+    "name": "Carrot scratching post",
+    "w": 0.4,
+    "d": 0.4,
+    "h": 0.69,
+    "contactShape": "round"
+  },
+  {
+    "id": "linen-wall-art",
+    "name": "Monochrome linen-wall artwork",
+    "w": 0.3,
+    "d": 0.018,
+    "h": 0.4,
+    "placement": "wall",
+    "defaultElevation": 1.22
+  },
+  {
+    "id": "numero-high",
+    "name": "Featherston Numero IV · high back",
+    "w": 0.762,
+    "d": 0.81,
+    "h": 0.864,
+    "supportHeight": 0.33,
+    "approximate": false
+  },
+  {
+    "id": "numero-low",
+    "name": "Featherston Numero IV · low back",
+    "w": 0.762,
+    "d": 0.75,
+    "h": 0.622,
+    "supportHeight": 0.33,
+    "approximate": false
+  },
+  {
+    "id": "fireside-dressed",
+    "baseModel": "fireside",
+    "name": "Fireside sofa · throw and cushion",
+    "w": 1.8,
+    "d": 1.0,
+    "h": 0.7,
+    "supportHeight": 0.36,
+    "finishes": [
+      {
+        "id": "sunflower",
+        "name": "Sunflower",
+        "color": "#cfb13c"
+      }
+    ]
+  },
+  {
+    "id": "dyvlinge-dressed",
+    "baseModel": "dyvlinge",
+    "name": "DYVLINGE · flower cushion",
+    "w": 0.63,
+    "d": 0.75,
+    "h": 0.75,
+    "supportHeight": 0.43,
+    "finishes": [
+      {
+        "id": "orange",
+        "name": "Kelinge orange",
+        "color": "#d86228"
+      }
+    ]
+  }
+]

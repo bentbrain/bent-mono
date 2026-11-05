@@ -1,0 +1,69 @@
+---
+import { builtInCategoryIconUrl } from '../lib/category-icons';
+interface Props {
+  name: string;
+  url?: string;
+}
+const { name, url: generatedUrl } = Astro.props;
+const builtInUrl = builtInCategoryIconUrl(name);
+const url = builtInUrl || generatedUrl;
+---
+
+<span
+  class="category-icon relative inline-block size-[1.7em] shrink-0"
+  aria-hidden="true"
+  data-icon-url={builtInUrl ? undefined : url}
+  data-builtin-icon={builtInUrl ? name : undefined}
+>
+  {!builtInUrl && (
+    <svg
+      viewBox="0 0 16 16"
+      class="absolute inset-0 size-full"
+      shape-rendering="crispEdges"
+    >
+      <path
+        d="M5 4h6v1h1v6h-1v1H5v-1H4V5h1zM6 6v4h4V6z"
+        fill="currentColor"
+        fill-rule="evenodd"
+      />
+    </svg>
+  )}
+  {url && (
+    <span
+      hidden={!builtInUrl}
+      class="absolute inset-0 bg-current [image-rendering:pixelated] [mask-image:var(--category-icon)] [mask-mode:alpha] [mask-size:contain] [mask-position:center] [mask-repeat:no-repeat]"
+      style={`--category-icon:url("${url}")`}
+      data-generated-icon
+    />
+  )}
+</span>
+<script>
+  async function loadIcons() {
+    for (const element of document.querySelectorAll(
+      '.category-icon[data-icon-url]',
+    )) {
+      if (!(element instanceof HTMLElement) || element.dataset.loaded) continue;
+      element.dataset.loaded = '1';
+      const image = new Image();
+      image.src = element.dataset.iconUrl || '';
+      try {
+        await image.decode();
+        const generated = element.querySelector('[data-generated-icon]');
+        const fallback = element.querySelector('svg');
+        if (
+          generated instanceof HTMLElement &&
+          fallback instanceof SVGElement
+        ) {
+          generated.hidden = false;
+          fallback.style.visibility = 'hidden';
+        }
+      } catch {
+        /* Keep the generic icon if the asset is no longer available. */
+      }
+    }
+  }
+  void loadIcons();
+  document.addEventListener('astro:page-load', () => {
+    void loadIcons();
+  });
+</script>

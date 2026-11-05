@@ -1,0 +1,56 @@
+---
+import { mediaUrl, posterUrl, type TripMedia } from '../lib/model';
+import { responsiveImage, galleryImageSizes } from '../lib/responsive-image';
+interface Props {
+  item: TripMedia;
+  inline?: boolean;
+  sizes?: string;
+}
+const { item, inline = false, sizes = galleryImageSizes } = Astro.props;
+const photo = Astro.locals.privateMediaRender
+  ? { src: posterUrl(item), srcSet: undefined, sizes: undefined }
+  : responsiveImage(posterUrl(item), sizes);
+---
+
+{item.kind === 'video' ? (
+  <div
+    class="media-tile relative block min-w-0 self-start overflow-hidden border-0 bg-muted p-0 [&_img]:block [&_img]:h-auto [&_img]:w-full [&_video]:block [&_video]:h-auto [&_video]:w-full"
+    data-feedback-id={`media-${item.id}`}
+  >
+    <video
+      data-visibility-video
+      muted
+      loop
+      src={mediaUrl(item)}
+      poster={posterUrl(item)}
+      controls
+      playsinline
+      preload="none"
+      aria-label={item.title}
+    ></video>
+    {!inline && (
+      <a
+        class="block bg-background px-3 py-2 text-xs"
+        href={`/media/${item.slug || item.id}`}
+        aria-label={`View ${item.title}`}
+      >
+        VIEW MEDIA →
+      </a>
+    )}
+  </div>
+) : (
+  <a
+    class="media-tile relative block min-w-0 self-start overflow-hidden border-0 bg-muted p-0 [&_img]:block [&_img]:h-auto [&_img]:w-full [&_video]:block [&_video]:h-auto [&_video]:w-full"
+    href={`/media/${item.slug || item.id}`}
+    data-feedback-id={`media-${item.id}`}
+    aria-label={item.title}
+  >
+    <img
+      src={photo.src}
+      srcset={photo.srcSet}
+      sizes={photo.sizes}
+      alt={item.title}
+      loading="lazy"
+    />
+  </a>
+)}

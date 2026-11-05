@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Pixel Furniture"
+  short_description: "Create strict four-view pixel furniture"
+  default_prompt: "Use $design-pixel-furniture to design and validate a new furniture asset."

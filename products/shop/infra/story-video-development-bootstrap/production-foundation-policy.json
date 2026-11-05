@@ -1,0 +1,204 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "P1",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "story-video/production/terraform.tfstate",
+            "story-video/production/terraform.tfstate.tflock"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "P2",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2"
+    },
+    {
+      "Sid": "P3",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/production/terraform.tfstate"
+    },
+    {
+      "Sid": "P4",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/production/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "P5",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:ap-southeast-2:{{SHOP:awsAccountId}}:key/{{SHOP:stateKmsKeyId}}",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "s3.ap-southeast-2.amazonaws.com",
+          "kms:CallerAccount": "{{SHOP:awsAccountId}}",
+          "kms:EncryptionContext:aws:s3:arn": [
+            "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/production/terraform.tfstate",
+            "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/production/terraform.tfstate.tflock"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "P6",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketAcl",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketTagging",
+        "s3:GetBucketOwnershipControls",
+        "s3:GetBucketCors",
+        "s3:GetBucketWebsite",
+        "s3:GetAccelerateConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:GetReplicationConfiguration",
+        "s3:GetBucketObjectLockConfiguration",
+        "s3:GetBucketRequestPayment",
+        "s3:GetBucketLogging",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketTagging",
+        "s3:PutBucketOwnershipControls"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-video-production-{{SHOP:awsAccountId}}-ap-southeast-2"
+    },
+    {
+      "Sid": "P7",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-video-production-{{SHOP:awsAccountId}}-ap-southeast-2/source/*"
+    },
+    {
+      "Sid": "P8",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ListQueueTags",
+        "sqs:SetQueueAttributes",
+        "sqs:TagQueue"
+      ],
+      "Resource": [
+        "arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures",
+        "arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures-dead-letter"
+      ]
+    },
+    {
+      "Sid": "P9",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:ListTagsForResource",
+        "logs:ListTagsLogGroup",
+        "logs:TagResource",
+        "logs:TagLogGroup"
+      ],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production:*",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production-failures",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production-failures:*"
+      ]
+    },
+    {
+      "Sid": "P10",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:ListTagsForResource",
+        "sns:TagResource",
+        "sns:ListSubscriptionsByTopic",
+        "sns:Publish"
+      ],
+      "Resource": "arn:aws:sns:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-alerts"
+    },
+    {
+      "Sid": "P11",
+      "Effect": "Allow",
+      "Action": "sns:Subscribe",
+      "Resource": "arn:aws:sns:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-alerts",
+      "Condition": {
+        "StringEquals": {
+          "sns:Protocol": "email"
+        }
+      }
+    },
+    {
+      "Sid": "P12",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetSubscriptionAttributes"
+      ],
+      "Resource": "arn:aws:sns:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-alerts"
+    },
+    {
+      "Sid": "P13",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:ListTagsForResource",
+        "cloudwatch:TagResource"
+      ],
+      "Resource": "arn:aws:cloudwatch:ap-southeast-2:{{SHOP:awsAccountId}}:alarm:forever-tee-video-production-*"
+    },
+    {
+      "Sid": "P14",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetAccountSettings",
+        "logs:DescribeLogGroups",
+        "cloudwatch:GetMetricStatistics"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-southeast-2"
+        }
+      }
+    }
+  ]
+}

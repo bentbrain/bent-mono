@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "laundry-sink",
+  "displayName": "Laundry utility sink",
+  "footprint": {
+    "width": 3,
+    "depth": 2
+  },
+  "heightPixels": 71,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/laundry-sink/laundry-sink-idle-north.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "east": {
+      "source": "assets/approved/laundry-sink/laundry-sink-idle-east.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "south": {
+      "source": "assets/approved/laundry-sink/laundry-sink-idle-south.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "west": {
+      "source": "assets/approved/laundry-sink/laundry-sink-idle-west.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    }
+  }
+}

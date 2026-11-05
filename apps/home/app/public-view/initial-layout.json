@@ -1,0 +1,655 @@
+{
+  "schema": 1,
+  "revision": 38,
+  "items": [
+    {
+      "productId": "okensand",
+      "x": 2.5,
+      "z": 1.75,
+      "rotation": 0,
+      "id": "p-6868167ad39be4b3",
+      "entityId": ""
+    },
+    {
+      "productId": "stoppino-large",
+      "x": 4.35,
+      "z": 1.75,
+      "rotation": 0,
+      "finish": "beige",
+      "id": "p-3109202874bbcd62",
+      "entityId": ""
+    },
+    {
+      "productId": "gullsudare",
+      "x": 3.25,
+      "z": 3,
+      "rotation": 0,
+      "id": "p-bf686fa933093b5c",
+      "entityId": ""
+    },
+    {
+      "productId": "fireside",
+      "x": 2.8,
+      "z": 3.1,
+      "rotation": 3,
+      "id": "p-b14fc9a48b60a758",
+      "entityId": ""
+    },
+    {
+      "productId": "checker-rug",
+      "x": 3.25,
+      "z": 3,
+      "rotation": 0,
+      "id": "p-aa2eef6a91ea68a3",
+      "entityId": ""
+    },
+    {
+      "productId": "magazine-rack",
+      "x": 4.5,
+      "z": 2.5,
+      "rotation": 1,
+      "id": "p-c2d6f95898879b3d",
+      "entityId": ""
+    },
+    {
+      "productId": "magazine-rack",
+      "x": 4.5,
+      "z": 3,
+      "rotation": 1,
+      "id": "p-1098eebf41aba9a2",
+      "entityId": ""
+    },
+    {
+      "productId": "era300-stand",
+      "x": 2,
+      "z": 4.25,
+      "rotation": 3,
+      "id": "p-3933926f8fc2a4bb",
+      "entityId": ""
+    },
+    {
+      "productId": "era300-stand",
+      "x": 2,
+      "z": 1.75,
+      "rotation": 3,
+      "id": "p-285cece7ab61cdf1",
+      "entityId": ""
+    },
+    {
+      "productId": "docksta",
+      "x": 2.75,
+      "z": 5,
+      "rotation": 3,
+      "id": "p-feb3e1a3174ec998",
+      "entityId": ""
+    },
+    {
+      "productId": "dyvlinge",
+      "x": 3.6,
+      "z": 1.85,
+      "rotation": 0,
+      "id": "p-2c529146aeadb861",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 1,
+      "z": 6.25,
+      "rotation": 0,
+      "id": "p-6aa426a81a7e658a",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 3,
+      "z": 6,
+      "rotation": 0,
+      "id": "p-e3b410eb9e0e1aae",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 6,
+      "z": 4.25,
+      "rotation": 0,
+      "id": "p-2a46cfefeb89fcb7",
+      "entityId": ""
+    },
+    {
+      "productId": "kirribilli",
+      "x": 7,
+      "z": 1.25,
+      "rotation": 0,
+      "finish": "ash",
+      "bedding": "rhubarb",
+      "id": "p-ea472db257ca7fa0",
+      "entityId": ""
+    },
+    {
+      "productId": "byakorre",
+      "x": 8.75,
+      "z": 1.75,
+      "rotation": 1,
+      "id": "p-ab85442c5d8ffcc9",
+      "entityId": ""
+    },
+    {
+      "productId": "perjohan",
+      "x": 4.5,
+      "z": 6.25,
+      "rotation": 1,
+      "id": "p-a7f50b1e164e6548",
+      "entityId": ""
+    },
+    {
+      "productId": "totem",
+      "x": 1.75,
+      "z": 2.25,
+      "rotation": 1,
+      "id": "p-9b430304f5e38572",
+      "entityId": ""
+    },
+    {
+      "productId": "kd27",
+      "x": 4.35,
+      "z": 1.75,
+      "rotation": 1,
+      "elevation": 0.394,
+      "id": "p-b595d01c93bead1c",
+      "entityId": "",
+      "supportId": "p-3109202874bbcd62"
+    },
+    {
+      "productId": "blasverk",
+      "x": 8.75,
+      "z": 2.35,
+      "rotation": 1,
+      "elevation": 1.39,
+      "finish": "yellow",
+      "id": "p-d7cc8f11efd11f17",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-3"
+    },
+    {
+      "productId": "giano",
+      "x": 3.75,
+      "z": 2.9,
+      "rotation": 1,
+      "id": "p-24a2d19275114120",
+      "entityId": ""
+    },
+    {
+      "productId": "giano",
+      "x": 2.95,
+      "z": 1.75,
+      "rotation": 0,
+      "finish": "orange",
+      "id": "p-85fbe09f819fa3a4",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 3.55,
+      "z": 5,
+      "rotation": 1,
+      "finish": "yellow",
+      "id": "p-709d8a1ae2c69e08",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 2.8,
+      "z": 5.8,
+      "rotation": 2,
+      "finish": "yellow",
+      "id": "p-0b792a9285363fd0",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 1.95,
+      "z": 5.1,
+      "rotation": 3,
+      "finish": "yellow",
+      "id": "p-be18ff86009734e7",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 5.65,
+      "z": 1.75,
+      "rotation": 3,
+      "id": "p-e24ed5fb76e47d42",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 5.8,
+      "z": 1.9,
+      "rotation": 0,
+      "id": "p-c36a8d9a00fee9c6",
+      "entityId": ""
+    },
+    {
+      "productId": "downlight",
+      "x": 7.35,
+      "z": 2.65,
+      "rotation": 0,
+      "id": "p-c19e6d7049960e48",
+      "entityId": ""
+    },
+    {
+      "productId": "lg-g4",
+      "x": 4.6624,
+      "z": 2.65,
+      "rotation": 1,
+      "id": "p-38a0784f83faad02",
+      "entityId": ""
+    },
+    {
+      "productId": "arc-ultra",
+      "x": 4.6207,
+      "z": 2.6,
+      "rotation": 1,
+      "id": "p-27df30609c55fa50",
+      "entityId": ""
+    },
+    {
+      "productId": "teak-sideboard",
+      "x": 2.35,
+      "z": 6.8,
+      "rotation": 2,
+      "id": "p-a12f5e24ff5b0add",
+      "entityId": ""
+    },
+    {
+      "productId": "componibili",
+      "x": 5.9,
+      "z": 0.25,
+      "rotation": 0,
+      "finish": "beige",
+      "id": "p-e6797c3c682182ab",
+      "entityId": ""
+    },
+    {
+      "productId": "componibili",
+      "x": 8.25,
+      "z": 0.3,
+      "rotation": 0,
+      "finish": "beige",
+      "id": "p-3f8690af8e6a2168",
+      "entityId": ""
+    },
+    {
+      "productId": "dejsa",
+      "x": 5.9,
+      "z": 0.25,
+      "rotation": 0,
+      "elevation": 0.6699999999999999,
+      "id": "p-34b6aafe0482c068",
+      "entityId": "",
+      "supportId": "p-e6797c3c682182ab",
+      "supportSurface": "p-e6797c3c682182ab-support"
+    },
+    {
+      "productId": "dejsa",
+      "x": 8.25,
+      "z": 0.3,
+      "rotation": 0,
+      "elevation": 0.6699999999999999,
+      "id": "p-641ac7f848073fc3",
+      "entityId": "",
+      "supportId": "p-3f8690af8e6a2168",
+      "supportSurface": "p-3f8690af8e6a2168-support"
+    },
+    {
+      "productId": "casalino",
+      "x": 0.35,
+      "z": 0.3,
+      "rotation": 3,
+      "finish": "yellow",
+      "id": "p-e020ce9cdb3fa5de",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 1,
+      "z": 1,
+      "rotation": 2,
+      "finish": "yellow",
+      "id": "p-bb59f1cf7c057aa2",
+      "entityId": ""
+    },
+    {
+      "productId": "stoppino-small",
+      "x": 0.4,
+      "z": 0.9,
+      "rotation": 2,
+      "id": "p-2894991c627657c9",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 3.5,
+      "z": 0.9,
+      "rotation": 2,
+      "finish": "yellow",
+      "id": "p-70ba00ceacdf9fcf",
+      "entityId": ""
+    },
+    {
+      "productId": "casalino",
+      "x": 4.2,
+      "z": 0.3,
+      "rotation": 1,
+      "finish": "yellow",
+      "id": "p-10a93ae89f834e73",
+      "entityId": ""
+    },
+    {
+      "productId": "shelf-plant",
+      "x": 8.75,
+      "z": 1.15,
+      "rotation": 1,
+      "elevation": 1.39,
+      "id": "p-cbaebb18404bae32",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-3"
+    },
+    {
+      "productId": "amber-glassware",
+      "x": 8.75,
+      "z": 1.58,
+      "rotation": 1,
+      "elevation": 1.39,
+      "id": "p-d17908e8cbc1bafd",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-3"
+    },
+    {
+      "productId": "book-stack-pale",
+      "x": 8.75,
+      "z": 1.15,
+      "rotation": 1,
+      "elevation": 1.025,
+      "id": "p-5c1a09d3b228404e",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-2"
+    },
+    {
+      "productId": "large-art-book",
+      "x": 8.75,
+      "z": 1.475,
+      "rotation": 1,
+      "elevation": 1.025,
+      "id": "p-5c9ad97e5f8f3772",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-2"
+    },
+    {
+      "productId": "book-stack-colour",
+      "x": 8.75,
+      "z": 1.83,
+      "rotation": 1,
+      "elevation": 1.025,
+      "id": "p-6651bbdba84b33b4",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-2"
+    },
+    {
+      "productId": "orange-shelf-cubby",
+      "x": 8.75,
+      "z": 2.3,
+      "rotation": 1,
+      "elevation": 1.025,
+      "id": "p-a4f504cf8be38578",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-2"
+    },
+    {
+      "productId": "eagle-display-plate",
+      "x": 8.75,
+      "z": 1.1,
+      "rotation": 1,
+      "elevation": 0.66,
+      "id": "p-b85e2e3d9b7cd8df",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-1"
+    },
+    {
+      "productId": "shelf-figurines",
+      "x": 8.75,
+      "z": 1.59,
+      "rotation": 1,
+      "elevation": 0.66,
+      "id": "p-407512e5d404c4f4",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-1"
+    },
+    {
+      "productId": "jewellery-tray",
+      "x": 8.75,
+      "z": 2.25,
+      "rotation": 1,
+      "elevation": 0.66,
+      "id": "p-f2c3e96f816bb51c",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-1"
+    },
+    {
+      "productId": "shelf-shoes",
+      "x": 8.75,
+      "z": 1.75,
+      "rotation": 1,
+      "elevation": 0.3,
+      "id": "p-7d9d74904ae391f4",
+      "entityId": "",
+      "supportId": "p-ab85442c5d8ffcc9",
+      "supportSurface": "p-ab85442c5d8ffcc9-shelf-0"
+    },
+    {
+      "productId": "pastel-catchalls",
+      "x": 3.0700000000000003,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-0d1d84cf73e4d874",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "sideboard-tablet",
+      "x": 2.75,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-3deb8adf27f93e68",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "ceramic-pig",
+      "x": 2.41,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-f9dc88bf3cde776f",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "black-ink-pot",
+      "x": 2.16,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-38863e7a22b980cd",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "sideboard-papers",
+      "x": 1.9200000000000002,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-e8baea576ada0482",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "lighthouse-lamp",
+      "x": 1.61,
+      "z": 6.8,
+      "rotation": 2,
+      "elevation": 0.79,
+      "id": "p-f1dde4ecf420cbb9",
+      "entityId": "",
+      "supportId": "p-a12f5e24ff5b0add",
+      "supportSurface": "p-a12f5e24ff5b0add-support"
+    },
+    {
+      "productId": "orange-cat-clock",
+      "x": 3.29,
+      "z": 7.060999999999999,
+      "rotation": 2,
+      "elevation": 1.42,
+      "id": "p-5f816d3b77d9f6bc",
+      "entityId": ""
+    },
+    {
+      "productId": "forest-frame",
+      "x": 2.74,
+      "z": 7.083499999999999,
+      "rotation": 2,
+      "elevation": 1.47,
+      "id": "p-611dfe114a214916",
+      "entityId": ""
+    },
+    {
+      "productId": "dark-poster-frame",
+      "x": 1.9500000000000002,
+      "z": 7.0809999999999995,
+      "rotation": 2,
+      "elevation": 1.2,
+      "id": "p-99f64995acc90833",
+      "entityId": ""
+    },
+    {
+      "productId": "plant-trolley",
+      "x": 4.28,
+      "z": 5.32,
+      "rotation": 1,
+      "id": "p-2254190e2b236fcb",
+      "entityId": ""
+    },
+    {
+      "productId": "fiddle-leaf",
+      "x": 4.28,
+      "z": 5.32,
+      "rotation": 1,
+      "elevation": 0.31,
+      "id": "p-7d702f002055eee7",
+      "entityId": "",
+      "supportId": "p-2254190e2b236fcb",
+      "supportSurface": "p-2254190e2b236fcb-support"
+    },
+    {
+      "productId": "hang-it-all",
+      "x": 4.1,
+      "z": 6.98,
+      "rotation": 2,
+      "elevation": 1.55,
+      "id": "p-908d95158d1b1d50",
+      "entityId": ""
+    },
+    {
+      "productId": "rimforsa",
+      "x": 1.7,
+      "z": 3.2,
+      "rotation": 3,
+      "id": "p-9ec902cd96aaec45",
+      "entityId": ""
+    }
+  ],
+  "roles": {
+    "p-6868167ad39be4b3": "lounge-lamps",
+    "p-3109202874bbcd62": "lounge-lamps",
+    "p-bf686fa933093b5c": "lounge-pendant",
+    "p-b14fc9a48b60a758": "lounge-lamps",
+    "p-aa2eef6a91ea68a3": "lounge-lamps",
+    "p-c2d6f95898879b3d": "lounge-lamps",
+    "p-1098eebf41aba9a2": "lounge-lamps",
+    "p-3933926f8fc2a4bb": "lounge-lamps",
+    "p-285cece7ab61cdf1": "lounge-lamps",
+    "p-feb3e1a3174ec998": "lounge-lamps",
+    "p-2c529146aeadb861": "lounge-lamps",
+    "p-6aa426a81a7e658a": "lounge-overheads",
+    "p-e3b410eb9e0e1aae": "lounge-overheads",
+    "p-2a46cfefeb89fcb7": "bedroom-overheads",
+    "p-ea472db257ca7fa0": "bedroom-lamps",
+    "p-ab85442c5d8ffcc9": "bedroom-lamps",
+    "p-a7f50b1e164e6548": "lounge-lamps",
+    "p-9b430304f5e38572": "lounge-lamps",
+    "p-b595d01c93bead1c": "lounge-lamps",
+    "p-d7cc8f11efd11f17": "bedroom-lamps",
+    "p-24a2d19275114120": "lounge-lamps",
+    "p-85fbe09f819fa3a4": "lounge-lamps",
+    "p-709d8a1ae2c69e08": "lounge-lamps",
+    "p-0b792a9285363fd0": "lounge-lamps",
+    "p-be18ff86009734e7": "lounge-lamps",
+    "p-e24ed5fb76e47d42": "bedroom-overheads",
+    "p-c36a8d9a00fee9c6": "bedroom-overheads",
+    "p-c19e6d7049960e48": "bedroom-overheads",
+    "p-38a0784f83faad02": "lounge-lamps",
+    "p-27df30609c55fa50": "lounge-lamps",
+    "p-a12f5e24ff5b0add": "lounge-lamps",
+    "p-e6797c3c682182ab": "bedroom-lamps",
+    "p-3f8690af8e6a2168": "bedroom-lamps",
+    "p-34b6aafe0482c068": "bedroom-bedside",
+    "p-641ac7f848073fc3": "bedroom-bedside",
+    "p-e020ce9cdb3fa5de": "lounge-lamps",
+    "p-bb59f1cf7c057aa2": "lounge-lamps",
+    "p-2894991c627657c9": "lounge-lamps",
+    "p-70ba00ceacdf9fcf": "lounge-lamps",
+    "p-10a93ae89f834e73": "lounge-lamps",
+    "p-cbaebb18404bae32": "bedroom-lamps",
+    "p-d17908e8cbc1bafd": "bedroom-lamps",
+    "p-5c1a09d3b228404e": "bedroom-lamps",
+    "p-5c9ad97e5f8f3772": "bedroom-lamps",
+    "p-6651bbdba84b33b4": "bedroom-lamps",
+    "p-a4f504cf8be38578": "bedroom-lamps",
+    "p-b85e2e3d9b7cd8df": "bedroom-lamps",
+    "p-407512e5d404c4f4": "bedroom-lamps",
+    "p-f2c3e96f816bb51c": "bedroom-lamps",
+    "p-7d9d74904ae391f4": "bedroom-lamps",
+    "p-0d1d84cf73e4d874": "lounge-lamps",
+    "p-3deb8adf27f93e68": "lounge-lamps",
+    "p-f9dc88bf3cde776f": "lounge-lamps",
+    "p-38863e7a22b980cd": "lounge-lamps",
+    "p-e8baea576ada0482": "lounge-lamps",
+    "p-f1dde4ecf420cbb9": "lounge-lamps",
+    "p-5f816d3b77d9f6bc": "lounge-lamps",
+    "p-611dfe114a214916": "lounge-lamps",
+    "p-99f64995acc90833": "lounge-lamps",
+    "p-2254190e2b236fcb": "lounge-lamps",
+    "p-7d702f002055eee7": "lounge-lamps",
+    "p-908d95158d1b1d50": "lounge-lamps",
+    "p-9ec902cd96aaec45": "lounge-lamps"
+  }
+}

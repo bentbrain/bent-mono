@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "bath-toilet",
+  "displayName": "Toilet",
+  "footprint": {
+    "width": 2,
+    "depth": 3
+  },
+  "heightPixels": 53,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/bath-toilet/bath-toilet-idle-north.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "east": {
+      "source": "assets/approved/bath-toilet/bath-toilet-idle-east.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "south": {
+      "source": "assets/approved/bath-toilet/bath-toilet-idle-south.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "west": {
+      "source": "assets/approved/bath-toilet/bath-toilet-idle-west.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    }
+  }
+}

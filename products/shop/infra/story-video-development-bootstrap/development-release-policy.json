@@ -1,0 +1,253 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "D1",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "story-video/development/terraform.tfstate",
+            "story-video/development/terraform.tfstate.tflock"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "D2",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2"
+    },
+    {
+      "Sid": "D3",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/development/terraform.tfstate"
+    },
+    {
+      "Sid": "D4",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/development/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "D5",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:ap-southeast-2:{{SHOP:awsAccountId}}:key/*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "s3.ap-southeast-2.amazonaws.com",
+          "kms:CallerAccount": "{{SHOP:awsAccountId}}",
+          "kms:EncryptionContext:aws:s3:arn": [
+            "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/development/terraform.tfstate",
+            "arn:aws:s3:::forever-tee-terraform-state-{{SHOP:awsAccountId}}-ap-southeast-2/story-video/development/terraform.tfstate.tflock"
+          ]
+        },
+        "ForAnyValue:StringEquals": {
+          "kms:ResourceAliases": "alias/forever-tee-video-development-state"
+        }
+      }
+    },
+    {
+      "Sid": "D6",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionConcurrency",
+        "lambda:GetFunctionEventInvokeConfig"
+      ],
+      "Resource": [
+        "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-development",
+        "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-development-failures"
+      ]
+    },
+    {
+      "Sid": "D7",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeImages",
+        "ecr:DescribeRepositories"
+      ],
+      "Resource": "arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development"
+    },
+    {
+      "Sid": "D8",
+      "Effect": "Allow",
+      "Action": "codebuild:BatchGetBuilds",
+      "Resource": "arn:aws:codebuild:ap-southeast-2:{{SHOP:awsAccountId}}:project/forever-tee-video-development"
+    },
+    {
+      "Sid": "D9",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2/source/*"
+    },
+    {
+      "Sid": "D10",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketAcl",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketTagging",
+        "s3:GetBucketOwnershipControls",
+        "s3:GetBucketCors",
+        "s3:GetBucketWebsite",
+        "s3:GetAccelerateConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:GetReplicationConfiguration",
+        "s3:GetBucketObjectLockConfiguration",
+        "s3:ListBucket",
+        "s3:GetBucketRequestPayment",
+        "s3:GetBucketLogging"
+      ],
+      "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2"
+    },
+    {
+      "Sid": "D11",
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:StartBuild",
+        "codebuild:StopBuild",
+        "codebuild:BatchGetProjects"
+      ],
+      "Resource": "arn:aws:codebuild:ap-southeast-2:{{SHOP:awsAccountId}}:project/forever-tee-video-development"
+    },
+    {
+      "Sid": "D12",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:ListTagsForResource",
+        "ecr:GetLifecyclePolicy"
+      ],
+      "Resource": "arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development"
+    },
+    {
+      "Sid": "D13",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunction",
+        "lambda:GetPolicy",
+        "lambda:ListTags",
+        "lambda:GetFunctionCodeSigningConfig",
+        "lambda:GetRuntimeManagementConfig",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:ListVersionsByFunction",
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-development",
+        "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-development-failures"
+      ]
+    },
+    {
+      "Sid": "D14",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetEventSourceMapping",
+        "lambda:ListTags"
+      ],
+      "Resource": "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:event-source-mapping:{{SHOP:resource_0bcc55046268}}"
+    },
+    {
+      "Sid": "D15",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ListQueueTags"
+      ],
+      "Resource": [
+        "arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-development-failures",
+        "arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-development-failures-dead-letter"
+      ]
+    },
+    {
+      "Sid": "D16",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRoleTags"
+      ],
+      "Resource": [
+        "arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-development-runtime",
+        "arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-development-build",
+        "arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-development-failures"
+      ]
+    },
+    {
+      "Sid": "D17",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetUser",
+        "iam:ListUserPolicies",
+        "iam:GetUserPolicy",
+        "iam:ListAttachedUserPolicies",
+        "iam:ListUserTags"
+      ],
+      "Resource": "arn:aws:iam::{{SHOP:awsAccountId}}:user/forever-tee-video-development-invoker"
+    },
+    {
+      "Sid": "D18",
+      "Effect": "Allow",
+      "Action": [
+        "logs:ListTagsLogGroup",
+        "logs:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-development",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-development:*",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-development-failures",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-development-failures:*",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/codebuild/forever-tee-video-development",
+        "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/codebuild/forever-tee-video-development:*"
+      ]
+    },
+    {
+      "Sid": "D19",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetAccountSettings",
+        "logs:DescribeLogGroups",
+        "cloudwatch:GetMetricStatistics"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-southeast-2"
+        }
+      }
+    }
+  ]
+}

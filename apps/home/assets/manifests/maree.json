@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "kind": "character",
+  "id": "maree",
+  "displayName": "Maree",
+  "footprint": {
+    "width": 2,
+    "depth": 3
+  },
+  "palette": "apartment-hotel-v1",
+  "animations": {
+    "idle": {
+      "north": {
+        "source": "assets/approved/maree/maree-idle-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/maree/maree-idle-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/maree/maree-idle-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/maree/maree-idle-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "walk": {
+      "north": {
+        "source": "assets/approved/maree/maree-walk-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/maree/maree-walk-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/maree/maree-walk-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/maree/maree-walk-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "sit": {
+      "north": {
+        "source": "assets/approved/maree/maree-sit-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/maree/maree-sit-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/maree/maree-sit-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/maree/maree-sit-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "sleep": {
+      "north": {
+        "source": "assets/approved/maree/maree-sleep-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/maree/maree-sleep-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/maree/maree-sleep-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/maree/maree-sleep-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "groom": {
+      "north": {
+        "source": "assets/approved/maree/maree-groom-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/maree/maree-groom-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/maree/maree-groom-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/maree/maree-groom-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    }
+  }
+}

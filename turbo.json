@@ -1,0 +1,540 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "dist/**",
+        "build/**"
+      ],
+      "cache": false
+    },
+    "lint": {
+      "dependsOn": [
+        "^lint"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "check-types": {
+      "dependsOn": [
+        "^check-types"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "@forever-tee/web#test:e2e:local": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/packages/**",
+        "$TURBO_ROOT$/products/shop/patches/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/bun.lock",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/products/shop/workers/*/package.json",
+        "$TURBO_ROOT$/products/shop/scripts/check-browser.mjs",
+        "$TURBO_ROOT$/products/shop/scripts/task-runtime.mjs",
+        "$TURBO_ROOT$/products/shop/scripts/validation-environment.mjs",
+        "$TURBO_ROOT$/products/shop/.github/actions/check/**",
+        "$TURBO_ROOT$/products/shop/.github/workflows/ci.yml",
+        "$TURBO_ROOT$/products/shop/.github/workflows/deploy.yml",
+        "$TURBO_ROOT$/products/shop/.github/workflows/native-development.yml",
+        "$TURBO_ROOT$/products/shop/.github/workflows/web-production.yml",
+        "$TURBO_ROOT$/products/shop/assets/lifestyle/**"
+      ],
+      "env": [
+        "CI",
+        "CI_BROWSER_RUNTIME",
+        "NODE_ENV",
+        "NODE_OPTIONS",
+        "PLAYWRIGHT_*",
+        "E2E_LOCAL_PRODUCT_DEFAULT_COLOR",
+        "E2E_LOCAL_PRODUCTION",
+        "NEXT_PUBLIC_*",
+        "LAN_DEV_ORIGIN"
+      ],
+      "outputs": [],
+      "cache": false
+    },
+    "@forever-tee/contracts#build": {
+      "outputs": [],
+      "cache": false
+    },
+    "@forever-tee/web#build": {
+      "dependsOn": [
+        "^build",
+        "typecheck",
+        "verify:worker-release"
+      ],
+      "env": [
+        "GITHUB_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "VERCEL_ENV",
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "next-env.d.ts"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "cache": false
+    },
+    "@forever-tee/video-renderer#build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/products/shop/packages/contracts/src/product-mockup-geometry.js"
+      ],
+      "outputs": [
+        "dist/**"
+      ],
+      "cache": false
+    },
+    "@forever-tee/web#verify:worker-release": {
+      "cache": false,
+      "env": [
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET"
+      ]
+    },
+    "@forever-tee/web#check": {
+      "dependsOn": [
+        "^check"
+      ],
+      "cache": false,
+      "env": [
+        "GITHUB_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "VERCEL_ENV",
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "@forever-tee/web#typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "env": [
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*",
+        "VERCEL_ENV"
+      ],
+      "outputs": [
+        ".next/types/**",
+        "next-env.d.ts"
+      ]
+    },
+    "@forever-tee/web#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "env": [
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*",
+        "VERCEL_ENV"
+      ],
+      "cache": false
+    },
+    "@forever-tee/video-renderer#test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/products/shop/packages/contracts/src/product-mockup-geometry.js"
+      ],
+      "cache": false
+    },
+    "@forever-tee/api#test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/workers/print-executor/**"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false
+    },
+    "@forever-tee/api#lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/workers/print-executor/**",
+        "$TURBO_ROOT$/products/shop/eslint.config.mjs"
+      ],
+      "dependsOn": [
+        "^lint"
+      ]
+    },
+    "@forever-tee/api#typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/workers/print-executor/**",
+        "$TURBO_ROOT$/products/shop/eslint.config.mjs"
+      ],
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "@forever-tee/api#build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/workers/print-executor/**"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ],
+      "cache": false
+    },
+    "@forever-tee/api#types:check": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/products/shop/workers/print-executor/**"
+      ]
+    },
+    "@forever-tee/product-image-renderer#build": {
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/products/shop/assets/lifestyle/**",
+        "$TURBO_ROOT$/products/shop/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/products/shop/workers/video-renderer/src/**"
+      ],
+      "cache": false
+    },
+    "@forever-tee/product-image-renderer#test": {
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/products/shop/assets/lifestyle/**",
+        "$TURBO_ROOT$/products/shop/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/products/shop/workers/video-renderer/src/**"
+      ],
+      "cache": false
+    },
+    "check": {
+      "cache": false
+    },
+    "types:check": {
+      "cache": false
+    },
+    "knip": {
+      "cache": false
+    },
+    "format:check": {
+      "cache": false
+    },
+    "test:integration": {
+      "cache": false
+    },
+    "test:e2e": {
+      "cache": false
+    },
+    "@bent-build/drive-copilot-web#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**"
+      ],
+      "env": [
+        "ALLOW_LOCAL_OAUTH_REDIRECTS",
+        "APP_URL",
+        "BENT_DRIVE_ADMIN_GITHUB_USERS",
+        "BENT_DRIVE_ALLOWED_GITHUB_USERS",
+        "CLERK_SECRET_KEY",
+        "DATABASE_URL",
+        "MCP_ACCESS_TOKEN_TTL_SECONDS",
+        "MCP_REFRESH_TOKEN_TTL_DAYS",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "TESLA_AUTHORIZATION_ENDPOINT",
+        "TESLA_CLIENT_ID",
+        "TESLA_CLIENT_SECRET",
+        "TESLA_FLEET_API_BASE_URL",
+        "TESLA_REDIRECT_URI",
+        "TESLA_SCOPES",
+        "TESLA_TOKEN_ENDPOINT",
+        "TOKEN_ENCRYPTION_KEY"
+      ]
+    },
+    "@bent-build/tesla-contracts#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**"
+      ],
+      "env": [
+        "ALLOW_LOCAL_OAUTH_REDIRECTS",
+        "APP_URL",
+        "BENT_DRIVE_ADMIN_GITHUB_USERS",
+        "BENT_DRIVE_ALLOWED_GITHUB_USERS",
+        "CLERK_SECRET_KEY",
+        "DATABASE_URL",
+        "MCP_ACCESS_TOKEN_TTL_SECONDS",
+        "MCP_REFRESH_TOKEN_TTL_DAYS",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "TESLA_AUTHORIZATION_ENDPOINT",
+        "TESLA_CLIENT_ID",
+        "TESLA_CLIENT_SECRET",
+        "TESLA_FLEET_API_BASE_URL",
+        "TESLA_REDIRECT_URI",
+        "TESLA_SCOPES",
+        "TESLA_TOKEN_ENDPOINT",
+        "TOKEN_ENCRYPTION_KEY"
+      ]
+    },
+    "@tesla-bridge/mcp-server#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "dist/**"
+      ],
+      "env": [
+        "ALLOW_LOCAL_OAUTH_REDIRECTS",
+        "APP_URL",
+        "BENT_DRIVE_ADMIN_GITHUB_USERS",
+        "BENT_DRIVE_ALLOWED_GITHUB_USERS",
+        "CLERK_SECRET_KEY",
+        "DATABASE_URL",
+        "MCP_ACCESS_TOKEN_TTL_SECONDS",
+        "MCP_REFRESH_TOKEN_TTL_DAYS",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "TESLA_AUTHORIZATION_ENDPOINT",
+        "TESLA_CLIENT_ID",
+        "TESLA_CLIENT_SECRET",
+        "TESLA_FLEET_API_BASE_URL",
+        "TESLA_REDIRECT_URI",
+        "TESLA_SCOPES",
+        "TESLA_TOKEN_ENDPOINT",
+        "TOKEN_ENCRYPTION_KEY"
+      ]
+    },
+    "@bent-build/drive-copilot-web#check": {
+      "dependsOn": [
+        "^check"
+      ]
+    },
+    "@bent-build/tesla-contracts#check": {
+      "dependsOn": [
+        "^check"
+      ]
+    },
+    "@tesla-bridge/mcp-server#check": {
+      "dependsOn": [
+        "^check"
+      ]
+    },
+    "@bent-build/drive-copilot-web#lint": {
+      "dependsOn": [
+        "^lint"
+      ],
+      "outputs": [
+        ".cache/.eslintcache"
+      ]
+    },
+    "@bent-build/tesla-contracts#lint": {
+      "dependsOn": [
+        "^lint"
+      ],
+      "outputs": [
+        ".cache/.eslintcache"
+      ]
+    },
+    "@tesla-bridge/mcp-server#lint": {
+      "dependsOn": [
+        "^lint"
+      ],
+      "outputs": [
+        ".cache/.eslintcache"
+      ]
+    },
+    "@bent-build/drive-copilot-web#test": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@bent-build/tesla-contracts#test": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@tesla-bridge/mcp-server#test": {
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@bent-build/drive-copilot-web#dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "@bent-build/tesla-contracts#dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "@tesla-bridge/mcp-server#dev": {
+      "cache": false,
+      "persistent": true
+    }
+  },
+  "globalPassThroughEnv": [
+    "CI",
+    "NODE_ENV",
+    "TEST_*",
+    "E2E_*",
+    "SKIP_ENV_VALIDATION",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+    "CLERK_SECRET_KEY",
+    "PAYLOAD_SECRET",
+    "DATABASE_URI",
+    "UPLOADTHING_TOKEN",
+    "PUBLIC_HOME_*",
+    "SHOP_PROTECTED_CONFIG_JSON",
+    "PUBLIC_STORE_DOMAIN",
+    "PUBLIC_STOREFRONT_API_TOKEN",
+    "PRIVATE_STOREFRONT_API_TOKEN",
+    "FOREVER_TEE_API_URL",
+    "FOREVER_TEE_API_SHARED_SECRET",
+    "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+    "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+    "TURNSTILE_SECRET",
+    "TURNSTILE_TEST_MODE",
+    "PAYLOAD_MIGRATION_TEST_DATABASE_URI",
+    "PAYLOAD_STORAGE_SOURCE",
+    "R2_BUCKET",
+    "R2_ENDPOINT",
+    "R2_PUBLIC_URL",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY"
+  ],
+  "globalEnv": [
+    "CI_TASK_RUNTIME",
+    "CI",
+    "NODE_ENV",
+    "NODE_OPTIONS"
+  ],
+  "globalDependencies": [
+    "bun.lock",
+    "package.json",
+    "products/shop/patches/**",
+    "apps/jp/patches/**",
+    "products/shop/scripts/task-runtime.mjs"
+  ]
+}

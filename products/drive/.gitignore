@@ -1,0 +1,11 @@
+.vercel/
+node_modules/
+.turbo/
+**/.cache/
+.env
+.env.*
+!.env.example
+private-key.pem
+credentials.json
+.playwright-mcp/
+hosting/

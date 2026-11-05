@@ -1,0 +1,112 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.769894861111, 35.678927],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "京橋（一）",
+        "name": "Kyobashi 1",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "きょうばし１ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.768535316944, 35.6767559522222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "京橋（三）",
+        "name": "Kyobashi 3",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "きょうばし３ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.769157916667, 35.6787665833333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "knj": "八重洲（二）",
+        "name": "Yaesu 2",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "やえす２ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770042522778, 35.6766743016667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Kyobashi Sta.",
+        "ftCode": 2930,
+        "knj": "京橋駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "きょうばしえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.771985473333, 35.6755863991667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Takaracho Sta.",
+        "ftCode": 2930,
+        "knj": "宝町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "たからちょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.769836972222, 35.6754999444444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770663095, 35.6754960294444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.771809305556, 35.67885075],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

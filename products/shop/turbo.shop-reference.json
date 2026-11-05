@@ -1,0 +1,366 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "globalDependencies": [
+    "bun.lock",
+    "package.json",
+    "patches/**",
+    "scripts/task-runtime.mjs"
+  ],
+  "tasks": {
+    "@forever-tee/web#test:e2e:local": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/packages/**",
+        "$TURBO_ROOT$/patches/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/bun.lock",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/workers/*/package.json",
+        "$TURBO_ROOT$/scripts/check-browser.mjs",
+        "$TURBO_ROOT$/scripts/task-runtime.mjs",
+        "$TURBO_ROOT$/scripts/validation-environment.mjs",
+        "$TURBO_ROOT$/.github/actions/check/**",
+        "$TURBO_ROOT$/.github/workflows/ci.yml",
+        "$TURBO_ROOT$/.github/workflows/deploy.yml",
+        "$TURBO_ROOT$/.github/workflows/native-development.yml",
+        "$TURBO_ROOT$/.github/workflows/web-production.yml",
+        "$TURBO_ROOT$/assets/lifestyle/**"
+      ],
+      "env": [
+        "CI",
+        "CI_BROWSER_RUNTIME",
+        "NODE_ENV",
+        "NODE_OPTIONS",
+        "PLAYWRIGHT_*",
+        "E2E_LOCAL_PRODUCT_DEFAULT_COLOR",
+        "E2E_LOCAL_PRODUCTION",
+        "NEXT_PUBLIC_*",
+        "LAN_DEV_ORIGIN"
+      ],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "@forever-tee/contracts#build": {
+      "outputs": []
+    },
+    "@forever-tee/web#build": {
+      "dependsOn": [
+        "^build",
+        "typecheck",
+        "verify:worker-release"
+      ],
+      "env": [
+        "GITHUB_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "VERCEL_ENV",
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        "next-env.d.ts"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "@forever-tee/video-renderer#build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/packages/contracts/src/product-mockup-geometry.js"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@forever-tee/web#verify:worker-release": {
+      "cache": false,
+      "env": [
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET"
+      ]
+    },
+    "check": {
+      "dependsOn": [
+        "^check"
+      ]
+    },
+    "@forever-tee/web#check": {
+      "dependsOn": [
+        "^check"
+      ],
+      "cache": false,
+      "env": [
+        "GITHUB_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "VERCEL_ENV",
+        "FOREVER_TEE_ENFORCE_WORKER_RELEASE",
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "types:check": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "env": [
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*",
+        "VERCEL_ENV"
+      ]
+    },
+    "lint": {
+      "dependsOn": [
+        "^lint"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/eslint.config.mjs"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/eslint.config.mjs"
+      ]
+    },
+    "@forever-tee/web#typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "env": [
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*",
+        "VERCEL_ENV"
+      ],
+      "outputs": [
+        ".next/types/**",
+        "next-env.d.ts"
+      ]
+    },
+    "@forever-tee/web#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "env": [
+        "PUBLIC_STORE_DOMAIN",
+        "PUBLIC_STOREFRONT_API_TOKEN",
+        "PRIVATE_STOREFRONT_API_TOKEN",
+        "FOREVER_TEE_API_URL",
+        "FOREVER_TEE_API_SHARED_SECRET",
+        "NEXT_PUBLIC_FOREVER_TEE_API_URL",
+        "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "TURNSTILE_TEST_MODE",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        "NEXT_PUBLIC_POSTHOG_HOST",
+        "POSTHOG_CLI_HOST",
+        "POSTHOG_CLI_PROJECT_ID",
+        "POSTHOG_CLI_API_KEY",
+        "LAN_DEV_ORIGIN",
+        "SHOP_ID",
+        "PUBLIC_STOREFRONT_ID",
+        "NEXT_PUBLIC_*",
+        "VERCEL_ENV"
+      ]
+    },
+    "@forever-tee/video-renderer#test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/packages/contracts/src/product-mockup-geometry.js"
+      ]
+    },
+    "@forever-tee/api#test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/workers/print-executor/**"
+      ],
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@forever-tee/api#lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/workers/print-executor/**",
+        "$TURBO_ROOT$/eslint.config.mjs"
+      ],
+      "dependsOn": [
+        "^lint"
+      ]
+    },
+    "@forever-tee/api#typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/workers/print-executor/**",
+        "$TURBO_ROOT$/eslint.config.mjs"
+      ],
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "@forever-tee/api#build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/workers/print-executor/**"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@forever-tee/api#types:check": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/workers/print-executor/**"
+      ]
+    },
+    "@forever-tee/product-image-renderer#build": {
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/assets/lifestyle/**",
+        "$TURBO_ROOT$/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/workers/video-renderer/src/**"
+      ]
+    },
+    "@forever-tee/product-image-renderer#test": {
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/assets/lifestyle/**",
+        "$TURBO_ROOT$/apps/web/public/mockups/**",
+        "$TURBO_ROOT$/workers/video-renderer/src/**"
+      ]
+    }
+  },
+  "globalEnv": [
+    "CI_TASK_RUNTIME",
+    "CI",
+    "NODE_ENV",
+    "NODE_OPTIONS"
+  ]
+}

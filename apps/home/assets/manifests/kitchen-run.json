@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "kitchen-run",
+  "displayName": "Fitted kitchen with stainless benchtop",
+  "footprint": {
+    "width": 17,
+    "depth": 3
+  },
+  "heightPixels": 164,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/kitchen-run/kitchen-run-idle-north.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "east": {
+      "source": "assets/approved/kitchen-run/kitchen-run-idle-east.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "south": {
+      "source": "assets/approved/kitchen-run/kitchen-run-idle-south.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "west": {
+      "source": "assets/approved/kitchen-run/kitchen-run-idle-west.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    }
+  }
+}

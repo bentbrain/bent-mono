@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "node ../../scripts/task-runtime.mjs run build --filter=@forever-tee/web --cwd=../.."
+}

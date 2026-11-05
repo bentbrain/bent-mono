@@ -1,0 +1,631 @@
+{
+  "features": [
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Saitama",
+        "ftCode": 51301,
+        "kana": "さいたま",
+        "dspPos": "RC",
+        "knj": "さいたま",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.649055192027, 35.8570396803248],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Nagoya",
+        "ftCode": 51301,
+        "kana": "なごや",
+        "dspPos": "LC",
+        "knj": "名古屋",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.90664277645, 35.1802247576894],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Sendai",
+        "ftCode": 51301,
+        "kana": "せんだい",
+        "dspPos": "LC",
+        "knj": "仙台",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.872191044319, 38.2689426887457],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Kyoto",
+        "ftCode": 51301,
+        "kana": "きょうと",
+        "dspPos": "RB",
+        "knj": "京都",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.75559896965, 35.0212095655998],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Yokohama",
+        "ftCode": 51301,
+        "kana": "よこはま",
+        "dspPos": "CT",
+        "knj": "横浜",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.642531979239, 35.4477446009681],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Kobe",
+        "ftCode": 51301,
+        "kana": "こうべ",
+        "dspPos": "RB",
+        "knj": "神戸",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.183283275515, 34.6910747058593],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Osaka",
+        "ftCode": 51301,
+        "kana": "おおさか",
+        "dspPos": "RT",
+        "knj": "大阪",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.520014358002, 34.6863660036965],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "TOKYO",
+        "ftCode": 51301,
+        "kana": "とうきょう",
+        "dspPos": "LB",
+        "knj": "東京",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.756398931152, 35.68263249419],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Chiba",
+        "ftCode": 51301,
+        "kana": "ちば",
+        "dspPos": "LC",
+        "knj": "千葉",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.123177788967, 35.6045690712845],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Niigata",
+        "ftCode": 51301,
+        "kana": "にいがた",
+        "dspPos": "CT",
+        "knj": "新潟",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.022975871649, 37.9028570145726],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Shizuoka",
+        "ftCode": 51301,
+        "kana": "しずおか",
+        "dspPos": "CT",
+        "knj": "静岡",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [138.383021344198, 34.9769168630388],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Utsunomiya",
+        "ftCode": 51301,
+        "kana": "うつのみや",
+        "dspPos": "LB",
+        "knj": "宇都宮",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.883577096578, 36.5658206533097],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Fukui",
+        "ftCode": 51301,
+        "kana": "ふくい",
+        "dspPos": "RC",
+        "knj": "福井",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.221730967433, 36.0652219174517],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Kanazawa",
+        "ftCode": 51301,
+        "kana": "かなざわ",
+        "dspPos": "RC",
+        "knj": "金沢",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.625658089721, 36.5946344049099],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Kofu",
+        "ftCode": 51301,
+        "kana": "こうふ",
+        "dspPos": "RC",
+        "knj": "甲府",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [138.568445279605, 35.6641129218025],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Aomori",
+        "ftCode": 51301,
+        "kana": "あおもり",
+        "dspPos": "LC",
+        "knj": "青森",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.740548186248, 40.8245691811836],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Fukushima",
+        "ftCode": 51301,
+        "kana": "ふくしま",
+        "dspPos": "LC",
+        "knj": "福島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.467733354007, 37.7500399070938],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Mito",
+        "ftCode": 51301,
+        "kana": "みと",
+        "dspPos": "LC",
+        "knj": "水戸",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.446855712933, 36.3417690588207],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Morioka",
+        "ftCode": 51301,
+        "kana": "もりおか",
+        "dspPos": "LC",
+        "knj": "盛岡",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [141.152664258014, 39.7035687064494],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Nagano",
+        "ftCode": 51301,
+        "kana": "ながの",
+        "dspPos": "LC",
+        "knj": "長野",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [138.180842538197, 36.6512919917605],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Otsu",
+        "ftCode": 51301,
+        "kana": "おおつ",
+        "dspPos": "LC",
+        "knj": "大津",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.868580399093, 35.0045289096759],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Tsu",
+        "ftCode": 51301,
+        "kana": "つ",
+        "dspPos": "LC",
+        "knj": "津",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.508675776073, 34.7302620703854],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Wakayama",
+        "ftCode": 51301,
+        "kana": "わかやま",
+        "dspPos": "LC",
+        "knj": "和歌山",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.167523553576, 34.2260228813907],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Akita",
+        "ftCode": 51301,
+        "kana": "あきた",
+        "dspPos": "CB",
+        "knj": "秋田",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.10269335658, 39.7186249753015],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Gifu",
+        "ftCode": 51301,
+        "kana": "ぎふ",
+        "dspPos": "CB",
+        "knj": "岐阜",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.722156827706, 35.3911860856497],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Toyama",
+        "ftCode": 51301,
+        "kana": "とやま",
+        "dspPos": "CB",
+        "knj": "富山",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [137.211323994955, 36.6952750164657],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Maebashi",
+        "ftCode": 51301,
+        "kana": "まえばし",
+        "dspPos": "CT",
+        "knj": "前橋",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.060470378057, 36.3906875872756],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Yamagata",
+        "ftCode": 51301,
+        "kana": "やまがた",
+        "dspPos": "RC",
+        "knj": "山形",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.363675872583, 38.2404179628661],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "arrngAgl": 0,
+        "name": "Nara",
+        "ftCode": 51301,
+        "kana": "なら",
+        "dspPos": "LT",
+        "knj": "奈良",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [135.83288847871, 34.6852803311567],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Hachijo Jima",
+        "name": "Hachijojima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "はちじょうじま",
+        "dspPos": "RC",
+        "knj": "八丈島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.795291243474, 33.1064131999189],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Hegura Jima",
+        "name": "Hegurajima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "へぐらじま",
+        "dspPos": "RC",
+        "knj": "舳倉島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [136.918310489084, 37.8537201877976],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Miyake Jima",
+        "name": "Miyakejima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "みやけじま",
+        "dspPos": "RC",
+        "knj": "三宅島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.549264950244, 34.0871988474834],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Sado Shima",
+        "name": "Sadoshima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "さどしま",
+        "dspPos": "RC",
+        "knj": "佐渡島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [138.337742692446, 38.1812915548138],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Oshima",
+        "name": "Oshima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "おおしま",
+        "dspPos": "LC",
+        "knj": "大島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.405576014078, 34.7438053485507],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 150,
+        "roma": "NIHON KOKU",
+        "name": "JAPAN",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "にほんこく",
+        "dspPos": "CC",
+        "knj": "日本国",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [137.183727394849, 32.1027560452443],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 351,
+        "roma": "IZU SHOTO",
+        "name": "IZU ISLANDS",
+        "arrngAgl": 280,
+        "ftCode": 50100,
+        "kana": "いずしょとう",
+        "dspPos": "CC",
+        "knj": "伊豆諸島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [140.20329234968, 33.5242340870379],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Awa Shima",
+        "name": "Awashima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "あわしま",
+        "dspPos": "RB",
+        "knj": "粟島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.239704023608, 38.4680418431918],
+        "type": "Point"
+      }
+    },
+    {
+      "properties": {
+        "annoCtg": 352,
+        "roma": "Tobi Shima",
+        "name": "Tobishima Is.",
+        "arrngAgl": 0,
+        "ftCode": 50100,
+        "kana": "とびしま",
+        "dspPos": "RB",
+        "knj": "飛島",
+        "arrng": 1
+      },
+      "type": "Feature",
+      "geometry": {
+        "coordinates": [139.552933591705, 39.1962290271453],
+        "type": "Point"
+      }
+    }
+  ],
+  "type": "FeatureCollection"
+}

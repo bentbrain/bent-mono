@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "bedroom-robe",
+  "displayName": "Enclosed bedroom wardrobe",
+  "footprint": {
+    "width": 11,
+    "depth": 3
+  },
+  "heightPixels": 146,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/bedroom-robe/bedroom-robe-idle-north.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "east": {
+      "source": "assets/approved/bedroom-robe/bedroom-robe-idle-east.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "south": {
+      "source": "assets/approved/bedroom-robe/bedroom-robe-idle-south.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    },
+    "west": {
+      "source": "assets/approved/bedroom-robe/bedroom-robe-idle-west.png",
+      "width": 480,
+      "height": 480,
+      "anchor": {
+        "x": 240,
+        "y": 360
+      }
+    }
+  }
+}

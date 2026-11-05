@@ -1,0 +1,60 @@
+name: Recover a reviewed existing provider order
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected environment
+        type: choice
+        options: [production]
+        required: true
+      paid_order_id:
+        description: Exact reviewed paid order to recheck and resume
+        type: choice
+        options: [{{SHOP:resource_5df53ebae4ae}}, {{SHOP:resource_5ba68fa39a92}}]
+        default: {{SHOP:resource_5df53ebae4ae}}
+        required: true
+      operation:
+        description: Plan or resume only the reviewed existing order readback
+        type: choice
+        options: [plan, apply]
+        required: true
+      expected_plan_sha256:
+        description: Unchanged reviewed plan hash, required for apply
+        type: string
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: paid-order-provider-recovery-${{ inputs.environment }}-${{ inputs.paid_order_id }}
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.actor_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Production
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify recovery boundaries
+        run: node --test scripts/paid-order-provider-recovery.test.mjs
+      - name: Recheck and perform only the selected order operation
+        env:
+          OPERATIONS_ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          PAID_ORDER_ID: ${{ inputs.paid_order_id }}
+          EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          BENT_SHIRT_OPERATIONS_SECRET: ${{ secrets.BENT_SHIRT_OPERATIONS_SECRET }}
+        run: node scripts/paid-order-provider-recovery.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: order-provider-recovery-${{ github.run_id }}
+          path: order-provider-recovery-*.json
+          if-no-files-found: ignore

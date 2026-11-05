@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "commandId": "123873c3-85a4-4a82-9122-2b90a76612cc",
+  "designId": "ce3f0cfe-ee7b-4600-9caa-89d80367ae8a",
+  "outerRevisionId": "713ac528-f86e-40ff-ab96-608cbbeb0fdf",
+  "innerRevisionId": "f790fd4a-0478-4815-9a9b-59bc73cf1f26",
+  "createdAt": 1789866910258,
+  "original": {
+    "productId": "d09442a5-74b9-43a7-9ec3-e14231dd7b07",
+    "revisionId": "162c3ded-5984-4389-9e00-f0670b68616e",
+    "sha256": "9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52",
+    "featuredRevision": 4,
+    "slot": 1
+  },
+  "sources": [
+    {
+      "role": "outer",
+      "file": "outer-original.png",
+      "sha256": "9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52",
+      "size": 4699616,
+      "width": 3024,
+      "height": 4032,
+      "crop": {
+        "cropX": 0.5074797371578658,
+        "cropY": 0.49859172407896213,
+        "cropZoom": 1.52
+      }
+    },
+    {
+      "role": "inner",
+      "file": "inset-cutout.png",
+      "sha256": "4b494f8055be162b187f12ee40e2ff7f52a892d6130fb827ed4251f457a6ed56",
+      "size": 3409711,
+      "width": 2448,
+      "height": 3264,
+      "crop": {
+        "cropX": 0.507,
+        "cropY": 0.6485,
+        "cropZoom": 1.375
+      },
+      "placement": {
+        "placementX": 0.267994,
+        "placementY": 0.48,
+        "placementWidth": 0.455717
+      }
+    }
+  ],
+  "products": [
+    {
+      "id": "904fb403-73a9-4815-9b1a-0ddfd34be22b",
+      "baseProductId": "97b629d7-1d3b-4d2a-a586-537168141e97",
+      "handle": "cotton-tote",
+      "placement": {
+        "placementX": 0.29479361533738313,
+        "placementY": 0.4289546195494397,
+        "placementWidth": 0.40307566050238475
+      },
+      "depth": 5
+    },
+    {
+      "id": "72b869aa-b9f2-4aa7-9bb2-0bd04a62fa9d",
+      "baseProductId": "a51b7acf-77e9-4762-83c4-62d96dd8942c",
+      "handle": "bent-shirt",
+      "placement": {
+        "placementX": 0.28748398632285943,
+        "placementY": 0.4264237292026817,
+        "placementWidth": 0.417433860352342
+      },
+      "depth": 5
+    }
+  ],
+  "printMode": "base-image-only",
+  "approval": "Owner approved chest placement and the 8.4% smaller whole portrait in the local print-quality review on 2026-09-20. Preserve original photo and app cutout pixels, natural proportions and repeated chest placement.",
+  "jobs": [
+    {
+      "id": "5f14078b-51d2-45df-ae56-3a1e9d3beebf",
+      "productId": "904fb403-73a9-4815-9b1a-0ddfd34be22b",
+      "colour": "Black"
+    },
+    {
+      "id": "c9e756fc-479a-4523-9d2a-b32c716ae2dd",
+      "productId": "904fb403-73a9-4815-9b1a-0ddfd34be22b",
+      "colour": "Cream"
+    },
+    {
+      "id": "a033b454-fd83-48c6-97d4-2d8464f30d0d",
+      "productId": "72b869aa-b9f2-4aa7-9bb2-0bd04a62fa9d",
+      "colour": "Black"
+    },
+    {
+      "id": "18cefb44-c5f8-4ee5-85a5-08f9b6946829",
+      "productId": "72b869aa-b9f2-4aa7-9bb2-0bd04a62fa9d",
+      "colour": "White"
+    }
+  ],
+  "transfer": {
+    "kind": "github-private-draft-assets",
+    "tag": "featured-artwork-398-20260920",
+    "assets": [
+      {
+        "file": "inset-cutout.png",
+        "apiUrl": "https://api.github.com/repos/bentbrain/bent-mono/releases/assets/575836232",
+        "size": 3409711,
+        "sha256": "4b494f8055be162b187f12ee40e2ff7f52a892d6130fb827ed4251f457a6ed56"
+      },
+      {
+        "file": "outer-original.png",
+        "apiUrl": "https://api.github.com/repos/bentbrain/bent-mono/releases/assets/575836231",
+        "size": 4699616,
+        "sha256": "9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52"
+      }
+    ]
+  }
+}

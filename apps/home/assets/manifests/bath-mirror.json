@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "bath-mirror",
+  "displayName": "Mirror cupboard and open shelves",
+  "footprint": {
+    "width": 4,
+    "depth": 1
+  },
+  "heightPixels": 130,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/bath-mirror/bath-mirror-idle-north.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "east": {
+      "source": "assets/approved/bath-mirror/bath-mirror-idle-east.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "south": {
+      "source": "assets/approved/bath-mirror/bath-mirror-idle-south.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "west": {
+      "source": "assets/approved/bath-mirror/bath-mirror-idle-west.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    }
+  }
+}

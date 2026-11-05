@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tesla-bridge": {
+      "type": "http",
+      "url": "https://drive.bent.build/mcp",
+      "auth": "oauth",
+      "scopes": ["tesla.read"],
+      "oauth_resource": "https://drive.bent.build/mcp"
+    }
+  }
+}

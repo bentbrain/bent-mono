@@ -1,0 +1,54 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.761739449722, 35.6803441677778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Nijubashimae Sta.",
+        "ftCode": 2930,
+        "knj": "二重橋前駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "にじゅうばしまええき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759749688333, 35.6832407925],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.762406011389, 35.6835651988889],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7571011, 35.68169169],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "",
+        "name": "Kokyogaien National Garden",
+        "ftCode": 100,
+        "annoCtg": 531,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": ""
+      }
+    }
+  ],
+  "type": "FeatureCollection"
+}

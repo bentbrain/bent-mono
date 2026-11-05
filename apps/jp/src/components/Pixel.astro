@@ -1,0 +1,105 @@
+---
+interface Props {
+  name?: string;
+  compact?: boolean;
+  centerPaint?: boolean;
+}
+const { name = 'beer', compact = false, centerPaint = false } = Astro.props;
+const counterIcon = compact && name === 'beer';
+const sprites: Record<string, string[]> = {
+  beer: [
+    '0000000000000000',
+    '0000000000000000',
+    '0001111111100000',
+    '0011000000110000',
+    '0010000000111100',
+    '0010101010100100',
+    '0010101010100100',
+    '0010101010100100',
+    '0010101010100100',
+    '0010101010111100',
+    '0010101010100000',
+    '0010101010100000',
+    '0010101010100000',
+    '0010000000100000',
+    '0001111111000000',
+    '0000000000000000',
+  ],
+  food: [
+    '0000000110000000',
+    '0000001001000000',
+    '0000010000100000',
+    '0000100000010000',
+    '0001000000001000',
+    '0010000000000100',
+    '0100000000000010',
+    '0100000000000010',
+    '0100001111000010',
+    '0100001111000010',
+    '0100001111000010',
+    '0010001111000100',
+    '0001111111111000',
+  ],
+  shopping: [
+    '0000011111000000',
+    '0000100000100000',
+    '0000100000100000',
+    '0001111111110000',
+    '0001000000010000',
+    '0001000000010000',
+    '0001000000010000',
+    '0001000000010000',
+    '0001000000010000',
+    '0001111111110000',
+  ],
+  landscape: [
+    '0000000110000000',
+    '0000001111000000',
+    '0000010110100000',
+    '0000100000010000',
+    '0001000000001000',
+    '0010000000000100',
+    '0100000000000010',
+    '0111111111111110',
+  ],
+};
+// Eight rows keep the foam, solid mug and open handle distinct at cap height.
+// Keep the detailed 16px sprite for gallery filters and other larger uses.
+const compactBeer = [
+  '01101000',
+  '11111000',
+  '11111111',
+  '11111001',
+  '11111001',
+  '11111111',
+  '11111000',
+  '01111000',
+];
+const sprite = counterIcon ? compactBeer : sprites[name] || sprites.beer || [];
+const firstPaintedRow = sprite.findIndex((row) => row.includes('1'));
+const lastPaintedRow = sprite.findLastIndex((row) => row.includes('1'));
+// Move the 16px canvas around the paint without resizing the sprite.
+const centeredY =
+  firstPaintedRow < 0 ? 0 : (firstPaintedRow + lastPaintedRow + 1) / 2 - 8;
+const path = sprite
+  .flatMap((row, y) =>
+    row
+      .split('')
+      .flatMap((bit, x) => (bit === '1' ? [`M${x} ${y}h1v1h-1z`] : [])),
+  )
+  .join('');
+---
+
+<svg
+  class:list={[
+    'pixel shrink-0',
+    counterIcon ? 'h-[1cap] w-[calc(12cap/13)]' : 'size-[1.7em] align-middle',
+  ]}
+  data-feedback-id={counterIcon ? 'beer-icon' : undefined}
+  viewBox={counterIcon ? '0 0 8 8' : `0 ${centerPaint ? centeredY : 0} 16 16`}
+  preserveAspectRatio={counterIcon ? 'none' : undefined}
+  aria-hidden="true"
+  shape-rendering="crispEdges"
+>
+  <path d={path} fill="currentColor" />
+</svg>

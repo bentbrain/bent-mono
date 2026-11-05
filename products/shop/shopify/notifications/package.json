@@ -1,0 +1,13 @@
+{
+  "name": "@bent-shop/notifications",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "preview": "node preview.mjs",
+    "test": "node --test test.mjs"
+  },
+  "devDependencies": {
+    "liquidjs": "10.29.0"
+  }
+}

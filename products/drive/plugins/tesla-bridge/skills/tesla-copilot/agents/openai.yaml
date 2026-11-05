@@ -1,0 +1,10 @@
+interface:
+  display_name: "Tesla Copilot"
+  short_description: "Inspect a linked Tesla safely"
+  default_prompt: "Use $tesla-copilot to check my Tesla's current status."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "tesla-bridge"
+      description: "Tesla Bridge read-only vehicle tools"
+      transport: "http"

@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "product": {
+    "slug": "staple-tee",
+    "geometryVersion": "physical-print-area-v1"
+  },
+  "registration": {
+    "status": "visual-calibration",
+    "reference": "Owner-approved physical print canvas retained and registered to the replacement photographs with parallel sides. Garment masks follow the visible shirt fabric independently of print placement. Physical scale remains visually estimated from the photographs."
+  },
+  "description": "Replacement owner-supplied black and white photographs isolated with Cloudflare foreground segmentation, mildly neutralised and cropped immediately above the pants.",
+  "templates": [
+    {
+      "id": "white",
+      "base": "featured-blank-white.png",
+      "lighting": "featured-blank-white.png",
+      "mask": "featured-mask-white.svg",
+      "quad": [
+        [
+          0.310606,
+          0.492898
+        ],
+        [
+          0.698864,
+          0.492898
+        ],
+        [
+          0.698864,
+          0.857955
+        ],
+        [
+          0.310606,
+          0.857955
+        ]
+      ],
+      "displacement": 80,
+      "shading": 0.75,
+      "texture": 0.22,
+      "highlights": 0.45,
+      "foldContrast": 1.2,
+      "inkSoftness": 0.25,
+      "lightReference": 0.86,
+      "lightTint": [
+        0.99,
+        0.995,
+        1
+      ]
+    },
+    {
+      "id": "black",
+      "base": "featured-blank-black.png",
+      "lighting": "featured-blank-black.png",
+      "mask": "featured-mask-black.svg",
+      "quad": [
+        [
+          0.30101,
+          0.522727
+        ],
+        [
+          0.717172,
+          0.522727
+        ],
+        [
+          0.717172,
+          0.915152
+        ],
+        [
+          0.30101,
+          0.915152
+        ]
+      ],
+      "displacement": 14,
+      "shading": 0.42,
+      "texture": 0.12,
+      "highlights": 0.45,
+      "foldContrast": 0.8,
+      "inkSoftness": 0.25,
+      "lightReference": 0.14,
+      "lightTint": [
+        0.99,
+        0.995,
+        1
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "colour": "black",
+      "file": "black.jpg",
+      "sha256": "61b7560b169a3de574a3efa215409f8a757af330ff0f5f129b864e399f37e64a"
+    },
+    {
+      "colour": "white",
+      "file": "white.jpg",
+      "sha256": "ba066f3fc44c89d240ac5e5f682b8f60fe44121f142af667894db77dff8e3bff"
+    }
+  ],
+  "preparation": {
+    "segmentation": "Cloudflare Images foreground, existing processJpeg print path",
+    "sourceDimensions": [
+      2316,
+      3088
+    ],
+    "masterDimensions": [
+      1086,
+      1448
+    ],
+    "sourceCrop": {
+      "black": {
+        "left": 169,
+        "top": 271,
+        "width": 1676,
+        "height": 2235
+      },
+      "white": {
+        "left": 251,
+        "top": 278,
+        "width": 1788,
+        "height": 2384
+      }
+    },
+    "rotationDegrees": {
+      "black": 0,
+      "white": 0
+    },
+    "rgbGains": {
+      "black": [
+        0.97,
+        1,
+        1.1
+      ],
+      "white": [
+        0.97,
+        1,
+        1.1
+      ]
+    },
+    "exposure": {
+      "black": 1,
+      "white": 1
+    }
+  }
+}

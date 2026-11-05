@@ -1,0 +1,9 @@
+---
+import Site from '../../../layouts/Site.astro';
+import { OwnerEditor } from '../../../components/OwnerEditor';
+import { tokyoDay } from '../../../lib/model';
+---
+
+<Site owner title="edit post / jp.bent.build">
+  <OwnerEditor id={Astro.params.id} day={tokyoDay(new Date())} client:load />
+</Site>

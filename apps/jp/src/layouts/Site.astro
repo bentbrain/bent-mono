@@ -1,0 +1,155 @@
+---
+import '../styles/globals.css';
+import Pixel from '../components/Pixel.astro';
+import { AdminMenu } from '../components/AdminMenu';
+import { env } from 'cloudflare:workers';
+import { showOwnerNavigation } from '../lib/owner-navigation';
+import { beerCounts } from '../lib/content';
+import { feedbackConfiguration } from '../lib/feedback';
+import { getRequestContext } from 'emdash';
+import { NewsletterSignup } from '../components/NewsletterSignup';
+interface Props {
+  title?: string;
+  owner?: boolean;
+  privateContent?: boolean;
+  newsletterAtTop?: boolean;
+}
+const {
+  title = 'jp.bent.build',
+  owner = false,
+  newsletterAtTop = false,
+} = Astro.props;
+const authenticatedOwner = showOwnerNavigation(
+  Astro.locals.user,
+  env.OWNER_EMAIL,
+  import.meta.env.DEV,
+);
+const cmsContext = getRequestContext();
+const privateContent =
+  owner ||
+  Boolean(
+    Astro.props.privateContent || cmsContext?.preview || cmsContext?.editMode,
+  );
+const counts = await beerCounts();
+const feedback = feedbackConfiguration(
+  import.meta.env.PUBLIC_FEEDBACK_SERVER,
+  import.meta.env.PUBLIC_FEEDBACK_PROJECT_ID,
+);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0647ff" />
+    <meta name="description" content="blog" />
+    <title>{title}</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/brand/favicon.svg?v=blue-flag"
+    />
+    {privateContent && <meta name="robots" content="noindex" />}
+  </head>
+  <body
+    data-public-video-playback={!privateContent ? true : undefined}
+    class="flex min-h-dvh flex-col"
+    data-feedback-redact={privateContent ? true : undefined}
+  >
+    <header
+      data-feedback-id="site-header"
+      class:list={[
+        'site-header sticky top-0 z-40 bg-background flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-[clamp(1rem,4vw,4rem)] py-3 text-[0.7rem] leading-[1.5] font-bold tracking-[0.05em] min-[601px]:py-0 [&_nav]:order-3 [&_nav]:flex [&_nav]:flex-wrap [&_nav]:items-center [&_nav]:w-full [&_nav]:justify-center [&_nav]:gap-5 [&_nav]:border-t [&_nav]:pt-2 min-[601px]:[&_nav]:order-none min-[601px]:[&_nav]:w-auto min-[601px]:[&_nav]:border-0 min-[601px]:[&_nav]:p-0 [&_nav_a]:no-underline [&_nav_a[aria-current]]:underline',
+        !authenticatedOwner &&
+          'min-[360px]:py-0 min-[360px]:[&_nav]:order-none min-[360px]:[&_nav]:w-auto min-[360px]:[&_nav]:border-0 min-[360px]:[&_nav]:p-0',
+      ]}
+    >
+      <a
+        class="brand inline-flex items-baseline max-w-full min-[601px]:min-w-fit gap-[0.5em] no-underline min-[601px]:flex-1"
+        data-feedback-id="brand"
+        href="/"
+      >
+        <img
+          src="/brand/favicon.svg#header"
+          alt=""
+          width="31"
+          height="21"
+          class="h-[1cap] w-auto shrink-0"
+        />
+        jp.bent.build
+      </a>
+      <nav aria-label="Main navigation" data-feedback-id="navigation">
+        <a
+          href="/"
+          aria-current={Astro.url.pathname === '/' ? 'page' : undefined}
+        >
+          blog
+        </a>
+        <a
+          href="/gallery"
+          aria-current={Astro.url.pathname === '/gallery' ? 'page' : undefined}
+        >
+          pics
+        </a>
+        {authenticatedOwner && (
+          <AdminMenu pathname={Astro.url.pathname} client:load />
+        )}
+      </nav>
+      <div
+        class="beer flex items-baseline gap-[0.5em] min-[601px]:flex-1 min-[601px]:justify-end"
+        data-feedback-id="beer-counter"
+      >
+        <Pixel compact />
+        <span class="relative">
+          {counts.total} beers<span class="absolute left-full top-0">*</span>
+        </span>
+      </div>
+    </header>
+    <main
+      data-feedback-private={privateContent ? true : undefined}
+      data-feedback-redact={privateContent ? true : undefined}
+      class="mx-auto w-full min-w-0 max-w-[1400px] flex-1 p-4 min-[601px]:p-6"
+    >
+      {!privateContent && newsletterAtTop && (
+        <div class="mb-4">
+          <NewsletterSignup client:load />
+        </div>
+      )}
+      <slot />
+      {privateContent && <slot name="after-newsletter" />}
+    </main>
+    {!privateContent && (
+      <footer>
+        <div class="mx-auto w-full max-w-[1400px] px-4 pb-4 min-[601px]:px-6 min-[601px]:pb-6">
+          {!newsletterAtTop && <NewsletterSignup client:load />}
+          <slot name="after-newsletter" />
+        </div>
+        <div class="border-t text-xs">
+          <div class="mx-auto max-w-[1400px] px-4 py-4 min-[601px]:px-6">
+            <a href="/newsletter/privacy">email privacy</a>
+            <p class="mt-3 text-xs leading-relaxed">
+              * as of 23/10/2026 i have stopped counting beers, so this figure
+              is no longer accurate. multiply this amount 4 and + 10 to be safe.
+            </p>
+          </div>
+        </div>
+      </footer>
+    )}
+    {feedback && (
+      <script
+        is:inline
+        defer
+        src={`${feedback.server}/embed.js`}
+        data-project={feedback.projectId}
+      ></script>
+    )}
+  </body>
+</html>
+
+<script>
+  import { startPublicVideoPlayback } from '../lib/public-video-playback';
+  if (document.body.hasAttribute('data-public-video-playback')) {
+    startPublicVideoPlayback(document.body);
+  }
+</script>

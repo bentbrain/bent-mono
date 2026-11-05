@@ -1,0 +1,77 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.7602430975, 35.6766048147222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Hibiya Sta.",
+        "ftCode": 2930,
+        "knj": "日比谷駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "ひびやえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.762261, 35.6759519552778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Yurakucho Sta.",
+        "ftCode": 2930,
+        "knj": "有楽町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "ゆうらくちょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.761281416667, 35.6759999444444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.761825381667, 35.6780224902778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759281388889, 35.6751666111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759527434444, 35.6792813327778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.76066025, 35.6765680833333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

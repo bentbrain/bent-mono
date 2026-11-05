@@ -1,0 +1,141 @@
+@import '@bent/design-tokens/tokens.css';
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource/geist-mono/400.css';
+@import '@fontsource/geist-mono/700.css';
+
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@theme inline {
+  --font-sans: 'Geist Mono', monospace;
+  --font-mono: 'Geist Mono', monospace;
+  --font-heading: 'Geist Mono', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--background);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--background);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--foreground);
+  --color-primary-foreground: var(--background);
+  --color-secondary: var(--muted);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--foreground);
+  --color-accent: var(--foreground);
+  --color-accent-foreground: var(--background);
+  --color-destructive: #b42318;
+  --color-border: var(--foreground);
+  --color-input: var(--foreground);
+  --color-ring: var(--foreground);
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+}
+
+@layer base {
+  :root {
+    --background: #fff;
+    --foreground: var(--bent-color-accent-light);
+    --muted: #f3f6ff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #000;
+      --foreground: var(--bent-color-accent-dark);
+      --muted: #0b1329;
+      color-scheme: dark;
+    }
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply m-0 bg-background font-mono text-[13px] leading-[1.7] text-foreground;
+  }
+  a {
+    @apply underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4;
+  }
+  button:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+@utility rich-text {
+  & :where(:not(pre) > code) {
+    @apply border bg-muted px-1 py-0.5 font-mono text-[0.9em] font-normal wrap-anywhere box-decoration-clone;
+  }
+  & :where(pre) {
+    @apply mb-4 max-w-full overflow-x-auto rounded-none border bg-muted p-4 font-mono text-xs leading-relaxed;
+    /* Override ProseMirror's injected, unlayered pre-wrap rule in the editor. */
+    @apply whitespace-pre!;
+  }
+  & :where(pre code) {
+    @apply border-0 bg-transparent p-0 font-mono font-normal text-inherit;
+  }
+}
+
+/* shadcn/ui state variants, MIT license. */
+/* Custom variants */
+@custom-variant data-open {
+  &:where([data-state='open']),
+  &:where([data-open]:not([data-open='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-closed {
+  &:where([data-state='closed']),
+  &:where([data-closed]:not([data-closed='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-checked {
+  &:where([data-state='checked']),
+  &:where([data-checked]:not([data-checked='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-unchecked {
+  &:where([data-state='unchecked']),
+  &:where([data-unchecked]:not([data-unchecked='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-selected {
+  &:where([data-selected='true']) {
+    @slot;
+  }
+}
+
+@custom-variant data-disabled {
+  &:where([data-disabled='true']),
+  &:where([data-disabled]:not([data-disabled='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-active {
+  &:where([data-state='active']),
+  &:where([data-active]:not([data-active='false'])) {
+    @slot;
+  }
+}
+
+@custom-variant data-horizontal {
+  &:where([data-orientation='horizontal']) {
+    @slot;
+  }
+}
+
+@custom-variant data-vertical {
+  &:where([data-orientation='vertical']) {
+    @slot;
+  }
+}

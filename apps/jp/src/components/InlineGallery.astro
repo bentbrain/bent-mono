@@ -1,0 +1,28 @@
+---
+import { z } from 'zod';
+import InlinePhoto from './InlinePhoto.astro';
+interface Props {
+  node: unknown;
+}
+const parsed = z
+  .object({ images: z.array(z.unknown()), columns: z.number().optional() })
+  .safeParse(Astro.props.node);
+const columns = parsed.success ? parsed.data.columns || 2 : 2;
+const grid =
+  columns <= 1
+    ? 'grid-cols-1'
+    : columns >= 3
+      ? 'min-[601px]:grid-cols-3'
+      : 'min-[601px]:grid-cols-2';
+---
+
+{parsed.success && (
+  <div class:list={['grid grid-cols-1 gap-3', grid]}>
+    {parsed.data.images.map((node) => (
+      <InlinePhoto
+        node={node}
+        columns={columns <= 1 ? 1 : columns >= 3 ? 3 : 2}
+      />
+    ))}
+  </div>
+)}

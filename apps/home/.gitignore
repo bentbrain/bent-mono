@@ -1,0 +1,16 @@
+node_modules/
+.env*
+!.env.example
+.wrangler/
+.vinext/
+.next/
+dist/
+dist-card/
+runs/
+backups/
+recovered/
+assets/references/
+assets/work/
+*.blend1
+__pycache__/
+*.pyc

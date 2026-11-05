@@ -1,0 +1,15 @@
+{
+  "tool": "Built-in image_gen.imagegen",
+  "date": "2026-09-22",
+  "sourceProductUrl": "https://shop.bent.build/featured/72b869aa-b9f2-4aa7-9bb2-0bd04a62fa9d",
+  "white": {
+    "input": "Full-resolution source artwork, SHA-256 9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52",
+    "output": "featured-blank-white.png",
+    "prompt": "Use case: precise-object-edit, identity-preserve. Edit this exact source photograph of the man. Remove ALL of the printed recursive portrait graphic from the front of his t-shirt, making the entire t-shirt completely plain WHITE cotton. Reconstruct realistic uninterrupted white fabric with the existing folds, wrinkles, lighting and shading through the removed print region. The man, face, glasses, moustache, cap, tattoos, hands, bracelet, trousers, pose, camera perspective, body proportions, shirt silhouette and shirt fit MUST remain the same as this source. Do not beautify or redesign the person. Keep the existing framing and relative position; preserve the empty headroom. The source is a cutout PNG: preserve a genuinely transparent alpha background, clean stray background-removal edge artifacts only. No new scenery, no white or black background rectangle, no checkerboard baked into the image. No print, logo, graphic, watermark or text on the shirt. Output a portrait PNG with transparency, same 3:4 aspect ratio. This is the white blank master for deterministic print displacement; keep chest fold structure natural and detailed."
+  },
+  "black": {
+    "input": "featured-blank-white.png",
+    "output": "featured-blank-black.png",
+    "prompt": "Use case: precise-object-edit, identity-preserve. This is the approved white blank master of a real man in a t-shirt. Change ONLY the white fabric of his t-shirt to plain BLACK cotton. Preserve exactly the face, glasses, cap, moustache, skin, tattoos, bracelet, hands, trousers, pose, clothing silhouette, framing, proportions, empty headroom and every wrinkle/fold location. The shirt must be solid blank black with natural dark shadows and visible subtle fabric highlights and knit texture. Absolutely no logos, print, graphics or text on the shirt. Keep a genuinely transparent alpha background; do not add scenery or a solid background or baked checkerboard. Same dimensions and 3:4 portrait framing as the input, no recrop, no repositioning. Need the black and white versions aligned for a displacement-map mockup system. Output transparent PNG."
+  }
+}

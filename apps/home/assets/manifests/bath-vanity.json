@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "bath-vanity",
+  "displayName": "Floating timber vanity",
+  "footprint": {
+    "width": 4,
+    "depth": 3
+  },
+  "heightPixels": 69,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/bath-vanity/bath-vanity-idle-north.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "east": {
+      "source": "assets/approved/bath-vanity/bath-vanity-idle-east.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "south": {
+      "source": "assets/approved/bath-vanity/bath-vanity-idle-south.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "west": {
+      "source": "assets/approved/bath-vanity/bath-vanity-idle-west.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    }
+  }
+}

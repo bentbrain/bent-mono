@@ -1,0 +1,15 @@
+{
+  "name": "forever-tee-lambda-benchmark-image",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1120.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@napi-rs/canvas": "0.1.80",
+    "aws-lambda-ric": "4.0.2",
+    "sharp": "0.35.5"
+  }
+}

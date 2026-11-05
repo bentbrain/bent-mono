@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    396,
+    398
+  ],
+  "sourceCommit": "316029da2a6e26b94e24b5d5524b2d8601656bcd",
+  "observedAt": "2026-09-19T08:23:11Z",
+  "environment": "production",
+  "products": [
+    {
+      "slot": 1,
+      "productId": "d09442a5-74b9-43a7-9ec3-e14231dd7b07",
+      "expected": {
+        "id": "d09442a5-74b9-43a7-9ec3-e14231dd7b07",
+        "design_id": "caf71959-3105-4615-adca-e25fbb1c5f9d",
+        "design_revision_id": "162c3ded-5984-4389-9e00-f0670b68616e",
+        "base_product_id": "a51b7acf-77e9-4762-83c4-62d96dd8942c",
+        "status": "active",
+        "default_color": "White",
+        "placement_x": 0.267994,
+        "placement_y": 0.419676,
+        "placement_width": 0.455717,
+        "placement_depth": 5,
+        "projection_version": "safe-margin-v1",
+        "artwork_key": "designs/caf71959-3105-4615-adca-e25fbb1c5f9d/artwork/9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52",
+        "content_type": "image/png",
+        "byte_size": 4699616,
+        "artwork_width": 3024,
+        "artwork_height": 4032,
+        "sha256": "9910a59b7fbdf57d76e993654178db935dc7fefb6b778a4a9f914daff1acfc52",
+        "crop_x": 0.5074797371578658,
+        "crop_y": 0.49859172407896213,
+        "crop_zoom": 1.6594002207087934
+      }
+    },
+    {
+      "slot": 2,
+      "productId": "ca2029bf-d870-4d81-97f8-8edbdc6352c7",
+      "expected": {
+        "id": "ca2029bf-d870-4d81-97f8-8edbdc6352c7",
+        "design_id": "eaee7754-b8f1-4b82-8447-3d5d37c8f956",
+        "design_revision_id": "9bdaa70e-930f-432e-bc83-205bbe6e4066",
+        "base_product_id": "a51b7acf-77e9-4762-83c4-62d96dd8942c",
+        "status": "active",
+        "default_color": "Black",
+        "placement_x": 0.296022,
+        "placement_y": 0.223279,
+        "placement_width": 0.398311,
+        "placement_depth": 5,
+        "projection_version": "safe-margin-v1",
+        "artwork_key": "designs/eaee7754-b8f1-4b82-8447-3d5d37c8f956/artwork/0af3ecfac2a1b0fdaddf9b46b2db493aa8bf51e14f0fc401d84b109820e853af",
+        "content_type": "image/png",
+        "byte_size": 7689528,
+        "artwork_width": 3024,
+        "artwork_height": 4032,
+        "sha256": "0af3ecfac2a1b0fdaddf9b46b2db493aa8bf51e14f0fc401d84b109820e853af",
+        "crop_x": 0.5442819015234904,
+        "crop_y": 0.7203954805552102,
+        "crop_zoom": 0.7481105964157624
+      }
+    },
+    {
+      "slot": 3,
+      "productId": "3d8ed467-55d4-45ed-ba9d-1eeb687fa5bc",
+      "expected": {
+        "id": "3d8ed467-55d4-45ed-ba9d-1eeb687fa5bc",
+        "design_id": "a59f1048-41cd-438d-9de5-865393219ea0",
+        "design_revision_id": "7902c16b-92a7-4788-850a-563603ea5dcd",
+        "base_product_id": "a51b7acf-77e9-4762-83c4-62d96dd8942c",
+        "status": "active",
+        "default_color": "White",
+        "placement_x": 0.485934,
+        "placement_y": 0.457948,
+        "placement_width": 0.278442,
+        "placement_depth": 5,
+        "projection_version": "safe-margin-v1",
+        "artwork_key": "designs/a59f1048-41cd-438d-9de5-865393219ea0/artwork/b656f4fd01b32021356c546e42afe8b24d2306ca2a198cebaca30ddb0bbed6c7",
+        "content_type": "image/png",
+        "byte_size": 8752173,
+        "artwork_width": 4032,
+        "artwork_height": 4032,
+        "sha256": "b656f4fd01b32021356c546e42afe8b24d2306ca2a198cebaca30ddb0bbed6c7",
+        "crop_x": 0.4239583333333333,
+        "crop_y": 0.5,
+        "crop_zoom": 1.3292307692307692
+      }
+    },
+    {
+      "slot": 4,
+      "productId": "415079cb-db44-48c7-a2eb-707befc01bdb",
+      "expected": {
+        "id": "415079cb-db44-48c7-a2eb-707befc01bdb",
+        "design_id": "263c3372-5855-4310-9363-4dd29c7f7ad2",
+        "design_revision_id": "86633d34-8d9e-4c36-8706-20d2d6dfdf89",
+        "base_product_id": "a51b7acf-77e9-4762-83c4-62d96dd8942c",
+        "status": "active",
+        "default_color": "White",
+        "placement_x": 0.317165,
+        "placement_y": 0.508579,
+        "placement_width": 0.323876,
+        "placement_depth": 5,
+        "projection_version": "safe-margin-v1",
+        "artwork_key": "designs/263c3372-5855-4310-9363-4dd29c7f7ad2/artwork/6c9a7780af33eaa368e4b45f3e88481f7d4052802372792e85bc3289afa11ef7",
+        "content_type": "image/png",
+        "byte_size": 7184003,
+        "artwork_width": 4032,
+        "artwork_height": 4032,
+        "sha256": "6c9a7780af33eaa368e4b45f3e88481f7d4052802372792e85bc3289afa11ef7",
+        "crop_x": 0.490625,
+        "crop_y": 0.5479166666666667,
+        "crop_zoom": 1.2
+      }
+    }
+  ],
+  "unresolved": [
+    "fifth-product",
+    "owner-chair-photo",
+    "white-shirt-print-and-video-separation"
+  ],
+  "videoAttachment": {
+    "url": "https://github.com/user-attachments/assets/b1ddad07-0c3e-4d32-8c8f-fe71c4534b4a",
+    "sha256": "e30d81fa311aacceac9c2e486dc6fa591cd9840735bfcd57e5ca1dcb663d9a4e",
+    "byteSize": 2243782,
+    "contentType": "image/jpeg",
+    "width": 2448,
+    "height": 3264
+  }
+}

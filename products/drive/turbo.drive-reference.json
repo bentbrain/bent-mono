@@ -1,0 +1,53 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "ALLOW_LOCAL_OAUTH_REDIRECTS",
+        "APP_URL",
+        "BENT_DRIVE_ADMIN_GITHUB_USERS",
+        "BENT_DRIVE_ALLOWED_GITHUB_USERS",
+        "CLERK_SECRET_KEY",
+        "DATABASE_URL",
+        "MCP_ACCESS_TOKEN_TTL_SECONDS",
+        "MCP_REFRESH_TOKEN_TTL_DAYS",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "TESLA_AUTHORIZATION_ENDPOINT",
+        "TESLA_CLIENT_ID",
+        "TESLA_CLIENT_SECRET",
+        "TESLA_FLEET_API_BASE_URL",
+        "TESLA_REDIRECT_URI",
+        "TESLA_SCOPES",
+        "TESLA_TOKEN_ENDPOINT",
+        "TOKEN_ENCRYPTION_KEY"
+      ]
+    },
+    "check": {
+      "dependsOn": ["^check"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "outputs": [".cache/.eslintcache"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:migrate": {
+      "cache": false
+    }
+  },
+  "globalPassThroughEnv": [
+    "CI",
+    "NODE_ENV",
+    "VERCEL",
+    "VERCEL_ENV",
+    "VERCEL_URL"
+  ]
+}

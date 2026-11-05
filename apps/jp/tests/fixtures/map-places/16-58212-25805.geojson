@@ -1,0 +1,45 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.7729526725, 35.6849699308333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Mitsukoshimae Sta.",
+        "ftCode": 2930,
+        "knj": "三越前駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "みつこしまええき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.772359161389, 35.6877321777778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.771524859444, 35.6872149594444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.773137888889, 35.6863556111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    }
+  ],
+  "type": "FeatureCollection"
+}
