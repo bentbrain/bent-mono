@@ -62,10 +62,16 @@ test("camera handoff opens one stream and releases it on navigation", async ({ p
         await page.getByRole("checkbox").check();
         const start = performance.now();
         await page.getByRole("button", { name: "Open camera", exact: true }).click();
-        await page.waitForFunction(() => {
-            const capture = document.querySelector('button[aria-label="Take photo in 3 seconds"]');
-            return capture instanceof HTMLButtonElement && !capture.disabled;
-        }, undefined, { timeout: 15000, polling: "raf" });
+        await page.waitForFunction(({ expectedOpens, path }) => {
+            const capture = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label="Take photo in 3 seconds"]')).find(button => button.checkVisibility());
+            const camera = window.cameraPerformance;
+            // Next can retain an inactive camera route in the DOM. Measure the
+            // current route and its newly returned stream, not a cached button.
+            return window.location.pathname === path && new URLSearchParams(window.location.search).get("camera") === "1" &&
+                capture instanceof HTMLButtonElement && capture.checkVisibility() && !capture.disabled &&
+                camera.opens === expectedOpens && camera.streams.length === expectedOpens &&
+                camera.streams.at(-1)?.getTracks().some(track => track.readyState === "live");
+        }, { expectedOpens: sample + 1, path: `/design/${id}` }, { timeout: 15000, polling: "raf" });
         const readyMs = Math.round(performance.now() - start);
         const opens = await page.evaluate(() => window.cameraPerformance.opens);
         measurements.push({ readyMs, opens });

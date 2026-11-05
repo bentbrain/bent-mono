@@ -185,3 +185,166 @@ Protect Preview, verify issued OIDC claims and review activation before removing
 the trust Deny. Keep the Wrangler-only native release stop. Infrastructure and
 identity setup do not qualify paired Worker/image release, rollback, cloud fault
 testing or production promotion.
+
+## Staged repository trust migration
+
+The activation, creation, state migration and policy operations above are
+historical one-shot operations. Preserve their constants, receipts and journals.
+They do not authorize retargeting existing roles. The current bootstrap state is
+remote. Never reconstruct its lineage or serial from those historical examples.
+
+The separate guarded route is:
+
+```sh
+node scripts/aws-personal.mjs terraform bootstrap repository-trust development discover
+node scripts/aws-personal.mjs terraform bootstrap repository-trust development plan
+node scripts/aws-personal.mjs terraform bootstrap repository-trust development show --review=development-ABC123 --plan-sha256=<saved-hash>
+node scripts/aws-personal.mjs terraform bootstrap repository-trust development apply --review=development-ABC123 --plan-sha256=<saved-hash>
+```
+
+These examples describe a future reviewed operation. Source preparation does not
+execute or approve it. `ABC123` is synthetic. Every AWS request still passes
+through the existing exact personal SSO/account/region guard. Authentication or
+missing private tools/configuration stops the operation. Do not create substitute
+credential files or use a different Terraform/AWS runner.
+
+Development changes only `aws_iam_role.ci`'s exact subject scalar. Its private
+render retains the reviewed original Production subject, leaving the old
+Production release and paired rollback route available while Development is
+qualified. Production uses a later explicit `repository-trust production` plan,
+show and apply. It changes only `aws_iam_role.production_ci`; Development must
+already use its verified target subject. Neither stage permits dual subjects,
+permission changes, new roles, replacement, state movement or output changes.
+Production candidate-read resources remain pinned. A fresh candidate may need a
+separate narrow permission review after its actual resources are known.
+
+### Protected prerequisites and discovery
+
+The parent provisions existing private tools/configuration from approved sources.
+New operation evidence lives under `.data/terraform-video-bootstrap/repository-trust/`
+with private directories and exclusive mode-0600 synced evidence files. Required
+protected configuration keys have no deployed defaults:
+
+- `trustOriginalRepository` and `trustOriginalReceiptSha256` identify the original
+  personal repository and exact `original-repository-receipt.json` bytes. That
+  independently reviewed receipt contains `repositoryId`, `subjectPrefix`, the
+  original bootstrap `lineage`, `accountId`, `region` and `backendKey`. Obtain it
+  from the original approved receipt, never from a guessed slug or new state.
+- `trust_development_reviewedCommit` and `trust_production_reviewedCommit` pin the
+  clean reviewed checkout to current canonical main. Each stage independently
+  requires authoritative main Quality and exact-head Independent review through
+  the existing admission verifier.
+- `trust_<stage>_baselineSha256` pins the separately reviewed
+  `<stage>-baseline.json`. `discover` requires the original receipt and reviewed
+  commit, but does not require or manufacture this baseline approval.
+- `trust_<stage>_approvedReviewSha256`, `trust_<stage>_approvedPlanSha256` and
+  `trust_<stage>_approvedSourceSha256` are supplied only after independent review
+  of that exact saved binary, complete JSON, source/guard/test/workflow manifest,
+  rendered module, canonical trust delta and fresh state/permission evidence.
+  Local hashes detect changes; they do not create an approval or GitHub status.
+
+`discover` is the guarded read-only route for the missing live baseline. It
+checks the existing versioned KMS state object and expected owner, privately
+renders the fixed nine files, initializes only the existing S3 backend, and saves
+fresh complete remote state and IAM/provider/inline/boundary/attachment evidence.
+It performs no plan or apply. It also remains available after a started journal
+for inspection, retaining that journal's hash. Review its private `discovery.json`
+and original receipt before preparing a baseline. No tracked fixture contains
+operational values.
+
+The baseline explicitly contains `original`, `sourceCommit`, fresh `observedAt`,
+complete `state` and `permissions` from discovery, `proofRuns.development`,
+`proofRuns.production`, `parentObservations`, and `window`. The window contains
+`observedAt`, `expiresAt`, `exclusive: true`, `admissionsFrozen: true` and the exact
+original/target `repositoryIds` in that order. Independently establish a freeze
+of release admissions in both repositories for that window. The guard rechecks
+all queued, in-progress, waiting, pending and requested runs in both repositories;
+concurrency group names alone do not establish exclusion. Unavailable evidence
+or uncertain admission control blocks planning/apply.
+
+`parentObservations` is normally empty. Any accepted provider-computed parent
+inline-policy observation must enumerate one fixed CI/runtime role `address`,
+exact stale `before` list and exact refreshed `after` list. The latter must match
+that role's existing separately managed child policy name and canonical document.
+The complete refreshed plan must report exactly those observations, with no
+other changed field. Unknown drift, unresolved values, attachments or policies
+stop. Do not normalize permissions or state to make a plan pass.
+
+### Fresh proofs and the Production prerequisite
+
+First dispatch canonical `native-ci-identity.yml` on the exact reviewed main with
+its explicit `proof_only: true` input. Its separate protected Preview `proof` job
+verifies signed claims without assuming AWS. The default remains `false`; normal
+runs require proof success and retain every prior account, storage, KMS enforcement
+and lock-contention check in the dependent `identity` job. A proof-only success
+is never storage, release or readiness success. A failed whole run cannot supply
+the migration proof. Dispatch fresh canonical Production identity verification
+on the same exact main too. It verifies signed claims without AWS assumption.
+
+The migration checks canonical workflow/repository/owner IDs, main protections,
+immutable OIDC API prefix, successful whole runs and exact proof job/step,
+first attempt, issuer, audience, environment, exact subject and source. It reads
+only the bounded verified claim receipt from the canonical job; raw JWTs are
+never logged or retained. Proofs, baseline and operation-window observations
+expire after 30 minutes and are rechecked immediately before applying.
+
+After Development trust succeeds, run normal identity/storage verification and
+the established fresh full Development candidate, qualification and paired
+rollback lanes. Identity success alone cannot admit Production. Production
+additionally requires the prior `development-started.json` and its confirmed
+`complete.json`, pinned by `trust_production_developmentCompleteSha256`.
+It requires `development-qualification-receipt.json` from the existing
+`verify-qualification` operation and `development-rollback-receipt.json` from
+the successful paired rollback. Their byte hashes must match both
+`trust_production_qualificationReceiptSha256` / `trust_production_rollbackReceiptSha256`
+and the baseline's `developmentReadiness.qualificationReceiptSha256` /
+`rollbackReceiptSha256`. Independent review must verify their immutable original
+objects, exact fresh pair, cleanup and rollback evidence through the existing
+release verifiers. Do not synthesize these receipts from a successful run label.
+
+`developmentReadiness` also supplies `sourceCommit`, `verifiedAt`,
+`qualificationRunId`, `rollbackRunId`, `qualified: true` and
+`rollbackVerified: true`. The guard requires full verified qualification with
+cleanup, exact source/pair and immutable references, a separate successful
+rollback of that pair, and fresh successful first-attempt canonical Development
+run metadata for both IDs. Missing established evidence blocks Production.
+A later main change requires new exact-source proofs, baseline and review.
+
+### Plan, apply and uncertain responses
+
+Each plan privately renders exactly the lockfile, four HCL files, runtime
+`tf.json` and three policy JSON files. It records both template and resolved byte
+hashes. Only the private copy changes the historical relative provider-config
+path to the guard's exact absolute path, pins Terraform 1.12.2, checks locked AWS
+provider 6.62.0, adds expected backend owner and stages the unselected Production
+subject. The tracked module and historical records remain intact.
+
+Initialization uses existing S3 bucket/key/KMS/account/region, encryption, native
+lockfile and default workspace. The guard requires the approved original lineage,
+fresh exact serial and complete resource IDs/inventory. It retains full refreshed
+saved binary plans with native locking, bounded wait and parallelism one. It
+rejects targeting, import, move, replacement, deletion, refresh-off, state push,
+force-unlock, changed permissions/provider/identity, unknown drift and outputs.
+Apply rechecks source, rendered files, proofs, protections, personal identity,
+live trusts/permissions, backend and full state content against the reviewed plan.
+
+Before the one-time saved-plan apply it syncs an exclusive per-stage started
+journal and private binary copy. Any response loss or failed postcheck leaves
+that journal in place and stops. Never delete it, blindly reapply, replay an
+historical operation, push an old state, or reverse a subject ad hoc. Use guarded
+`discover` plus fixed IAM reads to establish current evidence. Any completion or
+reverse change requires a separate reviewed, source/state/evidence-bound recovery
+route; this implementation deliberately exposes no recovery mutation command.
+
+Confirmed apply requires preserved lineage/inventory/IDs/permissions, advanced
+serial, exact selected trust, unchanged other role, and a full refreshed no-op
+plan. Completion explicitly records that fresh identity/storage qualification
+is still required and that release readiness has not been granted. Keep all
+private evidence and every original journal. Production deployment remains the
+existing guarded paired admission/release/rollback route.
+
+Changes to this route invalidate the source-pinned CodeQL evidence. Retain both
+complete query suites and the original SARIF, and obtain fresh analysis and
+independent final-head/current-base review before merging or live use. Run full
+Shop `check:ci` and `test:e2e:local` before the final PR push. Neither this migration
+nor its fixtures waive those gates or alter any query.

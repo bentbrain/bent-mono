@@ -134,6 +134,10 @@ export async function sourceDigest() {
     return sha256(JSON.stringify(files));
 }
 export async function runPersonalBootstrap(args, dependencies) {
+    if (args[0] === "repository-trust") {
+        const { runRepositoryTrust } = await import("./aws-personal-repository-trust.mjs");
+        return runRepositoryTrust(args.slice(1), dependencies);
+    }
     if (args[0] === "production-candidate-access") {
         const { runProductionCandidateAccess } = await import("./aws-personal-production-candidate-access.mjs");
         return runProductionCandidateAccess(args.slice(1), dependencies);
