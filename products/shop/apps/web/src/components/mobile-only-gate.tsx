@@ -41,15 +41,15 @@ export function MobileOnlyGate({
       : getServerDesktopViewport,
   );
 
-  if (viewport === "mobile") return children;
   if (viewport === "desktop") {
     return draftHandoff ? <DesktopDraftGuidance /> : <DesktopQrHandoff />;
   }
 
   return (
     <>
-      <div className="flex flex-1 lg:hidden">{children}</div>
-      {draftHandoff ? <DesktopDraftGuidance /> : <DesktopQrHandoff />}
+      {/* Preserve the form and in-flight mobile work when hydration resolves. */}
+      <div className={viewport === "mobile" ? "contents" : "flex flex-1 lg:hidden"}>{children}</div>
+      {viewport === "server" && (draftHandoff ? <DesktopDraftGuidance /> : <DesktopQrHandoff />)}
     </>
   );
 }
