@@ -143,6 +143,10 @@ jobs:
     name: CodeQL
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The raw-flow gate requires both complete suites on PRs and main.
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
+      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
     permissions:
       contents: read
       security-events: write

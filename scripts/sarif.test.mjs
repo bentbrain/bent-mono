@@ -69,6 +69,23 @@ test("empty ledger passes actual zero findings and rejects nonzero analysis", as
   assert.equal(counts.raw, 1); assert.equal(counts.reviewed, 0); assert.equal(counts.unresolved, 1);
 });
 
+test("partial PR analysis is rejected even with zero findings and an empty ledger", async context => {
+  const { source } = await fixture(context);
+  for (const results of [[], [finding()]]) {
+    for (const mode of ["diff-informed", "overlay", "overlay-base", "unknown"]) {
+      const partial = report(results);
+      partial.runs[0].properties.incrementalMode = mode;
+      assert.throws(() => classifyReports([partial], empty(), source), /requires full analysis/);
+    }
+    const partial = report(results);
+    partial.runs[0].tool.extensions.push({ name: "codeql-action/pr-diff-range", semanticVersion: "0.0.0" });
+    assert.throws(() => classifyReports([partial], empty(), source), /requires full analysis/);
+  }
+  const workflow = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
+  assert.match(workflow, /CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'/);
+  assert.match(workflow, /CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'/);
+});
+
 test("exact source-matched disposition preserves every raw SARIF byte", async context => {
   const { root, source } = await fixture(context);
   const reports = [report([finding()])];

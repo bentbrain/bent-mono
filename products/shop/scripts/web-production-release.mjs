@@ -1,6 +1,5 @@
 import { REPOSITORY_ROOT, storefrontSourceManifest } from "./monorepo-source.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
-import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { promisify, parseEnv } from "node:util";

@@ -38,13 +38,15 @@ test("realistic report HTML, large trace ZIP, raw trace and screenshot round-tri
     const corrupt = await readFile(encrypted); corrupt[Math.floor(corrupt.length / 2)] ^= 1;
     const corrupted = join(directory, "corrupted.enc");
     await writeFile(corrupted, corrupt); await copyFile(`${encrypted}.json`, `${corrupted}.json`);
-    const failedOutput = join(directory, "failed.tar");
-    await assert.rejects(openReleaseArchive(corrupted, failedOutput, identity, env), /authentication failed/);
-    await assert.rejects(access(failedOutput), { code: "ENOENT" });
-    await assert.rejects(openReleaseArchive(encrypted, failedOutput, { ...identity, runId: "124" }, env));
-    await assert.rejects(access(failedOutput), { code: "ENOENT" });
-    await writeFile(failedOutput, "preserve existing private file");
-    await assert.rejects(openReleaseArchive(encrypted, failedOutput, identity, env));
-    assert.equal(await readFile(failedOutput, "utf8"), "preserve existing private file");
+    const corruptOutput = join(directory, "corrupt-output.tar");
+    await assert.rejects(openReleaseArchive(corrupted, corruptOutput, identity, env), /authentication failed/);
+    await assert.rejects(access(corruptOutput), { code: "ENOENT" });
+    const wrongRunOutput = join(directory, "wrong-run-output.tar");
+    await assert.rejects(openReleaseArchive(encrypted, wrongRunOutput, { ...identity, runId: "124" }, env));
+    await assert.rejects(access(wrongRunOutput), { code: "ENOENT" });
+    const existingOutput = join(directory, "existing-output.tar");
+    await writeFile(existingOutput, "preserve existing private file", { flag: "wx", mode: 0o600 });
+    await assert.rejects(openReleaseArchive(encrypted, existingOutput, identity, env));
+    assert.equal(await readFile(existingOutput, "utf8"), "preserve existing private file");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -3,7 +3,6 @@ import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
 import { promisify, parseEnv } from "node:util";
 import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { productionAWS, assertProductionContext } from "./native-production-ci.mjs";
 import { productionCloudflare } from "./native-production-cloudflare.mjs";
 import { productionReleaseStore } from "./native-production-release-store.mjs";

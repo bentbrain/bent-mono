@@ -103,6 +103,10 @@ function normalizeLocations(value, run, paths) {
 }
 
 function analysisIdentity(run) {
+  if ((run.properties?.incrementalMode !== undefined && run.properties.incrementalMode !== "") ||
+      run.tool?.extensions?.some(extension => extension.name === "codeql-action/pr-diff-range")) {
+    fail("CodeQL requires full analysis; incremental or diff-informed reports are unsupported.");
+  }
   if (!object(run.tool?.driver) || run.tool.driver.name !== "CodeQL" || !text(run.tool.driver.semanticVersion)) {
     fail("CodeQL driver/version metadata is missing.");
   }
