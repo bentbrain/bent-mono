@@ -1,0 +1,11 @@
+:root {
+  --bent-font-mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, monospace;
+  --bent-color-accent-light: #0647ff;
+  --bent-color-accent-dark: #2870ff;
+  --bent-color-background-light: #fff;
+  --bent-color-background-dark: #000;
+  --bent-color-foreground-light: #111;
+  --bent-color-foreground-dark: #fff;
+  --bent-border-width: 1px;
+  --bent-radius: 0px;
+}

@@ -1,0 +1,52 @@
+{
+  "imports": [
+    {
+      "repository": "https://github.com/bentbrain/bent-build",
+      "revision": "2d518be78c0fbb8318df7a9ec6731a1c6fe5ba78",
+      "destination": "apps/www",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/japan-blog",
+      "revision": "9d98165008a9f9c06c0fae8a5f2f1f10b88189ea",
+      "destination": "apps/jp",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/apartment-guide",
+      "revision": "adf1c64d542cb388f9e2958a23cbcd71c8b08b74",
+      "destination": "apps/stay",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/feedback-toolbar",
+      "revision": "947ce1b1550988dce2238889ac343f3ef6f52c8a",
+      "destination": "apps/toolbar",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/forever-tee",
+      "revision": "e52854299971d2f6a7984ebe934e258343c88aed",
+      "destination": "products/shop",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/maya-collage",
+      "revision": "958916ea3b3f1cf5e2cd7d13d4a6a357ff8b4f11",
+      "destination": "apps/collage",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": "https://github.com/bentbrain/tesla-bridge",
+      "revision": "220b58f6c1848ab6e8abc0623e1250568e94c119",
+      "destination": "products/drive",
+      "method": "audited source snapshot; original history remains upstream"
+    },
+    {
+      "repository": null,
+      "revision": "7bfda529a44288696f85dc0888f34abc83628be0",
+      "destination": "apps/home",
+      "method": "audited local working-tree snapshot including required untracked assets; local revision alone does not identify snapshot"
+    }
+  ]
+}

@@ -1,0 +1,324 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.669719055556, 35.6063122777778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 140,
+        "name": "Tokyo",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "東京",
+        "dspPos": "LC",
+        "kana": "とうきょう"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.782893777778, 35.7221366111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Asakusa",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "浅草",
+        "dspPos": "LC",
+        "kana": "あさくさ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.769181305556, 35.6635007222222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Ginza",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "銀座",
+        "dspPos": "LC",
+        "kana": "ぎんざ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.718547833333, 35.7326553888889],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Ikebukuro",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "池袋",
+        "dspPos": "CC",
+        "kana": "いけぶくろ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.687451833333, 35.6582665833333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Shibuya",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "渋谷",
+        "dspPos": "LC",
+        "kana": "しぶや"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.805254, 35.5232346111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 322,
+        "name": "Tama R.",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "多摩川",
+        "dspPos": "LC",
+        "kana": "たまがわ",
+        "roma": "Tama Gawa"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.675626638889, 35.4759665],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 322,
+        "name": "Tsurumi R.",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "鶴見川",
+        "dspPos": "LC",
+        "kana": "つるみがわ",
+        "roma": "Tsurumi Gawa"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.691779334167, 35.6895379841667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "name": "Tokyo",
+        "dspPos": "LB",
+        "ftCode": 1401,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "東京",
+        "kana": "とうきょう"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7024035075, 35.529928205],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "name": "Kawasaki",
+        "dspPos": "LC",
+        "ftCode": 1402,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "川崎",
+        "kana": "かわさき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.578709055556, 35.6348035833333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "name": "Komae",
+        "dspPos": "LC",
+        "ftCode": 1402,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "狛江",
+        "kana": "こまえ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.901981987778, 35.6531099461111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "name": "Urayasu",
+        "dspPos": "RC",
+        "ftCode": 1402,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "浦安",
+        "kana": "うらやす"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.700655611111, 35.5802969166667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 1,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.876229111111, 35.71521925],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 14,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.717530333333, 35.54957125],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 15,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.591163472222, 35.6683961944444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 20,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.583944472222, 35.5765037777778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 246,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.837688547778, 35.4890921633333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2904,
+        "arrng": 1,
+        "eRNo": "CA",
+        "arrngAgl": 0
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.605512636944, 35.6256393572222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2904,
+        "arrng": 1,
+        "eRNo": "E1",
+        "arrngAgl": 0
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.911824407222, 35.7067853525],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2904,
+        "arrng": 1,
+        "eRNo": "E14",
+        "arrngAgl": 0
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.597752428889, 35.5295702352778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2904,
+        "arrng": 1,
+        "eRNo": "E83",
+        "arrngAgl": 0
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770076916667, 35.5515704166667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 6376 }
+    }
+  ]
+}

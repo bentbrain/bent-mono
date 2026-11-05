@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "vacuum",
+  "displayName": "Vacuum",
+  "footprint": {
+    "width": 2,
+    "depth": 2
+  },
+  "palette": "apartment-hotel-v1",
+  "heightPixels": 10,
+  "views": {
+    "north": {
+      "source": "assets/approved/vacuum/vacuum-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/vacuum/vacuum-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/vacuum/vacuum-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/vacuum/vacuum-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

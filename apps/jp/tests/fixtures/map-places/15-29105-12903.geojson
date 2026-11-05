@@ -1,0 +1,231 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.762633015556, 35.6812544697222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "knj": "丸の内（二）",
+        "name": "Marunouchi 2",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "まるのうち２ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7602430975, 35.6766048147222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Hibiya Sta.",
+        "ftCode": 2930,
+        "knj": "日比谷駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "ひびやえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.761739449722, 35.6803441677778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Nijubashimae Sta.",
+        "ftCode": 2930,
+        "knj": "二重橋前駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "にじゅうばしまええき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.764956771667, 35.6819692086111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.765078556111, 35.6777130483333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.767190926389, 35.6811264825],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.762261, 35.6759519552778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Yurakucho Sta.",
+        "ftCode": 2930,
+        "knj": "有楽町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "ゆうらくちょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.761281416667, 35.6759999444444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.761825381667, 35.6780224902778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7649325575, 35.6799268905556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.765614805556, 35.6837777222222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759281388889, 35.6751666111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759527434444, 35.6792813327778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.759749688333, 35.6832407925],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.762406011389, 35.6835651988889],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.765570288333, 35.6806396205556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.76066025, 35.6765680833333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.763116637778, 35.6784476069444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.766449003333, 35.6824142141667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7571011, 35.68169169],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "",
+        "name": "Kokyogaien National Garden",
+        "ftCode": 100,
+        "annoCtg": 531,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": ""
+      }
+    }
+  ],
+  "type": "FeatureCollection"
+}

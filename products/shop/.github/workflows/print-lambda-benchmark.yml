@@ -1,0 +1,73 @@
+name: Benchmark isolated print Lambda
+run-name: Print Lambda benchmark · ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Exact reviewed main commit
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-development
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: Preview
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify exact source and isolated contracts
+        run: |
+          test "$GITHUB_SHA" = "$RELEASE_EXPECTED_SOURCE"
+          node --test scripts/print-benchmark.test.mjs
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271
+      - run: bun install --frozen-lockfile
+      - name: Prepare exact geometry and Linux native dependencies
+        run: |
+          node workers/print-benchmark/prepare-plans.mjs
+          npm ci --prefix workers/print-benchmark/runtime --omit=dev
+          node --test workers/print-benchmark/runtime/*.test.mjs
+      - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-print-benchmark-development-ci
+          aws-region: ap-southeast-2
+          allowed-account-ids: '{{SHOP:awsAccountId}}'
+          role-session-name: print-${{ github.run_id }}
+          role-duration-seconds: 1800
+          unset-current-credentials: true
+          retry-max-attempts: 3
+      - name: Measure private Lambda and remove the temporary function
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node workers/print-benchmark/run.mjs
+      - name: Preserve numeric results and exact cleanup inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: print-benchmark-${{ github.run_id }}
+          path: |
+            .data/print-benchmark/report.json
+            .data/print-benchmark/cleanup-inventory.json
+            .data/print-benchmark/create-intent.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14

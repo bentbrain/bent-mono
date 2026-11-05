@@ -1,0 +1,10 @@
+---
+// Native emDash links and slug redirects use the collection name. Keep them
+// connected to the public viewer without changing the live schema.
+Astro.cache.set(false);
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+return Astro.redirect(
+  `/media/${encodeURIComponent(Astro.params.slug || '')}${Astro.url.search}`,
+  301,
+);
+---

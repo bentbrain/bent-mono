@@ -1,0 +1,206 @@
+@import "tailwindcss";
+@import "@bent/design-tokens/tokens.css";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--blue);
+  --font-sans: var(--font-geist-mono);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-mono);
+  --color-ring: var(--blue);
+  --color-input: var(--blue);
+  --color-border: var(--blue);
+  --color-destructive: var(--blue);
+  --color-accent-foreground: var(--background);
+  --color-accent: var(--blue);
+  --color-muted-foreground: var(--blue);
+  --color-muted: var(--background);
+  --color-secondary-foreground: var(--blue);
+  --color-secondary: var(--background);
+  --color-primary-foreground: var(--background);
+  --color-primary: var(--blue);
+  --color-popover-foreground: var(--blue);
+  --color-popover: var(--background);
+  --color-card-foreground: var(--blue);
+  --color-card: var(--background);
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+}
+
+:root {
+  color-scheme: light;
+  --background: var(--bent-color-background-light);
+  --foreground: var(--bent-color-accent-light);
+  --blue: var(--bent-color-accent-light);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: var(--bent-color-background-dark);
+    --foreground: var(--bent-color-accent-dark);
+    --blue: var(--bent-color-accent-dark);
+  }
+}
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--blue);
+    outline-color: var(--blue);
+  }
+  html,
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    font-family: var(--font-geist-mono), monospace;
+  }
+  body {
+    color: var(--blue);
+    background: var(--background);
+    text-transform: lowercase;
+  }
+  button,
+  [data-slot="button"],
+  input[type="submit"] {
+    text-transform: uppercase;
+  }
+  input:not([type="submit"]),
+  textarea,
+  [contenteditable="true"],
+  code,
+  pre {
+    text-transform: none;
+  }
+  button,
+  a,
+  input {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled),
+  a {
+    cursor: pointer;
+  }
+  button:focus-visible,
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 4px;
+  }
+  ::selection {
+    background: var(--blue);
+    color: var(--background);
+  }
+}
+@layer components {
+  .guide-prose {
+    @apply space-y-4 text-sm leading-7;
+    overflow-wrap: anywhere;
+  }
+  .guide-prose h2,
+  .guide-prose h3 {
+    @apply mt-6 font-semibold;
+  }
+  .guide-prose h2 {
+    @apply text-base;
+  }
+  .guide-prose ul {
+    @apply list-disc space-y-2 pl-5;
+  }
+  .guide-prose ol {
+    @apply list-decimal space-y-2 pl-5;
+  }
+  .guide-prose li p {
+    @apply my-1;
+  }
+  .guide-prose a {
+    @apply underline underline-offset-4;
+  }
+  .guide-prose blockquote {
+    @apply border-l-2 pl-4;
+  }
+  .guide-prose img {
+    @apply h-auto max-w-full;
+  }
+  .guide-prose [data-youtube-video] {
+    @apply aspect-video min-h-[200px] w-full;
+  }
+  .guide-prose iframe {
+    @apply h-full w-full;
+  }
+  .site-header {
+    @apply flex min-h-14 items-center justify-between gap-4 border-b px-[clamp(1rem,4vw,4rem)];
+  }
+  .brand-link {
+    @apply inline-flex min-h-11 items-center gap-2 text-sm font-semibold;
+  }
+  .page-shell {
+    @apply mx-auto w-full max-w-5xl px-[clamp(1rem,4vw,4rem)] pb-6 pt-8 sm:pt-12;
+  }
+  .address-row {
+    @apply mb-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-2;
+  }
+  .guide-shell {
+    @apply max-w-3xl;
+  }
+  .address-link {
+    @apply flex min-h-11 items-center gap-2 text-sm;
+    text-transform: lowercase;
+  }
+  .search-row {
+    @apply mb-6 flex gap-3;
+  }
+  .search-box {
+    @apply flex min-w-0 flex-1 items-center gap-3 border px-4;
+  }
+  .search-box:focus-within {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+  .article-link {
+    @apply flex min-h-12 items-center justify-between gap-3 border px-4 py-3 text-sm hover:bg-primary hover:text-primary-foreground;
+  }
+  .task-button {
+    @apply min-h-16 border px-3 py-3 text-left text-sm leading-6 hover:bg-primary hover:text-primary-foreground sm:px-4;
+    text-transform: lowercase;
+  }
+  .site-footer {
+    @apply mt-8 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs leading-6;
+  }
+  .login-shell {
+    @apply flex min-h-dvh items-center justify-center bg-background p-5;
+  }
+  .login-card {
+    @apply w-full max-w-md border bg-background p-7 sm:p-10;
+  }
+  .cl-rootBox,
+  .cl-cardBox {
+    width: 100%;
+  }
+  .cl-card,
+  .cl-footer {
+    box-shadow: none;
+  }
+  .cl-userButtonPopoverCard {
+    text-transform: lowercase;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

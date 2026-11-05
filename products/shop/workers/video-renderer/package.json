@@ -1,0 +1,30 @@
+{
+  "name": "@forever-tee/video-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "benchmark": "node src/benchmark.mjs",
+    "benchmark:batch:remote": "node src/benchmark-batch-remote.mjs",
+    "benchmark:remote": "node src/benchmark-remote.mjs",
+    "benchmark:vercel": "node src/benchmark-remote.mjs",
+    "build": "node ../../scripts/worker-local-check.mjs build \"\" dist/check",
+    "check": "bun run test && bun run build",
+    "start": "node src/server.mjs",
+    "test": "node --import ../../scripts/test-protected-config.mjs --test src/*.test.mjs custom/*.test.mjs benchmarks/*.test.mjs aws-lambda/*.test.mjs",
+    "test:lambda": "node --import ../../scripts/test-protected-config.mjs --test --test-concurrency=1 aws-lambda/*.test.mjs",
+    "mockups:compile:browser": "node src/compile-browser-mockups.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@napi-rs/canvas": "0.1.80",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "wrangler": "4.134.0"
+  }
+}

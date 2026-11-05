@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "fireside-dressed",
+  "displayName": "Fireside sofa \u00b7 throw and cushion",
+  "footprint": {
+    "width": 8,
+    "depth": 4
+  },
+  "heightPixels": 43,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/fireside-dressed/fireside-dressed-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/fireside-dressed/fireside-dressed-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/fireside-dressed/fireside-dressed-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/fireside-dressed/fireside-dressed-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "name": "camera",
+    "sha256": "b37dac66afdcaf30d1ac9cb83651425094b63845f32577c2d5dcb2d70b12eea0",
+    "bytes": 5613111,
+    "sourceWidth": 2400,
+    "sourceHeight": 3600,
+    "settings": {
+      "cropX": 0.5,
+      "cropY": 0.5222222222222223,
+      "cropZoom": 0.9451971622205568,
+      "depth": 5,
+      "placementWidth": 0.178885,
+      "placementX": 0.41019,
+      "placementY": 0.39843
+    },
+    "geometries": [
+      {
+        "width": 3619,
+        "height": 4089,
+        "baselineSha256": "f2a26c321403174a61357aaeffc4fd13ce90b1c48bee7499815984031be3e9ee",
+        "baselineVersion": "lQYlzHhR9uRsueu2YcEj3WUG.t_ra9.i"
+      },
+      {
+        "width": 4150,
+        "height": 4690,
+        "baselineSha256": "0b4c9bc1fd8484eeaef248313e1c63cd9fd039ef99f122e1fc472b8209bd1b40",
+        "baselineVersion": "o8hxdS5XFi8eNH7ZuMJDkcjaa84SFC2T"
+      },
+      {
+        "width": 4682,
+        "height": 5291,
+        "baselineSha256": "2e0413dd2d704d0ba0b944ac231120ad6db7acdec710de721727fcd489be54f9",
+        "baselineVersion": ".ZQvYZnZc9D9G3iURVN2Y5Dz3hxhQH_s"
+      }
+    ]
+  },
+  {
+    "name": "cropped",
+    "sha256": "{{SHOP:resource_73e91e639e8e}}",
+    "bytes": 6120149,
+    "sourceWidth": 3024,
+    "sourceHeight": 4032,
+    "settings": {
+      "cropX": 0.47,
+      "cropY": 0.62,
+      "cropZoom": 1.06,
+      "depth": 5,
+      "placementWidth": 0.398752,
+      "placementX": 0.310118,
+      "placementY": 0.310118
+    },
+    "geometries": [
+      {
+        "width": 3619,
+        "height": 4089,
+        "baselineSha256": "82aaf104de48efff87217578fccceec211d3689621d538e79f766c71560780ce",
+        "baselineVersion": "8u8KjFPetgyaQA88pC3XXtpVOsoHh4RQ"
+      },
+      {
+        "width": 4150,
+        "height": 4690,
+        "baselineSha256": "c90554507f3f98f61de0b9071a94b5ae0fafc200298e56608988f18c55f1b646",
+        "baselineVersion": "cksuAPIIZCk1OhPAAgjJp0VoNtCYq27P"
+      },
+      {
+        "width": 4682,
+        "height": 5291,
+        "baselineSha256": "3e7a9c68e1e6f4e85bbdab1e4e511f92beaa3119789d6bddedc23c2e6155cda6",
+        "baselineVersion": "szAZyhGgSKMAecV4RJSb9YdzZHcyA9S_"
+      }
+    ]
+  }
+]

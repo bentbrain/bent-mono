@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "sub4",
+  "displayName": "Sonos Sub 4",
+  "footprint": {
+    "width": 2,
+    "depth": 1
+  },
+  "heightPixels": 24,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/sub4/sub4-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/sub4/sub4-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/sub4/sub4-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/sub4/sub4-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

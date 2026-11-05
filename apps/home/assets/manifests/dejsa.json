@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "dejsa",
+  "displayName": "DEJSA",
+  "footprint": {
+    "width": 2,
+    "depth": 2
+  },
+  "heightPixels": 18,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/dejsa/dejsa-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/dejsa/dejsa-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/dejsa/dejsa-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/dejsa/dejsa-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

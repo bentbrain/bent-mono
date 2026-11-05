@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "orange-shelf-cubby",
+  "displayName": "Orange shelf cubby",
+  "footprint": {
+    "width": 2,
+    "depth": 2
+  },
+  "heightPixels": 19,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/orange-shelf-cubby/orange-shelf-cubby-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/orange-shelf-cubby/orange-shelf-cubby-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/orange-shelf-cubby/orange-shelf-cubby-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/orange-shelf-cubby/orange-shelf-cubby-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

@@ -1,0 +1,64 @@
+name: Render custom featured video
+run-name: Featured video · ${{ inputs.environment }} · final ${{ inputs.final_product }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Read current featured products from
+        type: choice
+        options: [production, development]
+        default: production
+        required: true
+      final_product:
+        description: Final frame featured slot (1–6) or configured product UUID
+        type: string
+        default: '1'
+        required: true
+      color:
+        description: Final garment color (default is white shirt or black tote)
+        type: choice
+        options: [default, black, white, cream]
+        default: default
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: featured-video-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  render:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install render dependencies
+        run: bun install --frozen-lockfile --filter @forever-tee/video-renderer --ignore-scripts
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+      - name: Check custom renderer
+        run: node --test workers/video-renderer/custom/*.test.mjs
+      - name: Render current featured cutouts
+        env:
+          RENDER_ENVIRONMENT: ${{ inputs.environment }}
+          FINAL_PRODUCT: ${{ inputs.final_product }}
+          RENDER_COLOR: ${{ inputs.color }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+        run: node workers/video-renderer/custom/render.mjs
+      - name: Upload MP4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: featured-video-${{ github.run_id }}
+          path: featured-video-output/featured.mp4
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

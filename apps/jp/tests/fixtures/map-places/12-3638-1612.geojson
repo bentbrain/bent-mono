@@ -1,0 +1,204 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.763630388889, 35.7451145555556]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "あらかわく",
+        "dspPos": "LC",
+        "name": "Arakawa City",
+        "knj": "荒川区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Arakawa Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.782083972222, 35.6778655833333]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "ちゅうおうく",
+        "dspPos": "LC",
+        "name": "Chuo City",
+        "knj": "中央区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Chuo Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.807185611111, 35.6766405833333]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "こうとうく",
+        "dspPos": "LC",
+        "name": "Koto City",
+        "knj": "江東区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Koto Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.811428638889, 35.7161960277778]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "すみだく",
+        "dspPos": "LC",
+        "name": "Sumida City",
+        "knj": "墨田区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Sumida Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.785901388889, 35.7204762777778]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "たいとうく",
+        "dspPos": "LC",
+        "name": "Taito City",
+        "knj": "台東区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Taito Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.775299527778, 35.6934393333333]
+      },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "1",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [139.7883675, 35.682813] },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "6",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.773065833333, 35.6841755555556]
+      },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "C1",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.78333744, 35.73611099]
+      },
+      "properties": {
+        "kana": "あらかわく",
+        "ftCode": 3205,
+        "knj": "荒川区役所",
+        "roma": "Arakawa Ku",
+        "name": "Arakawa City"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.75265464, 35.70781836]
+      },
+      "properties": {
+        "kana": "ぶんきょうく",
+        "ftCode": 3205,
+        "knj": "文京区役所",
+        "roma": "Bunkyo Ku",
+        "name": "Bunkyo City"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.75361483, 35.69388883]
+      },
+      "properties": {
+        "kana": "ちよだく",
+        "ftCode": 3205,
+        "knj": "千代田区役所",
+        "roma": "Chiyoda Ku",
+        "name": "Chiyoda City"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.80151277, 35.71067707]
+      },
+      "properties": {
+        "kana": "すみだく",
+        "ftCode": 3205,
+        "knj": "墨田区役所",
+        "roma": "Sumida Ku",
+        "name": "Sumida City"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.77967126, 35.71263206]
+      },
+      "properties": {
+        "kana": "たいとうく",
+        "ftCode": 3205,
+        "knj": "台東区役所",
+        "roma": "Taito Ku",
+        "name": "Taito City"
+      }
+    }
+  ]
+}

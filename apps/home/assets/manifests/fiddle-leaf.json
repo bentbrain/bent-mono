@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "fiddle-leaf",
+  "displayName": "Tall fiddle-leaf fig",
+  "footprint": {
+    "width": 4,
+    "depth": 3
+  },
+  "heightPixels": 129,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/fiddle-leaf/fiddle-leaf-idle-north.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "east": {
+      "source": "assets/approved/fiddle-leaf/fiddle-leaf-idle-east.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "south": {
+      "source": "assets/approved/fiddle-leaf/fiddle-leaf-idle-south.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    },
+    "west": {
+      "source": "assets/approved/fiddle-leaf/fiddle-leaf-idle-west.png",
+      "anchor": {
+        "x": 120,
+        "y": 180
+      },
+      "width": 240,
+      "height": 240
+    }
+  }
+}

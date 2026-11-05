@@ -1,0 +1,29 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.765078556111, 35.6777130483333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.763116637778, 35.6784476069444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

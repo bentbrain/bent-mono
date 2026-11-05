@@ -1,0 +1,174 @@
+diff --git a/dist/core/cart/cart.mjs b/dist/core/cart/cart.mjs
+index c3327749f8a792b8f0996dff3d7d8dc1308430ae..644dcfd1aed1316a43b0d2f1643b28b95d5547f2 100644
+--- a/dist/core/cart/cart.mjs
++++ b/dist/core/cart/cart.mjs
+@@ -452,6 +452,13 @@ function resolveCartLines(observable, cart, affectedIds, failure, lineIds) {
+ function isCartLineId(value) {
+ 	return typeof value === "string" && value.startsWith("gid://shopify/CartLine/");
+ }
++// Configured artwork is part of line identity even when Shopify merchandise
++// is shared. Server-added proof attributes must not split the same design.
++function cartAddIdentity(merchandiseId, attributes = [], sellingPlanId) {
++	const productId = attributes.find((attribute) => attribute.key === "_productId")?.value;
++	const identityAttributes = productId ? [["_productId", productId]] : attributes.map(({ key, value }) => [key, value]).sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
++	return identityAttributes.length || sellingPlanId ? JSON.stringify([merchandiseId, identityAttributes, sellingPlanId ?? null]) : merchandiseId;
++}
+ function handleCartLinesAdd(store, event) {
+ 	const cartObservable = store.observable;
+ 	const lineControllers = store.lineControllers;
+@@ -465,20 +472,23 @@ function handleCartLinesAdd(store, event) {
+ 	const untrackedAddLines = [];
+ 	const lineToMerchandise = /* @__PURE__ */ new Map();
+ 	for (const eventLine of addLines) {
+-		const existing = getLines(current.data).find((l) => l.merchandise?.id === eventLine.merchandiseId || l.id === OPTIMISTIC_LINE_ID_PREFIX + eventLine.merchandiseId);
++		const identity = cartAddIdentity(eventLine.merchandiseId, eventLine.attributes, eventLine.sellingPlanId);
++		const existing = getLines(current.data).find((l) => cartAddIdentity(l.merchandise?.id, l.attributes, l.sellingPlanAllocation?.sellingPlan?.id) === identity);
+ 		if (existing) {
+ 			const prev = matchedAdditions.get(existing.id) ?? 0;
+ 			matchedAdditions.set(existing.id, prev + eventLine.quantity);
+-			lineToMerchandise.set(existing.id, eventLine.merchandiseId);
++			lineToMerchandise.set(existing.id, identity);
+ 			if (!existing.id.startsWith(OPTIMISTIC_LINE_ID_PREFIX) && !lineBaselines.has(existing.id)) lineBaselines.set(existing.id, { ...existing });
+ 		} else {
+ 			const productDetail = products.find((p) => p.id === eventLine.merchandiseId);
+ 			if (productDetail) {
+ 				const { price, ...merchandise } = productDetail;
+-				const optimisticId = OPTIMISTIC_LINE_ID_PREFIX + eventLine.merchandiseId;
+-				lineToMerchandise.set(optimisticId, eventLine.merchandiseId);
++				const optimisticId = OPTIMISTIC_LINE_ID_PREFIX + identity;
++				lineToMerchandise.set(optimisticId, identity);
+ 				optimisticLines.push({
+ 					id: optimisticId,
++					attributes: eventLine.attributes ?? [],
++					...(eventLine.sellingPlanId ? { sellingPlanAllocation: { sellingPlan: { id: eventLine.sellingPlanId } } } : {}),
+ 					quantity: eventLine.quantity,
+ 					merchandise,
+ 					cost: {
+@@ -504,7 +514,7 @@ function handleCartLinesAdd(store, event) {
+ 	const optimisticIds = optimisticLines.map((l) => l.id);
+ 	const allAffectedIds = [...matchedIds, ...optimisticIds];
+ 	const controllersAtEventTime = new Map(matchedIds.map((id) => [id, lineControllers.get(id)]));
+-	const addMerchIds = [...new Set(addLines.map((l) => l.merchandiseId))];
++	const addMerchIds = [...new Set(addLines.map((l) => cartAddIdentity(l.merchandiseId, l.attributes, l.sellingPlanId)))];
+ 	const addController = new AbortController();
+ 	for (const merchId of addMerchIds) {
+ 		merchandiseControllers.get(merchId)?.abort();
+@@ -547,7 +557,7 @@ function handleCartLinesAdd(store, event) {
+ 	};
+ 	const getOwnedUntrackedQuantity = () => {
+ 		let quantity = 0;
+-		for (const line of untrackedAddLines) if (merchandiseControllers.get(line.merchandiseId) === addController) quantity += line.quantity;
++		for (const line of untrackedAddLines) if (merchandiseControllers.get(cartAddIdentity(line.merchandiseId, line.attributes, line.sellingPlanId)) === addController) quantity += line.quantity;
+ 		return quantity;
+ 	};
+ 	const rollbackAdd = (failure) => {
+@@ -887,9 +897,19 @@ function configureCartEndpoint(endpoint) {
+ 	if (configuredCartEndpoint !== null) console.warn(`configureCartEndpoint called with "${endpoint}" but already configured with "${configuredCartEndpoint}".`);
+ 	configuredCartEndpoint = endpoint;
+ }
+-async function postCartUpdateToEndpoint(endpoint, payload, options) {
+-	const timeoutSignal = AbortSignal.timeout(STANDARD_ACTION_TIMEOUT_IN_MS);
+-	const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
++// Set-Cookie from the first create must land before another mutation starts.
++// Keep optimistic events immediate while serializing the server writes.
++let cartMutationTail = Promise.resolve();
++function postCartUpdateToEndpoint(endpoint, payload, options) {
++	const mutation = cartMutationTail.then(() => sendCartUpdateToEndpoint(endpoint, payload, options));
++	cartMutationTail = mutation.then(() => {}, () => {});
++	return mutation;
++}
++async function sendCartUpdateToEndpoint(endpoint, payload, options) {
++	// A superseded queued request can be skipped. Once sent, wait for its
++	// response: aborting fetch cannot cancel a write already running on Shopify.
++	options?.signal?.throwIfAborted();
++	const signal = AbortSignal.timeout(STANDARD_ACTION_TIMEOUT_IN_MS);
+ 	const response = await fetch(endpoint, {
+ 		method: "POST",
+ 		headers: { "content-type": "application/json" },
+diff --git a/dist/development/core/cart/cart.mjs b/dist/development/core/cart/cart.mjs
+index c3327749f8a792b8f0996dff3d7d8dc1308430ae..644dcfd1aed1316a43b0d2f1643b28b95d5547f2 100644
+--- a/dist/development/core/cart/cart.mjs
++++ b/dist/development/core/cart/cart.mjs
+@@ -452,6 +452,13 @@ function resolveCartLines(observable, cart, affectedIds, failure, lineIds) {
+ function isCartLineId(value) {
+ 	return typeof value === "string" && value.startsWith("gid://shopify/CartLine/");
+ }
++// Configured artwork is part of line identity even when Shopify merchandise
++// is shared. Server-added proof attributes must not split the same design.
++function cartAddIdentity(merchandiseId, attributes = [], sellingPlanId) {
++	const productId = attributes.find((attribute) => attribute.key === "_productId")?.value;
++	const identityAttributes = productId ? [["_productId", productId]] : attributes.map(({ key, value }) => [key, value]).sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
++	return identityAttributes.length || sellingPlanId ? JSON.stringify([merchandiseId, identityAttributes, sellingPlanId ?? null]) : merchandiseId;
++}
+ function handleCartLinesAdd(store, event) {
+ 	const cartObservable = store.observable;
+ 	const lineControllers = store.lineControllers;
+@@ -465,20 +472,23 @@ function handleCartLinesAdd(store, event) {
+ 	const untrackedAddLines = [];
+ 	const lineToMerchandise = /* @__PURE__ */ new Map();
+ 	for (const eventLine of addLines) {
+-		const existing = getLines(current.data).find((l) => l.merchandise?.id === eventLine.merchandiseId || l.id === OPTIMISTIC_LINE_ID_PREFIX + eventLine.merchandiseId);
++		const identity = cartAddIdentity(eventLine.merchandiseId, eventLine.attributes, eventLine.sellingPlanId);
++		const existing = getLines(current.data).find((l) => cartAddIdentity(l.merchandise?.id, l.attributes, l.sellingPlanAllocation?.sellingPlan?.id) === identity);
+ 		if (existing) {
+ 			const prev = matchedAdditions.get(existing.id) ?? 0;
+ 			matchedAdditions.set(existing.id, prev + eventLine.quantity);
+-			lineToMerchandise.set(existing.id, eventLine.merchandiseId);
++			lineToMerchandise.set(existing.id, identity);
+ 			if (!existing.id.startsWith(OPTIMISTIC_LINE_ID_PREFIX) && !lineBaselines.has(existing.id)) lineBaselines.set(existing.id, { ...existing });
+ 		} else {
+ 			const productDetail = products.find((p) => p.id === eventLine.merchandiseId);
+ 			if (productDetail) {
+ 				const { price, ...merchandise } = productDetail;
+-				const optimisticId = OPTIMISTIC_LINE_ID_PREFIX + eventLine.merchandiseId;
+-				lineToMerchandise.set(optimisticId, eventLine.merchandiseId);
++				const optimisticId = OPTIMISTIC_LINE_ID_PREFIX + identity;
++				lineToMerchandise.set(optimisticId, identity);
+ 				optimisticLines.push({
+ 					id: optimisticId,
++					attributes: eventLine.attributes ?? [],
++					...(eventLine.sellingPlanId ? { sellingPlanAllocation: { sellingPlan: { id: eventLine.sellingPlanId } } } : {}),
+ 					quantity: eventLine.quantity,
+ 					merchandise,
+ 					cost: {
+@@ -504,7 +514,7 @@ function handleCartLinesAdd(store, event) {
+ 	const optimisticIds = optimisticLines.map((l) => l.id);
+ 	const allAffectedIds = [...matchedIds, ...optimisticIds];
+ 	const controllersAtEventTime = new Map(matchedIds.map((id) => [id, lineControllers.get(id)]));
+-	const addMerchIds = [...new Set(addLines.map((l) => l.merchandiseId))];
++	const addMerchIds = [...new Set(addLines.map((l) => cartAddIdentity(l.merchandiseId, l.attributes, l.sellingPlanId)))];
+ 	const addController = new AbortController();
+ 	for (const merchId of addMerchIds) {
+ 		merchandiseControllers.get(merchId)?.abort();
+@@ -547,7 +557,7 @@ function handleCartLinesAdd(store, event) {
+ 	};
+ 	const getOwnedUntrackedQuantity = () => {
+ 		let quantity = 0;
+-		for (const line of untrackedAddLines) if (merchandiseControllers.get(line.merchandiseId) === addController) quantity += line.quantity;
++		for (const line of untrackedAddLines) if (merchandiseControllers.get(cartAddIdentity(line.merchandiseId, line.attributes, line.sellingPlanId)) === addController) quantity += line.quantity;
+ 		return quantity;
+ 	};
+ 	const rollbackAdd = (failure) => {
+@@ -887,9 +897,19 @@ function configureCartEndpoint(endpoint) {
+ 	if (configuredCartEndpoint !== null) console.warn(`configureCartEndpoint called with "${endpoint}" but already configured with "${configuredCartEndpoint}".`);
+ 	configuredCartEndpoint = endpoint;
+ }
+-async function postCartUpdateToEndpoint(endpoint, payload, options) {
+-	const timeoutSignal = AbortSignal.timeout(STANDARD_ACTION_TIMEOUT_IN_MS);
+-	const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
++// Set-Cookie from the first create must land before another mutation starts.
++// Keep optimistic events immediate while serializing the server writes.
++let cartMutationTail = Promise.resolve();
++function postCartUpdateToEndpoint(endpoint, payload, options) {
++	const mutation = cartMutationTail.then(() => sendCartUpdateToEndpoint(endpoint, payload, options));
++	cartMutationTail = mutation.then(() => {}, () => {});
++	return mutation;
++}
++async function sendCartUpdateToEndpoint(endpoint, payload, options) {
++	// A superseded queued request can be skipped. Once sent, wait for its
++	// response: aborting fetch cannot cancel a write already running on Shopify.
++	options?.signal?.throwIfAborted();
++	const signal = AbortSignal.timeout(STANDARD_ACTION_TIMEOUT_IN_MS);
+ 	const response = await fetch(endpoint, {
+ 		method: "POST",
+ 		headers: { "content-type": "application/json" },

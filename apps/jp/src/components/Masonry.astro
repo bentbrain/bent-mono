@@ -1,0 +1,53 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+type Props = HTMLAttributes<'div'>;
+const { class: className, ...attributes } = Astro.props;
+---
+
+<div
+  {...attributes}
+  data-masonry
+  class:list={[
+    'grid grid-cols-1 items-start data-[masonry-ready]:auto-rows-[1px] data-[masonry-ready]:gap-y-0',
+    className,
+  ]}
+>
+  <slot />
+</div>
+
+<script>
+  // Grid's normal row placement scans left to right, then down. One-pixel rows
+  // let it pack native media heights while keeping source and keyboard order.
+  // The initial HTML is a regular responsive grid, including without JavaScript.
+  for (const grid of document.querySelectorAll('[data-masonry]')) {
+    if (!(grid instanceof HTMLElement)) continue;
+    const gap = parseFloat(getComputedStyle(grid).rowGap) || 0;
+    const items = Array.from(grid.children).filter(
+      (item): item is HTMLElement => item instanceof HTMLElement,
+    );
+    let frame = 0;
+    const layout = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const spans = items.map((item) =>
+          Math.max(1, Math.ceil(item.getBoundingClientRect().height + gap)),
+        );
+        items.forEach((item, index) => {
+          item.style.gridRowEnd = `span ${String(spans[index])}`;
+        });
+        grid.dataset.masonryReady = '';
+      });
+    };
+    const resize = new ResizeObserver(layout);
+    resize.observe(grid);
+    items.forEach((item) => resize.observe(item));
+    // Category filters toggle hidden without changing the media's intrinsic size.
+    const mutations = new MutationObserver(layout);
+    mutations.observe(grid, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden'],
+    });
+    layout();
+  }
+</script>

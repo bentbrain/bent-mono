@@ -1,0 +1,77 @@
+name: Create reviewed featured composition
+run-name: Featured composition · ${{ inputs.environment }} · ${{ inputs.operation }} · ${{ inputs.native_release }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Synthetic Preview qualification or approved Production artwork
+        type: choice
+        options: [development, production]
+        required: true
+      native_release:
+        description: Exact current compatible native-RUN_ID
+        type: string
+        required: true
+      qualified_source:
+        description: Exact unchanged native/artwork source when only editorial tooling was repaired
+        type: string
+        required: false
+      operation:
+        description: Create, recover saved identities, or clean an exact failed Development fixture
+        type: choice
+        options: [create, recover, cleanup]
+        default: create
+        required: true
+      cleanup_source:
+        description: Original source commit of a failed Development fixture, cleanup only
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  compose:
+    # Reading private draft-release assets requires push visibility.
+    permissions:
+      contents: write
+    if: github.ref == 'refs/heads/main' && github.repository_id == '{{SHOP:githubRepositoryId}}' && github.actor_id == '{{SHOP:githubOwnerId}}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    env:
+      COMPOSITION_ENVIRONMENT: ${{ inputs.environment }}
+      COMPOSITION_OPERATION: ${{ inputs.operation }}
+      COMPOSITION_CLEANUP_SOURCE: ${{ inputs.cleanup_source }}
+      COMPOSITION_QUALIFIED_SOURCE: ${{ inputs.qualified_source }}
+      COMPOSITION_NATIVE_RELEASE: ${{ inputs.native_release }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      BENT_SHIRT_OPERATIONS_SECRET: ${{ secrets.BENT_SHIRT_OPERATIONS_SECRET }}
+      WORKER_URL: ${{ vars.WORKER_URL }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - run: node --test scripts/featured-composition-records.test.mjs scripts/featured-composition-policy.test.mjs scripts/editorial-source.test.mjs
+      - name: Verify sources and atomically create the reviewed replacement
+        # Confine the ephemeral transfer token to the publication step.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/featured-composition-release.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: featured-composition-${{ github.run_id }}
+          path: featured-composition-output/
+          if-no-files-found: ignore
+          retention-days: 14

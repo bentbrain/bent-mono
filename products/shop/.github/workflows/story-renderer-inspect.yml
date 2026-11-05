@@ -1,0 +1,30 @@
+name: Inspect story renderer benchmark videos
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Inspect media and compare frames
+        env:
+          REMOTE_BENCHMARK_TOKEN: ${{ secrets.STORY_BENCHMARK_TOKEN }}
+        run: node workers/video-renderer/benchmarks/inspect.mjs workers/video-renderer/benchmarks/inspection-input.json /tmp/story-inspection
+      - name: Save private review artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: story-renderer-inspection
+          path: /tmp/story-inspection
+          retention-days: 7

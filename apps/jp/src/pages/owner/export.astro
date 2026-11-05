@@ -1,0 +1,16 @@
+---
+import Site from '../../layouts/Site.astro';
+import { StoryExporter } from '../../components/StoryExporter';
+import { tripMedia } from '../../lib/content';
+import { tokyoDay, posterUrl } from '../../lib/model';
+const media = (await tripMedia()).map((item) => ({
+  id: item.id,
+  day: tokyoDay(item.captured_at),
+  title: item.title,
+  poster: posterUrl(item),
+}));
+---
+
+<Site owner title="export / jp.bent.build">
+  <StoryExporter media={media} client:load />
+</Site>

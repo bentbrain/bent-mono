@@ -1,0 +1,80 @@
+---
+import { getEmDashCollection } from 'emdash';
+import TripContent from '../components/TripContent.astro';
+import Site from '../layouts/Site.astro';
+import JapanMap from '../components/JapanMap.astro';
+import Masonry from '../components/Masonry.astro';
+import ShopAd from '../components/ShopAd.astro';
+import { PostMedia } from '../components/PostMedia';
+import { buttonVariants } from '../components/ui/button';
+import { Card, CardHeader, CardContent } from '../components/ui/card';
+import { tripMedia, tripStartDay } from '../lib/content';
+import { correctTripTitle } from '../lib/trip-days';
+import { formatDay, galleryIds } from '../lib/model';
+const { entries, nextCursor } = await getEmDashCollection('posts', {
+  status: 'published',
+  limit: 24,
+  cursor: Astro.url.searchParams.get('cursor') || undefined,
+  // Post calendar day is the feed date. EmDash also orders equal days by
+  // descending ID, keeping this chronology stable across cursor pages.
+  orderBy: { day: 'desc' },
+});
+const media = await tripMedia();
+const firstDay = await tripStartDay(media);
+const posts = entries.map((post) => ({
+  ...post,
+  data: {
+    ...post.data,
+    title: correctTripTitle(post.data.day, firstDay, post.data.title),
+  },
+}));
+---
+
+<Site newsletterAtTop>
+  <Masonry class="journal-grid gap-4 min-[601px]:grid-cols-2 min-[901px]:grid-cols-3">
+    <section class="journal-card journal-map-card col-span-full min-w-0">
+      <Card className="journal-card-inner overflow-hidden border gap-0 py-0 shadow-none">
+        <JapanMap media={media} />
+      </Card>
+    </section>
+    {posts.map((post) => (
+      <article
+        class="journal-card @container/post min-w-0"
+        data-feedback-id={`post-${post.data.id}`}
+      >
+        <Card className="journal-card-inner overflow-hidden border gap-0 py-0 shadow-none">
+          <CardHeader className="post-heading flex flex-row items-center justify-between gap-2.5 p-4 [&_a]:no-underline">
+            <h1 class="min-w-0 wrap-anywhere">
+              <a href={`/posts/${post.id}`}>{post.data.title}</a>
+            </h1>
+            <time class="shrink-0 whitespace-nowrap" datetime={post.data.day}>
+              {formatDay(post.data.day)}
+            </time>
+          </CardHeader>
+          <CardContent className="post-body prose px-4 pb-0.5 [&_p]:mb-[17px] [&_h2]:mb-[15px] [&_h3]:mb-[15px] [&_a]:underline [&_img]:h-auto [&_img]:w-full [&_ul]:list-disc [&_ul]:pl-[23px] [&_ol]:list-decimal [&_ol]:pl-[23px] [&_ul]:pl-[23px] [&_ol]:pl-[23px]">
+            <TripContent value={post.data.content} media={media} />
+          </CardContent>
+          <PostMedia
+            client:load
+            responsive={!Astro.locals.privateMediaRender}
+            title={post.data.title}
+            design={post.data.shop_design}
+            items={galleryIds(post.data.gallery).flatMap((id) => {
+              const item = media.find((m) => m.id === id);
+              return item ? [item] : [];
+            })}
+          />
+        </Card>
+      </article>
+    ))}
+  </Masonry>
+  {nextCursor && (
+    <a
+      class={buttonVariants({ className: 'pagination my-6' })}
+      href={`/?cursor=${encodeURIComponent(nextCursor)}`}
+    >
+      EARLIER →
+    </a>
+  )}
+  <ShopAd slot="after-newsletter" />
+</Site>

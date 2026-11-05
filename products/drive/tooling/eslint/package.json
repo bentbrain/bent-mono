@@ -1,0 +1,23 @@
+{
+  "name": "@bent-build/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./base": "./base.mjs",
+    "./nextjs": "./nextjs.mjs"
+  },
+  "dependencies": {
+    "@clerk/eslint-plugin": "0.2.0",
+    "@eslint/js": "9.39.5",
+    "@next/eslint-plugin-next": "16.4.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "typescript-eslint": "8.72.1"
+  },
+  "peerDependencies": {
+    "eslint": "^9.39.0"
+  }
+}

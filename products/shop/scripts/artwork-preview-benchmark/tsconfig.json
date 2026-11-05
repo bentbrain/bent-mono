@@ -1,0 +1,5 @@
+{
+  "extends": "../../workers/api/tsconfig.json",
+  "compilerOptions": { "types": ["../../workers/api/worker-configuration.d.ts"] },
+  "include": ["worker.ts", "../../workers/api/src/**/*.ts", "../../workers/api/worker-configuration.d.ts"]
+}

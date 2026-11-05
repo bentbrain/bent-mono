@@ -1,0 +1,41 @@
+{
+  "$schema": "../api/node_modules/wrangler/config-schema.json",
+  "name": "forever-tee-print-executor-local",
+  "main": "src/index.ts",
+  "account_id": "{{SHOP:cloudflareAccountId}}",
+  "compatibility_date": "2026-08-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false, "persist": true },
+    "traces": { "enabled": false, "head_sampling_rate": 0.1, "persist": true },
+    "issues": { "enabled": true }
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "PRINT_EXECUTIONS", "class_name": "PrintAssetExecution" }]
+  },
+  "migrations": [{ "tag": "print-execution-v1", "new_sqlite_classes": ["PrintAssetExecution"] }],
+  "d1_databases": [{ "binding": "DB", "database_name": "forever-tee-designs-local" }],
+  "r2_buckets": [{ "binding": "DESIGN_ARTWORK", "bucket_name": "forever-tee-design-artwork-local" }],
+  "images": { "binding": "IMAGES" },
+  "env": {
+    "development": {
+      "name": "forever-tee-print-executor-development",
+      "durable_objects": {
+        "bindings": [{ "name": "PRINT_EXECUTIONS", "class_name": "PrintAssetExecution" }]
+      },
+      "migrations": [{ "tag": "print-execution-v1", "new_sqlite_classes": ["PrintAssetExecution"] }],
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "forever-tee-designs-development",
+        "database_id": "{{SHOP:resource_fb377032d2f5}}"
+      }],
+      "r2_buckets": [{ "binding": "DESIGN_ARTWORK", "bucket_name": "forever-tee-design-artwork-development" }],
+      "images": { "binding": "IMAGES" }
+    }
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // The unnamed environment is local-only. Production always requires
+  // `--env production`; do not add production resource IDs at this level.
+  "name": "forever-tee-api-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "forever-tee-designs-local",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DESIGN_ARTWORK",
+      "bucket_name": "forever-tee-design-artwork-local"
+    },
+    {
+      "binding": "STORY_VIDEOS",
+      "bucket_name": "forever-tee-story-videos-local"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "ratelimits": [
+    {
+      "name": "OWNER_MUTATION_RATE_LIMIT",
+      "namespace_id": "1101",
+      "simple": { "limit": 600, "period": 60 }
+    },
+    {
+      "name": "IMAGE_PROCESS_RATE_LIMIT",
+      "namespace_id": "1102",
+      "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "LEGACY_IMAGE_PROCESS_RATE_LIMIT",
+      "namespace_id": "1103",
+      "simple": { "limit": 2, "period": 60 }
+    },
+    {
+      "name": "LEGACY_MUTATION_RATE_LIMIT",
+      "namespace_id": "1104",
+      "simple": { "limit": 12, "period": 60 }
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false, "persist": true },
+    "traces": { "enabled": false, "head_sampling_rate": 0.1, "persist": true },
+    "issues": { "enabled": true }
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "env": {
+    "development": {
+      "name": "forever-tee-api-development",
+      "ai": { "binding": "AI" },
+      "durable_objects": { "bindings": [
+        { "name": "STORY_VIDEO_NOTIFICATIONS", "class_name": "StoryVideoNotifications" },
+        { "name": "PRINT_EXECUTIONS", "class_name": "PrintAssetExecution", "script_name": "forever-tee-print-executor-development" }
+      ] },
+      "migrations": [
+        { "tag": "notifications-v1", "new_sqlite_classes": ["StoryVideoNotifications"] }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "STORY_VIDEO_JOBS",
+            "queue": "forever-tee-story-video-development",
+            "remote": true
+          },
+          {
+            "binding": "PRINT_ASSET_JOBS",
+            "queue": "forever-tee-print-assets-development",
+            "remote": true
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "forever-tee-story-video-development",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            // Watchdog retries include time waiting for accepted invocations.
+            // The one-minute D1 reconciliation is the independent backstop.
+            "max_retries": 100,
+            // Two independent four-video families fit the development Lambda's
+            // eight slots. Restore 1 when rolling back to Cloudflare rendering.
+            "max_concurrency": 2,
+            "retry_delay": 10
+          },
+          {
+            "queue": "forever-tee-print-assets-development",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 100,
+            "max_concurrency": 5,
+            "retry_delay": 15
+          }
+        ]
+      },
+      "services": [
+        {
+          "binding": "STORY_VIDEO_RENDERER",
+          "service": "forever-tee-story-video-development",
+          "entrypoint": "StoryVideoService",
+          "remote": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "forever-tee-designs-development",
+          "database_id": "{{SHOP:resource_fb377032d2f5}}",
+          "migrations_dir": "drizzle",
+          "remote": true
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "DESIGN_ARTWORK",
+          "bucket_name": "forever-tee-design-artwork-development",
+          "remote": true
+        },
+        {
+          "binding": "STORY_VIDEOS",
+          "bucket_name": "forever-tee-story-videos-development",
+          "remote": true
+        }
+      ],
+      "images": {
+        "binding": "IMAGES"
+      },
+      "vars": {
+        "OPERATIONS_ENVIRONMENT": "development",
+        "PRINT_EXECUTION_MODE": "durable-object",
+        "STORY_VIDEO_PROVIDER": "lambda",
+        "PRODUCT_IMAGE_PROVIDER": "vercel",
+        "PRODUCT_IMAGE_MAX_INFLIGHT": "64",
+        "STORY_VIDEO_LAMBDA_FUNCTION": "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-development",
+        "STORY_VIDEO_FAMILY_CONFIGURATION": "1",
+        "STORY_VIDEO_LANES": "2",
+        "STORY_VIDEO_NOTIFICATION_MODE": "push",
+        "STORY_VIDEO_TRANSPORT": "direct",
+        "STORY_VIDEO_WARM_ON_CONFIRM": "1"
+      },
+      "ratelimits": [
+        {
+          "name": "OWNER_MUTATION_RATE_LIMIT",
+          "namespace_id": "2101",
+          "simple": { "limit": 600, "period": 60 }
+        },
+        {
+          "name": "IMAGE_PROCESS_RATE_LIMIT",
+          "namespace_id": "2102",
+          "simple": { "limit": 30, "period": 60 }
+        },
+        {
+          "name": "LEGACY_IMAGE_PROCESS_RATE_LIMIT",
+          "namespace_id": "2103",
+          "simple": { "limit": 2, "period": 60 }
+        },
+        {
+          "name": "LEGACY_MUTATION_RATE_LIMIT",
+          "namespace_id": "2104",
+          "simple": { "limit": 12, "period": 60 }
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "redact_query_string": true,
+        "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false, "persist": true },
+        "traces": { "enabled": false, "head_sampling_rate": 0.1, "persist": true },
+        "issues": { "enabled": true }
+      },
+      "triggers": {
+        "crons": ["* * * * *"]
+      }
+    },
+    "production": {
+      "name": "forever-tee-api",
+      "ai": { "binding": "AI" },
+      "queues": {
+        "producers": [
+          {
+            "binding": "STORY_VIDEO_JOBS",
+            "queue": "forever-tee-story-video-production",
+            "remote": true
+          },
+          {
+            "binding": "PRINT_ASSET_JOBS",
+            "queue": "forever-tee-print-assets-production",
+            "remote": true
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "forever-tee-story-video-production",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 2,
+            "max_concurrency": 1,
+            "retry_delay": 10
+          },
+          {
+            "queue": "forever-tee-print-assets-production",
+            "max_batch_size": 1,
+            "max_batch_timeout": 1,
+            "max_retries": 100,
+            "max_concurrency": 5,
+            "retry_delay": 15
+          }
+        ]
+      },
+      "services": [
+        {
+          "binding": "STORY_VIDEO_RENDERER",
+          "service": "forever-tee-story-video",
+          "entrypoint": "StoryVideoService",
+          "remote": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "forever-tee-designs-production",
+          "database_id": "{{SHOP:resource_1a1378f0d1dc}}",
+          "migrations_dir": "drizzle",
+          "remote": true
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "DESIGN_ARTWORK",
+          "bucket_name": "forever-tee-design-artwork-production",
+          "remote": true
+        }
+      ],
+      "images": {
+        "binding": "IMAGES"
+      },
+      "vars": {
+        "OPERATIONS_ENVIRONMENT": "production",
+        "STORY_VIDEO_TRANSPORT": "direct",
+        "STORY_VIDEO_WARM_ON_CONFIRM": "1"
+      },
+      "ratelimits": [
+        {
+          "name": "OWNER_MUTATION_RATE_LIMIT",
+          "namespace_id": "3101",
+          "simple": { "limit": 600, "period": 60 }
+        },
+        {
+          "name": "IMAGE_PROCESS_RATE_LIMIT",
+          "namespace_id": "3102",
+          "simple": { "limit": 30, "period": 60 }
+        },
+        {
+          "name": "LEGACY_IMAGE_PROCESS_RATE_LIMIT",
+          "namespace_id": "3103",
+          "simple": { "limit": 2, "period": 60 }
+        },
+        {
+          "name": "LEGACY_MUTATION_RATE_LIMIT",
+          "namespace_id": "3104",
+          "simple": { "limit": 12, "period": 60 }
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "redact_query_string": true,
+        "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false, "persist": true },
+        "traces": { "enabled": false, "head_sampling_rate": 0.1, "persist": true },
+        "issues": { "enabled": true }
+      },
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      }
+    }
+  }
+}

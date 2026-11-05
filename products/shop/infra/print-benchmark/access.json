@@ -1,0 +1,242 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "One-time isolated Development print benchmark identities. No application resources or existing IAM changes.",
+  "Resources": {
+    "RuntimeBoundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "forever-tee-print-benchmark-development-runtime-boundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2/source/print-benchmark/*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development:*"
+            }
+          ]
+        }
+      }
+    },
+    "RuntimeRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "forever-tee-print-benchmark-development-runtime",
+        "MaxSessionDuration": 3600,
+        "PermissionsBoundary": {
+          "Ref": "RuntimeBoundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "sts:AssumeRole",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "isolated-print-benchmark",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2/source/print-benchmark/*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development:*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CIBoundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "forever-tee-print-benchmark-development-ci-boundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:CreateFunction",
+                "lambda:DeleteFunction",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:GetFunctionConcurrency",
+                "lambda:PutFunctionConcurrency",
+                "lambda:InvokeFunction",
+                "lambda:ListTags",
+                "lambda:TagResource"
+              ],
+              "Resource": "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-print-benchmark-development"
+            },
+            {
+              "Effect": "Allow",
+              "Action": "iam:PassRole",
+              "Resource": "arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-print-benchmark-development-runtime",
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "lambda.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:PutObject",
+                "s3:DeleteObjectVersion"
+              ],
+              "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2/source/print-benchmark/*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetBucketVersioning",
+                "s3:GetBucketPublicAccessBlock"
+              ],
+              "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:PutRetentionPolicy",
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents"
+              ],
+              "Resource": [
+                "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development",
+                "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development:*"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "CIRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "forever-tee-print-benchmark-development-ci",
+        "MaxSessionDuration": 3600,
+        "PermissionsBoundary": {
+          "Ref": "CIBoundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Principal": {
+                "Federated": "arn:aws:iam::{{SHOP:awsAccountId}}:oidc-provider/token.actions.githubusercontent.com"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:bentbrain@{{SHOP:githubOwnerId}}/bent-mono@{{SHOP:githubRepositoryId}}:environment:Preview"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "isolated-print-benchmark",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:CreateFunction",
+                    "lambda:DeleteFunction",
+                    "lambda:GetFunction",
+                    "lambda:GetFunctionConfiguration",
+                    "lambda:GetFunctionConcurrency",
+                    "lambda:PutFunctionConcurrency",
+                    "lambda:InvokeFunction",
+                    "lambda:ListTags",
+                    "lambda:TagResource"
+                  ],
+                  "Resource": "arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-print-benchmark-development"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": "arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-print-benchmark-development-runtime",
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "lambda.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectVersion",
+                    "s3:PutObject",
+                    "s3:DeleteObjectVersion"
+                  ],
+                  "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2/source/print-benchmark/*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetBucketVersioning",
+                    "s3:GetBucketPublicAccessBlock"
+                  ],
+                  "Resource": "arn:aws:s3:::forever-tee-video-development-{{SHOP:awsAccountId}}-ap-southeast-2"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:PutRetentionPolicy",
+                    "logs:DescribeLogStreams",
+                    "logs:GetLogEvents"
+                  ],
+                  "Resource": [
+                    "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development",
+                    "arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-print-benchmark-development:*"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

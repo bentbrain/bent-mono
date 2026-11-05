@@ -1,0 +1,127 @@
+{
+  "resource": {
+    "aws_iam_policy": {
+      "production_runtime_boundary": {
+        "name": "forever-tee-video-production-runtime-boundary",
+        "path": "/",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production:*\"},{\"Effect\":\"Allow\",\"Action\":\"sqs:SendMessage\",\"Resource\":\"arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures\"},{\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"],\"Resource\":\"arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development\"}]}",
+        "tags": {
+          "Environment": "production"
+        },
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      },
+      "production_failures_boundary": {
+        "name": "forever-tee-video-production-failures-boundary",
+        "path": "/",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production-failures:*\"},{\"Effect\":\"Allow\",\"Action\":[\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],\"Resource\":\"arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures\"},{\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"],\"Resource\":\"arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development\"}]}",
+        "tags": {
+          "Environment": "production"
+        },
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      },
+      "production_invoker_boundary": {
+        "name": "forever-tee-video-production-invoker-boundary",
+        "path": "/",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-production\"}]}",
+        "tags": {
+          "Environment": "production"
+        },
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      }
+    },
+    "aws_iam_role": {
+      "production_runtime": {
+        "name": "forever-tee-video-production-runtime",
+        "path": "/",
+        "permissions_boundary": "arn:aws:iam::{{SHOP:awsAccountId}}:policy/forever-tee-video-production-runtime-boundary",
+        "tags": {
+          "Environment": "production"
+        },
+        "depends_on": [
+          "aws_iam_policy.production_runtime_boundary"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        },
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+      },
+      "production_failures": {
+        "name": "forever-tee-video-production-failures",
+        "path": "/",
+        "permissions_boundary": "arn:aws:iam::{{SHOP:awsAccountId}}:policy/forever-tee-video-production-failures-boundary",
+        "tags": {
+          "Environment": "production"
+        },
+        "depends_on": [
+          "aws_iam_policy.production_failures_boundary"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        },
+        "max_session_duration": 3600,
+        "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+      }
+    },
+    "aws_iam_role_policy": {
+      "production_runtime": {
+        "name": "production-runtime",
+        "role": "forever-tee-video-production-runtime",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production:*\"},{\"Effect\":\"Allow\",\"Action\":\"sqs:SendMessage\",\"Resource\":\"arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures\"},{\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"],\"Resource\":\"arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development\"}]}",
+        "depends_on": [
+          "aws_iam_role.production_runtime"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      },
+      "production_failures": {
+        "name": "production-runtime",
+        "role": "forever-tee-video-production-failures",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:ap-southeast-2:{{SHOP:awsAccountId}}:log-group:/aws/lambda/forever-tee-video-production-failures:*\"},{\"Effect\":\"Allow\",\"Action\":[\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],\"Resource\":\"arn:aws:sqs:ap-southeast-2:{{SHOP:awsAccountId}}:forever-tee-video-production-failures\"},{\"Effect\":\"Allow\",\"Action\":[\"ecr:BatchGetImage\",\"ecr:GetDownloadUrlForLayer\"],\"Resource\":\"arn:aws:ecr:ap-southeast-2:{{SHOP:awsAccountId}}:repository/forever-tee-video-development\"}]}",
+        "depends_on": [
+          "aws_iam_role.production_failures"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      }
+    },
+    "aws_iam_user": {
+      "production_invoker": {
+        "name": "forever-tee-video-production-invoker",
+        "path": "/",
+        "permissions_boundary": "arn:aws:iam::{{SHOP:awsAccountId}}:policy/forever-tee-video-production-invoker-boundary",
+        "tags": {
+          "Environment": "production"
+        },
+        "depends_on": [
+          "aws_iam_policy.production_invoker_boundary"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        },
+        "force_destroy": false
+      }
+    },
+    "aws_iam_user_policy": {
+      "production_invoker": {
+        "name": "production-runtime",
+        "user": "forever-tee-video-production-invoker",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"arn:aws:lambda:ap-southeast-2:{{SHOP:awsAccountId}}:function:forever-tee-video-production\"}]}",
+        "depends_on": [
+          "aws_iam_user.production_invoker"
+        ],
+        "lifecycle": {
+          "prevent_destroy": true
+        }
+      }
+    }
+  }
+}

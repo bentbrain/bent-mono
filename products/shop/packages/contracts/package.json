@@ -1,0 +1,33 @@
+{
+  "name": "@forever-tee/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cart": "./src/cart.ts",
+    "./cart-line-capability": "./src/cart-line-capability.ts",
+    "./design": "./src/design.ts",
+    "./product": "./src/product.ts",
+    "./order-management": "./src/order-management.ts",
+    "./limits": "./src/limits.ts",
+    "./product-mockup-geometry": "./src/product-mockup-geometry.js",
+    "./product-projection": "./src/product-projection.ts",
+    "./story-video-grants": "./src/story-video-grants.js",
+    "./diagnostics": "./src/diagnostics.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "check": "bun run lint && bun run typecheck",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform": "0.97.1",
+    "effect": "3.22.1"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "typescript": "^5"
+  }
+}

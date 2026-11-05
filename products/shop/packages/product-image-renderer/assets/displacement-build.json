@@ -1,0 +1,9 @@
+{
+  "compiler": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "files": {
+    "wasm/Cargo.toml": "a0d2f69cdc6ebbe7bba5fa92284a5023766b34a0d61bddf7f57c0818d03e448f",
+    "wasm/Cargo.lock": "e477ccd016b626dbdaae99408e98044db8ff3f1fbda43cc23b6ea349fa6ebfcc",
+    "wasm/src/lib.rs": "08c4d711c69c6428e66745c1abcca58111ab521724079a063cf3bbe0c73af4a1",
+    "assets/displacement.wasm": "80fb4b4250a32ad0f6bfe9476effbc8a53cafade17a9ee28a09228ce548c933a"
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "kind": "character",
+  "id": "pearl",
+  "displayName": "Pearl",
+  "footprint": {
+    "width": 2,
+    "depth": 3
+  },
+  "palette": "apartment-hotel-v1",
+  "animations": {
+    "idle": {
+      "north": {
+        "source": "assets/approved/pearl/pearl-idle-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/pearl/pearl-idle-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/pearl/pearl-idle-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/pearl/pearl-idle-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "walk": {
+      "north": {
+        "source": "assets/approved/pearl/pearl-walk-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/pearl/pearl-walk-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/pearl/pearl-walk-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/pearl/pearl-walk-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "sit": {
+      "north": {
+        "source": "assets/approved/pearl/pearl-sit-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/pearl/pearl-sit-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/pearl/pearl-sit-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/pearl/pearl-sit-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "sleep": {
+      "north": {
+        "source": "assets/approved/pearl/pearl-sleep-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/pearl/pearl-sleep-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/pearl/pearl-sleep-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/pearl/pearl-sleep-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    },
+    "groom": {
+      "north": {
+        "source": "assets/approved/pearl/pearl-groom-north.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "east": {
+        "source": "assets/approved/pearl/pearl-groom-east.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "south": {
+        "source": "assets/approved/pearl/pearl-groom-south.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      },
+      "west": {
+        "source": "assets/approved/pearl/pearl-groom-west.png",
+        "anchor": {
+          "x": 120,
+          "y": 180
+        },
+        "frameWidth": 240,
+        "frameHeight": 240,
+        "frameCount": 2,
+        "framesPerSecond": 4
+      }
+    }
+  }
+}

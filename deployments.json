@@ -1,0 +1,79 @@
+{
+  "applications": [
+    {
+      "name": "www",
+      "domains": [
+        "www.bent.build",
+        "bent.build"
+      ],
+      "directory": "apps/www",
+      "platform": "vercel",
+      "project": "bent.build"
+    },
+    {
+      "name": "jp",
+      "domains": [
+        "jp.bent.build"
+      ],
+      "directory": "apps/jp",
+      "platform": "cloudflare",
+      "project": "jp-bent-build"
+    },
+    {
+      "name": "stay",
+      "domains": [
+        "stay.bent.build"
+      ],
+      "directory": "apps/stay",
+      "platform": "vercel",
+      "project": "apartment-guide"
+    },
+    {
+      "name": "shop",
+      "domains": [
+        "shop.bent.build"
+      ],
+      "directory": "products/shop/apps/web",
+      "platform": "vercel-cloudflare-aws",
+      "project": "forever-tee-web"
+    },
+    {
+      "name": "toolbar",
+      "domains": [
+        "toolbar.bent.build"
+      ],
+      "directory": "apps/toolbar",
+      "platform": "vercel-cloudflare",
+      "project": "feedback-toolbar"
+    },
+    {
+      "name": "collage",
+      "domains": [
+        "maya-collage.bent.build",
+        "maya-collages.bent.build"
+      ],
+      "directory": "apps/collage",
+      "platform": "vercel",
+      "project": "maya-collage"
+    },
+    {
+      "name": "drive",
+      "domains": [
+        "drive.bent.build",
+        "tesla.bent.build"
+      ],
+      "directory": "products/drive/apps/web",
+      "platform": "vercel",
+      "project": "tesla-bridge"
+    },
+    {
+      "name": "home",
+      "domains": [
+        "home.bent.build"
+      ],
+      "directory": "apps/home",
+      "platform": "cloudflare",
+      "project": "home-bent-build"
+    }
+  ]
+}

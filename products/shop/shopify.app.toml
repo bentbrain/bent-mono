@@ -1,0 +1,22 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "{{SHOP:resource_e83e1f2c1a53}}"
+name = "bent.shop Worker"
+application_url = "https://shop.bent.build"
+embedded = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid"]
+uri = "https://forever-tee-api.socialqueue.workers.dev/v2/webhooks/shopify/orders-paid"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_merchant_managed_fulfillment_orders,read_orders,write_orders,read_products,write_merchant_managed_fulfillment_orders"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ ]

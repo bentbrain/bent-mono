@@ -1,0 +1,36 @@
+{
+  "name": "@tesla-bridge/mcp-server",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild src/stdio.ts src/http.ts src/setup.ts --bundle --platform=node --format=esm --outdir=dist --out-extension:.js=.mjs",
+    "check": "tsc --noEmit",
+    "lint": "eslint . --cache --cache-strategy content --cache-location .cache/.eslintcache --max-warnings=0",
+    "test": "tsx --test src/**/*.test.ts",
+    "setup:register": "node dist/setup.mjs register",
+    "setup:authorize": "node dist/setup.mjs authorize-url",
+    "setup:exchange": "node dist/setup.mjs exchange-code",
+    "setup:check": "node dist/setup.mjs check",
+    "start:http": "node --env-file-if-exists=.env --import tsx src/http.ts",
+    "start:stdio": "node --env-file-if-exists=.env --import tsx src/stdio.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bent-build/tesla-contracts": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@bent-build/eslint-config": "workspace:*",
+    "@bent-build/tsconfig": "workspace:*",
+    "@types/node": "24.19.2",
+    "eslint": "9.39.5",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,19 @@
+---
+import type { PortableTextCodeBlock } from 'emdash';
+
+interface Props {
+  node: PortableTextCodeBlock;
+}
+const { node } = Astro.props;
+---
+
+{node.filename && (
+  <div class="border border-b-0 bg-muted px-4 py-2 text-xs wrap-anywhere">
+    {node.filename}
+  </div>
+)}
+<pre
+  tabindex="0"
+  role="region"
+  aria-label={node.filename ? `code: ${node.filename}` : 'code block'}
+><code class={node.language ? `language-${node.language}` : undefined}>{node.code}</code></pre>

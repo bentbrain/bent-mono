@@ -1,0 +1,36 @@
+body, .body { background: #ffffff; }
+body, table, td, p, a, span, h1, h2, h3, h4, strong, del { font-family: 'Courier New', Courier, monospace !important; }
+h1, h2, h3, h4, p, td, span, strong, del { color: #0647ff; }
+a, a:hover, a:active, a:visited { color: #0647ff; }
+h1, h2 { font-weight: 700; }
+h2 { font-size: 20px !important; line-height: 1.45; margin: 0 0 20px !important; }
+h3 { font-size: 17px; margin-bottom: 24px; }
+h4 { font-size: 15px; line-height: 1.5; }
+p { font-size: 15px; line-height: 1.65; margin: 0 0 20px; }
+.bent-brand, .bent-brand a, .shop-name__text, .shop-name__cell a { color: #0647ff; font-size: 16px !important; line-height: 20px; font-weight: 700; margin: 0; }
+.bent-brand img { display: block; margin: 0; }
+.bent-brand td { vertical-align: middle !important; }
+.header { border-bottom: 1px solid #0647ff; margin: 0 !important; }
+.header__cell { padding: 28px 0 !important; }
+.content__cell { padding: 32px 0 !important; }
+.section__cell { padding-top: 32px; padding-bottom: 32px; }
+.section__cell, .footer__cell { border-top-color: #0647ff; }
+.button__cell, .actions-buttons .button__cell--primary { background: #0647ff !important; border: 1px solid #0647ff; border-radius: 0 !important; }
+.button__text, .button__text:visited, .button__text span { color: #ffffff !important; font-size: 14px; font-weight: 700; }
+.button, .actions-buttons, .order-list__product-image, .order-list__no-product-image { border-radius: 0 !important; box-shadow: none !important; }
+.order-list__item-title, .order-list__item-variant, .order-list__item-price, .subtotal-line__title, .subtotal-line__value, .customer-info__item-content, .disclaimer__subtext, .order-number__text { color: #0647ff; }
+.order-list__product-image { border: 1px solid #0647ff; }
+.order-list__item__cell { padding-top: 20px; padding-bottom: 20px; }
+.order-number__text { font-size: 12px; }
+.footer p { font-size: 13px; line-height: 1.6; }
+.order-list__item__cell > table { width: 100%; }
+.order-list__product-description-cell { width: 100%; }
+.order-list__price-cell { text-align: right; white-space: nowrap; padding-left: 16px; }
+.header .row td { vertical-align: middle !important; }
+.header .shop-name__cell { display: table-cell !important; padding-right: 16px; }
+.header .order-number__cell, .header .po-number__cell { display: table-cell !important; margin-top: 0 !important; text-align: right !important; }
+.header .order-po-number__container { margin: 0 0 0 auto !important; }
+.header .order-number__text { display: block; line-height: 20px; white-space: nowrap; }
+body, table, td, p, a, span, div, h1, h2, h3, h4, strong, b, del, s, small, em, li, font { color: #0647ff !important; }
+h1, h2, h3, h4, .giftcard__title { font-weight: 700 !important; }
+.button__cell a, .button__cell a:visited, .button__cell a:hover, .button__cell a:active, .button__cell span, .button__cell strong, .button__text, .button__text span { color: #ffffff !important; }

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "bath-shower",
+  "displayName": "Frameless shower",
+  "footprint": {
+    "width": 4,
+    "depth": 7
+  },
+  "heightPixels": 132,
+  "palette": "apartment-fixtures-v2",
+  "views": {
+    "north": {
+      "source": "assets/approved/bath-shower/bath-shower-idle-north.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "east": {
+      "source": "assets/approved/bath-shower/bath-shower-idle-east.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "south": {
+      "source": "assets/approved/bath-shower/bath-shower-idle-south.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    "west": {
+      "source": "assets/approved/bath-shower/bath-shower-idle-west.png",
+      "width": 240,
+      "height": 240,
+      "anchor": {
+        "x": 120,
+        "y": 180
+      }
+    }
+  }
+}

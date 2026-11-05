@@ -1,0 +1,42 @@
+{
+  "name": "@bent/shop-product",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "artwork:benchmark": "node scripts/artwork-preview-benchmark.mjs",
+    "lifestyle:fetch-preview": "node scripts/lifestyle/preview.mjs",
+    "lifestyle:fetch": "node scripts/lifestyle/preview.mjs",
+    "lifestyle:render": "node scripts/lifestyle/cli.mjs",
+    "lifestyle:calibrate": "node scripts/lifestyle/calibrate.mjs",
+    "lifestyle:review": "node scripts/lifestyle/serve.mjs",
+    "check:ci": "node scripts/check-ci.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
+    "test:pipeline": "node --import ./scripts/test-protected-config.mjs --test scripts/*.test.mjs",
+    "dev:api": "node scripts/task-runtime.mjs run dev --filter=@forever-tee/api",
+    "knip": "knip",
+    "test:e2e:local": "bun run --filter @forever-tee/web test:e2e:local",
+    "test:e2e:ci": "node scripts/check-browser.mjs",
+    "release:status": "node scripts/release-status.mjs",
+    "release:coordinate": "node scripts/release-coordinator.mjs",
+    "release:promotion-input": "node scripts/release-promotion-input.mjs",
+    "release:measurements": "node scripts/release-measurements.mjs",
+    "actions:usage": "node scripts/actions-usage.mjs",
+    "actions:cache": "node scripts/actions-cache.mjs",
+    "shop:build": "node scripts/task-runtime.mjs run build",
+    "shop:check": "bun run knip && bun run test:pipeline && node scripts/task-runtime.mjs run test lint typecheck types:check build --summarize",
+    "shop:dev": "node scripts/task-runtime.mjs run dev --filter=@forever-tee/web",
+    "shop:lint": "node scripts/task-runtime.mjs run lint",
+    "shop:typecheck": "node scripts/task-runtime.mjs run typecheck"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "knip": "^6.33.0",
+    "sharp": "0.35.5",
+    "turbo": "2.9.14",
+    "typescript": "^5",
+    "typescript-eslint": "^8"
+  }
+}

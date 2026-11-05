@@ -1,0 +1,154 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.782083972222, 35.6778655833333]
+      },
+      "properties": {
+        "annoCtg": 110,
+        "kana": "ちゅうおうく",
+        "dspPos": "LC",
+        "name": "Chuo City",
+        "knj": "中央区",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "roma": "Chuo Ku",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.774376565278, 35.6993166463889]
+      },
+      "properties": {
+        "kana": "あきはばらえき",
+        "dspPos": "LC",
+        "name": "Akihabara Sta.",
+        "knj": "秋葉原駅",
+        "ftCode": 2930,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.770822688611, 35.6917875463889]
+      },
+      "properties": {
+        "kana": "かんだえき",
+        "dspPos": "LC",
+        "name": "Kanda Sta.",
+        "knj": "神田駅",
+        "ftCode": 2930,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.765030841944, 35.6996088033333]
+      },
+      "properties": {
+        "kana": "おちゃのみずえき",
+        "dspPos": "LC",
+        "name": "Ochanomizu Sta.",
+        "knj": "御茶ノ水駅",
+        "ftCode": 2930,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.765343009722, 35.6816380502778]
+      },
+      "properties": {
+        "kana": "とうきょうえき",
+        "dspPos": "RC",
+        "name": "Tokyo Sta.",
+        "knj": "東京駅",
+        "ftCode": 2930,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.775299527778, 35.6934393333333]
+      },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "1",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [139.7883675, 35.682813] },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "6",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.773065833333, 35.6841755555556]
+      },
+      "properties": {
+        "ftCode": 2903,
+        "arrngAgl": 0,
+        "uRNo": "C1",
+        "dspPos": "CC",
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.75265464, 35.70781836]
+      },
+      "properties": {
+        "kana": "ぶんきょうく",
+        "ftCode": 3205,
+        "knj": "文京区役所",
+        "roma": "Bunkyo Ku",
+        "name": "Bunkyo City"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.75361483, 35.69388883]
+      },
+      "properties": {
+        "kana": "ちよだく",
+        "ftCode": 3205,
+        "knj": "千代田区役所",
+        "roma": "Chiyoda Ku",
+        "name": "Chiyoda City"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+name: Build isolated story renderer benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build isolated images or measure deployed development latency
+        type: choice
+        default: images
+        options: [images, latency, readiness]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: inputs.mode == 'images'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Authenticate with short-lived registry credentials
+        env:
+          REGISTRY_USERNAME: ${{ secrets.STORY_BENCHMARK_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.STORY_BENCHMARK_REGISTRY_PASSWORD }}
+        run: |
+          printf '%s' "$REGISTRY_PASSWORD" | docker login registry.cloudflare.com --username "$REGISTRY_USERNAME" --password-stdin
+      - name: Build and push benchmark image
+        env:
+          REGISTRY: registry.cloudflare.com/{{SHOP:cloudflareAccountId}}
+        run: |
+          for canvas_version in 0.1.80 1.0.8; do
+            image="$REGISTRY/story-renderer-benchmark:$GITHUB_SHA-canvas-$canvas_version"
+            docker build --build-arg "CANVAS_VERSION=$canvas_version" --file workers/video-renderer/benchmarks/Dockerfile --tag "$image" workers/video-renderer
+            docker push "$image"
+            docker image inspect "$image" --format '{{json .RepoDigests}}' >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Remove registry login
+        if: always()
+        run: docker logout registry.cloudflare.com
+
+  latency:
+    if: inputs.mode != 'images'
+    uses: ./.github/workflows/story-video-latency.yml
+    with:
+      family_only: ${{ inputs.mode == 'readiness' }}
+    secrets: inherit

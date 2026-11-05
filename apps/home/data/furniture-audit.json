@@ -1,0 +1,737 @@
+[
+  {
+    "id": "dyvlinge",
+    "name": "DYVLINGE",
+    "w": 0.63,
+    "d": 0.75,
+    "h": 0.68,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "orange",
+        "name": "Kelinge orange",
+        "color": "#cf6037"
+      },
+      {
+        "id": "green",
+        "name": "Green",
+        "color": "#77816b"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#303330"
+      }
+    ],
+    "supportHeight": 0.43
+  },
+  {
+    "id": "teak-sideboard",
+    "name": "Large mid-century teak sideboard",
+    "w": 1.815,
+    "d": 0.425,
+    "h": 0.79,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "teak",
+        "name": "Teak",
+        "color": "#a86736"
+      }
+    ],
+    "supportHeight": 0.79
+  },
+  {
+    "id": "perjohan",
+    "name": "PERJOHAN",
+    "w": 1,
+    "d": 0.28,
+    "h": 0.45,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "natural",
+        "name": "Natural pine",
+        "color": "#cfac76"
+      },
+      {
+        "id": "white",
+        "name": "Painted white",
+        "color": "#efeee6"
+      },
+      {
+        "id": "dark",
+        "name": "Dark timber",
+        "color": "#675141"
+      }
+    ],
+    "supportHeight": 0.45
+  },
+  {
+    "id": "byakorre",
+    "name": "BYAKORRE",
+    "w": 1.7,
+    "d": 0.32,
+    "h": 1.57,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White shelves",
+        "color": "#e9e9df"
+      },
+      {
+        "id": "black",
+        "name": "Black shelves",
+        "color": "#292c2a"
+      }
+    ],
+    "supportHeight": 1.39
+  },
+  {
+    "id": "kirribilli",
+    "name": "Kirribilli queen bed",
+    "w": 1.56,
+    "d": 2.12,
+    "h": 0.96,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "ash",
+        "name": "Warm ash",
+        "color": "#c4a779"
+      },
+      {
+        "id": "dark",
+        "name": "Dark ash",
+        "color": "#695644"
+      }
+    ],
+    "supportHeight": 0.64
+  },
+  {
+    "id": "checker-rug",
+    "name": "Checker rug",
+    "w": 2,
+    "d": 3,
+    "h": 0.01,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "rug",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "chocolate",
+        "name": "Chocolate / ivory",
+        "color": "#624538"
+      },
+      {
+        "id": "forest",
+        "name": "Forest / ivory",
+        "color": "#556951"
+      },
+      {
+        "id": "russet",
+        "name": "Russet / ivory",
+        "color": "#a6583c"
+      }
+    ]
+  },
+  {
+    "id": "fireside",
+    "name": "Fireside three-seater",
+    "w": 1.8,
+    "d": 1,
+    "h": 0.7,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "sunflower",
+        "name": "Sunflower microsuede",
+        "color": "#c9984d"
+      },
+      {
+        "id": "cream",
+        "name": "Cream upholstery",
+        "color": "#dfd3b8"
+      },
+      {
+        "id": "olive",
+        "name": "Olive upholstery",
+        "color": "#74805a"
+      },
+      {
+        "id": "rust",
+        "name": "Rust upholstery",
+        "color": "#a75235"
+      }
+    ],
+    "supportHeight": 0.36
+  },
+  {
+    "id": "docksta",
+    "name": "DOCKSTA",
+    "w": 1.03,
+    "d": 1.03,
+    "h": 0.75,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      }
+    ],
+    "supportHeight": 0.75,
+    "supportShape": "round"
+  },
+  {
+    "id": "rimforsa",
+    "name": "RIMFORSA",
+    "w": 1.2,
+    "d": 0.635,
+    "h": 0.92,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [],
+    "supportHeight": 0.92
+  },
+  {
+    "id": "blasverk",
+    "name": "BLÅSVERK",
+    "w": 0.19,
+    "d": 0.19,
+    "h": 0.36,
+    "category": "Lighting",
+    "approximate": false,
+    "placement": "small",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "red",
+        "name": "Red",
+        "color": "#bf4333"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#e7bf3c"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#efeee6"
+      }
+    ],
+    "emitter": 0.285,
+    "contactShape": "round",
+    "baseW": 0.16,
+    "baseD": 0.16
+  },
+  {
+    "id": "dejsa",
+    "name": "DEJSA",
+    "w": 0.26,
+    "d": 0.26,
+    "h": 0.28,
+    "category": "Lighting",
+    "approximate": false,
+    "placement": "small",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige glass",
+        "color": "#c9beab"
+      }
+    ],
+    "emitter": 0.21,
+    "contactShape": "round",
+    "baseW": 0.13,
+    "baseD": 0.13
+  },
+  {
+    "id": "era300",
+    "name": "Sonos Era 300",
+    "w": 0.26,
+    "d": 0.185,
+    "h": 0.16,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "small",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#e7e6df"
+      }
+    ]
+  },
+  {
+    "id": "era300-stand",
+    "name": "Era 300 + floor stand",
+    "w": 0.32,
+    "d": 0.32,
+    "h": 1.116,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#e7e6df"
+      }
+    ]
+  },
+  {
+    "id": "arc-ultra",
+    "name": "Sonos Arc Ultra",
+    "w": 1.178,
+    "d": 0.1106,
+    "h": 0.075,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "wall",
+    "defaultElevation": 0.8,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#e7e6df"
+      }
+    ]
+  },
+  {
+    "id": "sub4",
+    "name": "Sonos Sub 4",
+    "w": 0.402,
+    "d": 0.158,
+    "h": 0.389,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#e7e6df"
+      }
+    ]
+  },
+  {
+    "id": "lg-g4",
+    "name": "LG G4 · 55-inch",
+    "w": 1.222,
+    "d": 0.0272,
+    "h": 0.703,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "wall",
+    "defaultElevation": 0.95,
+    "finishes": []
+  },
+  {
+    "id": "totem",
+    "name": "Totem Max 60 L",
+    "w": 0.39,
+    "d": 0.366,
+    "h": 0.814,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "stone",
+        "name": "Stone",
+        "color": "#c6c3b5"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#313431"
+      },
+      {
+        "id": "steel",
+        "name": "Steel",
+        "color": "#aab0ac"
+      }
+    ]
+  },
+  {
+    "id": "casalino",
+    "name": "Casalino armchair",
+    "w": 0.57,
+    "d": 0.54,
+    "h": 0.72,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.43
+  },
+  {
+    "id": "stoppino-small",
+    "name": "Stoppino table · small",
+    "w": 0.47,
+    "d": 0.47,
+    "h": 0.32,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.294,
+    "supportShape": "round"
+  },
+  {
+    "id": "stoppino-medium",
+    "name": "Stoppino table · medium",
+    "w": 0.47,
+    "d": 0.47,
+    "h": 0.37,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.344,
+    "supportShape": "round"
+  },
+  {
+    "id": "stoppino-large",
+    "name": "Stoppino table · large",
+    "w": 0.47,
+    "d": 0.47,
+    "h": 0.42,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.394,
+    "supportShape": "round"
+  },
+  {
+    "id": "kd27",
+    "name": "KD27",
+    "w": 0.25,
+    "d": 0.25,
+    "h": 0.24,
+    "category": "Lighting",
+    "approximate": true,
+    "placement": "small",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "emitter": 0.155,
+    "contactShape": "round"
+  },
+  {
+    "id": "magazine-rack",
+    "name": "Kartell magazine rack",
+    "w": 0.4,
+    "d": 0.185,
+    "h": 0.4,
+    "category": "Furniture",
+    "approximate": false,
+    "placement": "small",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "clear",
+        "name": "Clear polycarbonate",
+        "color": "#d6e8e6"
+      },
+      {
+        "id": "amber",
+        "name": "Amber",
+        "color": "#ac5429"
+      }
+    ]
+  },
+  {
+    "id": "gullsudare",
+    "name": "GULLSUDARE",
+    "w": 0.7,
+    "d": 0.7,
+    "h": 0.7,
+    "category": "Lighting",
+    "approximate": true,
+    "placement": "ceiling",
+    "defaultElevation": 1.7,
+    "emitter": 0.35,
+    "finishes": []
+  },
+  {
+    "id": "downlight",
+    "name": "Ceiling downlight",
+    "w": 0.105,
+    "d": 0.105,
+    "h": 0.025,
+    "category": "Lighting",
+    "approximate": true,
+    "placement": "downlight",
+    "defaultElevation": 2.675,
+    "emitter": -0.008,
+    "finishes": [
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ]
+  },
+  {
+    "id": "componibili",
+    "name": "Componibili on castors",
+    "w": 0.42,
+    "d": 0.42,
+    "h": 0.69,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.6699999999999999,
+    "supportShape": "round"
+  },
+  {
+    "id": "giano",
+    "name": "Giano side table",
+    "w": 0.39,
+    "d": 0.39,
+    "h": 0.4,
+    "category": "Furniture",
+    "approximate": true,
+    "placement": "floor",
+    "defaultElevation": 0,
+    "finishes": [
+      {
+        "id": "beige",
+        "name": "Beige",
+        "color": "#dfd4b8"
+      },
+      {
+        "id": "white",
+        "name": "White",
+        "color": "#f2f1e8"
+      },
+      {
+        "id": "yellow",
+        "name": "Yellow",
+        "color": "#eac542"
+      },
+      {
+        "id": "orange",
+        "name": "Orange",
+        "color": "#ce5825"
+      },
+      {
+        "id": "black",
+        "name": "Black",
+        "color": "#242625"
+      }
+    ],
+    "supportHeight": 0.392,
+    "supportShape": "round"
+  }
+]

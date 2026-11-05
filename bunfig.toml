@@ -1,0 +1,5 @@
+[install]
+linker = "hoisted"
+minimumReleaseAge = 86400
+# These names are constrained to exact, source-lock-approved versions in root overrides.
+minimumReleaseAgeExcludes = ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner", "@tanstack/react-query", "geist", "posthog-js"]

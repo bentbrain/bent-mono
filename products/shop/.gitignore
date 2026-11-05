@@ -1,0 +1,64 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+**/node_modules/
+**/dist/
+**/.wrangler/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+**/playwright-report/
+**/test-results/
+
+# next.js
+**/.next/
+**/.open-next/
+**/.turbo/
+/out/
+
+# production
+/build
+/.data/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+/.pnpm-store/
+
+# env files (can opt-in for committing if needed)
+.env*
+!**/.env.example
+**/.dev.vars
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+storefront-graphql-env.d.ts
+customer-account-graphql-env.d.ts
+
+# Custom video exports
+/featured-video-output/
+
+# Private launch repair plans and receipts
+/launch-data-repair-output/

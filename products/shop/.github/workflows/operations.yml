@@ -1,0 +1,85 @@
+name: Operate bent.shop
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment and Worker target
+        required: true
+        type: choice
+        options:
+          - development
+          - production
+      action:
+        description: Operation to run
+        required: true
+        type: choice
+        options:
+          - read-sales-status
+          - pause-sales
+          - refresh-catalogue
+          - refresh-print-assets
+          - refresh-variant-mapping
+          - resume-sales
+      reason:
+        description: Required for pause-sales and resume-sales
+        required: false
+        type: string
+      configured_product_id:
+        description: Optional configured product UUID for refresh-print-assets
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operations-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    env:
+      ACTION: ${{ inputs.action }}
+      BENT_SHIRT_OPERATIONS_SECRET: ${{ secrets.BENT_SHIRT_OPERATIONS_SECRET }}
+      CONFIGURED_PRODUCT_ID: ${{ inputs.configured_product_id }}
+      FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+      REASON: ${{ inputs.reason }}
+      WORKER_URL: ${{ vars.WORKER_URL }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Require main for Production
+        if: inputs.environment == 'production'
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Validate operation configuration
+        run: |
+          test -n "$BENT_SHIRT_OPERATIONS_SECRET"
+          test -n "$FOREVER_TEE_API_SHARED_SECRET"
+          case "$WORKER_URL" in
+            https://*) ;;
+            *)
+              echo "WORKER_URL must be an HTTPS URL." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$ACTION" = "pause-sales" ] || [ "$ACTION" = "resume-sales" ]; then
+            test -n "$REASON"
+          fi
+          if [ -n "$CONFIGURED_PRODUCT_ID" ]; then
+            [[ "$CONFIGURED_PRODUCT_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
+            test "$ACTION" = "refresh-print-assets"
+          fi
+      - name: Install pnpm
+        uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install operations dependencies
+        run: bun install --frozen-lockfile --filter @forever-tee/api...
+      - name: Run operation
+        run: bun run --filter @forever-tee/api exec node scripts/run-operations.mjs "$ACTION" "$REASON" "$CONFIGURED_PRODUCT_ID"

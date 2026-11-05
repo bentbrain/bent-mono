@@ -1,0 +1,21 @@
+{
+  "name": "@bent/drive-product",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "drive:build": "turbo run build",
+    "drive:check": "turbo run check",
+    "drive:dev": "turbo run dev --filter=@bent-build/drive-copilot-web",
+    "drive:lint": "turbo run lint",
+    "drive:test": "turbo run test",
+    "knip": "knip"
+  },
+  "devDependencies": {
+    "knip": "6.44.1",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "@types/node": "24.19.2"
+  }
+}

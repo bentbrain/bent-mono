@@ -1,0 +1,60 @@
+{
+  "name": "@bent/home",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build && bun scripts/compress_public_models.ts",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --preload ./tests/environment.ts packages app",
+    "check": "bun run typecheck && bun run lint && bun run test && bun run test:integration && bun run build",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern recovered --ignore-pattern dist-card",
+    "asset:validate:furniture": "bun .agents/skills/design-pixel-furniture/scripts/validate_manifest.ts",
+    "asset:validate:character": "bun .agents/skills/design-pixel-character/scripts/validate_manifest.ts",
+    "build:card": "vite build --config vite.card.config.ts",
+    "deploy:public": "bun run build && wrangler deploy --config dist/server/wrangler.json",
+    "release:both": "python3 scripts/release_both.py",
+    "test:touch": "bun scripts/check_touch_performance.mjs",
+    "test:sliders": "bun scripts/check_slider_performance.mjs",
+    "test:full-lighting": "bun scripts/check_full_lighting.mjs",
+    "test:graphics": "bun scripts/check_graphics_recovery.mjs && bun scripts/check_context_recovery.mjs && bun scripts/check_recovery_limits.mjs",
+    "test:integration": "python3 -m unittest discover -s tests",
+    "test:worker": "node scripts/test-worker.mjs"
+  },
+  "dependencies": {
+    "@apartment-hotel/asset-contracts": "workspace:*",
+    "@apartment-hotel/scene-engine": "workspace:*",
+    "@babylonjs/core": "^9.25.0",
+    "@babylonjs/loaders": "^9.25.0",
+    "lucide-react": "^1.44.0",
+    "next": "16.4.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "suncalc": "^2.0.2",
+    "@bent/design-tokens": "workspace:*",
+    "@apartment-hotel/home-assistant": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@napi-rs/canvas": "^1.0.8",
+    "@types/bun": "1.3.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.4.4",
+    "playwright": "1.63.0",
+    "react-server-dom-webpack": "19.3.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.1.6",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

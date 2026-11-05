@@ -1,0 +1,55 @@
+---
+import {
+  displayPreviewReference,
+  responsiveImage,
+} from '../lib/responsive-image';
+import { tripMap } from '../lib/map';
+import { mediaUrl, posterUrl, type TripMedia } from '../lib/model';
+interface Props {
+  media: TripMedia[];
+}
+const { media } = Astro.props;
+const { projectMedia, land, references, projection } = tripMap(media);
+import { JapanMapView } from './JapanMapView';
+const points = media.flatMap((item) => {
+  const point = projectMedia(item);
+  if (!point) return [];
+  const [x = 0, y = 0] = point;
+  return [
+    {
+      x,
+      y,
+      id: item.id,
+      slug: item.slug,
+      title: item.title,
+      place: item.place,
+      kind: item.kind,
+      src: mediaUrl(item),
+      poster: posterUrl(item),
+      photo:
+        Astro.locals.privateMediaRender || item.kind === 'video'
+          ? { src: posterUrl(item) }
+          : responsiveImage(
+              posterUrl(item),
+              '(min-width: 672px) 614px, calc(100vw - 58px)',
+            ),
+      photoResolution:
+        !Astro.locals.privateMediaRender &&
+        item.kind === 'photo' &&
+        displayPreviewReference(posterUrl(item))
+          ? `/map-photo/${item.id}/${displayPreviewReference(posterUrl(item)) || ''}`
+          : undefined,
+    },
+  ];
+});
+---
+
+<JapanMapView
+  land={land || ''}
+  points={points}
+  references={references}
+  projection={
+    Astro.locals.privateMediaRender || !points.length ? undefined : projection
+  }
+  client:load
+/>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <title>{{ email_title }}</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width">
+  <link rel="stylesheet" type="text/css" href="/assets/notifications/styles.css">
+  <style>
+    .button__cell { background: {{ shop.email_accent_color }}; }
+    .actions-buttons .button__cell--primary { background-color: {{ shop.email_accent_color }}; }
+    a, a:hover, a:active, a:visited { color: {{ shop.email_accent_color }}; }
+  </style>
+</head>
+
+  <body>
+    <table align="center" class="body">
+      <tr>
+        <td class="empty-line">&nbsp;</td>
+      </tr>
+      <tr>
+        <td class="empty-line">&nbsp;</td>
+      </tr>
+      <tr>
+        <td>
+          <table class="row content">
+  <tr>
+    <td class="content__cell">
+      <center>
+        <table class="container">
+          <tr>
+            <td>
+              
+            {% if shop.email_logo_url %}
+              <table align="center" class="store_credit__topmargin">
+                <tr>
+                  <td>
+                    <img src="{{shop.email_logo_url}}" alt="{{ shop.name }}" class="store_credit__logosize" width="{{ shop.email_logo_width }}">
+                  </td>
+                </tr>
+              </table>
+            {% endif %}
+
+            <table align="center" class="row store_credit__topmargin">
+              <tr>
+                <td class="store_credit__message">
+                  <h2 class="store_credit__bottom_margin">{{ issued_store_credit.amount | money_with_currency }}</h2>
+                </td>
+              </tr>
+              {% if issued_store_credit.expires_at %}
+                <tr>
+                  <td class="store_credit__smalltext store_credit__expiry_date">
+                    Expires {{ issued_store_credit.expires_at | date: format: 'date_at_time_with_zone' }}
+                  </td>
+                </tr>
+              {% endif %}
+              <tr>
+                <td class="store_credit__message store_credit__top_padding">
+                    {% if company_location %}
+                      This has been automatically added to {{ company_location.company.name}} - {{ company_location.name }}'s account. The store credit balance is now {{ issued_store_credit.balance_after_transaction | money_with_currency }}.
+                    {% else %}
+                      This has been automatically added to your account. Your store credit balance is now {{ issued_store_credit.balance_after_transaction | money_with_currency }}.
+                    {% endif %}
+                </td>
+              </tr>
+            </table>
+
+            <table class="button store_credit__visit_online_store" align="center">
+              <tr>
+                <td class="button__cell"><a href="{{ shop.url }}" class="button__text">Visit online store</a></td>
+              </tr>
+            </table>
+
+            <table align="center">
+              <tr>
+                <td align="center" class="link__cell">
+                  <a href="{{ routes.account_profile_url }}" class="link__text">View store credit</a>
+                </td>
+              </tr>
+            </table>
+
+            </td>
+          </tr>
+        </table>
+      </center>
+    </td>
+  </tr>
+</table>
+          <table class="row footer">
+  <tr>
+    <td class="footer__cell">
+      <center>
+        <table class="container">
+          <tr>
+            <td>
+              
+              <p class="disclaimer__subtext">If you have any questions, reply to this email or contact us at <a href="mailto:{{ shop.email }}">{{ shop.email }}</a>.<!-- shopify-shop-marketplace-footer --></p>
+            </td>
+          </tr>
+        </table>
+      </center>
+    </td>
+  </tr>
+</table>
+
+<img src="{{ 'notifications/spacer.png' | shopify_asset_url }}" class="spacer" height="1" />
+
+        </td>
+      </tr>
+    </table>
+  </body>
+</html> 

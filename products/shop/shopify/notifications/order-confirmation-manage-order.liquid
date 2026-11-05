@@ -1,0 +1,31 @@
+{% comment %}
+Insert after the existing confirmation introduction. Do not expose private
+order attributes elsewhere. This snippet does not replace totals or policies.
+The matching Worker verifies these same successful transaction timestamps.
+{% endcomment %}
+{% assign bent_paid_at = 0 %}
+{% assign bent_paid_total = 0 %}
+{% for transaction in transactions %}
+  {% if transaction.status == 'success' %}
+    {% if transaction.kind == 'sale' or transaction.kind == 'capture' %}
+      {% assign bent_paid_total = bent_paid_total | plus: transaction.amount %}
+      {% if transaction.amount > 0 %}
+        {% assign bent_transaction_at = transaction.created_at | date: '%s' | plus: 0 %}
+        {% if bent_transaction_at > bent_paid_at %}
+          {% assign bent_paid_at = bent_transaction_at %}
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+{% assign bent_capability = attributes['_orderManagementCapability'] %}
+{% if bent_capability.size == 43 and bent_paid_at > 0 and bent_paid_total == total_price and financial_status == 'paid' %}
+  {% assign bent_deadline = bent_paid_at | plus: 3600 %}
+  {% assign bent_capability_fragment = bent_capability | url_encode %}
+  {% assign bent_manage_url = 'https://shop.bent.build/manage-order#' | append: bent_capability_fragment %}
+  <p>You can correct your Australian delivery address or cancel the whole order for a full refund until <strong>{{ bent_deadline | date: '%-d %b %Y at %-I:%M %P AEST' }}</strong>.</p>
+  <p><a href="{{ bent_manage_url | escape }}">Manage order</a></p>
+  <p>Keep this private link to yourself. Address corrections do not extend the one-hour hold.</p>
+{% else %}
+  <p>For help with your delivery address or cancellation, contact <a href="mailto:support@bent.build">support@bent.build</a> with your order number.</p>
+{% endif %}

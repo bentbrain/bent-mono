@@ -1,0 +1,13 @@
+node_modules
+.astro
+.wrangler
+.emdash
+.agents
+artifacts
+review-data
+public/demo
+mockups/assets
+worker-configuration.d.ts
+emdash-env.d.ts
+pnpm-lock.yaml
+mockups

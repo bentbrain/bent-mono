@@ -1,0 +1,94 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.765343009722, 35.6816380502778]
+      },
+      "properties": {
+        "kana": "とうきょうえき",
+        "dspPos": "RC",
+        "name": "Tokyo Sta.",
+        "knj": "東京駅",
+        "ftCode": 2930,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.752569277778, 35.6752646944444]
+      },
+      "properties": {
+        "annoCtg": 210,
+        "kana": "かすみがせき",
+        "dspPos": "RC",
+        "name": "Kasumigaseki",
+        "knj": "霞が関",
+        "ftCode": 100,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.764176611111, 35.6863460277778]
+      },
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.7649325575, 35.6799268905556]
+      },
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.753086611111, 35.6916910833333]
+      },
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.754703595278, 35.6905147169444]
+      },
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.76066025, 35.6765680833333]
+      },
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.763116637778, 35.6784476069444]
+      },
+      "properties": { "ftCode": 3216 }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [139.766449003333, 35.6824142141667]
+      },
+      "properties": { "ftCode": 3216 }
+    }
+  ]
+}

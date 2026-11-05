@@ -1,0 +1,583 @@
+.playground-shell {
+  --playground-blue: #0647ff;
+  --playground-rule: #0647ff30;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 580px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.playground-shell button,
+.playground-shell input,
+.playground-shell select,
+.playground-shell summary {
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.playground-shell button,
+.playground-shell summary {
+  min-height: 38px;
+  padding: 9px 12px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.playground-shell input:not([type='checkbox']):not([type='range']):not([type='color']),
+.playground-shell select {
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.playground-shell button:focus-visible,
+.playground-shell input:focus-visible,
+.playground-shell select:focus-visible,
+.playground-shell summary:focus-visible {
+  outline: 2px solid var(--playground-blue);
+  outline-offset: 3px;
+}
+
+.playground-shell .version-bar {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 70px;
+  padding: 14px 20px;
+}
+
+.playground-shell .playground-home {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.playground-shell .version-picker {
+  width: min(240px, 28vw);
+}
+
+.playground-shell .version-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.playground-shell .version-menu,
+.playground-shell .view-options {
+  position: relative;
+}
+
+.playground-shell summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  border: 1px solid var(--playground-blue);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.playground-shell summary::-webkit-details-marker {
+  display: none;
+}
+
+.playground-shell summary::after {
+  content: '+';
+  margin-left: auto;
+}
+
+.playground-shell details[open] > summary::after {
+  content: '−';
+}
+
+.playground-shell details[open] > summary {
+  background: #f2f5ff;
+}
+
+.playground-shell .version-menu-content,
+.playground-shell .view-options-content {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  display: grid;
+  gap: 16px;
+  width: 280px;
+  padding: 20px;
+  border: 1px solid var(--playground-blue);
+  background: #fff;
+  box-shadow: 0 8px 24px #0647ff12;
+}
+
+.playground-shell .version-menu-content label,
+.playground-shell .view-options-content label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.playground-shell .version-menu-content input,
+.playground-shell .view-options-content select {
+  width: 100%;
+}
+
+.playground-shell .version-bar .version-error {
+  font-size: 12px;
+}
+
+.playground-shell > .hotel-app {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  padding: 16px 20px 20px;
+}
+
+.playground-shell .editor-layout {
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.playground-shell .workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.playground-shell .stage-toolbar {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.playground-shell .stage-toolbar > .view-options {
+  margin-left: auto;
+}
+
+.playground-shell .toolbar-primary { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.playground-shell .toolbar-primary button,.playground-shell .edit-toolbar button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+.playground-shell .workspace { overflow:visible; }
+.playground-shell .view-options { z-index:25; }
+.playground-shell .view-options-content label:has(input[type='checkbox']),.playground-shell .inspector-fields label:has(input[type='checkbox']) { flex-direction:row; align-items:center; }
+.playground-shell input[type='checkbox'] { width:16px; height:16px; accent-color:#0647ff; }
+.playground-shell .arrangement-presets { padding:0 18px 12px; }
+.playground-shell .arrangement-presets summary { border:0; padding:6px 0; font-size:11px; }
+.playground-shell .arrangement-presets > div { display:grid; gap:8px; padding:10px 0; }
+.playground-shell .arrangement-presets { order:5; }
+.playground-shell .placed-picker { order:4; padding:14px 18px; margin:0; font-size:12px; }
+.playground-shell .layout-actions { order:6; }
+.playground-shell .layout-actions > div:first-child,.playground-shell .add-sign { display:none; }
+.playground-shell .product-card:hover .product-copy strong { color:#fff; }
+.playground-shell .canvas-scroll { touch-action:none; background:#fff; }
+.playground-shell .canvas-scroll canvas { touch-action:none; }
+.playground-shell .inspector-fields:empty { display:none; }
+.playground-shell .inspector-advanced a { display:block; color:inherit; }
+
+.playground-shell .segmented {
+  gap: 0;
+}
+
+.playground-shell .segmented button {
+  min-width: 38px;
+  min-height: 36px;
+  padding: 4px 10px;
+  font-size: 20px;
+}
+
+.playground-shell .segmented span {
+  min-width: 48px;
+  font: inherit;
+}
+
+.playground-shell .toolbar-toggles {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.playground-shell .canvas-scroll {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-content: center;
+  background: #fff;
+}
+
+.playground-shell .canvas-scroll canvas {
+  cursor: default;
+}
+
+.playground-shell .canvas-scroll.is-placing canvas {
+  cursor: crosshair;
+}
+
+.playground-shell .canvas-scroll.is-moving canvas {
+  cursor: grabbing;
+}
+
+.playground-shell .edit-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--playground-rule);
+  background: #fff;
+}
+
+.playground-shell .edit-toolbar > span,
+.playground-shell .edit-toolbar > strong {
+  flex: 1;
+  min-width: 100px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.playground-shell .status-bar {
+  flex: 0 0 auto;
+  align-items: center;
+  flex-direction: row;
+  gap: 12px;
+  min-height: 36px;
+  padding: 9px 16px;
+  border-color: var(--playground-rule);
+  font-size: 11px;
+}
+
+.playground-shell .catalogue {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.playground-shell .catalogue-heading {
+  flex: 0 0 auto;
+  padding: 16px 18px 12px;
+}
+
+.playground-shell .catalogue-heading h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.playground-shell .tabs {
+  flex: 0 0 auto;
+  gap: 20px;
+  margin: 16px 18px 0;
+  border-color: var(--playground-rule);
+}
+
+.playground-shell .tabs button {
+  min-height: 38px;
+  padding: 8px 0;
+}
+
+.playground-shell .search {
+  flex: 0 0 auto;
+  min-height: 40px;
+  margin: 14px 18px;
+  padding: 0 10px;
+  gap: 8px;
+}
+
+.playground-shell .search input {
+  padding: 8px 0;
+  min-height: 38px;
+  font-size: 12px;
+}
+
+.playground-shell .catalogue-list {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  grid-auto-rows: max-content;
+  gap: 10px;
+  min-height: 160px;
+  max-height: none;
+  padding: 2px 18px 18px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.playground-shell .product-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 162px;
+  margin: 0;
+  padding: 10px;
+  gap: 8px;
+  border-color: var(--playground-rule);
+}
+
+.playground-shell .product-image {
+  width: 100%;
+  height: 96px;
+  border: 0;
+  background-color: #f6f8ff;
+  flex-shrink: 0;
+}
+
+.playground-shell .product-copy {
+  flex: 0 0 auto;
+  width: 100%;
+  gap: 0;
+}
+
+.playground-shell .product-copy strong {
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.playground-shell .playground-inspector {
+  flex: 0 0 auto;
+  padding: 18px;
+  border-bottom: 1px solid var(--playground-blue);
+  background: #fff;
+}
+
+.playground-shell .inspector-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.playground-shell .inspector-heading h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.playground-shell .inspector-heading button {
+  flex-shrink: 0;
+  min-width: 38px;
+}
+
+.playground-shell .inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.playground-shell .inspector-actions button {
+  flex: 1;
+}
+
+.playground-shell .inspector-fields {
+  display: grid;
+  gap: 16px;
+}
+
+.playground-shell .inspector-fields label,
+.playground-shell .inspector-advanced label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.playground-shell .inspector-fields input,
+.playground-shell .inspector-fields select,
+.playground-shell .inspector-advanced input,
+.playground-shell .inspector-advanced select {
+  width: 100%;
+  min-width: 0;
+}
+
+.playground-shell .inspector-fields input[type='color'] {
+  height: 38px;
+  padding: 4px;
+}
+
+.playground-shell .inspector-fields input[type='checkbox'] { width:16px; height:16px; flex:none; }
+.playground-shell .inspector-fields label:has(input[type='checkbox']) { justify-content:flex-start; }
+
+.playground-shell .inspector-advanced {
+  margin-top: 18px;
+  border-top: 1px solid var(--playground-rule);
+  padding-top: 14px;
+}
+
+.playground-shell .inspector-advanced > summary {
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+}
+
+.playground-shell .inspector-advanced > :not(summary) {
+  margin-top: 14px;
+}
+
+.playground-shell .layout-actions {
+  flex: 0 0 auto;
+  padding: 14px 18px;
+  border-color: var(--playground-rule);
+  gap: 8px;
+}
+
+.playground-shell .layout-actions button {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+@media (max-width: 1000px) and (min-width: 851px) {
+  .playground-shell .editor-layout {
+    grid-template-columns: minmax(0, 1fr) 288px;
+    gap: 12px;
+  }
+
+  .playground-shell > .hotel-app {
+    padding: 12px;
+  }
+
+  .playground-shell .version-bar {
+    gap: 12px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-width: 850px) {
+  .playground-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .playground-shell .version-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .playground-shell .playground-home {
+    margin-right: auto;
+  }
+
+  .playground-shell .version-picker {
+    width: min(220px, 50vw);
+  }
+
+  .playground-shell .version-actions {
+    display: flex;
+    margin-left: 0;
+  }
+
+  .playground-shell > .hotel-app {
+    padding: 12px;
+  }
+
+  .playground-shell .editor-layout {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .playground-shell .canvas-scroll {
+    flex: none;
+    height: clamp(260px, 48dvh, 540px);
+    min-height: 0;
+  }
+
+  .playground-shell .stage-toolbar {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .playground-shell .toolbar-primary { gap:4px; }
+  .playground-shell .toolbar-primary button { padding:8px; min-width:42px; }
+
+  .playground-shell .toolbar-toggles {
+    width: auto;
+  }
+
+  .playground-shell button,
+  .playground-shell summary {
+    min-height: 42px;
+  }
+
+  .playground-shell .catalogue-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-height: 380px;
+  }
+
+  .playground-shell .status-bar {
+    align-items: flex-start;
+    font-size: 10px;
+  }
+
+  .playground-shell .status-bar > span:last-child {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 440px) {
+  .playground-shell .version-bar {
+    gap: 10px 8px;
+  }
+
+  .playground-shell .version-actions {
+    flex: 1;
+  }
+
+  .playground-shell .version-actions button {
+    flex: 1;
+  }
+
+  .playground-shell .version-menu-content,
+  .playground-shell .view-options-content {
+    width: min(280px, calc(100vw - 56px));
+  }
+
+  .playground-shell .catalogue-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .playground-shell .edit-toolbar {
+    padding: 12px;
+  }
+
+  .playground-shell .edit-toolbar > span,
+  .playground-shell .edit-toolbar > strong {
+    flex-basis: 100%;
+  }
+}

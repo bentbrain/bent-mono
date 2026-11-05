@@ -1,0 +1,110 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.763208813333, 35.6845145558333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "丸の内（一）",
+        "name": "Marunouchi 1",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "まるのうち１ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.762721908889, 35.6841571408333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Otemachi Sta.",
+        "ftCode": 2930,
+        "knj": "大手町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "おおてまちえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.763581539722, 35.6862736791667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Otemachi Sta.",
+        "ftCode": 2930,
+        "knj": "大手町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "おおてまちえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.766097088611, 35.6865668994444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Otemachi Sta.",
+        "ftCode": 2930,
+        "knj": "大手町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "おおてまちえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.766180578611, 35.6846506705556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Otemachi Sta.",
+        "ftCode": 2930,
+        "knj": "大手町駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "おおてまちえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.764174027778, 35.6877736666667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.764176611111, 35.6863460277778],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.766858559444, 35.6867528486111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

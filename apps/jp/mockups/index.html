@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>jp.bent.build / design review</title>
+  <link rel="stylesheet" href="/review.css">
+  <script defer src="/assets/d3.min.js"></script>
+  <script defer src="/assets/topojson.min.js"></script>
+  <script defer src="/review.js"></script>
+</head>
+<body>
+  <div id="review-app">
+    <header class="review-toolbar">
+      <strong>jp.bent.build / review</strong>
+      <select id="screen" hidden aria-hidden="true">
+        <optgroup label="public"><option value="journal">journal</option><option value="post">post</option><option value="gallery">gallery</option><option value="viewer">media viewer</option></optgroup>
+        <optgroup label="owner"><option value="login">sign in</option><option value="posts">posts</option><option value="editor">post editor</option><option value="media">media manager</option><option value="export">story export</option></optgroup>
+      </select>
+      <select id="viewport" hidden aria-hidden="true"><option value="desktop">desktop</option><option value="mobile">mobile</option></select>
+      <div class="view-buttons" role="group" aria-label="Viewport"><button data-viewport="desktop" aria-pressed="true">DESKTOP</button><button data-viewport="mobile" aria-pressed="false">MOBILE</button></div>
+      <label class="check"><input id="dark" type="checkbox"> dark</label>
+      <button id="comment-mode" aria-pressed="false">COMMENT</button>
+      <button id="show-notes">NOTES <span id="note-count">0</span></button>
+    </header>
+    <nav class="review-screen-nav" aria-label="Mockup screens">
+      <div><span>public</span><button data-screen="journal" aria-pressed="true">journal</button><button data-screen="post" aria-pressed="false">post</button><button data-screen="gallery" aria-pressed="false">gallery</button><button data-screen="viewer" aria-pressed="false">media viewer</button></div>
+      <div><span>owner</span><button data-screen="login" aria-pressed="false">sign in</button><button data-screen="posts" aria-pressed="false">posts</button><button data-screen="editor" aria-pressed="false">editor</button><button data-screen="media" aria-pressed="false">media manager</button><button data-screen="export" aria-pressed="false">story export</button></div>
+    </nav>
+    <div class="review-meta"><span>r5 / sample content / simulated blog actions</span><span id="feedback-status" role="status">loading feedback…</span></div>
+    <div class="review-layout">
+      <main id="canvas" class="canvas" aria-label="Blog mockup"></main>
+      <aside id="feedback-panel" class="feedback-panel" hidden>
+        <div class="panel-heading"><strong>feedback</strong><button id="close-panel" aria-label="Close feedback">×</button></div>
+        <form id="note-form" hidden>
+          <p id="selected-label"></p>
+          <label for="comment-text">comment</label>
+          <textarea id="comment-text" maxlength="4000" required placeholder="What should change?"></textarea>
+          <button id="save-note" type="submit">SAVE FEEDBACK</button>
+          <p id="save-status" role="status"></p>
+        </form>
+        <div id="note-list"></div>
+        <button id="copy-notes">COPY FEEDBACK</button>
+        <p class="review-help">Saved locally for the agent. Tell the agent when your review is ready.</p>
+      </aside>
+    </div>
+    <div id="demo-status" role="status"></div>
+  </div>
+</body>
+</html>

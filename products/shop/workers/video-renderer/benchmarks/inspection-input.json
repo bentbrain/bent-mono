@@ -1,0 +1,119 @@
+{
+  "endpoint": "https://forever-tee-story-video-benchmark.socialqueue.workers.dev",
+  "videos": [
+    {
+      "name": "production-baseline-tee-black",
+      "key": "benchmarks/production-baseline-9868b034-8d9b-461f-9265-d1f3d20d1f78/tee-black.mp4"
+    },
+    {
+      "name": "production-baseline-tee-white",
+      "key": "benchmarks/production-baseline-9868b034-8d9b-461f-9265-d1f3d20d1f78/tee-white.mp4"
+    },
+    {
+      "name": "production-baseline-tote-black",
+      "key": "benchmarks/production-baseline-9868b034-8d9b-461f-9265-d1f3d20d1f78/tote-black.mp4"
+    },
+    {
+      "name": "production-baseline-tote-cream",
+      "key": "benchmarks/production-baseline-9868b034-8d9b-461f-9265-d1f3d20d1f78/tote-cream.mp4"
+    },
+    {
+      "name": "old-scaled-clean-tee-black",
+      "key": "benchmarks/old-scaled-clean-5dcef155-4c32-4626-842d-22d745b8c2e3/tee-black.mp4"
+    },
+    {
+      "name": "old-scaled-clean-tee-white",
+      "key": "benchmarks/old-scaled-clean-5dcef155-4c32-4626-842d-22d745b8c2e3/tee-white.mp4"
+    },
+    {
+      "name": "old-scaled-clean-tote-black",
+      "key": "benchmarks/old-scaled-clean-5dcef155-4c32-4626-842d-22d745b8c2e3/tote-black.mp4"
+    },
+    {
+      "name": "old-scaled-clean-tote-cream",
+      "key": "benchmarks/old-scaled-clean-5dcef155-4c32-4626-842d-22d745b8c2e3/tote-cream.mp4"
+    },
+    {
+      "name": "new-control-tee-white",
+      "key": "benchmarks/new-control-8a317caa-27ff-41ff-aa35-19cd963966d2/tee-white.mp4"
+    },
+    {
+      "name": "new-control-tote-black",
+      "key": "benchmarks/new-control-8a317caa-27ff-41ff-aa35-19cd963966d2/tote-black.mp4"
+    },
+    {
+      "name": "new-control-tote-cream",
+      "key": "benchmarks/new-control-8a317caa-27ff-41ff-aa35-19cd963966d2/tote-cream.mp4"
+    },
+    {
+      "name": "new-control-tee-black",
+      "key": "benchmarks/new-control-8a317caa-27ff-41ff-aa35-19cd963966d2/tee-black.mp4"
+    },
+    {
+      "name": "new-scaled-tee-black",
+      "key": "benchmarks/new-scaled-e26e9e7a-8dfd-4f49-a64e-d4b456a43b07/tee-black.mp4"
+    },
+    {
+      "name": "new-scaled-tee-white",
+      "key": "benchmarks/new-scaled-e26e9e7a-8dfd-4f49-a64e-d4b456a43b07/tee-white.mp4"
+    },
+    {
+      "name": "new-scaled-tote-black",
+      "key": "benchmarks/new-scaled-e26e9e7a-8dfd-4f49-a64e-d4b456a43b07/tote-black.mp4"
+    },
+    {
+      "name": "new-scaled-tote-cream",
+      "key": "benchmarks/new-scaled-e26e9e7a-8dfd-4f49-a64e-d4b456a43b07/tote-cream.mp4"
+    }
+  ],
+  "comparisons": [
+    {
+      "reference": "production-baseline-tee-black",
+      "candidate": "old-scaled-clean-tee-black"
+    },
+    {
+      "reference": "production-baseline-tee-white",
+      "candidate": "old-scaled-clean-tee-white"
+    },
+    {
+      "reference": "production-baseline-tote-black",
+      "candidate": "old-scaled-clean-tote-black"
+    },
+    {
+      "reference": "production-baseline-tote-cream",
+      "candidate": "old-scaled-clean-tote-cream"
+    },
+    {
+      "reference": "production-baseline-tee-white",
+      "candidate": "new-control-tee-white"
+    },
+    {
+      "reference": "production-baseline-tote-black",
+      "candidate": "new-control-tote-black"
+    },
+    {
+      "reference": "production-baseline-tote-cream",
+      "candidate": "new-control-tote-cream"
+    },
+    {
+      "reference": "production-baseline-tee-black",
+      "candidate": "new-control-tee-black"
+    },
+    {
+      "reference": "production-baseline-tee-black",
+      "candidate": "new-scaled-tee-black"
+    },
+    {
+      "reference": "production-baseline-tee-white",
+      "candidate": "new-scaled-tee-white"
+    },
+    {
+      "reference": "production-baseline-tote-black",
+      "candidate": "new-scaled-tote-black"
+    },
+    {
+      "reference": "production-baseline-tote-cream",
+      "candidate": "new-scaled-tote-cream"
+    }
+  ]
+}

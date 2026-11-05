@@ -1,0 +1,83 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.782893777778, 35.7221366111111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Asakusa",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "浅草",
+        "dspPos": "LC",
+        "kana": "あさくさ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.769181305556, 35.6635007222222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "annoCtg": 212,
+        "name": "Ginza",
+        "ftCode": 100,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "銀座",
+        "dspPos": "LC",
+        "kana": "ぎんざ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.901981987778, 35.6531099461111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "name": "Urayasu",
+        "dspPos": "RC",
+        "ftCode": 1402,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "knj": "浦安",
+        "kana": "うらやす"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.876229111111, 35.71521925],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2901,
+        "nRNo": 14,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.911824407222, 35.7067853525],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "ftCode": 2904,
+        "arrng": 1,
+        "eRNo": "E14",
+        "arrngAgl": 0
+      }
+    }
+  ]
+}

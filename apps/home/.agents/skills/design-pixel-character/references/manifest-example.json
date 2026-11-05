@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "kind": "character",
+  "id": "miso-cat",
+  "displayName": "Miso",
+  "footprint": {
+    "width": 1,
+    "depth": 1
+  },
+  "palette": "apartment-hotel-v1",
+  "animations": {
+    "idle": {
+      "north": {
+        "source": "assets/approved/miso/idle-north.png",
+        "frameWidth": 32,
+        "frameHeight": 40,
+        "frameCount": 4,
+        "framesPerSecond": 4,
+        "anchor": { "x": 16, "y": 34 }
+      },
+      "east": {
+        "source": "assets/approved/miso/idle-east.png",
+        "frameWidth": 32,
+        "frameHeight": 40,
+        "frameCount": 4,
+        "framesPerSecond": 4,
+        "anchor": { "x": 16, "y": 34 }
+      },
+      "south": {
+        "source": "assets/approved/miso/idle-south.png",
+        "frameWidth": 32,
+        "frameHeight": 40,
+        "frameCount": 4,
+        "framesPerSecond": 4,
+        "anchor": { "x": 16, "y": 34 }
+      },
+      "west": {
+        "source": "assets/approved/miso/idle-west.png",
+        "frameWidth": 32,
+        "frameHeight": 40,
+        "frameCount": 4,
+        "framesPerSecond": 4,
+        "anchor": { "x": 16, "y": 34 }
+      }
+    }
+  }
+}

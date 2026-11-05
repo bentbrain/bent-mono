@@ -1,0 +1,86 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.762633015556, 35.6812544697222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "knj": "丸の内（二）",
+        "name": "Marunouchi 2",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "まるのうち２ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.764956771667, 35.6819692086111],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.767190926389, 35.6811264825],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "name": "Tokyo Sta.",
+        "ftCode": 2930,
+        "knj": "東京駅",
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "とうきょうえき"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7649325575, 35.6799268905556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.765614805556, 35.6837777222222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.765570288333, 35.6806396205556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.766449003333, 35.6824142141667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3216 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

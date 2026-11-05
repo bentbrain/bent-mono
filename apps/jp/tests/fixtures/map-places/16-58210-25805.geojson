@@ -1,0 +1,56 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.761373635833, 35.6873281741667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "大手町（一）",
+        "name": "Otemachi 1",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "おおてまち１ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.7603227, 35.68606264],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "",
+        "name": "Ote-mon Gate",
+        "ftCode": 100,
+        "annoCtg": 531,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": ""
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.758646158889, 35.6853595547222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "",
+        "name": "Imperial Guard Headquarters",
+        "ftCode": 100,
+        "annoCtg": 612,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": ""
+      }
+    }
+  ],
+  "type": "FeatureCollection"
+}

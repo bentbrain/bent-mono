@@ -1,0 +1,226 @@
+{
+  "version": "1",
+  "meta": {
+    "name": "jp.bent.build",
+    "description": "blog"
+  },
+  "settings": {
+    "title": "jp.bent.build",
+    "timezone": "Asia/Tokyo"
+  },
+  "collections": [
+    {
+      "slug": "posts",
+      "label": "Posts",
+      "labelSingular": "Post",
+      "supports": [
+        "drafts",
+        "revisions",
+        "preview",
+        "scheduling",
+        "search",
+        "seo"
+      ],
+      "fields": [
+        {
+          "slug": "title",
+          "type": "string",
+          "label": "title",
+          "required": true,
+          "searchable": true
+        },
+        {
+          "slug": "place",
+          "type": "string",
+          "label": "place"
+        },
+        {
+          "slug": "day",
+          "type": "string",
+          "label": "day",
+          "required": true,
+          "indexed": true
+        },
+        {
+          "slug": "content",
+          "type": "portableText",
+          "label": "content",
+          "searchable": true
+        },
+        {
+          "slug": "gallery",
+          "type": "json",
+          "label": "gallery",
+          "widget": "japan-trip:gallery"
+        },
+        {
+          "slug": "shop_design",
+          "type": "json",
+          "label": "shop design"
+        },
+        {
+          "slug": "demo",
+          "type": "boolean",
+          "label": "demo"
+        }
+      ]
+    },
+    {
+      "slug": "media_items",
+      "label": "Trip media",
+      "labelSingular": "Media",
+      "supports": ["drafts", "revisions"],
+      "fields": [
+        {
+          "slug": "title",
+          "type": "string",
+          "label": "title",
+          "required": true
+        },
+        {
+          "slug": "asset",
+          "type": "file",
+          "label": "asset"
+        },
+        {
+          "slug": "poster",
+          "type": "image",
+          "label": "poster"
+        },
+        {
+          "slug": "kind",
+          "type": "select",
+          "label": "kind",
+          "validation": {
+            "options": ["photo", "video"]
+          }
+        },
+        {
+          "slug": "captured_at",
+          "type": "datetime",
+          "label": "captured_at",
+          "indexed": true
+        },
+        {
+          "slug": "latitude",
+          "type": "number",
+          "label": "latitude"
+        },
+        {
+          "slug": "longitude",
+          "type": "number",
+          "label": "longitude"
+        },
+        {
+          "slug": "place",
+          "type": "string",
+          "label": "place"
+        },
+        {
+          "slug": "categories",
+          "type": "json",
+          "label": "categories"
+        },
+        {
+          "slug": "duration",
+          "type": "number",
+          "label": "duration"
+        },
+        {
+          "slug": "source_url",
+          "type": "string",
+          "label": "source_url"
+        },
+        {
+          "slug": "poster_url",
+          "type": "string",
+          "label": "poster_url"
+        },
+        {
+          "slug": "demo",
+          "type": "boolean",
+          "label": "demo"
+        },
+        {
+          "slug": "original_key",
+          "label": "Original storage key",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "slug": "beers",
+      "label": "Beer counter",
+      "labelSingular": "Day",
+      "supports": ["revisions"],
+      "fields": [
+        {
+          "slug": "title",
+          "type": "string",
+          "label": "title",
+          "required": true
+        },
+        {
+          "slug": "day",
+          "type": "string",
+          "label": "day",
+          "required": true,
+          "indexed": true
+        },
+        {
+          "slug": "count",
+          "type": "integer",
+          "label": "count",
+          "required": true
+        },
+        {
+          "slug": "demo",
+          "type": "boolean",
+          "label": "demo"
+        }
+      ]
+    },
+    {
+      "slug": "categories",
+      "label": "Categories",
+      "labelSingular": "Category",
+      "routable": false,
+      "supports": ["drafts"],
+      "fields": [
+        {
+          "slug": "title",
+          "type": "string",
+          "label": "category",
+          "required": true
+        }
+      ]
+    },
+    {
+      "slug": "category_icons",
+      "label": "Category icons",
+      "labelSingular": "Icon",
+      "routable": false,
+      "supports": ["drafts"],
+      "fields": [
+        {
+          "slug": "title",
+          "type": "string",
+          "label": "icon",
+          "required": true
+        },
+        {
+          "slug": "image",
+          "type": "image",
+          "label": "image",
+          "required": true
+        },
+        {
+          "slug": "category",
+          "type": "string",
+          "label": "subject",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

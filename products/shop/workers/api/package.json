@@ -1,0 +1,37 @@
+{
+  "name": "@forever-tee/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build:local && bun run build:environments",
+    "build:local": "node ../../scripts/worker-local-check.mjs build \"\" dist/local",
+    "build:environments": "node ../../scripts/worker-local-check.mjs build development dist/development && node ../../scripts/worker-local-check.mjs build production dist/production",
+    "check": "bun run test && bun run types:check && bun run typecheck && bun run lint && bun run build",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:development": "wrangler d1 migrations apply DB --env development --remote",
+    "deploy:development": "wrangler deploy --env development",
+    "dev": "node ../../scripts/worker-local-check.mjs dev",
+    "dev:remote": "wrangler dev --env development --remote",
+    "lint": "eslint src --max-warnings=0",
+    "test": "node scripts/check-revision-migration.mjs && vitest run",
+    "typecheck": "tsc --noEmit",
+    "types": "node ../../scripts/worker-local-check.mjs types",
+    "types:check": "node ../../scripts/worker-local-check.mjs types:check"
+  },
+  "dependencies": {
+    "@effect/platform": "0.97.1",
+    "@forever-tee/contracts": "workspace:*",
+    "aws4fetch": "1.0.20",
+    "drizzle-orm": "0.45.2",
+    "effect": "3.22.1",
+    "jose": "6.2.8"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10",
+    "eslint": "^9",
+    "typescript": "^5",
+    "vitest": "^4.1.10",
+    "wrangler": "4.134.0"
+  }
+}

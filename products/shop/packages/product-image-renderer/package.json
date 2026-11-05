@@ -1,0 +1,22 @@
+{
+  "name": "@forever-tee/product-image-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "scripts": {
+    "check": "node --test src/*.test.mjs",
+    "build": "node --test src/*.test.mjs",
+    "compile:displacement": "node src/compile-displacement.mjs",
+    "test": "node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "sharp": "0.35.3",
+    "@forever-tee/contracts": "workspace:*"
+  }
+}

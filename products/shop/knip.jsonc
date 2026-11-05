@@ -1,0 +1,53 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "treatConfigHintsAsErrors": true,
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/aws-personal.mjs",
+        "scripts/artwork-preview-benchmark/player.mjs",
+        "scripts/*.test.mjs"
+      ],
+      // The diagnostic runner uses the API workspace's Wrangler, the web
+      // workspace's React for its isolated comparison, and system ffmpeg.
+      "ignoreDependencies": ["wrangler"],
+      "ignoreBinaries": ["ffmpeg"],
+      "project": ["scripts/**/*.mjs"]
+    },
+    "apps/web": {
+      // The checked-in config intentionally rejects an unspecified deployment.
+      // Knip only needs the test entry pattern and must not execute that config.
+      "playwright": {
+        "config": [],
+        "entry": ["e2e/**/*.spec.ts", "playwright*.config.ts", "e2e/local/start.mjs", "e2e/local/preload.mjs"]
+      },
+      "entry": ["scripts/check-cold-create-navigation.mjs"]
+    },
+    "packages/product-image-renderer": {"ignoreBinaries": ["rustc"]},
+    "workers/api": {
+      "entry": ["scripts/run-operations.mjs"]
+    },
+    "workers/video-renderer": {
+      "entry": [
+        "aws-lambda/app-entry.mjs",
+        "aws-lambda/benchmark.mjs",
+        "aws-lambda/configure-app-secrets.mjs",
+        "aws-lambda/entry.mjs",
+        "aws-lambda/failure-entry.mjs",
+        "aws-lambda/rotate-development-service-secret.mjs",
+        "aws-lambda/runtime-smoke.mjs",
+        "aws-lambda/sequential-smoke.mjs",
+        "aws-lambda/smoke-app-confirmation.mjs",
+        "aws-lambda/smoke-app.mjs",
+        "aws-lambda/verify-bundle.mjs",
+        "benchmarks/compare-remote.mjs",
+        "benchmarks/queue-dispatch.mjs",
+        "benchmarks/summarize.mjs",
+        "benchmarks/worker.mjs"
+      ],
+      "ignoreBinaries": ["ffmpeg", "ffprobe"],
+      // The Lambda image owns its own npm package outside the Bun workspace.
+      "ignoreDependencies": ["@aws-sdk/client-s3"]
+    }
+  }
+}

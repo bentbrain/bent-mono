@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "kind": "furniture",
+  "id": "reading-chair",
+  "displayName": "Reading Chair",
+  "footprint": {
+    "width": 1,
+    "depth": 1
+  },
+  "heightPixels": 48,
+  "palette": "apartment-hotel-v1",
+  "views": {
+    "north": {
+      "source": "assets/approved/reading-chair/north.png",
+      "width": 32,
+      "height": 48,
+      "anchor": { "x": 16, "y": 40 }
+    },
+    "east": {
+      "source": "assets/approved/reading-chair/east.png",
+      "width": 32,
+      "height": 48,
+      "anchor": { "x": 16, "y": 40 }
+    },
+    "south": {
+      "source": "assets/approved/reading-chair/south.png",
+      "width": 32,
+      "height": 48,
+      "anchor": { "x": 16, "y": 40 }
+    },
+    "west": {
+      "source": "assets/approved/reading-chair/west.png",
+      "width": 32,
+      "height": 48,
+      "anchor": { "x": 16, "y": 40 }
+    }
+  }
+}

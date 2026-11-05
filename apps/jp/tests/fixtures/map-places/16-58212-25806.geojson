@@ -1,0 +1,102 @@
+{
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [139.77276825, 35.6832128333333],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "日本橋（一）",
+        "name": "Nihonbashi 1",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "にほんばし１ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770773194444, 35.6805934722222],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "LC",
+        "knj": "日本橋（三）",
+        "name": "Nihonbashi 3",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "にほんばし３ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.771773138889, 35.6828448888889],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "knj": "八重洲（一）",
+        "name": "Yaesu 1",
+        "ftCode": 100,
+        "annoCtg": 210,
+        "arrng": 1,
+        "arrngAgl": 0,
+        "kana": "やえす１ちょうめ"
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.772004388889, 35.6832043055556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": {
+        "dspPos": "CC",
+        "nRNo": 1,
+        "ftCode": 2901,
+        "arrngAgl": 0,
+        "arrng": 1
+      }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770309361944, 35.6833001094444],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.772821861111, 35.68167],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3218 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.76830925, 35.6802221666667],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    },
+    {
+      "geometry": {
+        "coordinates": [139.770644972222, 35.6800098055556],
+        "type": "Point"
+      },
+      "type": "Feature",
+      "properties": { "ftCode": 3211 }
+    }
+  ],
+  "type": "FeatureCollection"
+}

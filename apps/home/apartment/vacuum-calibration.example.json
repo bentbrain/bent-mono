@@ -1,0 +1,11 @@
+{
+  "sourceMapId": "replace-with-stable-vacuum-map-id",
+  "scale": 0.001,
+  "rotationRadians": 0,
+  "reflectY": true,
+  "translation": {
+    "x": 0,
+    "z": 0
+  },
+  "measuredErrorMeters": 0
+}
