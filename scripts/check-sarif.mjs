@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,9 +53,19 @@ export async function sourceManifest(root) {
   for (const path of [...new Set(files.filter(included))].sort()) {
     repositoryPath(path);
     const absolute = join(root, path);
-    if (!(await lstat(absolute)).isFile()) fail(`Source manifest requires a regular file: ${path}`);
-    const bytes = await readFile(absolute);
-    entries.push([path, createHash("sha256").update(bytes).digest("hex")]);
+    const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = await handle.stat();
+      if (!before.isFile()) fail(`Source manifest requires a regular file: ${path}`);
+      const bytes = await handle.readFile();
+      const after = await handle.stat();
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || before.nlink !== after.nlink) {
+        fail(`Source manifest file changed during inspection: ${path}`);
+      }
+      entries.push([path, createHash("sha256").update(bytes).digest("hex")]);
+    } finally {
+      await handle.close();
+    }
   }
   return { sha256: digest(entries), paths: new Set(entries.map(([path]) => path)) };
 }

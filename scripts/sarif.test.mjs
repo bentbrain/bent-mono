@@ -153,6 +153,53 @@ test("source, guards, tests, shared code, CI, dependencies and new files invalid
   await assert.rejects(sourceManifest(root), /ENOENT/);
 });
 
+test("source manifest rejects a file swapped for a symlink during inspection", async context => {
+  const { root } = await fixture(context);
+  const checker = new URL("./check-sarif.mjs", import.meta.url).href;
+  const program = `
+    import assert from "node:assert/strict";
+    import fs from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    import { join } from "node:path";
+    const target = join(process.cwd(), ${JSON.stringify(sourcePath)});
+    const replacement = join(process.cwd(), "replacement.txt");
+    await fs.writeFile(replacement, "uninspected replacement");
+    let swapped = false;
+    async function swap() {
+      if (swapped) return;
+      swapped = true;
+      await fs.unlink(target);
+      await fs.symlink(replacement, target);
+    }
+    const originalLstat = fs.lstat;
+    fs.lstat = async function(path, ...args) {
+      const info = await originalLstat.call(this, path, ...args);
+      if (path === target) await swap();
+      return info;
+    };
+    const originalOpen = fs.open;
+    fs.open = async function(path, ...args) {
+      const handle = await originalOpen.call(this, path, ...args);
+      if (path === target) {
+        const originalStat = handle.stat.bind(handle);
+        handle.stat = async (...statArgs) => {
+          const info = await originalStat(...statArgs);
+          await swap();
+          return info;
+        };
+      }
+      return handle;
+    };
+    syncBuiltinESMExports();
+    const { sourceManifest } = await import(${JSON.stringify(checker)});
+    await assert.rejects(sourceManifest(process.cwd()), /changed|ELOOP/);
+    assert.equal(swapped, true);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", program], {
+    cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+});
+
 test("duplicate, reused, ambiguous, unused, missing and risk-acceptance records fail closed", async context => {
   const { source } = await fixture(context);
   const reports = [report([finding()])]; const manifest = reviewed(reports, source);
