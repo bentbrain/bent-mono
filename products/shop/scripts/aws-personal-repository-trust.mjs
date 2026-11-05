@@ -43,8 +43,9 @@ function repositoryTrustArguments(args) {
     const [stage, operation, ...options] = args;
     check(Object.hasOwn(trustEnvironments, stage), "select development or production explicitly.");
     if (["discover", "plan"].includes(operation) && !options.length) return { stage, operation };
+    const reviewPattern = stage === "development" ? /^--review=development-[A-Za-z0-9]{6}$/ : /^--review=production-[A-Za-z0-9]{6}$/;
     if (["show", "apply"].includes(operation) && options.length === 2 &&
-        new RegExp(`^--review=${stage}-[A-Za-z0-9]{6}$`).test(options[0]) && /^--plan-sha256=[a-f0-9]{64}$/.test(options[1]))
+        reviewPattern.test(options[0]) && /^--plan-sha256=[a-f0-9]{64}$/.test(options[1]))
         return { stage, operation, review: options[0].slice(9), planHash: options[1].slice(14) };
     throw new Error("Use repository-trust development|production discover|plan, or show|apply --review=<stage-ID> --plan-sha256=<hash>; no overrides.");
 }
@@ -67,7 +68,8 @@ function inspectTrustState(state, baseline) {
             typeof item.instances[0].attributes?.id === "string" && item.instances[0].attributes.id.length > 0, "existing single untainted resource identity/provider required.");
     }
     const data = values(state).get("data.aws_iam_openid_connect_provider.github");
-    check(data.arn === OIDC && data.url === "token.actions.githubusercontent.com" && data.client_id_list?.includes("sts.amazonaws.com"), "existing read-only OIDC data ownership.");
+    check(data.arn === OIDC && data.url === "token.actions.githubusercontent.com" && Array.isArray(data.client_id_list) &&
+        data.client_id_list.some(audience => audience === "sts.amazonaws.com"), "existing read-only OIDC data ownership.");
     for (const spec of Object.values(trustEnvironments)) {
         const role = values(state).get(spec.role);
         check(role.name === spec.name && role.arn === `arn:aws:iam::${PERSONAL_ACCOUNT}:role/${spec.name}` && role.path === "/" &&
@@ -198,7 +200,8 @@ async function collectTrustPermissions(call) {
         result[key] = { role: identity, inline: policy(inline.PolicyDocument), boundary: { ...boundary }, boundaryDocument: policy(version.Document) };
     }
     result.provider = await call(["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", OIDC]);
-    check(result.provider.Url === "token.actions.githubusercontent.com" && result.provider.ClientIDList?.includes("sts.amazonaws.com"), "exact live OIDC provider.");
+    check(result.provider.Url === "token.actions.githubusercontent.com" && Array.isArray(result.provider.ClientIDList) &&
+        result.provider.ClientIDList.some(audience => audience === "sts.amazonaws.com"), "exact live OIDC provider.");
     return result;
 }
 function permissionsMatchState(permissions, state) {

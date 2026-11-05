@@ -248,7 +248,10 @@ test("lost apply response leaves synced intent, preserves evidence and forbids b
 });
 test("actual CLI requires missing private configuration; IAM writes and argument overrides stay forbidden", async t => {
     const h = await harness(t);
-    for (const args of [["development", "plan", "-target=aws_iam_role.ci"], ["both", "plan"], ["production", "apply"], ["development", "plan", "--backend=x"], ["development", "recover"]]) await assert.rejects(h.invoke(args));
+    for (const args of [["development", "plan", "-target=aws_iam_role.ci"], ["both", "plan"], ["production", "apply"], ["development", "plan", "--backend=x"], ["development", "recover"],
+        ["development|production", "show", "--review=development-ABC123", `--plan-sha256=${"a".repeat(64)}`],
+        ["development", "show", "--review=production-ABC123", `--plan-sha256=${"a".repeat(64)}`],
+        ["production", "show", "--review=development-ABC123", `--plan-sha256=${"a".repeat(64)}`]]) await assert.rejects(h.invoke(args));
     for (const args of [["iam", "update-assume-role-policy", "--role-name", "forever-tee-video-development-ci"], ["iam", "list-role-policies", "--role-name", "foreign"],
         ["iam", "get-role-policy", "--role-name", "forever-tee-video-production-ci", "--policy-name", "foreign"], ["iam", "get-policy-version", "--policy-arn", "foreign", "--version-id", "v7"]]) assert.throws(() => validatePersonalArguments(args));
     const cli = spawnSync(process.execPath, ["scripts/aws-personal.mjs", "terraform", "bootstrap", "repository-trust", "development", "plan"], { cwd: new URL("../", import.meta.url), encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: h.directory, SHOP_PROTECTED_CONFIG_JSON: JSON.stringify(baseConfig) } });
@@ -282,6 +285,21 @@ test("plan inspection rejects permissions, boundary, role IDs, dual subjects, un
             p => p.output_changes.extra = { actions: ["create"], after: true },
             p => p.resource_drift.push({ address: "aws_kms_key.state" }), p => p.resource_changes.pop(),
         ]) { const p = planFor(baseline, stage); mutate(p); assert.throws(() => inspectRepositoryTrustPlan(p, baseline, stage)); }
+    }
+});
+test("saved state requires an audience array containing the exact STS audience", () => {
+    for (const audiences of ["sts.amazonaws.com", "https://sts.amazonaws.com.attacker.invalid", ["sts.amazonaws.com.attacker.invalid"], ["prefix-sts.amazonaws.com"], null]) {
+        const { baseline, value } = fixture();
+        value("data.aws_iam_openid_connect_provider.github").client_id_list = audiences;
+        assert.throws(() => inspectRepositoryTrustPlan(planFor(baseline), baseline, "development"), /OIDC/);
+    }
+});
+test("live provider discovery rejects strings and lookalike audience entries before planning", async t => {
+    for (const audiences of ["sts.amazonaws.com", "https://sts.amazonaws.com.attacker.invalid", ["sts.amazonaws.com.attacker.invalid"], ["prefix-sts.amazonaws.com"], null]) {
+        const h = await harness(t);
+        h.permissions.provider.ClientIDList = audiences;
+        await assert.rejects(h.invoke(["development", "discover"]), /OIDC/);
+        assert.equal(h.commands.some(command => ["plan", "apply"].includes(command[0])), false);
     }
 });
 test("fresh signed proof gate rejects failed whole runs, reruns, stale/source/subject/protection/window changes and absent review", async () => {
