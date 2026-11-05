@@ -39,7 +39,7 @@ const read = path => readRegularFile(path, { privateOnly: true, maxBytes: 64 * 1
 const json = async path => JSON.parse(await read(path));
 const absent = async path => { try { await lstat(path); } catch (error) { if (error.code === "ENOENT") return; throw error; } throw new Error("Repository trust journal exists; preserve it and inspect state/IAM. Recovery requires a separately reviewed route."); };
 const cfg = (stage, name) => protectedConfig(`trust_${stage}_${name}`);
-export function repositoryTrustArguments(args) {
+function repositoryTrustArguments(args) {
     const [stage, operation, ...options] = args;
     check(Object.hasOwn(trustEnvironments, stage), "select development or production explicitly.");
     if (["discover", "plan"].includes(operation) && !options.length) return { stage, operation };
@@ -57,7 +57,7 @@ function exactTrust(value, subject) {
         same(statement.Condition, { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com", [SUB]: subject } }), "single exact provider/audience/subject trust required.");
     return trust;
 }
-export function inspectTrustState(state, baseline) {
+function inspectTrustState(state, baseline) {
     check(state.version === 4 && state.terraform_version === "1.12.2" && state.lineage === baseline.original.lineage &&
         typeof state.lineage === "string" && /^[a-f0-9-]{36}$/.test(state.lineage) && Number.isSafeInteger(state.serial) && state.serial >= 0 && baseline.original.accountId === PERSONAL_ACCOUNT && baseline.original.region === "ap-southeast-2" && baseline.original.backendKey === "story-video/bootstrap/terraform.tfstate", "approved original lineage and fresh serial required.");
     check(same(state.resources?.map(address).sort(), TRUST_INVENTORY), "complete fixed bootstrap inventory.");
@@ -124,7 +124,7 @@ export function inspectRepositoryTrustPlan(plan, baseline, stage, noOp = false) 
     check(plan.checks?.every(item => item.status === "pass") ?? true, "all checks must pass.");
     return { stage, changedResource: noOp ? null : trustEnvironments[stage].role, permissionsChanged: false };
 }
-export async function renderTrustModule(directory, baseline, stage, verifyOnly = false) {
+async function renderTrustModule(directory, baseline, stage, verifyOnly = false) {
     check(/^bentbrain\/[A-Za-z0-9._-]+$/.test(protectedConfig("trustOriginalRepository")) &&
         Number.isSafeInteger(baseline.original.repositoryId) && baseline.original.repositoryId > 0 &&
         baseline.original.subjectPrefix === `repo:bentbrain@${protectedConfig("githubOwnerId")}/${protectedConfig("trustOriginalRepository").split("/")[1]}@${baseline.original.repositoryId}`,
@@ -177,7 +177,7 @@ function backendIdentity(backend) {
         !config.role_arn && !config.access_key && !config.secret_key && !config.token && !config.profile && [config.assume_role, config.assume_role_with_web_identity].every(value => value == null || same(value, [])) && !config.endpoints && !config.endpoint && !config.skip_credentials_validation && !config.skip_requesting_account_id,
     "exact existing S3 backend, expected owner, KMS, native lock and personal identity required.");
 }
-export async function collectTrustPermissions(call) {
+async function collectTrustPermissions(call) {
     const result = {};
     for (const [key, spec] of Object.entries(trustEnvironments)) {
         const role = (await call(["iam", "get-role", "--role-name", spec.name])).Role;

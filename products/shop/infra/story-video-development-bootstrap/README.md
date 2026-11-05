@@ -343,8 +343,8 @@ is still required and that release readiness has not been granted. Keep all
 private evidence and every original journal. Production deployment remains the
 existing guarded paired admission/release/rollback route.
 
-This source change leaves the accepted CodeQL ledger untouched. Its source pin
-becomes stale. Before publishing, prepare the final assessment, fresh hosted
-analysis and independent final-head/current-base review, plus full Shop
-`check:ci` and `test:e2e:local`. Neither this migration nor its fixtures waive those
-gates or alter any query.
+Changes to this route invalidate the source-pinned CodeQL evidence. Retain both
+complete query suites and the original SARIF, and obtain fresh analysis and
+independent final-head/current-base review before merging or live use. Run full
+Shop `check:ci` and `test:e2e:local` before the final PR push. Neither this migration
+nor its fixtures waive those gates or alter any query.
