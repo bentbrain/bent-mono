@@ -39,7 +39,21 @@ export async function personalGitHub({ run = execute, request = fetch, environme
     const repo = await api(`/repos/${REPOSITORY}`);
     if (repo.id !== Number(protectedConfig("githubRepositoryId")) || repo.owner?.id !== Number(protectedConfig("githubOwnerId")) || repo.full_name !== REPOSITORY)
         throw new Error("Personal GitHub repository identity mismatch.");
-    return { api, repository: repo, setProductionNativeSecret: async (name, value) => {
+    return { api, repository: repo,
+        // Read-only migration discovery. The old repository is an explicit
+        // protected prerequisite, never inferred from a role's current subject.
+        trustRead: async path => {
+            const url = new URL(path, "https://api.github.com");
+            const old = protectedConfig("trustOriginalRepository");
+            if (!/^bentbrain\/[A-Za-z0-9._-]+$/.test(old) || old === REPOSITORY ||
+                url.origin !== "https://api.github.com" || url.username || url.password || url.hash || /%|\\|\.\./.test(path) ||
+                ![REPOSITORY, old].some(name => url.pathname === `/repos/${name}` || url.pathname.startsWith(`/repos/${name}/`)))
+                throw new Error("Trust discovery must stay within the two exact personal repositories.");
+            const response = await request(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(30000),
+                headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } });
+            if (!response.ok) throw new Error(`Trust discovery failed with HTTP ${response.status}.`);
+            return response.json();
+        }, setProductionNativeSecret: async (name, value) => {
             const formats = { STORY_VIDEO_LAMBDA_ACCESS_KEY_ID: /^AKIA[A-Z0-9]{16}$/, STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY: /^[A-Za-z0-9+/]{40}$/,
                 STORY_VIDEO_GRANT_SECRET: /^[A-Za-z0-9_-]{43}$/ };
             if (!Object.hasOwn(formats, name) || typeof value !== "string" || !formats[name].test(value))

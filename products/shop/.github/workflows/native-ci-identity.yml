@@ -2,6 +2,12 @@ name: Verify native CI identity
 
 on:
   workflow_dispatch:
+    inputs:
+      proof_only:
+        description: Verify signed Preview claims only, without AWS or storage qualification
+        type: boolean
+        default: false
+        required: true
 
 permissions:
   contents: read
@@ -18,8 +24,8 @@ defaults:
     working-directory: products/shop
 
 jobs:
-  identity:
-    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID
+  proof:
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: Preview
@@ -56,6 +62,37 @@ jobs:
           SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
       - name: Verify signed Preview identity without AWS access
         run: node scripts/native-ci-identity.mjs
+
+  identity:
+    needs: proof
+    if: needs.proof.result == 'success' && inputs.proof_only == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Preview
+    permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Assume the personal Development inspection role
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:

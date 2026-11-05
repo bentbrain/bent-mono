@@ -4,6 +4,8 @@ import { pathToFileURL } from "node:url";
 const ISSUER = "https://token.actions.githubusercontent.com";
 const WORKFLOW = "bentbrain/bent-mono/.github/workflows/native-ci-identity.yml";
 const REFS = ["refs/heads/main", "refs/heads/perf/story-video-family-experiments"];
+const WORKFLOW_REF = `${WORKFLOW}@refs/heads/main`;
+const SUBJECT = "repo:bentbrain@" + protectedConfig("githubOwnerId") + "/bent-mono@" + protectedConfig("githubRepositoryId") + ":environment:Preview";
 const fail = () => { throw new Error("Native CI identity verification failed; no AWS access attempted."); };
 export function assertActionsIdentityContext(env) {
     if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== "bentbrain/bent-mono" ||
@@ -12,8 +14,13 @@ export function assertActionsIdentityContext(env) {
         !/^[0-9a-f]{40}$/.test(env.GITHUB_SHA ?? "") || !/^\d+$/.test(env.GITHUB_RUN_ID ?? ""))
         fail();
 }
-export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now() / 1000)) {
+export function assertPreviewProofContext(env) {
     assertActionsIdentityContext(env);
+    if (env.GITHUB_REF !== "refs/heads/main" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" ||
+        env.GITHUB_RUN_ATTEMPT !== "1" || env.GITHUB_WORKFLOW_REF !== WORKFLOW_REF) fail();
+}
+export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now() / 1000)) {
+    assertPreviewProofContext(env);
     if (typeof token !== "string" || token.length > 20000 || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token))
         fail();
     const parts = token.split(".");
@@ -37,7 +44,7 @@ export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now()
     catch {
         fail();
     }
-    for (const [key, expected] of Object.entries({ iss: ISSUER, aud: "sts.amazonaws.com", repository: "bentbrain/bent-mono",
+    for (const [key, expected] of Object.entries({ iss: ISSUER, aud: "sts.amazonaws.com", sub: SUBJECT, run_attempt: "1", repository: "bentbrain/bent-mono",
         repository_id: protectedConfig("githubRepositoryId"), repository_owner: "bentbrain", repository_owner_id: protectedConfig("githubOwnerId"), environment: "Preview",
         ref: env.GITHUB_REF, sha: env.GITHUB_SHA, run_id: env.GITHUB_RUN_ID, event_name: env.GITHUB_EVENT_NAME,
         workflow_ref: `${WORKFLOW}@${env.GITHUB_REF}` }))
@@ -45,16 +52,16 @@ export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now()
             fail();
     if (![claims.iat, claims.nbf, claims.exp].every(Number.isSafeInteger) || claims.exp <= now || claims.nbf > now + 60 ||
         claims.iat > now + 60 || now - claims.iat > 600 || claims.exp - claims.iat > 600 ||
-        typeof claims.sub !== "string" || !/^repo:[A-Za-z0-9._/@-]+:environment:Preview$/.test(claims.sub))
+        claims.sub !== SUBJECT)
         fail();
     // Record only verified non-secret claims. Never log/store the JWT, request
     // bearer token, response body, arbitrary claims or authentication headers.
     return { signatureVerified: true, issuer: claims.iss, audience: claims.aud, subject: claims.sub,
-        repositoryId: claims.repository_id, environment: claims.environment, ref: claims.ref,
+        repositoryId: claims.repository_id, ownerId: claims.repository_owner_id, runAttempt: claims.run_attempt, environment: claims.environment, ref: claims.ref,
         sourceCommit: claims.sha, runId: claims.run_id, workflowRef: claims.workflow_ref, awsAccessAttempted: false };
 }
 export async function inspectActionsIdentity(env = process.env, request = fetch) {
-    assertActionsIdentityContext(env);
+    assertPreviewProofContext(env);
     let url;
     try {
         url = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL);

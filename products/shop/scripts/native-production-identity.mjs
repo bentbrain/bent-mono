@@ -46,7 +46,7 @@ export function verifyProductionToken(token, keys, env, now = Math.floor(Date.no
     if (![claims.iat, claims.nbf, claims.exp].every(Number.isSafeInteger) || claims.exp <= now || claims.nbf > now + 60 ||
         claims.iat > now + 60 || now - claims.iat > 600 || claims.exp - claims.iat > 600)
         fail();
-    return { signatureVerified: true, issuer: claims.iss, audience: claims.aud, subject: claims.sub, repositoryId: claims.repository_id,
+    return { signatureVerified: true, issuer: claims.iss, audience: claims.aud, subject: claims.sub, repositoryId: claims.repository_id, ownerId: claims.repository_owner_id, runAttempt: claims.run_attempt,
         environment: claims.environment, ref: claims.ref, sourceCommit: claims.sha, runId: claims.run_id, workflowRef: claims.workflow_ref,
         awsAccessAttempted: false, deploymentAttempted: false };
 }
