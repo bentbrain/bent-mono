@@ -143,5 +143,7 @@
   "inspectionProviderOrderId": "000000000000000000000002",
   "qualifiedCandidateSourceCommit": "01ac9d9b4edff6802074afcc051968b937ea3571",
   "alertVerificationSourceCommit": "0851fec71d40040aa739204a3b74c857cbe26f2a",
-  "previewRendererOrigin": "https://synthetic-renderer.example.invalid"
+  "previewRendererOrigin": "https://synthetic-renderer.example.invalid",
+  "currentProductionImageDigest": "sha256:431980ce78e0e490236e736e49f5e9491b295c85fd2270ac5b974619aed4d921",
+  "currentProductionSourceDigest": "c1380f7dc8a64dde4593027e0d995b6d91cb997ed2e1385773ac6209e65744b5"
 }

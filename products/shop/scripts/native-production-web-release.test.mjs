@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { verifyWebProject, verifyStagedWebDeployment, verifyProductionWebEnvironment, verifyProductionWebEnvironmentMetadata, executeStorefrontPromotion, existingWebAutomationCredential } from "./native-production-web-release.mjs";
-const project = { id: "prj_qJ3JwcSlVixLNHRxfwnvfxp8dMBS", accountId: "team_ru36uQa1rhHA6N5wW0lblUkz", name: "forever-tee-web", rootDirectory: "apps/web" };
+const project = { id: "prj_qJ3JwcSlVixLNHRxfwnvfxp8dMBS", accountId: "team_ru36uQa1rhHA6N5wW0lblUkz", name: "forever-tee-web", rootDirectory: "products/shop/apps/web" };
 const deployment = { id: "dpl_staged", projectId: project.id, team: { id: project.accountId }, target: "production", readyState: "READY", source: "cli",
   meta: { githubCommitSha: "a".repeat(40), nativeProductionSource: "a".repeat(40) }, url: "forever-tee-fixture-bentbrains-projects.vercel.app", alias: [] };
 test("staged access requires one existing automation credential and never changes protection", () => {

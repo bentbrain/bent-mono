@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 export function validationEnvironment(env = process.env) {
   return {
     ...env,
+    SHOP_EVIDENCE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("hex"),
+    SHOP_EVIDENCE_KEY_VERSION: "v1",
+    SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: "",
     SHOP_PROTECTED_CONFIG_JSON: readFileSync(new URL("./protected-config.fixtures.json", import.meta.url), "utf8"),
     // Validation produces fixture builds, never deployable release artifacts.
     // Keep commit identity hashing for actual storefront builds.

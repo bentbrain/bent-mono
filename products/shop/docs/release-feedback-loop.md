@@ -6,11 +6,19 @@ Ordinary application fixes use a focused local regression and relevant package c
 
 Validation workflows pin `ubuntu-24.04`, matching the admitted `ubuntu24` runtime. A moving `ubuntu-latest` label would otherwise disable receipt reuse after an OS migration. Exact Node and hosted image versions remain part of validation evidence, so runtime drift still requires fresh checks.
 
+## Monorepo admission
+
+The active root release workflows are generated from the reviewed product sources. They install from the single root Bun lockfile, run product commands from `products/shop`, and require the authoritative exact-main root quality gate before cloud access. `git diff` and full-tree manifests distinguish Shop paths from external `@monorepo/` inputs; shared packages, root configuration and unknown inputs cannot inherit an older qualification.
+
+Protected Wrangler and Terraform configurations are rendered outside the tracked checkout. Their source templates remain unchanged and generated config/plan bytes are sealed in private release evidence. Native candidate clean-checkout assertions stay enabled. The isolated Lambda image receives only its expected account identity during the verified cloud build, and its non-root tests run against that built image configuration.
+
+Operational evidence and dispatch inputs use the protected versioned encryption route described in the product README. Public Actions artifacts contain ciphertext, never provider object versions or private acceptance reports. Keep the same protected key available to authorized coordinator/recovery consumers and retain old versions until their recovery records expire. Current monorepo quality checks supplement every existing product release and qualification guard.
+
 ## Commands
 
 ```sh
 # Once per Playwright version; installs a browser on this device.
-bun run --filter @forever-tee/web exec playwright install chromium
+(cd apps/web && bunx --no-install playwright install chromium)
 
 # Complete browser suite for broad changes, with deterministic service fixtures.
 bun run test:e2e:local
@@ -127,9 +135,9 @@ its real provenance; do not dispatch a benchmark release. Production admission,
 live camera/purchase checks, cloud qualification, drains and rollback checks are
 unchanged, including full qualification for release-tooling changes.
 
-Web-only Preview accepts exact current main, as well as an eligible web-only branch containing current main. It does not require a temporary branch or an environment-policy edit. GitHub's Preview environment must still permit the selected branch. Both web release paths check live Worker capabilities before dependency installation or Vercel preparation and retain the later pre-promotion check.
+Web-only Preview accepts exact current main, as well as an eligible web-only branch containing current main. It does not require a temporary branch or an environment-policy edit. GitHub's Preview environment must still permit the selected branch. Branch Preview admission verifies the exact remote commit, current-main ancestry and a canonical open PR against that main. Both main and the branch must pass all canonical Quality jobs, native CodeQL and exact-head independent review. Only storefront changes and the separately reviewed CodeQL evidence ledger may differ from main; release controls, shared dependencies and native mockup assets remain pinned. Branches run the full fallback validation, and admission is repeated before storefront publication. Both web release paths check live Worker capabilities before dependency installation or Vercel preparation and retain the later pre-promotion check.
 
-Native workflow titles identify operation, mode, referenced release, branch and source. Coordinated runs also include their journal correlation ID. Verified durable stages and drain progress appear in logs and the Actions summary. A summary-write failure cannot interrupt a release after a successful mutation. Drain progress is rate-limited to one message per minute; fences and ownership checks are unchanged.
+Native workflow titles identify operation, mode, referenced release, branch and source. Coordinated runs also include their journal correlation ID. Generic stage/count status appears publicly. Full console diagnostics and child stdout/stderr use the independently authenticated encrypted log route in the product README, including errors before private cloud evidence is saved. Private deployment details remain in encrypted diagnostics and immutable cloud records. A summary-write failure cannot interrupt a release after a successful mutation. Drain progress is rate-limited to one message per minute; fences and ownership checks are unchanged.
 
 ## Coordinate an authorized release
 

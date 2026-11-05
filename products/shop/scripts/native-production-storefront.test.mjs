@@ -6,7 +6,7 @@ const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "bentbrain/bent-mono", 
     GITHUB_REPOSITORY_OWNER_ID: protectedConfig("githubOwnerId"), GITHUB_REF: "refs/heads/main", GITHUB_SHA: "a".repeat(40), GITHUB_RUN_ID: "123",
     GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", GITHUB_WORKFLOW_REF: "bentbrain/bent-mono/.github/workflows/native-production-identity.yml@refs/heads/main",
     VERCEL_PROJECT_ID: "prj_qJ3JwcSlVixLNHRxfwnvfxp8dMBS", VERCEL_ORG_ID: "team_ru36uQa1rhHA6N5wW0lblUkz", VERCEL_TOKEN: "private-fixture-token" };
-const project = { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID, name: "forever-tee-web", rootDirectory: "apps/web", link: null,
+const project = { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID, name: "forever-tee-web", rootDirectory: "products/shop/apps/web", link: null,
     env: [{ value: "must-not-log" }], targets: { production: { id: "dpl_fixture", target: "production", readyState: "READY", alias: ["shop.bent.build"],
             meta: { githubCommitSha: "b".repeat(40), privateMetadata: "must-not-log" } } } };
 test("Production storefront inspection reads only the exact project and exposes no arbitrary configuration", async () => {

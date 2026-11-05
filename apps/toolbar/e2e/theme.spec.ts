@@ -5,7 +5,7 @@ import type { Theme } from '../src/shared/models.js';
 import { projectSchema } from '../src/shared/models.js';
 import { test, expect } from './fixtures.js';
 
-const serviceOrigin = new URL(`http://localhost:${process.env.FEEDBACK_E2E_PORT ?? '44320'}`)
+const serviceOrigin = new URL(`http://localhost:${process.env.FEEDBACK_E2E_PORT ?? '14320'}`)
   .origin;
 const website = new URL(serviceOrigin);
 website.port = String(Number(website.port) + 1);

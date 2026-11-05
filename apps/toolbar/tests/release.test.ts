@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import {
   prepareReleaseBundle,
   releaseBundle,
+  releaseFiles,
   releaseAssetPaths,
   verifyReleaseArtifacts,
+  retrieveReleaseArtifacts,
 } from '../scripts/release-artifacts.js';
 import { once } from 'node:events';
 import { test } from 'node:test';
@@ -67,6 +69,185 @@ void test('asset publication retains the running Worker release across interrupt
   await assert.rejects(retainActiveAssets(directory, origin, next, retrieve), /active release/);
   health = 404;
   await retainActiveAssets(directory, origin, next, retrieve);
+});
+
+void test('legacy archive fallback is explicit, authenticated and verifies bytes before extraction', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'feedback-legacy-archive-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const version = 'a'.repeat(40);
+  const files = ['app.js', 'toolbar.js', 'embed.js', 'embed-module.js', 'styles.css'];
+  const bundle = JSON.stringify({
+    version: 1,
+    files: files.map((path) => ({
+      path,
+      contents: Buffer.from(`archived:${path}`).toString('base64'),
+    })),
+  });
+  const metadata = {
+    tag_name: `assets-${version}`,
+    target_commitish: version,
+    assets: [
+      {
+        name: releaseBundle,
+        size: Buffer.byteLength(bundle),
+        digest: `sha256:${createHash('sha256').update(bundle).digest('hex')}`,
+      },
+    ],
+  };
+  const calls: { args: string[]; token: string | undefined }[] = [];
+  const command = async (args: string[], token?: string) => {
+    calls.push({ args, token });
+    if (args[0] === 'api') {
+      if (args[1]?.startsWith('repos/fixture/mono/'))
+        throw Object.assign(new Error('Synthetic missing current archive'), { stderr: 'HTTP 404' });
+      assert.ok(args[1]?.startsWith('repos/fixture/legacy/'));
+      assert.equal(token, 'synthetic-legacy-read-token');
+      return JSON.stringify(metadata);
+    }
+    assert.equal(args[args.indexOf('--repo') + 1], 'fixture/legacy');
+    assert.equal(token, 'synthetic-legacy-read-token');
+    const destination = args[args.indexOf('--dir') + 1];
+    if (!destination) throw new Error('Missing temporary download directory');
+    await writeFile(join(destination, releaseBundle), bundle);
+    return '';
+  };
+  const environment = {
+    GITHUB_REPOSITORY: 'fixture/mono',
+    TOOLBAR_LEGACY_ARCHIVE_REPOSITORY: 'fixture/legacy',
+    TOOLBAR_LEGACY_ARCHIVE_TOKEN: 'synthetic-legacy-read-token',
+  };
+  await retrieveReleaseArtifacts(version, join(directory, 'verified'), { environment, command });
+  assert.equal(calls.length, 3);
+  for (const file of files)
+    assert.equal(await readFile(join(directory, 'verified', file), 'utf8'), `archived:${file}`);
+  calls.length = 0;
+  await assert.rejects(
+    retrieveReleaseArtifacts(version, join(directory, 'missing-token'), {
+      environment: {
+        GITHUB_REPOSITORY: 'fixture/mono',
+        TOOLBAR_LEGACY_ARCHIVE_REPOSITORY: 'fixture/legacy',
+      },
+      command,
+    }),
+    /protected read credential/,
+  );
+  assert.equal(calls.length, 1);
+  await assert.rejects(
+    retrieveReleaseArtifacts(version, join(directory, 'denied'), {
+      environment,
+      command: () => Promise.reject(Object.assign(new Error('Denied'), { stderr: 'HTTP 403' })),
+    }),
+    /Could not read/,
+  );
+  await retrieveReleaseArtifacts(version, join(directory, 'current'), {
+    environment: { ...environment, TOOLBAR_MIGRATED_ARCHIVE_JSON: 'unused legacy receipt' },
+    command: async (args, token) => {
+      assert.equal(token, undefined, 'Normal current archives never use the legacy credential');
+      if (args[0] === 'api') {
+        assert.ok(args[1]?.startsWith('repos/fixture/mono/'));
+        return JSON.stringify(metadata);
+      }
+      assert.equal(args[args.indexOf('--repo') + 1], 'fixture/mono');
+      const destination = args[args.indexOf('--dir') + 1];
+      if (!destination) throw new Error('Missing temporary download directory');
+      await writeFile(join(destination, releaseBundle), bundle);
+      return '';
+    },
+  });
+});
+
+void test('a protected migrated receipt binds the legacy version to real new-repository release metadata and bytes', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'feedback-migrated-archive-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const legacy = 'b'.repeat(40);
+  const target = 'c'.repeat(40);
+  const bundle = JSON.stringify({
+    version: 1,
+    files: releaseFiles.map((path) => ({
+      path,
+      contents: Buffer.from(`migrated:${path}`).toString('base64'),
+    })),
+  });
+  const digest = createHash('sha256').update(bundle).digest('hex');
+  const receipt = {
+    version: 1,
+    legacyAssetSha: legacy,
+    archiveSha256: digest,
+    newRepository: 'fixture/mono',
+    releaseTag: 'toolbar-imported-assets-synthetic',
+    targetCommitish: target,
+    assets: [{ name: releaseBundle, size: Buffer.byteLength(bundle), digest: `sha256:${digest}` }],
+  };
+  let corrupt = false;
+  let downloads = 0;
+  let extraAsset = false;
+  const command = async (args: string[], token?: string) => {
+    assert.equal(
+      token,
+      undefined,
+      'Migrated archives use the existing current-repository credential',
+    );
+    if (args[0] === 'api') {
+      if (args[1]?.endsWith(`/assets-${legacy}`))
+        throw Object.assign(new Error('Synthetic absent normal archive'), { stderr: 'HTTP 404' });
+      assert.equal(args[1], `repos/fixture/mono/releases/tags/${receipt.releaseTag}`);
+      return JSON.stringify({
+        tag_name: receipt.releaseTag,
+        target_commitish: target,
+        assets: extraAsset
+          ? [...receipt.assets, { name: 'private.txt', size: 1, digest: `sha256:${digest}` }]
+          : receipt.assets,
+      });
+    }
+    downloads++;
+    assert.equal(args[2], receipt.releaseTag);
+    assert.equal(args[args.indexOf('--repo') + 1], receipt.newRepository);
+    const destination = args[args.indexOf('--dir') + 1];
+    if (!destination) throw new Error('Missing temporary download directory');
+    await writeFile(join(destination, releaseBundle), corrupt ? 'corrupted' : bundle);
+    return '';
+  };
+  const options = (value: unknown) => ({
+    environment: {
+      GITHUB_REPOSITORY: 'fixture/mono',
+      TOOLBAR_MIGRATED_ARCHIVE_JSON: JSON.stringify(value),
+    },
+    command,
+  });
+  await retrieveReleaseArtifacts(legacy, join(directory, 'verified'), options(receipt));
+  assert.equal(downloads, 1);
+  assert.equal(
+    await readFile(join(directory, 'verified/toolbar.js'), 'utf8'),
+    'migrated:toolbar.js',
+  );
+  for (const changed of [
+    { ...receipt, legacyAssetSha: 'd'.repeat(40) },
+    { ...receipt, archiveSha256: '0'.repeat(64) },
+    { ...receipt, newRepository: 'fixture/other' },
+    { ...receipt, targetCommitish: 'e'.repeat(40) },
+    { ...receipt, releaseTag: '../unsafe' },
+    { ...receipt, assets: [] },
+    { ...receipt, version: 2 },
+    { ...receipt, unreviewed: true },
+  ]) {
+    await assert.rejects(
+      retrieveReleaseArtifacts(legacy, join(directory, 'rejected'), options(changed)),
+    );
+    assert.equal(downloads, 1, 'Altered receipts must fail before downloading bytes');
+  }
+  extraAsset = true;
+  await assert.rejects(
+    retrieveReleaseArtifacts(legacy, join(directory, 'extra'), options(receipt)),
+    /metadata differs/,
+  );
+  assert.equal(downloads, 1);
+  extraAsset = false;
+  corrupt = true;
+  await assert.rejects(
+    retrieveReleaseArtifacts(legacy, join(directory, 'corrupt'), options(receipt)),
+    /digest differs/,
+  );
+  await assert.rejects(readFile(join(directory, 'corrupt/toolbar.js')), /ENOENT/);
 });
 
 void test('framework release bundles verify all chunks and reject unsafe or duplicate paths', async (t) => {

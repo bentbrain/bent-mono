@@ -1,0 +1,113 @@
+name: Check Preview camera after native deployment
+run-name: Preview smoke · ${{ github.ref_name }} · ${{ github.sha }} · [${{ inputs.coordination_id || 'manual' }}]
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Exact main source of the successful native Preview release
+        type: string
+        required: true
+      coordination_id:
+        description: Optional journal correlation ID
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: deploy-development
+  cancel-in-progress: false
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
+jobs:
+  smoke:
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Preview
+    permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
+      contents: read
+      actions: read
+      deployments: read
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+      GH_TOKEN: ${{ github.token }}
+      E2E_BASE_URL: ${{ vars.WEB_ORIGIN }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Bind smoke to the live native and unchanged web sources
+        run: node --import ./scripts/public-release-logging.mjs scripts/preview-smoke-context.mjs before
+      - name: Verify deployed Worker health
+        env:
+          FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+          FOREVER_TEE_API_URL: ${{ vars.WORKER_URL }}
+          FOREVER_TEE_ENFORCE_WORKER_RELEASE: '1'
+        run: node apps/web/scripts/verify-worker-release.mjs
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
+      # One bounded camera-to-design/cart journey. No test retry can hide a
+      # failed upload. Its authenticated source-bound artifact may accompany full cloud qualification
+      # for the owner's authorized autonomous alert repair task.
+      - run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          bun run --filter @forever-tee/web test:e2e --project mobile-camera-chromium --retries=0
+          SHOP_PROTECTED_SHELL
+      - name: Verify smoke sources did not change
+        run: node --import ./scripts/public-release-logging.mjs scripts/preview-smoke-context.mjs after
+      - name: Seal private browser diagnostics
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-browser-artifacts.mjs
+      - name: Preserve source-bound automated browser acceptance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: preview-browser-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/preview-smoke-*.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve smoke evidence and browser failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: preview-smoke-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/preview-smoke-*.json
+            ${{ runner.temp }}/sealed-browser-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90

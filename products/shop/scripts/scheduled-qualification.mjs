@@ -1,4 +1,5 @@
-import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import { sealReleaseEvidence, openReleaseEvidence } from "./release-evidence.mjs";
+import { protectedConfig } from "./protected-config.mjs";
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -59,7 +60,7 @@ if (import.meta.main) {
     check(env.RUNNER_TEMP?.startsWith('/') && env.GH_TOKEN, 'private runner and explicit GitHub token');
     const api = githubApi({ token: env.GH_TOKEN, repository: 'bentbrain/bent-mono' }), path = join(env.RUNNER_TEMP, 'scheduled-qualification-intent.json');
     if (process.argv.includes('--dispatch')) {
-        const intent = JSON.parse(resolveProtectedTemplate(await readFile(path, 'utf8')));
+        const intent = openReleaseEvidence(await readFile(path, 'utf8'),{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'scheduled-qualification-intent.json'});
         check(/^[1-9][0-9]*$/.test(env.INTENT_ARTIFACT_ID ?? ''), 'acknowledged intent upload');
         const artifact = await api(`actions/artifacts/${env.INTENT_ARTIFACT_ID}`), name = `scheduled-qualification-intent-${env.GITHUB_RUN_ID}`;
         check(artifact.name === name && artifact.expired === false && artifact.workflow_run?.id === Number(env.GITHUB_RUN_ID), 'original immutable intent artifact');
@@ -67,7 +68,7 @@ if (import.meta.main) {
         let preserved;
         try {
             execFileSync('gh', ['run', 'download', env.GITHUB_RUN_ID, '--repo', 'bentbrain/bent-mono', '--name', name, '--dir', directory], { env: { ...env, GH_TOKEN: env.GH_TOKEN }, stdio: ['ignore', 'ignore', 'pipe'], timeout: 30000 });
-            preserved = JSON.parse(resolveProtectedTemplate(await readFile(join(directory, 'scheduled-qualification-intent.json'), 'utf8')));
+            preserved = openReleaseEvidence(await readFile(join(directory, 'scheduled-qualification-intent.json'), 'utf8'),{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'scheduled-qualification-intent.json'});
         }
         finally {
             await rm(directory, { recursive: true, force: true });
@@ -84,7 +85,7 @@ if (import.meta.main) {
         const plan = await scheduledQualificationPlan({ env, api });
         output('dispatch', plan.dispatch);
         if (plan.dispatch)
-            await writeFile(path, JSON.stringify(plan), { flag: 'wx', mode: 0o600 });
+            await writeFile(path, sealReleaseEvidence(plan,{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'scheduled-qualification-intent.json'}), { flag: 'wx', mode: 0o600 });
         summary(plan.dispatch ? 'Existing Development pair is eligible for full qualification.' : plan.reason);
     }
 }

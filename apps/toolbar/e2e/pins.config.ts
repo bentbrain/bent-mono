@@ -7,6 +7,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: 'list',
-  use: { baseURL: 'http://localhost:44330', trace: 'off', screenshot: 'only-on-failure' },
+  // Keep listeners below Linux's outbound source-port allocation range.
+  use: { baseURL: 'http://localhost:14330', trace: 'off', screenshot: 'only-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

@@ -1,3 +1,4 @@
+import { sealDispatchInputs } from "./release-dispatch-inputs.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { parsePromotionInput } from "./release-promotion-input.mjs";
 import { cleanupCoordinatorPlan, downloadQualificationReference, downloadRendererReference, discoverRendererBaseline } from "./release-qualification-recovery.mjs";
@@ -100,6 +101,7 @@ export async function advanceCoordinator(journal, { api, save, preflight, change
                 ...(stage.inputs.operation === "promote" && journal.promotion ? { promotion_input: JSON.stringify(journal.promotion) } : {}),
                 ...(["qualify-all", "qualify-components"].includes(stage.inputs.operation) ? { verify_release: stage.inputs.verify_release ?? `native-${journal.stages[0].runId}` } : {}),
                 expected_source: journal.source, coordination_id: `release-${journal.id}-${index}` };
+            stage.dispatchInputs = sealDispatchInputs(stage.dispatchInputs, journal.source);
             stage.status = "dispatching";
             stage.dispatchedAt = new Date().toISOString();
             await save(journal);

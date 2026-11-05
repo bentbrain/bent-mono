@@ -15,7 +15,7 @@ test('interrupted work keeps remaining requirements and release evidence visible
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Delivery proof', origins: ['http://localhost:44321'] },
+        data: { name: 'Delivery proof', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
@@ -25,7 +25,7 @@ test('interrupted work keeps remaining requirements and release evidence visible
         data: {
           body: 'Improve map detail and ordering.',
           context: {
-            url: 'http://localhost:44321/',
+            url: 'http://localhost:14321/',
             viewport: { width: 1280, height: 900 },
             deployment: null,
             anchor: {

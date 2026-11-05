@@ -16,9 +16,13 @@ concurrency:
   group: deploy-development
   cancel-in-progress: false
 
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   benchmark:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: Preview
@@ -33,14 +37,17 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
       - name: Verify exact source and isolated contracts
         run: |
           test "$GITHUB_SHA" = "$RELEASE_EXPECTED_SOURCE"
           node --test scripts/print-benchmark.test.mjs
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271
+        with:
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+        working-directory: .
       - name: Prepare exact geometry and Linux native dependencies
         run: |
           node workers/print-benchmark/prepare-plans.mjs
@@ -50,7 +57,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-print-benchmark-development-ci
           aws-region: ap-southeast-2
-          allowed-account-ids: '{{SHOP:awsAccountId}}'
+          allowed-account-ids: ${{ secrets.SHOP_AWS_ACCOUNT_ID }}
           role-session-name: print-${{ github.run_id }}
           role-duration-seconds: 1800
           unset-current-credentials: true

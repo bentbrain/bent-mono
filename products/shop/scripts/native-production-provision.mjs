@@ -1,3 +1,4 @@
+import { renderTerraformModule } from "./deployment-config.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
 import { promisify, isDeepStrictEqual as equal } from "node:util";
@@ -75,9 +76,10 @@ export async function prepareProductionRuntime(env, candidate) {
         TF_WORKSPACE: "default", CHECKPOINT_DISABLE: "1", TF_VAR_enable_alerts: "true", TF_VAR_alert_email: env.NATIVE_ALERT_EMAIL,
         TF_VAR_image_digest: PRODUCTION_IMAGE_DIGEST, TF_VAR_source_digest: PRODUCTION_SOURCE_DIGEST };
     let diagnostic = 0;
+    const moduleConfig = await renderTerraformModule(MODULE, join(directory, "module"));
     const run = async (args) => {
         try {
-            return (await execute(join(directory, "terraform"), args, { cwd: MODULE, env: tfEnv, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300000 })).stdout;
+            return (await execute(join(directory, "terraform"), args, { cwd: moduleConfig.directory, env: tfEnv, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300000 })).stdout;
         }
         catch (error) {
             const summary = { operation: args[0], ...terraformFailureSummary(error) };

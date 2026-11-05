@@ -3,9 +3,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   inspect:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: Production
@@ -15,12 +19,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
-      - run: node --test scripts/inspect-printify-order.test.mjs
+      - run: node --import ./scripts/test-protected-config.mjs --test scripts/inspect-printify-order.test.mjs
       - name: Read the existing order and report only field types
         env:
           PRINTIFY_API_TOKEN: ${{ secrets.PRINTIFY_API_TOKEN }}
           PRINTIFY_SHOP_ID: ${{ secrets.PRINTIFY_SHOP_ID }}
           PRINTIFY_ORDER_ID: "{{SHOP:inspectionProviderOrderId}}"
-        run: node scripts/inspect-printify-order.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/inspect-printify-order.mjs

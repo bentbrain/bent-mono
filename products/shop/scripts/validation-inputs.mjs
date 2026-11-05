@@ -1,13 +1,13 @@
 import { protectedConfig } from "./protected-config.mjs";
 import { validationEnvironment } from "./validation-environment.mjs";
-import { execFileSync } from 'node:child_process';
+import { releaseTree } from "./monorepo-source.mjs";
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const metadata = path => path.startsWith('docs/') || path === 'README.md' ||
     ['infra/story-video-lambda/development-qualification.json', 'infra/story-video-lambda/production-promotion.json'].includes(path);
-const tree = source => execFileSync('git', ['ls-tree', '-r', '-z', source], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+const tree = releaseTree;
 export function validationInputs(source, { env = process.env, readTree = tree, node = process.version, platform = process.platform, arch = process.arch } = {}) {
     if (!/^[a-f0-9]{40}$/.test(source ?? '') || !/^v24\./.test(node) || platform !== 'linux' || arch !== 'x64' ||
         env.ImageOS !== 'ubuntu24' || !/^[0-9.]+$/.test(env.ImageVersion ?? ''))

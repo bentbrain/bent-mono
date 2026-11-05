@@ -7,7 +7,8 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: `http://localhost:${process.env.FEEDBACK_E2E_PORT ?? '44320'}`,
+    // Keep listeners below Linux's outbound source-port allocation range.
+    baseURL: `http://localhost:${process.env.FEEDBACK_E2E_PORT ?? '14320'}`,
     trace: 'off',
     screenshot: 'only-on-failure',
   },

@@ -13,6 +13,10 @@ concurrency:
   group: ci-${{ github.ref }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   repository:
     if: github.event.pull_request.draft == false
@@ -30,7 +34,7 @@ jobs:
         id: runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
       - name: Record protected runtime
         if: contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')
@@ -53,12 +57,12 @@ jobs:
           persist-credentials: false
       - name: Check repository with caches
         if: "!contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')"
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         with:
           suite: repository
       - name: Check repository without restored caches
         if: contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         with:
           suite: repository
           node-version: ${{ steps.runtime.outputs.node-version }}
@@ -87,7 +91,7 @@ jobs:
         id: runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
       - name: Record protected runtime
         if: contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')
@@ -110,13 +114,13 @@ jobs:
           persist-credentials: false
       - name: Check browser with caches
         if: "!contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')"
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         with:
           suite: browser
           browser-shard: ${{ matrix.shard }}
       - name: Check browser without restored caches
         if: contains(github.event.pull_request.labels.*.name, 'ci:release-candidate')
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         with:
           suite: browser
           browser-shard: ${{ matrix.shard }}

@@ -1,6 +1,6 @@
 import {loadEnv} from 'vite';
 
-export function locationDefines(mode: string): Record<string, string> {
+export function locationDefines(mode: string, target: 'public' | 'card'): Record<string, string> {
   const env = {...loadEnv(mode, process.cwd(), ''), ...process.env};
   const defines: Record<string, string> = {};
   for (const name of ['PUBLIC_HOME_LATITUDE', 'PUBLIC_HOME_LONGITUDE', 'PUBLIC_HOME_BALCONY_BEARING', 'PUBLIC_HOME_ALTITUDE_METRES']) {
@@ -10,6 +10,6 @@ export function locationDefines(mode: string): Record<string, string> {
     }
     defines[`process.env.${name}`] = JSON.stringify(value);
   }
-  defines['process.env.PUBLIC_HOME_HA_BINDINGS'] = JSON.stringify(env.PUBLIC_HOME_HA_BINDINGS ?? '{}');
+  defines['process.env.PUBLIC_HOME_HA_BINDINGS'] = JSON.stringify(target === 'card' ? env.PUBLIC_HOME_HA_BINDINGS ?? '{}' : '{}');
   return defines;
 }

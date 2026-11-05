@@ -23,7 +23,8 @@
     "test:full-lighting": "bun scripts/check_full_lighting.mjs",
     "test:graphics": "bun scripts/check_graphics_recovery.mjs && bun scripts/check_context_recovery.mjs && bun scripts/check_recovery_limits.mjs",
     "test:integration": "python3 -m unittest discover -s tests",
-    "test:worker": "node scripts/test-worker.mjs"
+    "test:worker": "node scripts/test-worker.mjs",
+    "test:build-privacy": "node scripts/check-build-privacy.mjs"
   },
   "dependencies": {
     "@apartment-hotel/asset-contracts": "workspace:*",

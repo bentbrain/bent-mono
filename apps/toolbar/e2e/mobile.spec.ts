@@ -160,7 +160,7 @@ test('GitHub sign-in fits a small phone in both appearances', async ({ page }) =
   await page.route('**/api/config', (route) =>
     route.fulfill({
       json: {
-        demoUrl: 'http://localhost:44321',
+        demoUrl: 'http://localhost:14321',
         allowSignup: false,
         github: true,
         localPassword: false,

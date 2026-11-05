@@ -37,7 +37,7 @@ test("malformed and ambiguous provider settings cannot hide a native deployment"
 });
 test("release gate precedes the first remote mutation", async () => {
     const workflow = await readFile(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
-    const gate = workflow.indexOf("node scripts/native-release-gate.mjs");
+    const gate = workflow.indexOf("scripts/native-release-gate.mjs");
     assert.ok(gate > 0);
     assert.ok(gate < workflow.indexOf("wrangler d1 migrations apply"));
 });

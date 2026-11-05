@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { changedComponents, deploymentPlan, gitChanges, previousRelease, webOnlyPreviewPlan, } from "./deployment-plan.mjs";
 import { githubApi } from "./github-actions.mjs";
@@ -92,10 +93,10 @@ test("web-only Production stages only Vercel and shares the Production release l
     const workflow = readFileSync(new URL("../.github/workflows/web-production.yml", import.meta.url), "utf8");
     assert.match(workflow, /group: deploy-production/);
     assert.match(workflow, /environment: Production/);
-    assert.match(workflow, /node scripts\/reuse-ci\.mjs/);
-    assert.match(workflow, /node scripts\/web-production-release\.mjs/);
+    assert.match(workflow, /node --import \.\/scripts\/public-release-logging\.mjs scripts\/reuse-ci\.mjs/);
+    assert.match(workflow, /node --import \.\/scripts\/public-release-logging\.mjs scripts\/web-production-release\.mjs/);
     const install = workflow.indexOf("bun install --frozen-lockfile");
-    const release = workflow.indexOf("node scripts/web-production-release.mjs");
+    const release = workflow.indexOf("scripts/web-production-release.mjs");
     assert.ok(install >= 0 && install < release);
     assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
     assert.doesNotMatch(workflow, /wrangler|aws-actions|CLOUDFLARE|video-renderer|terraform|workers\/api/);
@@ -222,7 +223,7 @@ test("baseline lookup is environment-specific and API failures block deployment"
     await assert.rejects(deploymentPlan({ api: async () => { throw new Error("API unavailable"); } }), /API unavailable/);
 });
 test("git comparison includes older undeployed changes, deletions and cross-component moves", (t) => {
-    const cwd = mkdtempSync(join(tmpdir(), "release-plan-"));
+    const cwd = mkdtempSync(join(tmpdir(), "release plan "));
     t.after(() => rmSync(cwd, { recursive: true, force: true }));
     const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     git("init");
@@ -241,6 +242,7 @@ test("git comparison includes older undeployed changes, deletions and cross-comp
     git("commit", "-m", "Update documentation");
     const current = git("rev-parse", "HEAD");
     const paths = gitChanges(released, current, cwd);
+    assert.deepEqual(gitChanges(released, current, pathToFileURL(cwd + "/")), paths);
     assert.deepEqual(changedComponents(paths), { web: true, api: true, renderer: false, lambda: false });
     assert.equal(gitChanges(current, released, cwd), undefined);
     assert.equal(gitChanges("--help", current, cwd), undefined);

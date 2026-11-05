@@ -1,8 +1,8 @@
+import { REPOSITORY_ROOT, storefrontSourceManifest } from "./monorepo-source.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
 import { promisify, parseEnv } from "node:util";
 import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { productionAWS, assertProductionContext } from "./native-production-ci.mjs";
 import { productionCloudflare } from "./native-production-cloudflare.mjs";
 import { productionReleaseStore } from "./native-production-release-store.mjs";
@@ -23,7 +23,7 @@ const check = (value, reason) => { if (!value)
     throw new Error(`Production storefront release stopped: ${reason}`); };
 const deploymentURL = value => /^https:\/\/forever-tee-[a-z0-9]+-bentbrains-projects\.vercel\.app$/.test(value);
 export function verifyWebProject(project) {
-    check(project.id === PROJECT && project.accountId === TEAM && project.name === "forever-tee-web" && project.rootDirectory === "apps/web" &&
+    check(project.id === PROJECT && project.accountId === TEAM && project.name === "forever-tee-web" && project.rootDirectory === "products/shop/apps/web" &&
         (project.link === null || project.link === undefined), "exact unlinked personal project/root.");
 }
 export function existingWebAutomationCredential(project) {
@@ -116,7 +116,7 @@ export async function releaseProductionStorefront(env) {
     const cliEnv = { PATH: env.PATH, HOME: env.HOME, CI: "1", VERCEL_ORG_ID: TEAM, VERCEL_PROJECT_ID: PROJECT };
     const cli = async (args) => {
         try {
-            return (await execute("bun", ["dlx", "vercel@59.5.0", ...args, `--token=${env.VERCEL_TOKEN}`], { env: cliEnv, encoding: "utf8", timeout: 1200000, maxBuffer: 4 * 1024 * 1024 })).stdout.trim();
+            return (await execute("bunx", ["vercel@59.5.0", ...args, `--token=${env.VERCEL_TOKEN}`], { cwd: REPOSITORY_ROOT, env: cliEnv, encoding: "utf8", timeout: 1200000, maxBuffer: 4 * 1024 * 1024 })).stdout.trim();
         }
         catch {
             throw new Error("Production Vercel command failed or response uncertain; private command output omitted. Inspect the saved intent before recovery.");
@@ -126,15 +126,12 @@ export async function releaseProductionStorefront(env) {
     check(status.stdout.trim() === "", "clean CI source checkout required.");
     const commit = (await execute("git", ["rev-parse", "HEAD"])).stdout.trim();
     check(commit === env.GITHUB_SHA, "checked-out source commit.");
-    const files = (await execute("git", ["ls-files", "apps/web", "packages", "bun.lock", "package.json", "package.json"])).stdout.trim().split("\n");
-    const manifest = [];
-    for (const path of files)
-        manifest.push({ path, sha256: createHash("sha256").update(await readFile(path)).digest("hex") });
+    const manifest = await storefrontSourceManifest();
     await store.save("storefront-source.json", Buffer.from(JSON.stringify({ sourceCommit: commit, files: manifest })));
     await cli(["pull", "--yes", "--environment=production"]);
-    const linked = JSON.parse(resolveProtectedTemplate(await readFile(".vercel/project.json", "utf8")));
+    const linked = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../../../.vercel/project.json", import.meta.url), "utf8")));
     check(linked.projectId === PROJECT && linked.orgId === TEAM, "CLI project linkage.");
-    verifyProductionWebEnvironment(parseEnv(await readFile(".vercel/.env.production.local", "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
+    verifyProductionWebEnvironment(parseEnv(await readFile(new URL("../../../.vercel/.env.production.local", import.meta.url), "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
     return executeStorefrontPromotion({
         previous: { id: previousId, sourceCommit: old.meta.githubCommitSha },
         save: (name, value) => store.save(name, Buffer.from(JSON.stringify(value))), verifyPair, domain,

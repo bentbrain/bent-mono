@@ -115,7 +115,7 @@ test('new user creates a project, customizes its theme, and gets the installatio
   await expect(page.getByRole('heading', { name: 'Installation' })).toBeVisible();
   await expect(page.getByText(/data-project="prj_/)).toBeVisible();
   const origins = page.getByLabel('Website origins');
-  const enteredOrigins = 'http://localhost:44321\nhttps://iPhone.Japan.example';
+  const enteredOrigins = 'http://localhost:14321\nhttps://iPhone.Japan.example';
   await origins.fill(enteredOrigins);
   const projectChoice = page.getByRole('combobox', { name: 'Project', exact: true });
   const selectedProject = projectChoice.locator('[data-slot="select-value"]');
@@ -196,7 +196,7 @@ test('new user creates a project, customizes its theme, and gets the installatio
     data: {
       body: 'Preserve iPhone and Japan URL casing',
       context: {
-        url: 'http://localhost:44321/',
+        url: 'http://localhost:14321/',
         viewport: { width: 1280, height: 800 },
         deployment: null,
         anchor: {
@@ -257,12 +257,12 @@ test('isolated toolbar shares the service session and completes the feedback-to-
   const created = await page.request.post('/api/projects', {
     data: {
       name: 'Toolbar test',
-      origins: ['http://localhost:44321'],
+      origins: ['http://localhost:14321'],
       theme: { mode: 'dark', accent: '#788468', radius: 'square' },
     },
   });
   const project = z.object({ project: projectSchema }).parse(await created.json()).project;
-  await page.goto(`http://localhost:44321/?project=${project.id}`);
+  await page.goto(`http://localhost:14321/?project=${project.id}`);
   await expect
     .poll(() => page.frames().some((frame) => frame.url().includes('/toolbar?')))
     .toBe(true);
@@ -376,9 +376,9 @@ test('isolated toolbar shares the service session and completes the feedback-to-
     );
     window.dispatchEvent(
       new MessageEvent('message', {
-        origin: 'http://localhost:44321',
+        origin: 'http://localhost:14321',
         source: window,
-        data: { type: 'feedback:navigation', url: 'http://localhost:44321/forged' },
+        data: { type: 'feedback:navigation', url: 'http://localhost:14321/forged' },
       }),
     );
     await new Promise<void>((resolve) => {
@@ -410,13 +410,13 @@ test('isolated toolbar shares the service session and completes the feedback-to-
   await frame.evaluate((projectId) => {
     window.dispatchEvent(
       new MessageEvent('message', {
-        origin: 'http://localhost:44321',
+        origin: 'http://localhost:14321',
         source: window.parent,
         data: {
           type: 'feedback:configure',
           projectId,
           theme: { accent: '#4065ab' },
-          url: 'http://localhost:44321/',
+          url: 'http://localhost:14321/',
           viewport: { width: innerWidth, height: innerHeight },
         },
       }),
@@ -445,12 +445,12 @@ test('embedded toolbar reconciles older pages and retains an active resolved con
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Embedded cached pages', origins: ['http://localhost:44321'] },
+        data: { name: 'Embedded cached pages', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
   const context = {
-    url: 'http://localhost:44321/',
+    url: 'http://localhost:14321/',
     viewport: { width: 1280, height: 800 },
     deployment: null,
     anchor: {
@@ -470,7 +470,7 @@ test('embedded toolbar reconciles older pages and retains an active resolved con
     expect(response.status()).toBe(201);
     ids.push(z.object({ thread: threadSchema }).parse(await response.json()).thread.id);
   }
-  await page.goto(`http://localhost:44321/?project=${project.id}`);
+  await page.goto(`http://localhost:14321/?project=${project.id}`);
   await expect
     .poll(() => page.frames().some((frame) => frame.url().includes('/toolbar?')))
     .toBe(true);
@@ -509,12 +509,12 @@ test('filtered dashboard reconciles resolved cached rows while preserving loaded
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Cached pages', origins: ['http://localhost:44321'] },
+        data: { name: 'Cached pages', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
   const context = {
-    url: 'http://localhost:44321/',
+    url: 'http://localhost:14321/',
     viewport: { width: 1280, height: 800 },
     deployment: null,
     anchor: {
@@ -573,13 +573,13 @@ test('toolbar stays hidden for guests, reuses a later service login, and follows
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Shared browser session', origins: ['http://localhost:44321'] },
+        data: { name: 'Shared browser session', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
-  const cookies = await page.context().cookies('http://localhost:44320');
+  const cookies = await page.context().cookies('http://localhost:14320');
   await page.context().clearCookies();
-  await page.goto(`http://localhost:44321/?project=${project.id}`);
+  await page.goto(`http://localhost:14321/?project=${project.id}`);
   const host = page.locator('[data-feedback-host]');
   await expect(host).toHaveCount(1);
   await expect(host).toBeHidden();
@@ -594,7 +594,7 @@ test('toolbar stays hidden for guests, reuses a later service login, and follows
   await expect(frame.getByRole('button', { name: 'New feedback' })).toBeVisible();
   await expect(frame.getByRole('button', { name: 'Sign in to Feedback' })).toHaveCount(0);
   const dashboard = await page.context().newPage();
-  await dashboard.goto('http://localhost:44320/');
+  await dashboard.goto('http://localhost:14320/');
   await dashboard.getByRole('button', { name: 'Account menu', exact: true }).click();
   await dashboard.getByRole('menuitem', { name: 'Sign out', exact: true }).click();
   await expect(dashboard.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
@@ -612,7 +612,7 @@ test('cookie-blocked toolbar requires explicit connection and ends with the appr
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Cookie-blocked website', origins: ['http://localhost:44321'] },
+        data: { name: 'Cookie-blocked website', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
@@ -625,9 +625,9 @@ test('cookie-blocked toolbar requires explicit connection and ends with the appr
           body: JSON.stringify({ error: 'Browser blocked cookie access' }),
         }),
   );
-  await page.goto(`http://localhost:44321/?project=${project.id}`);
+  await page.goto(`http://localhost:14321/?project=${project.id}`);
   await expect(page.locator('[data-feedback-host]')).toBeHidden();
-  await page.goto(`http://localhost:44321/?project=${project.id}#feedback-connect`);
+  await page.goto(`http://localhost:14321/?project=${project.id}#feedback-connect`);
   await expect(page).not.toHaveURL(/#feedback-connect/);
   await expect(page.locator('[data-feedback-host]')).toBeVisible();
   const frame = page.frames().find((frame) => frame.url().includes('/toolbar?'));
@@ -644,7 +644,7 @@ test('cookie-blocked toolbar requires explicit connection and ends with the appr
     timeout: 15_000,
   });
   const signedOut = await page.request.post('/api/auth/sign-out', {
-    headers: { Origin: 'http://localhost:44320' },
+    headers: { Origin: 'http://localhost:14320' },
     data: {},
   });
   expect(signedOut.status()).toBe(200);

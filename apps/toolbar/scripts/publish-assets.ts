@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { requireToolbarRelease } from './release-guard.js';
 import {
   prepareReleaseBundle,
   releaseBundle,
@@ -8,12 +9,9 @@ import {
   verifyReleaseArtifacts,
 } from './release-artifacts.js';
 
-if (process.env.GITHUB_REF !== 'refs/heads/main' || process.env.GITHUB_EVENT_NAME !== 'push')
-  throw new Error('Only the protected production pipeline can archive release assets.');
-const version = z
-  .string()
-  .regex(/^[a-f0-9]{40}$/)
-  .parse(process.env.GITHUB_SHA);
+if (process.argv.length !== 2) throw new Error('Asset publication accepts no command arguments.');
+
+const version = await requireToolbarRelease();
 const repository = z
   .string()
   .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
@@ -21,6 +19,7 @@ const repository = z
 await prepareReleaseBundle('dist');
 let metadata = await releaseMetadata(version);
 if (!metadata) {
+  await requireToolbarRelease();
   await promisify(execFile)(
     'gh',
     [

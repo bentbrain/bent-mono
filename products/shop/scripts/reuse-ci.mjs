@@ -26,7 +26,15 @@ export async function reuseCi({
 }) {
   const deadline = now() + timeoutMs;
   while (true) {
-    const result = await api(`actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+    let result;
+    try {
+      result = await api(`actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+      // Root Quality is required before these release steps. The archived CI
+      // workflow may be absent; without reusable evidence, run full validation.
+      result = { workflow_runs: [] };
+    }
     const run = selectCiRun(result.workflow_runs, { sha, repository, branch });
     if (!run) return trustedMain ? reuseMainValidation({ api, sha, repository, branch, currentRunId }) : undefined;
     if (run.status === "completed") {

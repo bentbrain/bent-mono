@@ -1,0 +1,65 @@
+name: Deploy JP
+on:
+  workflow_run:
+    workflows: [Quality]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  statuses: read
+  pull-requests: read
+concurrency:
+  group: jp-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      vars.JP_DEPLOYMENT_ENABLED == 'true' && github.repository == 'bentbrain/bent-mono' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == 'bentbrain/bent-mono'))
+    runs-on: ubuntu-latest
+    environment:
+      name: jp-production
+      url: https://jp.bent.build
+    timeout-minutes: 25
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.18.0
+      - name: Qualify exact main source before installing
+        run: node scripts/require-release-checks.mjs --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: ./.github/actions/setup
+      - name: Build blog
+        working-directory: apps/jp
+        run: bun run build
+        env:
+          PUBLIC_FEEDBACK_SERVER: ${{ vars.PUBLIC_FEEDBACK_SERVER }}
+          PUBLIC_FEEDBACK_PROJECT_ID: ${{ vars.PUBLIC_FEEDBACK_PROJECT_ID }}
+      - name: Require no unapproved pending migrations
+        working-directory: apps/jp
+        run: node ../../scripts/require-no-pending-migrations.mjs DB
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Recheck source immediately before release
+        run: node scripts/require-release-checks.mjs --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Deploy without replacing provisioned runtime secrets
+        working-directory: apps/jp
+        run: node scripts/deploy-verified.mjs --preserve-existing-secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -17,9 +17,13 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   configure:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: Production
@@ -29,12 +33,15 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+        working-directory: .
       - name: Test the fixed Printify configuration boundary
-        run: node --test scripts/configure-printify-webhooks.test.mjs
+        run: node --import ./scripts/test-protected-config.mjs --test scripts/configure-printify-webhooks.test.mjs
       - name: Plan or apply the exact signed shipment subscriptions
         env:
           PRINTIFY_API_TOKEN: ${{ secrets.PRINTIFY_API_TOKEN }}

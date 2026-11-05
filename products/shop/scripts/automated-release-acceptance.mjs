@@ -1,4 +1,5 @@
-import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import { openReleaseEvidence } from "./release-evidence.mjs";
+import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual as equal } from 'node:util';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -49,8 +50,8 @@ export async function readAutomatedBrowserEvidence(env, runId, run = execute) {
         const records = [];
         for (const name of ['before', 'after']) {
             const path = join(directory, `preview-smoke-${name}.json`);
-            records.push(JSON.parse(resolveProtectedTemplate(await readRegularFile(path, { minBytes: 1, maxBytes: 16384,
-                message: 'Automated acceptance rejected: bounded original browser observations' }))));
+            records.push(openReleaseEvidence((await readRegularFile(path, { minBytes: 1, maxBytes: 100000,
+                message: 'Automated acceptance rejected: bounded original browser observations' })).toString('utf8'), { sourceCommit: env.GITHUB_SHA, runId, filename: `preview-smoke-${name}.json` }));
         }
         return records;
     }

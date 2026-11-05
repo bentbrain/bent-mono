@@ -17,9 +17,13 @@ permissions:
 concurrency:
   group: deploy-production
   cancel-in-progress: false
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   repair:
-    if: github.ref == 'refs/heads/main' && github.repository_id == '{{SHOP:githubRepositoryId}}' && github.actor_id == '{{SHOP:githubOwnerId}}'
+    if: github.ref == 'refs/heads/main' && github.repository_id == vars.SHOP_REPOSITORY_ID && github.actor_id == vars.SHOP_OWNER_ID
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: Production
@@ -31,17 +35,19 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: node --test scripts/launch-data-repair.test.mjs
+      - run: node --import ./scripts/test-protected-config.mjs --test scripts/launch-data-repair.test.mjs
       - name: Repair only verified historical unpaid artwork and the exact missing video pair
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: node scripts/launch-data-repair.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/launch-data-repair.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

@@ -31,12 +31,16 @@ permissions:
 concurrency:
   group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   compose:
     # Reading private draft-release assets requires push visibility.
     permissions:
       contents: write
-    if: github.ref == 'refs/heads/main' && github.repository_id == '{{SHOP:githubRepositoryId}}' && github.actor_id == '{{SHOP:githubOwnerId}}'
+    if: github.ref == 'refs/heads/main' && github.repository_id == vars.SHOP_REPOSITORY_ID && github.actor_id == vars.SHOP_OWNER_ID
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
@@ -56,18 +60,20 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: sudo apt-get update && sudo apt-get install --yes ffmpeg
-      - run: node --test scripts/featured-composition-records.test.mjs scripts/featured-composition-policy.test.mjs scripts/editorial-source.test.mjs
+      - run: node --import ./scripts/test-protected-config.mjs --test scripts/featured-composition-records.test.mjs scripts/featured-composition-policy.test.mjs scripts/editorial-source.test.mjs
       - name: Verify sources and atomically create the reviewed replacement
         # Confine the ephemeral transfer token to the publication step.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/featured-composition-release.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/featured-composition-release.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

@@ -1,3 +1,4 @@
+import { renderTerraformModule } from "./deployment-config.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -148,9 +149,10 @@ export async function prepareDevelopmentImage(candidate, env = process.env, { re
         AWS_REGION: "ap-southeast-2", AWS_DEFAULT_REGION: "ap-southeast-2", AWS_CONFIG_FILE: "/dev/null", AWS_SHARED_CREDENTIALS_FILE: "/dev/null",
         AWS_EC2_METADATA_DISABLED: "true", AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true", AWS_MAX_ATTEMPTS: "2",
         TF_DATA_DIR: join(directory, "data"), TF_CLI_CONFIG_FILE: cliConfig, TF_IN_AUTOMATION: "true", TF_INPUT: "false", CHECKPOINT_DISABLE: "1" };
+    const moduleConfig = await renderTerraformModule(MODULE, join(directory, "module"));
     const run = async (args) => {
         try {
-            return await execute(join(directory, "terraform"), args, { cwd: MODULE, env: childEnv, encoding: "utf8", timeout: 300000, maxBuffer: 16 * 1024 * 1024 });
+            return await execute(join(directory, "terraform"), args, { cwd: moduleConfig.directory, env: childEnv, encoding: "utf8", timeout: 300000, maxBuffer: 16 * 1024 * 1024 });
         }
         catch (error) {
             // Plans/state may contain private environment values. Report only a

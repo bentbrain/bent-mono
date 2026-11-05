@@ -103,6 +103,10 @@ function normalizeLocations(value, run, paths) {
 }
 
 function analysisIdentity(run) {
+  if ((run.properties?.incrementalMode !== undefined && run.properties.incrementalMode !== "") ||
+      run.tool?.extensions?.some(extension => extension.name === "codeql-action/pr-diff-range")) {
+    fail("CodeQL requires full analysis; incremental or diff-informed reports are unsupported.");
+  }
   if (!object(run.tool?.driver) || run.tool.driver.name !== "CodeQL" || !text(run.tool.driver.semanticVersion)) {
     fail("CodeQL driver/version metadata is missing.");
   }
@@ -119,6 +123,23 @@ function analysisIdentity(run) {
   // The installation UUID changes on every hosted runner. Preserve every
   // component/pack path and all other metadata, and leave raw SARIF untouched.
   const tool = structuredClone(run.tool);
+  // Main scans can add these informational source-archive descriptors. They
+  // are not queries or findings. Match their complete schema before excluding
+  // them; changed/unknown metadata and actual warning/error notifications stay
+  // significant and cannot be accepted by an existing record.
+  if (Array.isArray(tool.driver.notifications)) {
+    const languages = { typescript: "TypeScript", javascript: "JavaScript", html: "HTML" };
+    tool.driver.notifications = tool.driver.notifications.filter(notification =>
+      !Object.entries(languages).some(([language, display]) => canonical(notification) === canonical({
+        id: `cli/expected-extracted-files/${language}`,
+        name: `cli/expected-extracted-files/${language}`,
+        shortDescription: { text: "Expected extracted files" },
+        fullDescription: { text: "Files appearing in the source archive that are expected to be extracted." },
+        defaultConfiguration: { enabled: true },
+        properties: { tags: ["expected-extracted-files", "telemetry"], languageDisplayName: display },
+      })));
+    if (!tool.driver.notifications.length) delete tool.driver.notifications;
+  }
   const installation = /^file:\/\/\/home\/runner\/work\/_temp\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/codeql\/qlpacks\//;
   for (const extension of tool.extensions ?? []) {
     for (const location of extension.locations ?? []) {
@@ -204,7 +225,9 @@ export function classifyReports(reports, manifest, source) {
       analysisIdentity(run);
       if (run.externalPropertyFileReferences) fail("External SARIF result data is unsupported.");
       if (!Array.isArray(run.results)) fail("CodeQL results are missing.");
-      if (run.invocations?.some(invocation => invocation.executionSuccessful === false || invocation.toolExecutionNotifications?.some(note => note.level === "error"))) {
+      // Missing/unknown severity cannot establish successful extraction. SARIF
+      // can default an absent level to warning; accept explicit information only.
+      if (run.invocations?.some(invocation => invocation.executionSuccessful === false || invocation.toolExecutionNotifications?.some(note => !["none", "note"].includes(note.level)))) {
         fail("CodeQL analysis did not complete successfully.");
       }
       for (const result of run.results) {

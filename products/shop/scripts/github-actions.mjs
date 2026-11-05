@@ -14,7 +14,7 @@ export function githubApi({ token, repository, fetcher = fetch }) {
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
-      throw new Error(`GitHub ${path.split("?")[0]} returned HTTP ${response.status}.`);
+      throw Object.assign(new Error(`GitHub ${path.split("?")[0]} returned HTTP ${response.status}.`), { status: response.status });
     }
     return response.json();
   };
@@ -29,6 +29,8 @@ export function output(name, value) {
 export function summary(message) {
   console.log(message);
   if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${message}\n`);
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, process.env.GITHUB_ACTIONS === "true" && process.env.SHOP_EVIDENCE_ENCRYPTION_KEY
+      ? "Protected release status recorded; full details are in encrypted diagnostics.\n"
+      : `${message}\n`);
   }
 }

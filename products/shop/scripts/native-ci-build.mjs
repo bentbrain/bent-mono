@@ -1,3 +1,4 @@
+import { sealReleaseEvidence } from "./release-evidence.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdtemp } from "node:fs/promises";
@@ -124,7 +125,10 @@ export async function runCloudBuild(env = process.env) {
     const recordKey = `source/candidates/${expected.sourceDigest}/${env.GITHUB_RUN_ID}.json`;
     const record = await call(["s3api", "put-object", ...bucket, "--key", recordKey, "--body", recordPath, "--if-none-match", "*", "--server-side-encryption", "AES256"]);
     check(typeof record.VersionId === "string" && record.VersionId !== "null", "candidate version acknowledgement.");
-    return { candidateVerified: true, ...candidate, candidateKey: recordKey, candidateVersion: record.VersionId, candidateSha256: hash(await readFile(recordPath)) };
+    const result = { candidateVerified: true, ...candidate, candidateKey: recordKey, candidateVersion: record.VersionId, candidateSha256: hash(await readFile(recordPath)) };
+    const receipt = { schemaVersion: 1, sourceDigest: result.sourceDigest, candidateKey: result.candidateKey, candidateVersion: result.candidateVersion, candidateSha256: result.candidateSha256 };
+    await writeFile(join(env.RUNNER_TEMP, "candidate-reference.json"), sealReleaseEvidence(receipt, { sourceCommit: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID, filename: "candidate-reference.json" }), { flag: "wx", mode: 0o600 });
+    return result;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     try {

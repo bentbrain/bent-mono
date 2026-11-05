@@ -1,0 +1,476 @@
+name: Deploy bent.shop
+
+run-name: Storefront · ${{ inputs.environment }} · preview=${{ inputs.web_only_preview }} · full=${{ inputs.force_full }} · ${{ github.ref_name }} · ${{ github.sha }} · [${{ inputs.coordination_id || 'manual' }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source:
+        description: Optional exact main commit for coordinated releases
+        type: string
+      coordination_id:
+        description: Optional journal correlation ID
+        type: string
+      environment:
+        description: GitHub environment and deployment target
+        required: true
+        type: choice
+        options:
+          - development
+          - production
+      force_full:
+        description: Redeploy every component, including secret or environment changes
+        type: boolean
+        default: false
+      web_only_preview:
+        description: Deploy the current main storefront or web-only branch changes
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
+jobs:
+  validate:
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      statuses: read
+      checks: read
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Require main for production
+        if: inputs.environment == 'production'
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Validate web-only Preview request
+        if: inputs.web_only_preview
+        env:
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          test "${{ inputs.environment }}" = "development"
+          test "$FORCE_FULL" != "true"
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Check Preview source before validation
+        if: inputs.web_only_preview
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment development --lane web
+      - name: Reuse CI for the exact release commit
+        if: github.ref == 'refs/heads/main'
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/reuse-ci.mjs
+      - name: Check commit without existing CI
+        if: steps.ci.outputs.reused != 'true'
+        uses: ./products/shop/.github/actions/check
+        env:
+          TURBO_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ github.ref == 'refs/heads/main' && vars.TURBO_TEAM || '' }}
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
+      contents: read
+      actions: read
+      deployments: read
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+      DEPLOY_ENV: ${{ inputs.environment }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
+      WORKER_URL: ${{ vars.WORKER_URL }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Require main for production
+        if: inputs.environment == 'production'
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Fetch trusted web-only Preview base
+        if: inputs.web_only_preview
+        run: git fetch --no-tags --force origin main:refs/remotes/origin/main
+      - name: Validate deployment configuration
+        run: |
+          required=(
+            CLOUDFLARE_ACCOUNT_ID
+            CLOUDFLARE_API_TOKEN
+            VERCEL_ORG_ID
+            VERCEL_PROJECT_ID
+            VERCEL_TOKEN
+            WORKER_URL
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub environment configuration: $name" >&2
+              exit 1
+            fi
+          done
+          case "$WORKER_URL" in
+            https://*) ;;
+            *)
+              echo "WORKER_URL must be an HTTPS URL." >&2
+              exit 1
+              ;;
+          esac
+          if [ "$DEPLOY_ENV" = "development" ]; then
+            case "$WEB_ORIGIN" in
+              https://*.vercel.app) ;;
+              *)
+                echo "Preview WEB_ORIGIN must be a stable HTTPS Vercel hostname." >&2
+                exit 1
+                ;;
+            esac
+          fi
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Verify existing Worker before web-only preparation
+        if: inputs.web_only_preview
+        env:
+          FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+          FOREVER_TEE_API_URL: ${{ vars.WORKER_URL }}
+          FOREVER_TEE_ENFORCE_WORKER_RELEASE: "1"
+        run: node apps/web/scripts/verify-worker-release.mjs
+      - name: Determine changed components
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_FULL: ${{ inputs.force_full }}
+          WEB_ONLY_PREVIEW: ${{ inputs.web_only_preview }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/deployment-plan.mjs
+      - name: Require a compatible native release path
+        env:
+          API_CHANGED: ${{ steps.changes.outputs.api }}
+          LAMBDA_CHANGED: ${{ steps.changes.outputs.lambda }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/native-release-gate.mjs
+      - name: Install deployment dependencies
+        if: steps.changes.outputs.api == 'true' || steps.changes.outputs.renderer == 'true'
+        run: bun install --frozen-lockfile
+        working-directory: .
+      - name: Apply D1 migrations
+        if: steps.changes.outputs.api == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 migrations apply DB --env "$DEPLOY_ENV" --remote
+          SHOP_PROTECTED_SHELL
+      - name: Configure Worker secrets
+        if: steps.changes.outputs.api == 'true'
+        env:
+          BENT_SHIRT_OPERATIONS_SECRET: ${{ secrets.BENT_SHIRT_OPERATIONS_SECRET }}
+          CART_LINE_CAPABILITY_SECRET: ${{ secrets.CART_LINE_CAPABILITY_SECRET }}
+          FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PRINTIFY_ASSET_DELIVERY_SECRET: ${{ secrets.PRINTIFY_ASSET_DELIVERY_SECRET }}
+          PRINTIFY_API_TOKEN: ${{ secrets.PRINTIFY_API_TOKEN }}
+          PRINTIFY_SHOP_ID: ${{ secrets.PRINTIFY_SHOP_ID }}
+          PRINTIFY_WEBHOOK_SECRET: ${{ secrets.PRINTIFY_WEBHOOK_SECRET }}
+          SCHEDULED_TASK_SECRET: ${{ secrets.SCHEDULED_TASK_SECRET }}
+          SHOPIFY_ADMIN_STORE_DOMAIN: ${{ secrets.SHOPIFY_ADMIN_STORE_DOMAIN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          required=(
+            BENT_SHIRT_OPERATIONS_SECRET
+            CART_LINE_CAPABILITY_SECRET
+            FOREVER_TEE_API_SHARED_SECRET
+            OPENAI_API_KEY
+            PRINTIFY_ASSET_DELIVERY_SECRET
+            PRINTIFY_API_TOKEN
+            PRINTIFY_SHOP_ID
+            PRINTIFY_WEBHOOK_SECRET
+            SHOPIFY_ADMIN_STORE_DOMAIN
+            SHOPIFY_CLIENT_ID
+            SHOPIFY_CLIENT_SECRET
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub environment secret: $name" >&2
+              exit 1
+            fi
+          done
+          web_origins=""
+          if [ "$DEPLOY_ENV" = "development" ]; then
+            web_origins="$WEB_ORIGIN"
+          fi
+          jq -n \
+            --arg operations "$BENT_SHIRT_OPERATIONS_SECRET" \
+            --arg cartLineCapability "$CART_LINE_CAPABILITY_SECRET" \
+            --arg service "$FOREVER_TEE_API_SHARED_SECRET" \
+            --arg openai "$OPENAI_API_KEY" \
+            --arg printifyAssetDelivery "$PRINTIFY_ASSET_DELIVERY_SECRET" \
+            --arg printifyAssetOrigin "$WORKER_URL" \
+            --arg printifyToken "$PRINTIFY_API_TOKEN" \
+            --arg printifyShop "$PRINTIFY_SHOP_ID" \
+            --arg printifyWebhook "$PRINTIFY_WEBHOOK_SECRET" \
+            --arg scheduled "$SCHEDULED_TASK_SECRET" \
+            --arg shopifyDomain "$SHOPIFY_ADMIN_STORE_DOMAIN" \
+            --arg shopifyClientId "$SHOPIFY_CLIENT_ID" \
+            --arg shopifyClientSecret "$SHOPIFY_CLIENT_SECRET" \
+            --arg webOrigins "$web_origins" \
+            '{
+              BENT_SHIRT_OPERATIONS_SECRET: $operations,
+              CART_LINE_CAPABILITY_SECRET: $cartLineCapability,
+              FOREVER_TEE_API_SHARED_SECRET: $service,
+              OPENAI_API_KEY: $openai,
+              PRINTIFY_ASSET_DELIVERY_SECRET: $printifyAssetDelivery,
+              PRINTIFY_ASSET_ORIGIN: $printifyAssetOrigin,
+              PRINTIFY_API_TOKEN: $printifyToken,
+              PRINTIFY_SHOP_ID: $printifyShop,
+              PRINTIFY_WEBHOOK_SECRET: $printifyWebhook,
+              SCHEDULED_TASK_SECRET: $scheduled,
+              SHOPIFY_ADMIN_STORE_DOMAIN: $shopifyDomain,
+              SHOPIFY_CLIENT_ID: $shopifyClientId,
+              SHOPIFY_CLIENT_SECRET: $shopifyClientSecret,
+              WEB_ORIGINS: $webOrigins
+            } | with_entries(select(.value != ""))' |
+            (cd workers/api && bunx --no-install wrangler secret bulk --env "$DEPLOY_ENV")
+          SHOP_PROTECTED_SHELL
+      - name: Deploy story video renderer
+        if: steps.changes.outputs.renderer == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/video-renderer && bunx --no-install wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+          SHOP_PROTECTED_SHELL
+      - name: Deploy Worker
+        if: steps.changes.outputs.api == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+          SHOP_PROTECTED_SHELL
+      - name: Verify Development upload origin
+        if: inputs.environment == 'development'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          headers_file="$(mktemp)"
+          curl --silent --show-error \
+            --dump-header "$headers_file" \
+            --output /dev/null \
+            --request OPTIONS \
+            --header "Origin: $WEB_ORIGIN" \
+            --header "Access-Control-Request-Method: PUT" \
+            --header "Access-Control-Request-Headers: content-type" \
+            "$WORKER_URL/v2/design-upload-grants/cors-smoke-test"
+          allowed_origin="$(
+            awk 'BEGIN { IGNORECASE = 1 }
+              /^access-control-allow-origin:/ {
+                sub(/^[^:]+:[[:space:]]*/, "")
+                sub(/\r$/, "")
+                print
+              }' "$headers_file"
+          )"
+          if [ "$allowed_origin" != "$WEB_ORIGIN" ]; then
+            echo "Development Worker did not allow the stable Preview origin." >&2
+            exit 1
+          fi
+          SHOP_PROTECTED_SHELL
+      - name: Catch up revision links created during deployment
+        if: steps.changes.outputs.api == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-design-revisions.sql
+          SHOP_PROTECTED_SHELL
+      - name: Catch up placement created during deployment
+        if: steps.changes.outputs.api == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-configured-product-placement.sql
+          SHOP_PROTECTED_SHELL
+      - name: Verify Worker release
+        env:
+          FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
+          FOREVER_TEE_API_URL: ${{ vars.WORKER_URL }}
+          FOREVER_TEE_ENFORCE_WORKER_RELEASE: "1"
+        run: bun run --filter @forever-tee/web verify:worker-release
+      - name: Pull Vercel environment
+        if: steps.changes.outputs.web == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd ../..
+          if [ "$DEPLOY_ENV" = "production" ]; then
+            bunx vercel@59.5.0 pull --yes --environment=production --token="$VERCEL_TOKEN"
+          else
+            bunx vercel@59.5.0 pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          fi
+          SHOP_PROTECTED_SHELL
+      - name: Recheck authoritative storefront release admission
+        if: steps.changes.outputs.web == 'true'
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Deploy storefront
+        if: steps.changes.outputs.web == 'true'
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd ../..
+          if [ "$DEPLOY_ENV" = "production" ]; then
+            deployment_url="$(
+              bunx vercel@59.5.0 deploy \
+                --build-env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" \
+                --prod \
+                --token="$VERCEL_TOKEN"
+            )"
+          else
+            # Cloudflare's documented test pair works on generated Preview hostnames.
+            # Production continues to use the real credentials pulled from Vercel.
+            turnstile_site_key="1x00000000000000000000AA"
+            turnstile_secret="1x0000000000000000000000000000000AA"
+            deployment_url="$(
+              bunx vercel@59.5.0 deploy \
+                --build-env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" \
+                --build-env "NEXT_PUBLIC_TURNSTILE_SITE_KEY=$turnstile_site_key" \
+                --env "NEXT_PUBLIC_TURNSTILE_SITE_KEY=$turnstile_site_key" \
+                --env "TURNSTILE_SECRET=$turnstile_secret" \
+                --env "TURNSTILE_TEST_MODE=1" \
+                --token="$VERCEL_TOKEN"
+            )"
+            preview_alias="${WEB_ORIGIN#https://}"
+            bunx vercel@59.5.0 alias set \
+              "$deployment_url" \
+              "$preview_alias" \
+              --token="$VERCEL_TOKEN"
+          fi
+          printf '%s\n' "$deployment_url" "$WEB_ORIGIN"
+          echo "Storefront deployment completed; immutable details are in encrypted diagnostics." >> "$GITHUB_STEP_SUMMARY"
+          SHOP_PROTECTED_SHELL
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+
+  e2e:
+    if: inputs.environment == 'development'
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    environment: Preview
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
+      RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
+      E2E_BASE_URL: ${{ vars.WEB_ORIGIN }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Verify coordinated source before any release work
+        run: node scripts/release-dispatch-guard.mjs
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
+      - run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          bun run --filter @forever-tee/web test:e2e
+          SHOP_PROTECTED_SHELL
+      - name: Seal private browser diagnostics
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-browser-artifacts.mjs
+      - name: Save browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-failures
+          path: |
+            ${{ runner.temp }}/sealed-browser-evidence
+          retention-days: 7
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90

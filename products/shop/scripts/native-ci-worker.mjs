@@ -1,3 +1,4 @@
+import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -32,10 +33,9 @@ export async function inspectDevelopmentConsumer(cf) {
 }
 const check = (value, reason) => { if (!value)
     throw new Error(`Native Worker verification failed: ${reason}`); };
-const RELEASE_SECRET_NAMES = ["CART_LINE_CAPABILITY_SECRET", "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_WEBHOOK_SECRET", "PRODUCT_IMAGE_RENDERER_BYPASS_SECRET"];
-export const workerCommandArguments = args => [join(API, "node_modules/wrangler/bin/wrangler.js"), ...args, "--config", join(API, "wrangler.jsonc")];
-export const printExecutorCommandArguments = args => [join(API, "node_modules/wrangler/bin/wrangler.js"), ...args,
-    "--config", join(ROOT, "workers/print-executor/wrangler.jsonc")];
+const RELEASE_SECRET_NAMES = ["SHOP_PROTECTED_CONFIG_JSON", "CART_LINE_CAPABILITY_SECRET", "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_WEBHOOK_SECRET", "PRODUCT_IMAGE_RENDERER_BYPASS_SECRET"];
+export const workerCommandArguments = (args, config = join(API, "wrangler.jsonc")) => [wranglerCli(), ...args, "--config", config];
+export const printExecutorCommandArguments = (args, config = join(ROOT, "workers/print-executor/wrangler.jsonc")) => [wranglerCli(), ...args, "--config", config];
 const singleVersion = deployments => {
     const versions = deployments.deployments?.[0]?.versions;
     check(versions?.length === 1 && versions[0].percentage === 100 && /^[a-f0-9-]{36}$/.test(versions[0].version_id), "single active version.");
@@ -104,15 +104,17 @@ export async function prepareDevelopmentWorker(env = process.env) {
     const cf = developmentCloudflare(env);
     check(env.RUNNER_TEMP?.startsWith("/") && process.platform === "linux", "cloud-only build.");
     const directory = await mkdtemp(join(env.RUNNER_TEMP, "native-worker-"));
-    const releaseSecrets = Object.fromEntries(RELEASE_SECRET_NAMES.map(name => [name, env[name]]));
+    const releaseSecrets = Object.fromEntries(RELEASE_SECRET_NAMES.map(name => [name, name === "SHOP_PROTECTED_CONFIG_JSON" ? workerProtectedConfiguration() : env[name]]));
     check(Object.values(releaseSecrets).every(value => typeof value === "string" && value.length >= 32), "application release secrets.");
     const secretsPath = join(directory, "release-secrets.json");
     await writeFile(secretsPath, JSON.stringify(releaseSecrets), { flag: "wx", mode: 0o600 });
+    const apiConfig = await renderWranglerConfig(join(API, "wrangler.jsonc"), join(directory, "api.json"));
+    const executorConfig = await renderWranglerConfig(join(ROOT, "workers/print-executor/wrangler.jsonc"), join(directory, "executor.json"));
     const childEnv = { PATH: env.PATH, HOME: directory, CI: "true", NO_COLOR: "1", WRANGLER_SEND_METRICS: "false",
         CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN };
     const run = async (args, executor = false) => {
         try {
-            return await execute(process.execPath, executor ? printExecutorCommandArguments(args) : workerCommandArguments(args), { cwd: API, env: childEnv, encoding: "utf8", timeout: 240000, maxBuffer: 4 * 1024 * 1024 });
+            return await execute(process.execPath, executor ? printExecutorCommandArguments(args, executorConfig.path) : workerCommandArguments(args, apiConfig.path), { cwd: API, env: childEnv, encoding: "utf8", timeout: 240000, maxBuffer: 4 * 1024 * 1024 });
         }
         catch (error) {
             let output = [error.stdout, error.stderr].filter(value => typeof value === "string").join("\n");
@@ -137,7 +139,7 @@ export async function prepareDevelopmentWorker(env = process.env) {
     check(hash(await readFile(join(checked, "index.js"))) === hash(bytes), "Wrangler changed the prepared bundle bytes.");
     const printExecutor = await preparePrintExecutorFoundation({ env, directory, api: cf,
         run: args => run(args, true), inspectWorker: inspectDevelopmentWorker });
-    const review = { bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
+    const review = { configuration: { api: apiConfig.resolvedSha256, executor: executorConfig.resolvedSha256 }, bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
         printExecutor: printExecutor.review };
     let historicalArtifact;
     if ((await cf.versions()).items?.[0]?.id !== singleVersion(await cf.deployments())) {

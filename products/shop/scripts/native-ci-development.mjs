@@ -86,8 +86,9 @@ try {
             const runtime = await inspectDevelopmentRuntime(env);
             console.info(JSON.stringify({ bindings, runtime }));
             let receipt;
+            if (env.NATIVE_CANDIDATE_RECEIPT) receipt = JSON.parse(env.NATIVE_CANDIDATE_RECEIPT);
             try {
-                receipt = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../infra/story-video-lambda/development-candidate.json", import.meta.url), "utf8")));
+                if (!receipt && env.NATIVE_RELEASE_MODE === "api") receipt = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../infra/story-video-lambda/development-candidate.json", import.meta.url), "utf8")));
             }
             catch (error) {
                 if (error.code !== "ENOENT")

@@ -5,18 +5,18 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 // A fresh real service per test isolates account data and native rate-limit buckets.
 export const test = base.extend<{ service: boolean }>({
-  baseURL: 'http://localhost:44330',
+  baseURL: 'http://localhost:14330',
   service: [
     async ({ baseURL }, use) => {
-      if (baseURL !== 'http://localhost:44330')
+      if (baseURL !== 'http://localhost:14330')
         throw new Error('Unexpected browser fixture origin');
       await mkdir('.data', { recursive: true, mode: 0o700 });
       const directory = await mkdtemp('.data/pins-browser-');
       const server = spawn(process.execPath, ['dist/server.js'], {
         env: {
           ...process.env,
-          PORT: '44330',
-          DEMO_PORT: '44331',
+          PORT: '14330',
+          DEMO_PORT: '14331',
           FEEDBACK_URL: baseURL,
           FEEDBACK_DATA_DIR: directory,
         },

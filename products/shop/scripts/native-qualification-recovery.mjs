@@ -1,3 +1,4 @@
+import { sealReleaseEvidence } from "./release-evidence.mjs";
 import { measureReleaseStage } from "./release-stage-timing.mjs";
 import { recoveryReference, readQualificationRun } from "./native-qualification-reference.mjs";
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -11,7 +12,7 @@ import { verifyRecoverableQualification } from './native-production-qualificatio
 const check = (value,reason) => {if(!value) throw Error(`Qualification recovery stopped: ${reason}`);};
 export async function writeQualificationPointer(env,reference) {
   check(typeof env.RUNNER_TEMP === 'string' && env.RUNNER_TEMP.startsWith('/'),'runner evidence directory');
-  await writeFile(join(env.RUNNER_TEMP,'qualification-reference.json'),JSON.stringify(reference),{flag:'wx',mode:0o600});
+  await writeFile(join(env.RUNNER_TEMP,'qualification-reference.json'),sealReleaseEvidence(reference,{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'qualification-reference.json'}),{flag:'wx',mode:0o600});
 }
 export async function finishQualification(env,cf,store,functional,originalRunId=env.GITHUB_RUN_ID) {
   const originalEnv={...env,GITHUB_RUN_ID:String(originalRunId)};
@@ -23,10 +24,10 @@ export async function finishQualification(env,cf,store,functional,originalRunId=
   const receipt={schemaVersion:1,qualificationComplete:true,expectedPair,identity,
     functionalRunId:Number(originalRunId),functionalReference:functional.evidence,cleanupReference:cleanup.evidence};
   const evidence=await store.save('qualification-receipt.json',Buffer.from(JSON.stringify(receipt)));
-  await writeFile(join(env.RUNNER_TEMP,'qualification-completion-reference.json'),JSON.stringify(evidence),{flag:'wx',mode:0o600});
-  if (functional.rendererEvidence && functional.baselineSelectionEligible !== false) await writeFile(join(env.RUNNER_TEMP,'renderer-reference.json'),JSON.stringify({schemaVersion:1,
+  await writeFile(join(env.RUNNER_TEMP,'qualification-completion-reference.json'),sealReleaseEvidence(evidence,{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'qualification-completion-reference.json'}),{flag:'wx',mode:0o600});
+  if (functional.rendererEvidence && functional.baselineSelectionEligible !== false) await writeFile(join(env.RUNNER_TEMP,'renderer-reference.json'),sealReleaseEvidence({schemaVersion:1,
     reference:evidence,expectedPair,sourceCommit:env.GITHUB_SHA,inputsDigest:functional.rendererEvidence.inputsDigest,
-    nodeVersion:functional.rendererEvidence.nodeVersion, ...(functional.rendererEvidence.boundary ? {boundary:functional.rendererEvidence.boundary} : {})}),{flag:'wx',mode:0o600});
+    nodeVersion:functional.rendererEvidence.nodeVersion, ...(functional.rendererEvidence.boundary ? {boundary:functional.rendererEvidence.boundary} : {})},{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'renderer-reference.json'}),{flag:'wx',mode:0o600});
   return {...receipt,evidence};
 }
 export async function recoverQualification(env) {

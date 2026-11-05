@@ -30,6 +30,15 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if(url.pathname === "/api/release") {
+      if (request.method !== 'GET' && request.method !== 'HEAD')
+        return new Response(null, {status: 405, headers: {Allow: 'GET, HEAD'}});
+      const sha = process.env.PUBLIC_HOME_RELEASE_SHA;
+      if (!sha || !/^[a-f0-9]{40}$/.test(sha)) return new Response(null, {status: 503});
+      return new Response(request.method === 'HEAD' ? null : JSON.stringify({sourceRevision: sha}), {
+        headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store'},
+      });
+    }
     if(url.pathname === "/api/telemetry")return telemetryApi(request);
     if(url.pathname === "/api/layout")return publicLayoutApi(request,env);
 

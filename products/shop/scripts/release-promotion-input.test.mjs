@@ -38,6 +38,33 @@ test('a reviewed input binds image, qualification and owner report without editi
     assert.equal(saved[0].name, 'promotion-input.json');
     assert.equal(reference.version, 'immutable');
 });
+test('the Production pair uses the validated submitted candidate while retaining explicit historical rollback identities', () => {
+    const value = fixture(), sourceDigest = 'e'.repeat(64), imageDigest = `sha256:${'f'.repeat(64)}`;
+    Object.assign(value.manifest.candidate, { sourceDigest, imageDigest });
+    Object.assign(value.candidateReceipt, { sourceDigest, candidateKey: `source/candidates/${sourceDigest}/${value.manifest.candidate.buildRunId}.json` });
+    value.qualification.expectedPair.imageDigest = imageDigest;
+    value.phone.imageDigest = imageDigest;
+    const code = 'const value = await import("./scripts/native-production-runtime.mjs"); console.log(JSON.stringify({image:value.PRODUCTION_IMAGE_DIGEST,source:value.PRODUCTION_SOURCE_DIGEST,historical:value.HISTORICAL_PRODUCTION_IMAGE_DIGEST}));';
+    const env = { ...process.env, NATIVE_PROMOTION_INPUT: JSON.stringify(value), GITHUB_SHA: value.sourceCommit };
+    const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env, encoding: 'utf8' }));
+    assert.equal(result.image, imageDigest);
+    assert.equal(result.source, sourceDigest);
+    assert.notEqual(result.image, result.historical);
+    const invalid = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...env, GITHUB_SHA: 'b'.repeat(40) }, encoding: 'utf8' });
+    assert.notEqual(invalid.status, 0);
+    assert.equal(invalid.stdout, '');
+    const configured = JSON.parse(process.env.SHOP_PROTECTED_CONFIG_JSON);
+    configured.currentProductionImageDigest = `sha256:${'8'.repeat(64)}`;
+    configured.currentProductionSourceDigest = '9'.repeat(64);
+    const currentEnv = { ...env, NATIVE_PROMOTION_INPUT: '', SHOP_PROTECTED_CONFIG_JSON: JSON.stringify(configured) };
+    const current = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: currentEnv, encoding: 'utf8' }));
+    assert.equal(current.image, configured.currentProductionImageDigest);
+    assert.equal(current.source, configured.currentProductionSourceDigest);
+    delete configured.currentProductionImageDigest;
+    const missing = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...currentEnv, SHOP_PROTECTED_CONFIG_JSON: JSON.stringify(configured) }, encoding: 'utf8' });
+    assert.notEqual(missing.status, 0);
+    assert.equal(missing.stdout, '');
+});
 test('wrong artifacts, invented report replacements and incomplete immutable writes cannot establish promotion inputs', async () => {
     for (const mutate of [v => v.sourceCommit = 'f'.repeat(40), v => v.qualification.reference.version = 'null', v => v.qualification.expectedPair.imageDigest = 'other',
         v => v.manifest.qualification.runId = 1, v => v.phone.ownerResponse = 'different', v => v.phone.requestedChecks.pop(),
