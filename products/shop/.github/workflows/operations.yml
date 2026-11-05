@@ -88,4 +88,4 @@ jobs:
       - name: Install operations dependencies
         run: bun install --frozen-lockfile --filter @forever-tee/api...
       - name: Run operation
-        run: bun run --filter @forever-tee/api exec node scripts/run-operations.mjs "$ACTION" "$REASON" "$CONFIGURED_PRODUCT_ID"
+        run: node workers/api/scripts/run-operations.mjs "$ACTION" "$REASON" "$CONFIGURED_PRODUCT_ID"

@@ -84,7 +84,7 @@ jobs:
         working-directory: .
       - name: Hold sales during cutover
         run: >-
-          bun run --filter @forever-tee/api exec node scripts/run-operations.mjs
+          node workers/api/scripts/run-operations.mjs
           pause-sales "Launch qualification is incomplete."
       - name: Configure Shopify Worker secrets
         run: |
@@ -97,18 +97,18 @@ jobs:
               SHOPIFY_CLIENT_ID: $shopifyClientId,
               SHOPIFY_CLIENT_SECRET: $shopifyClientSecret
             }' |
-            cd workers/api && bunx --no-install wrangler secret bulk --env production
+            (cd workers/api && bunx --no-install wrangler secret bulk --env production)
       - name: Refresh Printify catalogue
         run: >-
-          bun run --filter @forever-tee/api exec node scripts/run-operations.mjs
+          node workers/api/scripts/run-operations.mjs
           refresh-catalogue
       - name: Refresh Shopify variant mapping
         run: >-
-          bun run --filter @forever-tee/api exec node scripts/run-operations.mjs
+          node workers/api/scripts/run-operations.mjs
           refresh-variant-mapping
       - name: Confirm sales remain paused
         run: >-
-          bun run --filter @forever-tee/api exec node scripts/run-operations.mjs
+          node workers/api/scripts/run-operations.mjs
           read-sales-status
       - name: Verify Worker release
         env:

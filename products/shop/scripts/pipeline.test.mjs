@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { changedComponents, deploymentPlan, gitChanges, previousRelease, webOnlyPreviewPlan, } from "./deployment-plan.mjs";
 import { githubApi } from "./github-actions.mjs";
@@ -222,7 +223,7 @@ test("baseline lookup is environment-specific and API failures block deployment"
     await assert.rejects(deploymentPlan({ api: async () => { throw new Error("API unavailable"); } }), /API unavailable/);
 });
 test("git comparison includes older undeployed changes, deletions and cross-component moves", (t) => {
-    const cwd = mkdtempSync(join(tmpdir(), "release-plan-"));
+    const cwd = mkdtempSync(join(tmpdir(), "release plan "));
     t.after(() => rmSync(cwd, { recursive: true, force: true }));
     const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     git("init");
@@ -241,6 +242,7 @@ test("git comparison includes older undeployed changes, deletions and cross-comp
     git("commit", "-m", "Update documentation");
     const current = git("rev-parse", "HEAD");
     const paths = gitChanges(released, current, cwd);
+    assert.deepEqual(gitChanges(released, current, pathToFileURL(cwd + "/")), paths);
     assert.deepEqual(changedComponents(paths), { web: true, api: true, renderer: false, lambda: false });
     assert.equal(gitChanges(current, released, cwd), undefined);
     assert.equal(gitChanges("--help", current, cwd), undefined);

@@ -291,7 +291,7 @@ jobs:
               SHOPIFY_CLIENT_SECRET: $shopifyClientSecret,
               WEB_ORIGINS: $webOrigins
             } | with_entries(select(.value != ""))' |
-            cd workers/api && bunx --no-install wrangler secret bulk --env "$DEPLOY_ENV"
+            (cd workers/api && bunx --no-install wrangler secret bulk --env "$DEPLOY_ENV")
           SHOP_PROTECTED_SHELL
       - name: Deploy story video renderer
         if: steps.changes.outputs.renderer == 'true'

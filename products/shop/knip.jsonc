@@ -25,7 +25,7 @@
     },
     "packages/product-image-renderer": {"ignoreBinaries": ["rustc"]},
     "workers/api": {
-      "entry": ["scripts/run-operations.mjs"]
+      // The operations entry is discovered from the explicit Node workflow commands.
     },
     "workers/video-renderer": {
       "entry": [

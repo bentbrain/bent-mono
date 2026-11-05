@@ -59,9 +59,9 @@ runs:
         key: ${{ runner.os }}-${{ runner.arch }}-chromium-${{ hashFiles('bun.lock') }}
     - name: Install local browser and OS dependencies
       if: inputs.suite != 'repository'
-      run: bun run --filter @forever-tee/web exec playwright install --with-deps chromium
+      run: bunx --no-install playwright install --with-deps chromium
       shell: bash
-      working-directory: products/shop
+      working-directory: products/shop/apps/web
     - name: Catch browser regressions before deployment
       if: inputs.suite != 'repository'
       run: bun run test:e2e:ci

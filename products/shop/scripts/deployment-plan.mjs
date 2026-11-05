@@ -1,6 +1,8 @@
 import { PRODUCT_ROOT, REPOSITORY_ROOT, releasePath } from "./monorepo-source.mjs";
 import { applicationContractPath } from "./contract-consumers.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { githubApi, output, summary } from "./github-actions.mjs";
 
 const allComponents = { web: true, api: true, renderer: true, lambda: true };
@@ -66,12 +68,15 @@ export async function previousRelease({ api, environment, repository, runId }) {
 
 export function gitChanges(base, sha, cwd = PRODUCT_ROOT) {
   if (![base, sha].every((ref) => /^[a-f0-9]{40}$/.test(ref ?? ""))) return undefined;
-  const ancestor = spawnSync("git", ["merge-base", "--is-ancestor", base, sha], { cwd });
+  const directory = cwd instanceof URL ? fileURLToPath(cwd) : resolve(cwd);
+  const repositoryDirectory = resolve(REPOSITORY_ROOT);
+  const repositoryPaths = directory === repositoryDirectory || directory.startsWith(repositoryDirectory + sep);
+  const ancestor = spawnSync("git", ["merge-base", "--is-ancestor", base, sha], { cwd: directory });
   if (ancestor.status !== 0) return undefined;
   // Disabling rename detection includes both deleted and added component paths.
   return execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", base, sha], {
-    cwd, encoding: "utf8",
-  }).split("\0").filter(Boolean).map(path => cwd.startsWith(REPOSITORY_ROOT) ? releasePath(path) : path);
+    cwd: directory, encoding: "utf8",
+  }).split("\0").filter(Boolean).map(path => repositoryPaths ? releasePath(path) : path);
 }
 
 export async function deploymentPlan({ forceFull, changes = gitChanges, sha, ...context }) {

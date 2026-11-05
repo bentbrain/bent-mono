@@ -14,7 +14,7 @@ export function githubApi({ token, repository, fetcher = fetch }) {
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
-      throw new Error(`GitHub ${path.split("?")[0]} returned HTTP ${response.status}.`);
+      throw Object.assign(new Error(`GitHub ${path.split("?")[0]} returned HTTP ${response.status}.`), { status: response.status });
     }
     return response.json();
   };
