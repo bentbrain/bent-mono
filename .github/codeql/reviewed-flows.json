@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "8274538e8c532b6b40f53e7b6861c90f87d08eeeb4a56ef6786be6dcace0804c",
+  "sourceManifestSha256": "25b0f369075257ac5e02aca2df6b738f10625d8760a5f1863b2085b52689de19",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -22,7 +22,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -45,7 +45,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -68,7 +68,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -91,7 +91,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -114,7 +114,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -139,7 +139,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -164,7 +164,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -181,7 +181,8 @@
       "guardPaths": [
         "products/shop/scripts/native-ci-qualification-verification.mjs",
         "products/shop/scripts/native-ci-operation.mjs",
-        "products/shop/scripts/native-production-qualification.mjs"
+        "products/shop/scripts/native-production-qualification.mjs",
+        "products/shop/scripts/native-ci-development.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-ci-qualification-verification.test.mjs",
@@ -189,7 +190,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -215,7 +216,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -240,7 +241,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -265,7 +266,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -290,7 +291,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -316,7 +317,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -341,7 +342,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -366,7 +367,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -392,7 +393,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -417,7 +418,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -442,7 +443,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -469,7 +470,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -496,7 +497,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -523,7 +524,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -548,7 +549,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -573,7 +574,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -598,7 +599,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -625,7 +626,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -650,7 +651,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -675,7 +676,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -700,7 +701,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -725,7 +726,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -750,7 +751,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -775,7 +776,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -800,7 +801,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -823,7 +824,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -834,23 +835,26 @@
         "primaryLocationLineHash": "982c8595a6a145c8:1",
         "primaryLocationStartColumnFingerprint": "25"
       },
-      "canonicalFlowSha256": "bfe436c1b5340df015caad2cf0d77b06b44d3b5b326b6f2dec341073e8defa71",
+      "canonicalFlowSha256": "a8e0e975270ac9d9ab504fec1a214f040e272871c46e93a3c5c231278478c892",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "The Development installer intentionally downloads a fixed Terraform 1.12.2 HTTPS ZIP with redirects denied, compares the full body SHA256 to the protected reviewed ZIP_HASH before any write/unzip, and uses exclusive 0600 terraform.zip inside mkdtemp. Exact Development workflow/account and cloud-only x86 context precede it; credentials/endpoints are isolated for execution. Tests cover CI operation/plan mutation boundaries and diagnostics, not the live archive download. Source-inspected fixed URL/checksum ordering prevents arbitrary executable download; no unit-test claim of cloud qualification is made.",
+      "rationale": "The Development installer intentionally downloads a fixed Terraform 1.12.2 HTTPS ZIP with redirects denied, compares the full body SHA256 to the protected reviewed ZIP_HASH before any write/unzip, and uses exclusive 0600 terraform.zip inside mkdtemp. Exact Development workflow/account and cloud-only x86 context precede it; credentials/endpoints are isolated for execution. Tests cover CI operation/plan mutation boundaries and diagnostics, not the live archive download. Source-inspected fixed URL/checksum ordering prevents arbitrary executable download; no unit-test claim of cloud qualification is made. The current monorepo path renders only regular, bounded, allowlisted Terraform module files into private exclusive outputs and runs Terraform from that rendered directory; the checkout templates stay untouched. This changes execution cwd after the same fixed-host/checksum-before-write installer guard, not the network source or archive trust boundary.",
       "guardPaths": [
         "products/shop/scripts/native-ci-terraform.mjs",
         "products/shop/scripts/native-ci-aws.mjs",
-        "products/shop/scripts/native-ci-identity.mjs"
+        "products/shop/scripts/native-ci-identity.mjs",
+        "products/shop/scripts/deployment-config.mjs",
+        "products/shop/scripts/read-regular-file.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-ci-terraform.test.mjs",
         "products/shop/scripts/native-ci-operation.test.mjs",
         "products/shop/scripts/native-ci-aws.test.mjs",
-        "products/shop/scripts/native-ci-identity.test.mjs"
+        "products/shop/scripts/native-ci-identity.test.mjs",
+        "products/shop/scripts/monorepo-deployment.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -861,22 +865,28 @@
         "primaryLocationLineHash": "66702ae4cfb27e19:1",
         "primaryLocationStartColumnFingerprint": "22"
       },
-      "canonicalFlowSha256": "bac039ac0151739c0e8e523ef50bb89f7c8b0b1988cd4ba16b34450cc7375c45",
+      "canonicalFlowSha256": "f2e34485433dff362d5dee028cc2cd64cb1df18394f7082b53df6bc4150abed5",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "Authenticated original GitHub run/journal metadata and verified qualification data are intentionally persisted by foundationEvidenceSaver as private immutable release evidence. The helper allows only safe basenames/no dotdot, writes a separate evidence-prefixed path wx 0600 inside the owned runner directory, and uploads to the fixed expected-owner bucket with If-None-Match and a version acknowledgement. Tests verify permission bits, no overwrite/collision, traversal rejection and original-run/context guards. The file is evidence, not code to execute or an arbitrary remote-selected destination.",
+      "rationale": "Authenticated original GitHub run/journal metadata and verified qualification data are intentionally persisted by foundationEvidenceSaver as private immutable release evidence. The helper allows only safe basenames/no dotdot, writes a separate evidence-prefixed path wx 0600 inside the owned runner directory, and uploads to the fixed expected-owner bucket with If-None-Match and a version acknowledgement. Tests verify permission bits, no overwrite/collision, traversal rejection and original-run/context guards. The file is evidence, not code to execute or an arbitrary remote-selected destination. Reassessment covers all four current trace branches, including candidate qualification and the foundation/runtime GitHub deployment journals. Rendered module cwd is separate from the fixed evidence-prefixed local saver path; neither remote response nor protected config selects that evidence basename.",
       "guardPaths": [
         "products/shop/scripts/native-production-foundation.mjs",
         "products/shop/scripts/native-production-foundation-contract.mjs",
-        "products/shop/scripts/native-production-ci.mjs"
+        "products/shop/scripts/native-production-ci.mjs",
+        "products/shop/scripts/native-production-provision.mjs",
+        "products/shop/scripts/native-production-candidate.mjs",
+        "products/shop/scripts/native-production-qualification.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-production-evidence.test.mjs",
         "products/shop/scripts/native-production-foundation.test.mjs",
-        "products/shop/scripts/native-production-ci.test.mjs"
+        "products/shop/scripts/native-production-ci.test.mjs",
+        "products/shop/scripts/native-production-runtime.test.mjs",
+        "products/shop/scripts/native-production-candidate.test.mjs",
+        "products/shop/scripts/native-production-qualification.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -887,20 +897,23 @@
         "primaryLocationLineHash": "982c8595a6a145c8:1",
         "primaryLocationStartColumnFingerprint": "25"
       },
-      "canonicalFlowSha256": "fc33d54c1d70ceac0cdd347cb46a5a91c4646706d126e900cbedd8c0aa69cd47",
+      "canonicalFlowSha256": "9d511e97adc911ef9b70fde84933653eecb40f76dc133fccd0781941a7901807",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "The Production foundation intentionally installs Terraform from one fixed versioned Hashicorp HTTPS URL with redirect:error. It hashes all downloaded bytes and requires the protected reviewed SHA256 before exclusive 0600 archive write and unzip in a fresh private runner directory; exact main first-attempt workflow, account/session and fixed module inventory precede it. Tests exercise context/resource-plan limits and evidence-file safety, not the live downloader. This pinned executable input is intentional; checksum ordering is source-inspected and cannot be replaced by an arbitrary URL/body.",
+      "rationale": "The Production foundation intentionally installs Terraform from one fixed versioned Hashicorp HTTPS URL with redirect:error. It hashes all downloaded bytes and requires the protected reviewed SHA256 before exclusive 0600 archive write and unzip in a fresh private runner directory; exact main first-attempt workflow, account/session and fixed module inventory precede it. Tests exercise context/resource-plan limits and evidence-file safety, not the live downloader. This pinned executable input is intentional; checksum ordering is source-inspected and cannot be replaced by an arbitrary URL/body. The current monorepo path renders only regular, bounded, allowlisted Terraform module files into private exclusive outputs and runs Terraform from that rendered directory; the checkout templates stay untouched. This changes execution cwd after the same fixed-host/checksum-before-write installer guard, not the network source or archive trust boundary.",
       "guardPaths": [
         "products/shop/scripts/native-production-foundation.mjs",
-        "products/shop/scripts/native-production-foundation-contract.mjs"
+        "products/shop/scripts/native-production-foundation-contract.mjs",
+        "products/shop/scripts/deployment-config.mjs",
+        "products/shop/scripts/read-regular-file.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-production-foundation.test.mjs",
-        "products/shop/scripts/native-production-evidence.test.mjs"
+        "products/shop/scripts/native-production-evidence.test.mjs",
+        "products/shop/scripts/monorepo-deployment.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -911,20 +924,26 @@
         "primaryLocationLineHash": "bb40480df70e6543:1",
         "primaryLocationStartColumnFingerprint": "25"
       },
-      "canonicalFlowSha256": "a9381f93e065546faadc8d1cc03a2e5746cc810280a20a79c6060948fcbce28f",
+      "canonicalFlowSha256": "98a71eba95ab0b7f7187f2923bf546881182ffcc67763fc09a543076c9b1aae9",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "For the exact qualified target image/source and fixed module inventory, authenticated Production CI downloads only the fixed Terraform 1.12.2 Hashicorp HTTPS archive, denies redirects and checks its protected reviewed ZIP_HASH before wx 0600 write/unzip inside mkdtemp. Production credentials require the exact account/role/session and disable external credential/endpoint fallbacks. Tests reject wrong runtime/image plan/observations and CI identities; they do not execute the live downloader. This is a deliberately pinned executable build input, with source-inspected hash enforcement rather than arbitrary network code.",
+      "rationale": "For the exact qualified target image/source and fixed module inventory, authenticated Production CI downloads only the fixed Terraform 1.12.2 Hashicorp HTTPS archive, denies redirects and checks its protected reviewed ZIP_HASH before wx 0600 write/unzip inside mkdtemp. Production credentials require the exact account/role/session and disable external credential/endpoint fallbacks. Tests reject wrong runtime/image plan/observations and CI identities; they do not execute the live downloader. This is a deliberately pinned executable build input, with source-inspected hash enforcement rather than arbitrary network code. The current monorepo path renders only regular, bounded, allowlisted Terraform module files into private exclusive outputs and runs Terraform from that rendered directory; the checkout templates stay untouched. This changes execution cwd after the same fixed-host/checksum-before-write installer guard, not the network source or archive trust boundary. The accepted baseline pairs remain exact protected current/historical/previous or validated submitted-candidate digest pairs; plan review still requires both functions to move together to the exact qualified target, with no unrelated resource changes.",
       "guardPaths": [
         "products/shop/scripts/native-production-image.mjs",
-        "products/shop/scripts/native-production-ci.mjs"
+        "products/shop/scripts/native-production-ci.mjs",
+        "products/shop/scripts/deployment-config.mjs",
+        "products/shop/scripts/read-regular-file.mjs",
+        "products/shop/scripts/native-production-runtime.mjs",
+        "products/shop/scripts/release-promotion-input.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-production-image.test.mjs",
-        "products/shop/scripts/native-production-ci.test.mjs"
+        "products/shop/scripts/native-production-ci.test.mjs",
+        "products/shop/scripts/monorepo-deployment.test.mjs",
+        "products/shop/scripts/release-promotion-input.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -935,20 +954,23 @@
         "primaryLocationLineHash": "982c8595a6a145c8:1",
         "primaryLocationStartColumnFingerprint": "25"
       },
-      "canonicalFlowSha256": "c4cfadddd065f4991a36707f100e46f148c184c348bda24ec13b30b589970fa8",
+      "canonicalFlowSha256": "712affc17362f7032360f97d0a6c78d4e6bf03b3b3aab5fddbaadd9856372ace",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "Runtime provisioning is gated by verified candidate/acceptance, explicit authenticated Production operation and absent existing functions before a fixed Terraform 1.12.2 HTTPS download. Redirects are denied and the entire archive must match the protected reviewed SHA256 before wx 0600 private-file write/unzip; exact module/source inventory remains pinned. Tests exercise runtime-plan/resource limits, collision/unchanged-state guards and Production identity, not a live binary installation. The download is intended and content-pinned; it does not admit a caller-controlled URL/executable.",
+      "rationale": "Runtime provisioning is gated by verified candidate/acceptance, explicit authenticated Production operation and absent existing functions before a fixed Terraform 1.12.2 HTTPS download. Redirects are denied and the entire archive must match the protected reviewed SHA256 before wx 0600 private-file write/unzip; exact module/source inventory remains pinned. Tests exercise runtime-plan/resource limits, collision/unchanged-state guards and Production identity, not a live binary installation. The download is intended and content-pinned; it does not admit a caller-controlled URL/executable. The current monorepo path renders only regular, bounded, allowlisted Terraform module files into private exclusive outputs and runs Terraform from that rendered directory; the checkout templates stay untouched. This changes execution cwd after the same fixed-host/checksum-before-write installer guard, not the network source or archive trust boundary.",
       "guardPaths": [
         "products/shop/scripts/native-production-provision.mjs",
-        "products/shop/scripts/native-production-ci.mjs"
+        "products/shop/scripts/native-production-ci.mjs",
+        "products/shop/scripts/deployment-config.mjs",
+        "products/shop/scripts/read-regular-file.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/native-production-runtime.test.mjs",
-        "products/shop/scripts/native-production-ci.test.mjs"
+        "products/shop/scripts/native-production-ci.test.mjs",
+        "products/shop/scripts/monorepo-deployment.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -970,29 +992,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
-      }
-    },
-    {
-      "id": "shop-script-http-file-paid-order-provider-recovery-64",
-      "disposition": "intentional-safe-flow",
-      "ruleId": "js/http-to-file-access",
-      "fingerprint": {
-        "primaryLocationLineHash": "5b8ceed96edf7999:1",
-        "primaryLocationStartColumnFingerprint": "50"
-      },
-      "canonicalFlowSha256": "d78044f69c843e03578cf238d36e5b37fc8af90e46dd2e90f44fcbc34e0574ed",
-      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "The exact protected owner Production workflow permits only pinned order/fulfilment/provider/request identities and explicit reviewed plan/apply with body-bound OIDC to the fixed Worker. Response IDs/request/plan/source/release/run/mutation fields must match before a safe projection is saved wx 0600 as constant order-provider-recovery-result.json. Tests cover both pinned orders, exclude private response address/token fields, reject target/source/apply drift and forbid uncertain retries. Network receipt persistence is intentional and does not expose raw customer data or control the pathname.",
-      "guardPaths": [
-        "products/shop/scripts/paid-order-provider-recovery.mjs"
-      ],
-      "testPaths": [
-        "products/shop/scripts/paid-order-provider-recovery.test.mjs"
-      ],
-      "reviewReference": {
-        "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1014,7 +1014,29 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-paid-order-provider-recovery-64",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "5b8ceed96edf7999:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "d78044f69c843e03578cf238d36e5b37fc8af90e46dd2e90f44fcbc34e0574ed",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The exact protected owner Production workflow permits only pinned order/fulfilment/provider/request identities and explicit reviewed plan/apply with body-bound OIDC to the fixed Worker. Response IDs/request/plan/source/release/run/mutation fields must match before a safe projection is saved wx 0600 as constant order-provider-recovery-result.json. Tests cover both pinned orders, exclude private response address/token fields, reject target/source/apply drift and forbid uncertain retries. Network receipt persistence is intentional and does not expose raw customer data or control the pathname.",
+      "guardPaths": [
+        "products/shop/scripts/paid-order-provider-recovery.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/paid-order-provider-recovery.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1036,32 +1058,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
-      }
-    },
-    {
-      "id": "shop-runtime-lifecycle-result-evidence",
-      "disposition": "intentional-safe-flow",
-      "ruleId": "js/http-to-file-access",
-      "fingerprint": {
-        "primaryLocationLineHash": "cad0d270fad424c6:1",
-        "primaryLocationStartColumnFingerprint": "49"
-      },
-      "canonicalFlowSha256": "c287632320cb4536ee73b3b2bf9e8fbbbbfa1bc54fbb3ca5eb04e7c356e1123e",
-      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "The tool intentionally saves authenticated product-lifecycle response status and JSON to the literal product-lifecycle-result.json using exclusive creation. Network data reaches the file data argument, never its path or executable source. Dispatch requires main-repository Actions context, an HTTPS Worker, operations authentication and a signed identity bound to the exact request; the server verifies workflow/environment and action authority. Saving the receipt preserves recovery evidence after uncertain mutations.",
-      "guardPaths": [
-        "products/shop/workers/api/scripts/product-lifecycle.mjs",
-        "products/shop/workers/api/src/product-lifecycle.ts",
-        "products/shop/workers/api/src/operations-identity.ts",
-        "products/shop/workers/api/src/service-auth.ts"
-      ],
-      "testPaths": [
-        "products/shop/workers/api/src/product-lifecycle.test.ts"
-      ],
-      "reviewReference": {
-        "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1087,7 +1084,32 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-lifecycle-result-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "cad0d270fad424c6:1",
+        "primaryLocationStartColumnFingerprint": "49"
+      },
+      "canonicalFlowSha256": "c287632320cb4536ee73b3b2bf9e8fbbbbfa1bc54fbb3ca5eb04e7c356e1123e",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The tool intentionally saves authenticated product-lifecycle response status and JSON to the literal product-lifecycle-result.json using exclusive creation. Network data reaches the file data argument, never its path or executable source. Dispatch requires main-repository Actions context, an HTTPS Worker, operations authentication and a signed identity bound to the exact request; the server verifies workflow/environment and action authority. Saving the receipt preserves recovery evidence after uncertain mutations.",
+      "guardPaths": [
+        "products/shop/workers/api/scripts/product-lifecycle.mjs",
+        "products/shop/workers/api/src/product-lifecycle.ts",
+        "products/shop/workers/api/src/operations-identity.ts",
+        "products/shop/workers/api/src/service-auth.ts"
+      ],
+      "testPaths": [
+        "products/shop/workers/api/src/product-lifecycle.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1112,7 +1134,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1136,7 +1158,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1161,7 +1183,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1186,7 +1208,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1211,7 +1233,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1236,7 +1258,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1264,7 +1286,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1287,7 +1309,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1315,7 +1337,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1343,7 +1365,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1371,7 +1393,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1396,7 +1418,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1421,7 +1443,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1446,7 +1468,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     },
     {
@@ -1471,7 +1493,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
       }
     }
   ]
