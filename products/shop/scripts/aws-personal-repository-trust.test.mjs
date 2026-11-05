@@ -52,7 +52,9 @@ function fixture(stage = "development") {
             boundary: { Arn: boundaryArn, DefaultVersionId: "v7", PolicyId: `SYNTHETIC-${key}-BOUNDARY` }, boundaryDocument: policy };
     }
     const now = new Date().toISOString();
-    const baseline = { sourceCommit: source, observedAt: now, original, state, permissions, parentObservations: [], proofRuns: { development: 1201, production: 1202 },
+    const object = { ServerSideEncryption: "aws:kms", SSEKMSKeyId: `arn:aws:kms:ap-southeast-2:${account}:key/${protectedConfig("stateKmsKeyId")}`,
+        VersionId: "synthetic-version", ContentLength: 400, ETag: '"synthetic-etag"', LastModified: "2026-01-01T00:00:00Z" };
+    const baseline = { object, sourceCommit: source, observedAt: now, original, state, permissions, parentObservations: [], proofRuns: { development: 1201, production: 1202 },
         window: { observedAt: now, expiresAt: new Date(Date.now() + 15 * 60000).toISOString(), exclusive: true, admissionsFrozen: true, repositoryIds: [original.repositoryId, Number(repo)] } };
     return { baseline, value };
 }
@@ -133,7 +135,8 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
     const directory = await mkdtemp(join(tmpdir(), "shop-trust-synthetic-"));
     t.after(async () => { process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(baseConfig); await rm(directory, { recursive: true, force: true }); });
     const { baseline } = fixture(stage);
-    const currentState = structuredClone(baseline.state), permissions = structuredClone(baseline.permissions), commands = [];
+    const currentState = structuredClone(baseline.state), permissions = structuredClone(baseline.permissions), commands = [], events = [];
+    const object = structuredClone(baseline.object);
     await write(join(directory, "original-repository-receipt.json"), original);
     const config = { ...baseConfig };
     if (stage === "production") {
@@ -159,7 +162,7 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
     config[`trust_${stage}_baselineSha256`] = sha(JSON.stringify(baseline));
     process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
     const backend = { type: "s3", config: { bucket: `forever-tee-terraform-state-${account}-ap-southeast-2`, key: "story-video/bootstrap/terraform.tfstate", region: "ap-southeast-2",
-        use_lockfile: true, encrypt: true, kms_key_id: `arn:aws:kms:ap-southeast-2:${account}:key/${protectedConfig("stateKmsKeyId")}`, allowed_account_ids: [account], expected_bucket_owner: account } };
+        use_lockfile: true, encrypt: true, kms_key_id: `arn:aws:kms:ap-southeast-2:${account}:key/${protectedConfig("stateKmsKeyId")}`, allowed_account_ids: [account] } };
     let applied = false;
     const dependencies = {
         trustPrivateDirectory: directory, trustGitHub: githubFor(baseline), inspectTrustCheckout: expected => assert.equal(expected, source),
@@ -168,11 +171,16 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
         execute: async (args, env) => {
             assert.equal(env.AWS_ACCESS_KEY_ID, undefined); assert.equal(env.AWS_CONFIG_FILE, PERSONAL_CONFIG_PATH);
             if (args[0] === "sts") return JSON.stringify({ Account: account, Arn: `arn:aws:sts::${account}:assumed-role/AWSReservedSSO_AdministratorAccess_synthetic/session` });
-            if (args[0] === "s3api") return JSON.stringify({ ServerSideEncryption: "aws:kms", SSEKMSKeyId: backend.config.kms_key_id, VersionId: "synthetic-version", ContentLength: 400 });
+            if (args[0] === "s3api") {
+                assert.deepEqual(args.slice(0, -7), ["s3api", "head-object", "--bucket", backend.config.bucket,
+                    "--expected-bucket-owner", account, "--key", backend.config.key]);
+                events.push("owner-head");
+                return JSON.stringify(object);
+            }
             return JSON.stringify(await iam(args.slice(0, -7), permissions));
         },
         executeTerraformCapture: async (args, env, cwd) => {
-            commands.push(args);
+            commands.push(args); events.push(args[0]);
             assert.equal(env.TF_CLI_ARGS, undefined); assert.equal(env.NODE_OPTIONS, undefined); assert.equal(env.AWS_ACCESS_KEY_ID, undefined);
             assert.equal(env.TF_WORKSPACE, "default"); assert.equal(env.TF_CLI_CONFIG_FILE, "/dev/null"); assert.equal(basename(cwd), "module");
             if (args[0] === "version") return JSON.stringify({ terraform_version: "1.12.2", provider_selections: { [AWS]: "6.62.0" } });
@@ -188,7 +196,7 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
             if (args[0] === "apply") {
                 const plan = planFor(baseline, stage);
                 currentState.resources.forEach((resource, i) => resource.instances[0].attributes = plan.resource_changes[i].change.after);
-                currentState.serial++;
+                currentState.serial++; object.VersionId = "synthetic-after-version"; object.ETag = '"synthetic-after-etag"';
                 permissions[stage].role.AssumeRolePolicyDocument = trust(trustEnvironments[stage], targetPrefix());
                 applied = true;
                 if (uncertain) throw Object.assign(new Error("synthetic response lost"), { stderr: "synthetic private diagnostics" });
@@ -197,13 +205,36 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
             assert.fail(`Forbidden synthetic command ${args}`);
         },
     };
-    return { directory, baseline, dependencies, commands, config, backend, currentState, permissions,
+    return { directory, baseline, dependencies, commands, events, config, backend, currentState, permissions, object,
         invoke: args => runPersonalTerraform(["bootstrap", "repository-trust", ...args], dependencies),
         approve: result => {
             Object.assign(config, { [`trust_${stage}_approvedPlanSha256`]: result.planSha256, [`trust_${stage}_approvedReviewSha256`]: result.reviewSha256, [`trust_${stage}_approvedSourceSha256`]: result.sourceSha256 });
             process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
         } };
 }
+// Opt in with the exact installed binary. No credentials, provider download or
+// backend configuration can run: the deliberately unknown attribute stops init
+// during native schema decoding. Every rendered backend argument is decoded too.
+test("native Terraform 1.12.2 accepts the rendered S3 backend schema before configuration", { skip: !process.env.SHOP_TRUST_SCHEMA_TERRAFORM }, async t => {
+    const h = await harness(t), result = JSON.parse(await h.invoke(["development", "plan"]));
+    const probe = join(h.directory, "schema-probe");
+    await mkdir(probe, { mode: 0o700 });
+    const rendered = await readFile(join(result.reviewDirectory, "module/versions.tf"), "utf8");
+    await write(join(probe, "versions.tf"), rendered.replace(JSON.stringify(PERSONAL_CONFIG_PATH), JSON.stringify(join(probe, "no-config")))
+        .replace('backend "s3" {', 'backend "s3" {\n    synthetic_schema_stop = true'));
+    const env = { PATH: "/usr/bin:/bin", HOME: probe, TF_DATA_DIR: join(probe, "data"), TF_CLI_CONFIG_FILE: "/dev/null",
+        TF_IN_AUTOMATION: "1", CHECKPOINT_DISABLE: "1", AWS_EC2_METADATA_DISABLED: "true",
+        AWS_CONFIG_FILE: "/dev/null", AWS_SHARED_CREDENTIALS_FILE: "/dev/null" };
+    const native = args => spawnSync(process.env.SHOP_TRUST_SCHEMA_TERRAFORM, args, { cwd: probe, env, encoding: "utf8", timeout: 10000 });
+    const version = native(["version", "-json"]);
+    assert.equal(version.status, 0, version.stderr);
+    assert.equal(JSON.parse(version.stdout).terraform_version, "1.12.2");
+    const output = native(["init", "-input=false", "-no-color"]);
+    assert.equal(output.status, 1, output.stderr);
+    assert.match(output.stderr, /synthetic_schema_stop/);
+    assert.equal((output.stderr.match(/Error:/g) ?? []).length, 1, output.stderr);
+    assert.doesNotMatch(output.stderr, /expected_bucket_owner|credential|network|provider registry/i);
+});
 test("guarded CLI route renders, plans, shows and applies one Development scalar; Production stays unchanged", async t => {
     const h = await harness(t), beforeProduction = structuredClone(h.permissions.production);
     const result = JSON.parse(await h.invoke(["development", "plan"]));
@@ -245,6 +276,86 @@ test("lost apply response leaves synced intent, preserves evidence and forbids b
     const discovered = JSON.parse(await h.invoke(["development", "discover"]));
     assert.equal(discovered.recoveryRequired, true);
     assert.ok(await readFile(join(h.directory, "development-started.json")));
+});
+test("every Terraform remote operation is bracketed by expected-owner HEAD attestations", async t => {
+    const h = await harness(t), result = JSON.parse(await h.invoke(["development", "plan"]));
+    h.approve(result);
+    await h.invoke(["development", "apply", `--review=${basename(result.reviewDirectory)}`, `--plan-sha256=${result.planSha256}`]);
+    for (const [index, event] of h.events.entries()) if (["init", "state", "plan", "apply"].includes(event)) {
+        assert.equal(h.events[index - 1], "owner-head", `before ${event}`);
+        assert.equal(h.events[index + 1], "owner-head", `after ${event}`);
+    }
+    assert.deepEqual(JSON.parse(await readFile(join(result.reviewDirectory, "review.json"))).object, h.baseline.object);
+    assert.deepEqual(JSON.parse(await readFile(join(result.reviewDirectory, "object-after.json"))), h.object);
+});
+test("owner denial and invalid or unapproved KMS object metadata stop before native initialization", async t => {
+    for (const fault of ["owner-denied", "version", "kms", "unversioned", "empty-version", "etag", "modified", "length", "baseline"]) {
+        const h = await harness(t);
+        if (fault === "owner-denied") {
+            const execute = h.dependencies.execute;
+            h.dependencies.execute = async (args, ...rest) => {
+                if (args[0] === "s3api") throw Object.assign(new Error("synthetic owner denied"), { stderr: "synthetic-private-owner" });
+                return execute(args, ...rest);
+            };
+        }
+        if (fault === "version") h.object.VersionId = "another-version";
+        if (fault === "kms") h.object.SSEKMSKeyId = "other-key";
+        if (fault === "unversioned") h.object.VersionId = "null";
+        if (fault === "empty-version") h.object.VersionId = "";
+        if (fault === "etag") delete h.object.ETag;
+        if (fault === "modified") h.object.LastModified = "invalid";
+        if (fault === "length") h.object.ContentLength = "400";
+        if (fault === "baseline") {
+            delete h.baseline.object;
+            await write(join(h.directory, "development-baseline.json"), h.baseline);
+            process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify({ ...h.config, trust_development_baselineSha256: sha(JSON.stringify(h.baseline)) });
+        }
+        await assert.rejects(h.invoke(["development", "plan"]), error => !error.message.includes("synthetic-private-owner"), fault);
+        assert.equal(h.commands.length, 0, fault);
+    }
+});
+test("owner/object changes at init, pull, plan and final apply barriers fail closed", async t => {
+    for (const barrier of ["init", "state", "plan", "apply"]) for (const timing of ["before", "after"]) {
+        const h = await harness(t);
+        let options = [];
+        if (barrier === "apply") {
+            const result = JSON.parse(await h.invoke(["development", "plan"])); h.approve(result);
+            options = [`--review=${basename(result.reviewDirectory)}`, `--plan-sha256=${result.planSha256}`];
+        }
+        const capture = h.dependencies.executeTerraformCapture;
+        const execute = h.dependencies.execute;
+        let crossed = false;
+        if (timing === "before") {
+            // Introduce a change just as the HEAD immediately before the target
+            // operation runs. It must never reach that native command.
+            const preceding = { init: "version", state: "workspace", plan: "state", apply: "state" }[barrier];
+            let count = 0;
+            h.dependencies.executeTerraformCapture = async (args, ...rest) => {
+                const result = await capture(args, ...rest);
+                if (args[0] === preceding && ++count === (barrier === "apply" ? 3 : 1)) h.object.VersionId = "unexpected-version";
+                if (args[0] === barrier) crossed = true;
+                return result;
+            };
+        } else {
+            h.dependencies.executeTerraformCapture = async (args, ...rest) => {
+                const result = await capture(args, ...rest);
+                if (args[0] === barrier) crossed = true;
+                return result;
+            };
+            h.dependencies.execute = async (args, ...rest) => {
+                if (args[0] === "s3api" && crossed) throw new Error("synthetic owner changed during native command");
+                return execute(args, ...rest);
+            };
+        }
+        await assert.rejects(h.invoke(["development", barrier === "apply" ? "apply" : "plan", ...options]), undefined, `${timing} ${barrier}`);
+        if (timing === "before") assert.equal(crossed, false, barrier);
+        if (barrier !== "apply") assert.equal(h.commands.some(command => command[0] === "apply"), false);
+        if (barrier === "apply") {
+            assert.ok(await readFile(join(h.directory, "development-started.json")));
+            if (timing === "after") assert.ok(await readFile(join(h.directory, options[0].slice(9), "apply-uncertain.json")));
+            await assert.rejects(h.invoke(["development", "apply", ...options]), /journal/);
+        }
+    }
 });
 test("actual CLI requires missing private configuration; IAM writes and argument overrides stay forbidden", async t => {
     const h = await harness(t);

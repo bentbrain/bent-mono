@@ -143,7 +143,6 @@ async function renderTrustModule(directory, baseline, stage, verifyOnly = false)
             check(resolved.includes('required_version = ">= 1.12.0, < 2.0.0"'), "exact historical Terraform constraint.");
             resolved = resolved.replace('required_version = ">= 1.12.0, < 2.0.0"', 'required_version = "= 1.12.2"');
             check(!resolved.includes("expected_bucket_owner"), "unexpected backend owner source.");
-            resolved = resolved.replace('use_lockfile        = true', `use_lockfile        = true\n    expected_bucket_owner = "${PERSONAL_ACCOUNT}"`);
         }
         if (stage === "development" && name === "production.tf") {
             const target = `${targetPrefix()}:environment:Production`;
@@ -174,10 +173,10 @@ function backendIdentity(backend) {
     const config = backend?.config;
     check(backend?.type === "s3" && config.bucket === `forever-tee-terraform-state-${PERSONAL_ACCOUNT}-ap-southeast-2` &&
         config.key === "story-video/bootstrap/terraform.tfstate" && config.region === "ap-southeast-2" && config.encrypt === true && config.use_lockfile === true &&
-        config.expected_bucket_owner === PERSONAL_ACCOUNT && same(config.allowed_account_ids, [PERSONAL_ACCOUNT]) &&
+        !Object.hasOwn(config, "expected_bucket_owner") && same(config.allowed_account_ids, [PERSONAL_ACCOUNT]) &&
         config.kms_key_id === `arn:aws:kms:ap-southeast-2:${PERSONAL_ACCOUNT}:key/${protectedConfig("stateKmsKeyId")}` &&
         !config.role_arn && !config.access_key && !config.secret_key && !config.token && !config.profile && [config.assume_role, config.assume_role_with_web_identity].every(value => value == null || same(value, [])) && !config.endpoints && !config.endpoint && !config.skip_credentials_validation && !config.skip_requesting_account_id,
-    "exact existing S3 backend, expected owner, KMS, native lock and personal identity required.");
+    "exact supported S3 backend, KMS, native lock and personal identity required; owner is attested separately.");
 }
 async function collectTrustPermissions(call) {
     const result = {};
@@ -292,7 +291,8 @@ async function run(args, dependencies) {
         return { githubEvidence, permissions };
     };
     const evidence = await preflight();
-    await requireRemoteObject(call);
+    const object = await requireRemoteObject(call);
+    check(same(object, baseline.object), "owner-attested current object differs from independently reviewed baseline.");
     const directory = operation === "plan" ? await mkdtemp(join(privateDirectory, `${stage}-`)) : join(privateDirectory, request.review);
     const directoryInfo = await lstat(directory);
     check(directoryInfo.isDirectory() && !directoryInfo.isSymbolicLink() && (directoryInfo.mode & 0o077) === 0, "private operation directory required.");
@@ -305,7 +305,8 @@ async function run(args, dependencies) {
     const manifest = await renderTrustModule(module, baseline, stage, operation !== "plan");
     const env = { ...personalEnvironment(dependencies.environment), TF_DATA_DIR: data, TF_CLI_CONFIG_FILE: "/dev/null", TF_IN_AUTOMATION: "1",
         TF_WORKSPACE: "default", CHECKPOINT_DISABLE: "1", GOMAXPROCS: "1" };
-    const capture = command => dependencies.executeTerraformCapture(command, env, module);
+    const owned = ownedTerraformCapture(command => dependencies.executeTerraformCapture(command, env, module), call, object);
+    const capture = owned.capture;
     const version = JSON.parse(await capture(["version", "-json"]));
     check(version.terraform_version === "1.12.2", "pinned Terraform 1.12.2 executable required.");
     if (operation === "plan") {
@@ -332,8 +333,9 @@ async function run(args, dependencies) {
     if (request.planHash) check(request.planHash === planSha256, "exact requested saved binary hash required.");
     const review = { ...inspected, sourceCommit: baseline.sourceCommit, sourceSha256: source.sha256, planSha256,
         baselineSha256: prerequisite.baselineSha256, originalReceiptSha256: prerequisite.originalReceiptSha256, stateSha256: sha(remote),
-        manifest, evidence, requiresIndependentReview: true };
+        manifest, evidence, object, requiresIndependentReview: true };
     check(same(await renderTrustModule(module, baseline, stage, true), manifest) && same(await sourceEvidence(), source), "source/rendered bytes changed during planning.");
+    await owned.attest();
     if (operation === "plan") {
         await privateWrite(join(directory, "plan.json"), raw);
         await privateWrite(join(directory, "review.json"), JSON.stringify(review));
@@ -392,6 +394,7 @@ async function run(args, dependencies) {
     inspectRepositoryTrustPlan(JSON.parse(noOp), { ...baseline, state: after, parentObservations: [] }, stage, true);
     check(same(await sourceEvidence(), source) && sha(await read(path)) === planSha256 && sha(await read(join(directory, "apply.tfplan"))) === planSha256,
         "evidence/source changed after apply.");
+    await privateWrite(join(directory, "object-after.json"), JSON.stringify(await owned.attest()));
     const complete = { stage, planSha256, sourceSha256: source.sha256, lineage: after.lineage, serial: after.serial,
         completedAt: new Date().toISOString(), refreshedNoOp: true, permissionsChanged: false, identityStorageQualificationRequired: true, releaseReady: false };
     await privateWrite(join(directory, "complete.json"), JSON.stringify(complete));
@@ -411,8 +414,37 @@ async function requireRemoteObject(call) {
     const object = await call(["s3api", "head-object", "--bucket", `forever-tee-terraform-state-${PERSONAL_ACCOUNT}-ap-southeast-2`,
         "--expected-bucket-owner", PERSONAL_ACCOUNT, "--key", "story-video/bootstrap/terraform.tfstate"]);
     check(object.ServerSideEncryption === "aws:kms" && object.SSEKMSKeyId === `arn:aws:kms:ap-southeast-2:${PERSONAL_ACCOUNT}:key/${protectedConfig("stateKmsKeyId")}` &&
-        typeof object.VersionId === "string" && object.VersionId !== "null" && object.ContentLength > 0, "existing versioned KMS bootstrap state object required before initialization.");
+        typeof object.VersionId === "string" && /^[A-Za-z0-9._~+/=-]{1,1024}$/.test(object.VersionId) && object.VersionId !== "null" &&
+        Number.isSafeInteger(object.ContentLength) && object.ContentLength > 0 && typeof object.ETag === "string" && object.ETag.length > 0 &&
+        typeof object.LastModified === "string" && Number.isFinite(Date.parse(object.LastModified)), "owner-attested existing versioned KMS bootstrap state object required.");
     return object;
+}
+// Terraform 1.12.2 has no expected-owner backend argument or request header.
+// S3 itself verifies ownership on the guarded HEAD. Bind the entire versioned
+// object to the approved baseline/review, and bracket each remote operation.
+// Only the one-use saved apply may advance the object. Bucket deletion/recreation
+// cannot preserve its S3 VersionId. The separately verified exclusive window and
+// exact backend/state/permission checks remain mandatory.
+function ownedTerraformCapture(capture, call, initialObject) {
+    let object = initialObject;
+    const attest = async () => {
+        const current = await requireRemoteObject(call);
+        check(same(current, object), "owner-attested state object changed before Terraform operation or evidence completion.");
+        return current;
+    };
+    return {
+        attest,
+        capture: async command => {
+            if (!["init", "state", "plan", "apply"].includes(command[0])) return capture(command);
+            await attest();
+            const result = await capture(command);
+            const after = await requireRemoteObject(call);
+            if (command[0] === "apply") check(after.VersionId !== object.VersionId, "saved apply must advance the owner-attested state object version.");
+            else check(same(after, object), "owner-attested state object changed during Terraform operation.");
+            object = after;
+            return result;
+        },
+    };
 }
 async function discover(stage, dependencies, privateDirectory) {
     const journalPath = join(privateDirectory, `${stage}-started.json`);
@@ -431,7 +463,8 @@ async function discover(stage, dependencies, privateDirectory) {
     await mkdir(module, { mode: 0o700 });
     const manifest = await renderTrustModule(module, baseline, stage);
     const env = { ...personalEnvironment(dependencies.environment), TF_DATA_DIR: data, TF_CLI_CONFIG_FILE: "/dev/null", TF_IN_AUTOMATION: "1", TF_WORKSPACE: "default", CHECKPOINT_DISABLE: "1", GOMAXPROCS: "1" };
-    const capture = command => dependencies.executeTerraformCapture(command, env, module);
+    const owned = ownedTerraformCapture(command => dependencies.executeTerraformCapture(command, env, module), call, object);
+    const capture = owned.capture;
     check(JSON.parse(await capture(["version", "-json"])).terraform_version === "1.12.2", "pinned Terraform executable required.");
     await privateWrite(join(directory, "init.txt"), await capture(["init", "-reconfigure", "-input=false", "-lockfile=readonly"]));
     const backend = (await json(join(data, "terraform.tfstate"))).backend;

@@ -252,8 +252,38 @@ for inspection, retaining that journal's hash. Review its private `discovery.jso
 and original receipt before preparing a baseline. No tracked fixture contains
 operational values.
 
+Terraform 1.12.2 does not support `expected_bucket_owner` in its S3 backend.
+The guarded `s3api head-object --expected-bucket-owner` request independently
+attests the bucket owner. `allowed_account_ids` only pins the credential account.
+The adapter brackets every backend initialization, state pull, plan and saved
+apply with that owner check, requiring the same complete versioned KMS object
+metadata before and after reads. A baseline must include discovery's exact
+`object` metadata, including `VersionId`, `ETag`, `LastModified`, content length
+and KMS identity. Its independently approved hash and the saved review bind that
+attestation. A missing or changed object blocks the operation before Terraform.
+Only the separately approved one-use saved apply may advance the object version;
+its resulting owner/KMS proof is revalidated and saved in `object-after.json`.
+An unconfirmed apply or its post-operation owner check retains the journal and
+requires the existing separately reviewed recovery route.
+
+This uses an attestation at operation barriers, not a Terraform request header.
+S3 bucket ownership cannot transfer while the bucket exists. Deleting and
+recreating it cannot preserve the approved object version. The independently
+established exclusive, quiescent window remains required throughout the operation;
+barrier checks do not authorize concurrent bucket deletion or other state writers.
+The adapter still verifies the exact backend, full state, lineage, serial,
+resource identities, permissions and saved binary at their existing barriers.
+
+The native backend schema regression uses only a disposable synthetic render.
+Run it with the approved Terraform 1.12.2 executable as
+`SHOP_TRUST_SCHEMA_TERRAFORM=/path/to/terraform node --import ./scripts/test-protected-config.mjs --test --test-name-pattern='native Terraform' scripts/aws-personal-repository-trust.test.mjs`
+from this product. Without that explicit binary the native test reports skipped.
+A deliberate unsupported test attribute stops native `init` during schema decoding,
+before backend configuration, credentials, provider installation or network calls.
+All actual rendered backend arguments must pass that same decoding step.
+
 The baseline explicitly contains `original`, `sourceCommit`, fresh `observedAt`,
-complete `state` and `permissions` from discovery, `proofRuns.development`,
+complete `state`, `permissions` and `object` from discovery, `proofRuns.development`,
 `proofRuns.production`, `parentObservations`, and `window`. The window contains
 `observedAt`, `expiresAt`, `exclusive: true`, `admissionsFrozen: true` and the exact
 original/target `repositoryIds` in that order. Independently establish a freeze
