@@ -96,6 +96,8 @@ test("requires actual merged PR, native security publisher and successful exact-
 test("validates actual main release events without accepting fabricated push or untrusted workflow-run triggers", () => {
   const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: repo, GITHUB_REF: "refs/heads/main", GITHUB_SHA: sha, GITHUB_EVENT_NAME: "workflow_dispatch" };
   assert.doesNotThrow(() => validateReleaseEvent(env, { ref: "main" }, sha));
+  assert.doesNotThrow(() => validateReleaseEvent(env, { ref: "refs/heads/main" }, sha));
+  assert.throws(() => validateReleaseEvent(env, { ref: "refs/tags/main" }, sha));
   assert.doesNotThrow(() => validateReleaseEvent({ ...env, GITHUB_EVENT_NAME: "workflow_run" }, { workflow_run: run }, sha));
   assert.doesNotThrow(() => validateReleaseEvent({}, {}, sha));
   assert.throws(() => validateReleaseEvent({ ...env, GITHUB_EVENT_NAME: "push" }, {}, sha));

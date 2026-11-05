@@ -60,7 +60,7 @@ test("the activated protected CLI emits reused=false for the first monorepo rele
     assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 5);
     for (const name of ["deploy.yml", "web-production.yml", "native-development.yml"]) {
       const workflow = await readFile(join(REPOSITORY_ROOT, ".github/workflows", name), "utf8");
-      assert.ok(workflow.indexOf("Require authoritative exact-main monorepo quality") < workflow.indexOf("scripts/reuse-ci.mjs"));
+      assert.ok(workflow.indexOf(name === "deploy.yml" ? "Require authoritative storefront release admission" : "Require authoritative exact-main monorepo quality") < workflow.indexOf("scripts/reuse-ci.mjs"));
       assert.match(workflow, /if: steps\.ci\.outputs\.reused != 'true'\n\s+uses: \.\/products\/shop\/\.github\/actions\/check/);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }

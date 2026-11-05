@@ -11,6 +11,7 @@ const webOnlyPreviewControlPaths = new Set([
   "scripts/deployment-plan.mjs",
   "scripts/pipeline.test.mjs",
   "scripts/reuse-ci.mjs",
+  "@monorepo/.github/codeql/reviewed-flows.json",
 ]);
 
 export function changedComponents(paths) {

@@ -82,12 +82,13 @@ jobs:
         with:
           node-version: 24.18.0
           package-manager-cache: false
-      - name: Require authoritative exact-main monorepo quality
-        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check Preview source before validation
         if: inputs.web_only_preview
         run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment development --lane web
       - name: Reuse CI for the exact release commit
+        if: github.ref == 'refs/heads/main'
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
@@ -189,8 +190,8 @@ jobs:
         with:
           node-version: 24.18.0
           package-manager-cache: false
-      - name: Require authoritative exact-main monorepo quality
-        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Verify existing Worker before web-only preparation
         if: inputs.web_only_preview
         env:
@@ -360,6 +361,9 @@ jobs:
             bunx vercel@59.5.0 pull --yes --environment=preview --token="$VERCEL_TOKEN"
           fi
           SHOP_PROTECTED_SHELL
+      - name: Recheck authoritative storefront release admission
+        if: steps.changes.outputs.web == 'true'
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Deploy storefront
         if: steps.changes.outputs.web == 'true'
         run: |
@@ -409,6 +413,12 @@ jobs:
     needs: deploy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
     environment: Preview
     env:
       SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
@@ -421,6 +431,8 @@ jobs:
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
       - name: Install Bun
@@ -434,8 +446,8 @@ jobs:
         with:
           node-version: 24.18.0
           package-manager-cache: false
-      - name: Require authoritative exact-main monorepo quality
-        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Require authoritative storefront release admission
+        run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - run: bun install --frozen-lockfile
         working-directory: .
       - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
