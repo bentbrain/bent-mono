@@ -1,14 +1,26 @@
 // @vitest-environment happy-dom
 
+import QRCode from "qrcode";
 import { act, useEffect } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MobileOnlyGate } from "@/components/mobile-only-gate";
 
-// Happy DOM has no canvas context. Browser tests exercise the actual QR renderer.
-vi.mock("qrcode", () => ({ default: { toCanvas: vi.fn(() => Promise.resolve()) } }));
+// Hydration starts overlapping lazy imports. Spy on the real shared export so
+// every import uses this stub, including imports that bypass a module factory.
+// Happy DOM has no canvas context; browser tests exercise the actual renderer.
+const renderQr = vi.spyOn(QRCode, "toCanvas");
+
+beforeEach(() => {
+  renderQr.mockClear();
+  renderQr.mockImplementation(() => undefined);
+});
+
+afterAll(() => {
+  renderQr.mockRestore();
+});
 
 function installMatchMedia(matches: boolean) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -49,7 +61,7 @@ function installMatchMedia(matches: boolean) {
 }
 
 afterEach(async () => {
-  // Finish lazy QR imports while this file still owns its mock and DOM.
+  // Finish lazy QR imports before removing this file's DOM.
   await vi.dynamicImportSettled();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
@@ -212,11 +224,28 @@ describe("MobileOnlyGate", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).not.toContain("Useful no-JS landing");
-    expect(container.textContent).toBe("");
-    act(() => {
-      root?.unmount();
-    });
+    try {
+      // Both the server fallback and its desktop replacement start a lazy QR
+      // import. Keep the replacement mounted until those imports have completed.
+      await vi.dynamicImportSettled();
+      expect(renderQr).toHaveBeenCalledOnce();
+      expect(renderQr).toHaveBeenCalledWith(
+        container.querySelector("canvas"),
+        window.location.href,
+        {
+          errorCorrectionLevel: "M",
+          margin: 2,
+          width: 256,
+          color: { dark: "#0647ff", light: "#ffffff" },
+        },
+      );
+      expect(container.textContent).not.toContain("Useful no-JS landing");
+      expect(container.textContent).toBe("");
+    } finally {
+      act(() => {
+        root?.unmount();
+      });
+    }
   });
 
   it("never mounts deferred mobile work while hydrating a desktop route", async () => {
