@@ -48,7 +48,9 @@ function installMatchMedia(matches: boolean) {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // Finish lazy QR imports while this file still owns its mock and DOM.
+  await vi.dynamicImportSettled();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
