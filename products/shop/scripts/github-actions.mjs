@@ -29,6 +29,8 @@ export function output(name, value) {
 export function summary(message) {
   console.log(message);
   if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${message}\n`);
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, process.env.GITHUB_ACTIONS === "true" && process.env.SHOP_EVIDENCE_ENCRYPTION_KEY
+      ? "Protected release status recorded; full details are in encrypted diagnostics.\n"
+      : `${message}\n`);
   }
 }

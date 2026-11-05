@@ -1,3 +1,4 @@
+import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -10,7 +11,7 @@ import { productionCloudflare, inspectProductionConsumer, verifyProductionBindin
 import { assertReleasePaused } from "./native-release-pause.mjs";
 import { isReviewedAppliedMigrationPrefix, isReviewedMigrationInventory, } from "./native-migration-inventory.mjs";
 import { validateProductionNativeSecrets, PRODUCTION_NATIVE_SECRET_NAMES } from "./native-production-invoker-bootstrap.mjs";
-import { PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST } from "./native-production-runtime.mjs";
+import { CURRENT_PRODUCTION_IMAGE_DIGEST, CURRENT_PRODUCTION_SOURCE_DIGEST, HISTORICAL_PRODUCTION_IMAGE_DIGEST, HISTORICAL_PRODUCTION_SOURCE_DIGEST, PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST } from "./native-production-runtime.mjs";
 import { syntheticProductionCanaryArtwork } from "./native-production-canary-source.mjs";
 import { verifyPrintQueue } from "./print-queue-policy.mjs";
 import { printExecutorProtocol } from "./native-print-executor.mjs";
@@ -24,7 +25,7 @@ const PRINTIFY_ASSET_DELIVERY_SECRET = "PRINTIFY_ASSET_DELIVERY_SECRET";
 const PRINTIFY_WEBHOOK_SECRET = "PRINTIFY_WEBHOOK_SECRET";
 const CART_LINE_CAPABILITY_SECRET = "CART_LINE_CAPABILITY_SECRET";
 const OPENAI_API_KEY = "OPENAI_API_KEY";
-const APPLICATION_SECRET_NAMES = [CART_LINE_CAPABILITY_SECRET, OPENAI_API_KEY, PRINTIFY_ASSET_DELIVERY_SECRET, PRINTIFY_WEBHOOK_SECRET];
+const APPLICATION_SECRET_NAMES = ["SHOP_PROTECTED_CONFIG_JSON", CART_LINE_CAPABILITY_SECRET, OPENAI_API_KEY, PRINTIFY_ASSET_DELIVERY_SECRET, PRINTIFY_WEBHOOK_SECRET];
 const printProtocol = printExecutorProtocol("production");
 const PRODUCTION_EXECUTOR_CONFIG = fileURLToPath(new URL("../workers/print-executor/wrangler.production.jsonc", import.meta.url));
 const PRODUCTION_ASSET_ORIGIN = "https://forever-tee-api.socialqueue.workers.dev";
@@ -55,8 +56,12 @@ export function productionReleaseConfig(source, releaseId, sourceCommit, assetOr
         PRINTIFY_ASSET_ORIGIN: assetOrigin, ...(printExecutor ? { PRINT_EXECUTION_MODE: "durable-object" } : {}) };
     return config;
 }
-export function verifyProductionReleaseSettings(settings, consumer, variables, previousSettings, queue = NATIVE_PRODUCTION_QUEUE, printExecutor) {
+export function verifyProductionReleaseSettings(settings, consumer, variables, previousSettings, queue = NATIVE_PRODUCTION_QUEUE, printExecutor, { requireProtectedConfig = false } = {}) {
     verifyProductionBindings(settings, { application: true, native: true });
+    if (requireProtectedConfig) {
+        const bindings = settings.bindings.filter(item => item.name === "SHOP_PROTECTED_CONFIG_JSON");
+        check(bindings.length === 1 && bindings[0].type === "secret_text", "encrypted protected runtime configuration required for the new Worker.");
+    }
     for (const [name, value] of Object.entries(variables)) {
         const matches = settings.bindings.filter(item => item.name === name);
         check(matches.length === 1 && matches[0].type === "plain_text" && matches[0].text === value, `live ${name} differs.`);
@@ -119,7 +124,7 @@ export async function loadRecordedProductionWorkerBaseline(cf, store, { pauseOwn
     const { preparation, ...prepared } = preparedEvent;
     check(prepared.environment === "production" && prepared.accountId === protectedConfig("awsAccountId") && prepared.region === "ap-southeast-2" &&
         prepared.releaseId === sourceReleaseId && /^[a-f0-9]{40}$/.test(prepared.sourceCommit) &&
-        [[PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST], [PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST]]
+        [[CURRENT_PRODUCTION_IMAGE_DIGEST, CURRENT_PRODUCTION_SOURCE_DIGEST], [PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST], [HISTORICAL_PRODUCTION_IMAGE_DIGEST, HISTORICAL_PRODUCTION_SOURCE_DIGEST], [PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST]]
             .some(([imageDigest, sourceDigest]) => prepared.candidate?.imageDigest === imageDigest && prepared.candidate?.sourceDigest === sourceDigest) &&
         equal(JSON.parse(await store.read(preparation)), prepared), "immutable fallback preparation.");
     const fallback = JSON.parse(await store.read(fallbackEvent.artifact));
@@ -190,7 +195,7 @@ export function classifyProductionBaseline(settings, consumer, before, recordedF
     }
     const image = variable("STORY_VIDEO_IMAGE_DIGEST"), source = variable("STORY_VIDEO_SOURCE_DIGEST");
     check(image.length === 1 && source.length === 1 && image[0].type === "plain_text" && source[0].type === "plain_text" &&
-        [[PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST], [PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST]]
+        [[CURRENT_PRODUCTION_IMAGE_DIGEST, CURRENT_PRODUCTION_SOURCE_DIGEST], [PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST], [HISTORICAL_PRODUCTION_IMAGE_DIGEST, HISTORICAL_PRODUCTION_SOURCE_DIGEST], [PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST]]
             .some(([imageDigest, sourceDigest]) => image[0].text === imageDigest && source[0].text === sourceDigest), "recorded current native image/source pair.");
     const release = variable("STORY_VIDEO_RELEASE_ID"), commit = variable("STORY_VIDEO_RELEASE_COMMIT");
     check(release.length === 1 && release[0].type === "plain_text" && /^native-[1-9][0-9]+$/.test(release[0].text) &&
@@ -202,7 +207,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
     check(process.platform === "linux" && env.RUNNER_TEMP?.startsWith("/"), "cloud-only bundle preparation.");
     const nativeSecrets = Object.fromEntries(PRODUCTION_NATIVE_SECRET_NAMES.map(name => [name, env[name]]));
     validateProductionNativeSecrets(nativeSecrets);
-    const applicationSecrets = Object.fromEntries(APPLICATION_SECRET_NAMES.map(name => [name, env[name]]));
+    const applicationSecrets = Object.fromEntries(APPLICATION_SECRET_NAMES.map(name => [name, name === "SHOP_PROTECTED_CONFIG_JSON" ? workerProtectedConfiguration() : env[name]]));
     check(Object.values(applicationSecrets).every(secret => typeof secret === "string" && secret.length >= 32), "application release secrets required.");
     const secrets = { ...nativeSecrets, ...applicationSecrets };
     const releaseId = `native-${env.GITHUB_RUN_ID}`;
@@ -228,6 +233,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
     const previousArtifact = await store.save("previous-worker.json", Buffer.from(JSON.stringify({ ...raw, before, consumer, settings, schedules: await cf.schedules() })));
     const directory = await mkdtemp(join(env.RUNNER_TEMP, "production-worker-"));
     const source = await readFile(join(API, "wrangler.jsonc"), "utf8"), config = productionReleaseConfig(source, releaseId, env.GITHUB_SHA, env.WORKER_URL, { printExecutor: Boolean(qualifiedPrintExecutor) });
+    const executorConfig = await renderWranglerConfig(PRODUCTION_EXECUTOR_CONFIG, join(directory, "executor.json"));
     const configPath = join(directory, "wrangler.json");
     await writeFile(configPath, JSON.stringify(config), { flag: "wx", mode: 0o600 });
     const configHash = sha(await readFile(configPath));
@@ -243,9 +249,9 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
         CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN };
     let errorIndex = 0;
     const run = async (args, path = configPath) => {
-        check([configPath, fallbackPath, PRODUCTION_EXECUTOR_CONFIG].includes(path), "prepared configuration path.");
+        check([configPath, fallbackPath, executorConfig.path].includes(path), "prepared configuration path.");
         try {
-            return await execute(process.execPath, [join(API, "node_modules/wrangler/bin/wrangler.js"), ...args, "--config", path], { cwd: API, env: child, timeout: 240000, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" });
+            return await execute(process.execPath, [wranglerCli(), ...args, "--config", path], { cwd: API, env: child, timeout: 240000, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" });
         }
         catch (error) {
             let output = [error.stdout, error.stderr].filter(value => typeof value === "string").join("\n");
@@ -258,7 +264,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
         }
     };
     const printExecutor = qualifiedPrintExecutor ? await printProtocol.preparePrintExecutorFoundation({ env, directory,
-        run: args => run(args, PRODUCTION_EXECUTOR_CONFIG), api: cf, inspectWorker, baselineStore: store }) : null;
+        run: args => run(args, executorConfig.path), api: cf, inspectWorker, baselineStore: store }) : null;
     if (printExecutor) {
         check(/^[a-f0-9]{40}$/.test(qualifiedPrintExecutor.sourceCommit ?? "") && qualifiedPrintExecutor.worker?.content?.modules?.length === 1 &&
             qualifiedPrintExecutor.worker.content.modules[0].sha256 === printExecutor.review.bundleSha256, "Production print executor bytes must equal the qualified Development artifact.");
@@ -336,7 +342,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
                 ...Object.entries(chosen.vars).flatMap(([key, value]) => ["--var", `${key}:${value}`])], path);
             const live = await inspectWorker(cf);
             check(live.content.modules.length === 1 && live.content.modules[0].sha256 === review.bundleSha256, "live candidate bytes.");
-            verifyProductionReleaseSettings(await cf.settings(), await inspectProductionConsumer(cf), chosen.vars, settings, provider === "lambda" ? NATIVE_PRODUCTION_QUEUE : FALLBACK_PRODUCTION_QUEUE, deployedPrintExecutor);
+            verifyProductionReleaseSettings(await cf.settings(), await inspectProductionConsumer(cf), chosen.vars, settings, provider === "lambda" ? NATIVE_PRODUCTION_QUEUE : FALLBACK_PRODUCTION_QUEUE, deployedPrintExecutor, { requireProtectedConfig: true });
             await verifyPrintExecutor();
             await verifyPrintQueue(cf, "production");
             const schedules = await cf.schedules();

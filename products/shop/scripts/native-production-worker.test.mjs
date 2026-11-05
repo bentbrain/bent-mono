@@ -194,6 +194,10 @@ test("live settings allow only the reviewed creation burst limits and reject unr
     bindings.find(item => item.name === "IMAGE_PROCESS_RATE_LIMIT").simple.limit = 30;
     bindings.push({ name: "STORY_VIDEOS", type: "r2_bucket", bucket_name: "forever-tee-story-videos-production" }, { name: "STORY_VIDEO_NOTIFICATIONS", type: "durable_object_namespace" }, ...["STORY_VIDEO_LAMBDA_ACCESS_KEY_ID", "STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY", "STORY_VIDEO_GRANT_SECRET", "CART_LINE_CAPABILITY_SECRET", "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_WEBHOOK_SECRET"].map(name => ({ name, type: "secret_text" })), { name: "STORY_VIDEO_PROVIDER", type: "plain_text", text: "lambda" });
     verifyProductionReleaseSettings({ bindings }, { settings: NATIVE_PRODUCTION_QUEUE }, { STORY_VIDEO_PROVIDER: "lambda" }, previous);
+    assert.throws(() => verifyProductionReleaseSettings({ bindings }, { settings: NATIVE_PRODUCTION_QUEUE }, { STORY_VIDEO_PROVIDER: "lambda" }, previous, NATIVE_PRODUCTION_QUEUE, undefined, { requireProtectedConfig: true }), /protected runtime configuration/);
+    const configured = [...bindings, { name: "SHOP_PROTECTED_CONFIG_JSON", type: "secret_text" }];
+    verifyProductionReleaseSettings({ bindings: configured }, { settings: NATIVE_PRODUCTION_QUEUE }, { STORY_VIDEO_PROVIDER: "lambda" }, previous, NATIVE_PRODUCTION_QUEUE, undefined, { requireProtectedConfig: true });
+    assert.throws(() => verifyProductionReleaseSettings({ bindings: [...configured, configured.at(-1)] }, { settings: NATIVE_PRODUCTION_QUEUE }, { STORY_VIDEO_PROVIDER: "lambda" }, previous, NATIVE_PRODUCTION_QUEUE, undefined, { requireProtectedConfig: true }), /protected runtime configuration/);
     for (const mutate of [value => { value[0].id = "development"; }, value => { value.pop(); }, value => { value[3].type = "plain_text"; },
         value => { value.find(item => item.name === "IMAGE_PROCESS_RATE_LIMIT").simple.limit = 31; },
         value => { value.find(item => item.name === "IMAGE_PROCESS_RATE_LIMIT").namespace_id = "2102"; },

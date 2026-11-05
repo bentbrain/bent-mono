@@ -22,6 +22,9 @@ COPY product-assets ./product-assets
 RUN chmod 0644 /function/package.json \
     && find /function/src /function/aws-lambda /function/product-assets -type d -exec chmod 0755 {} + \
     && find /function/src /function/aws-lambda /function/product-assets -type f -exec chmod 0644 {} +
+ARG SHOP_AWS_ACCOUNT_ID
+ENV SHOP_PROTECTED_CONFIG_JSON="{\"awsAccountId\":\"${SHOP_AWS_ACCOUNT_ID}\"}"
+RUN node -e 'const value = JSON.parse(process.env.SHOP_PROTECTED_CONFIG_JSON); if (!/^[0-9]{12}$/.test(value.awsAccountId)) process.exit(1)'
 ARG STORY_IMAGE_BUILD_ID
 ENV STORY_IMAGE_BUILD_ID=${STORY_IMAGE_BUILD_ID}
 ENV NPM_CONFIG_CACHE=/tmp/.npm

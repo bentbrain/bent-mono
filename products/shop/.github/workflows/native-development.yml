@@ -53,16 +53,30 @@ concurrency:
   group: deploy-development
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   check:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}'
+    environment: Preview
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
+      statuses: read
+      checks: read
       contents: read
       actions: read
       pull-requests: read
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
     steps:
@@ -72,10 +86,14 @@ jobs:
           fetch-depth: 0
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check native request before dependency installation
         env:
           OPERATION: ${{ inputs.operation }}
@@ -86,28 +104,44 @@ jobs:
           NATIVE_SCHEDULED_QUALIFICATION: ${{ inputs.scheduled_qualification }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
           NATIVE_ROLLBACK_REFERENCE: ${{ inputs.rollback_reference }}
-        run: node scripts/release-preflight.mjs --environment development --lane native --operation "$OPERATION"
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment development --lane native --operation "$OPERATION"
       - name: Reuse CI for the exact release commit
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/reuse-ci.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/reuse-ci.mjs
       - name: Check commit without existing CI
         if: steps.ci.outputs.reused != 'true'
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         env:
           TURBO_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ github.ref == 'refs/heads/main' && vars.TURBO_TEAM || '' }}
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+
   build:
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: Preview
     permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
       contents: read
       id-token: write
       actions: read
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
     steps:
@@ -117,19 +151,26 @@ jobs:
           fetch-depth: 0
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
         if: inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - run: bun install --frozen-lockfile
+        working-directory: .
         if: inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-development-ci
+          role-to-assume: ${{ secrets.SHOP_AWS_DEVELOPMENT_ROLE_ARN }}
           aws-region: ap-southeast-2
-          allowed-account-ids: '{{SHOP:awsAccountId}}'
+          allowed-account-ids: ${{ secrets.SHOP_AWS_ACCOUNT_ID }}
           role-session-name: native-${{ github.run_id }}
           role-duration-seconds: 3600
           unset-current-credentials: true
@@ -146,6 +187,7 @@ jobs:
           PRINTIFY_ASSET_DELIVERY_SECRET: ${{ secrets.PRINTIFY_ASSET_DELIVERY_SECRET }}
           PRINTIFY_WEBHOOK_SECRET: ${{ secrets.PRINTIFY_WEBHOOK_SECRET }}
           CART_LINE_CAPABILITY_SECRET: ${{ secrets.CART_LINE_CAPABILITY_SECRET }}
+          NATIVE_CANDIDATE_RECEIPT: ${{ secrets.SHOP_DEVELOPMENT_CANDIDATE_RECEIPT }}
           NATIVE_OPERATION: ${{ inputs.operation || 'plan' }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
           NATIVE_ROLLBACK_REFERENCE: ${{ inputs.rollback_reference }}
@@ -155,7 +197,15 @@ jobs:
           NATIVE_RENDERER_REFERENCE: ${{ inputs.renderer_reference }}
           NATIVE_SCHEDULED_QUALIFICATION: ${{ inputs.scheduled_qualification }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/native-ci-development.mjs
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/native-ci-development.mjs
+      - name: Preserve sealed candidate pointer
+        if: always() && (inputs.operation == 'build-candidate' || inputs.operation == 'release')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: candidate-reference-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate-reference.json
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Preserve immutable qualification reference pointers
         if: always() && (inputs.operation == 'qualify-all' || inputs.operation == 'cleanup-qualification' || inputs.operation == 'qualify-components')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -172,5 +222,13 @@ jobs:
         with:
           name: release-timings-${{ github.run_id }}
           path: ${{ runner.temp }}/release-timings.ndjson
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
           if-no-files-found: ignore
           retention-days: 90

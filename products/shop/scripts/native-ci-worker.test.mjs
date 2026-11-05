@@ -57,6 +57,7 @@ test("release verification checks actual bindings and watchdog queue limits, not
     const vars = { STORY_VIDEO_RELEASE_ID: "native-123", STORY_VIDEO_PROVIDER: "lambda" };
     const settings = { bindings: [
             ...Object.entries(vars).map(([name, text]) => ({ name, text, type: "plain_text" })),
+            { name: "SHOP_PROTECTED_CONFIG_JSON", type: "secret_text" },
             { name: "CART_LINE_CAPABILITY_SECRET", type: "secret_text" },
             { name: "OPENAI_API_KEY", type: "secret_text" },
             { name: "PRINTIFY_ASSET_DELIVERY_SECRET", type: "secret_text" },

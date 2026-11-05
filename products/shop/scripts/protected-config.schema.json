@@ -143,5 +143,7 @@
   "inspectionProviderOrderId": "protected provider identifier",
   "qualifiedCandidateSourceCommit": "protected source revision",
   "alertVerificationSourceCommit": "protected source revision",
-  "previewRendererOrigin": "protected renderer origin"
+  "previewRendererOrigin": "protected renderer origin",
+  "currentProductionImageDigest": "SHA-256 image digest including sha256: prefix",
+  "currentProductionSourceDigest": "SHA-256 current live source bundle digest"
 }

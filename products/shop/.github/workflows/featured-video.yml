@@ -25,6 +25,10 @@ permissions:
 concurrency:
   group: featured-video-${{ inputs.environment }}
   cancel-in-progress: false
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   render:
     if: github.ref == 'refs/heads/main'
@@ -34,10 +38,12 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
       - name: Install render dependencies
         run: bun install --frozen-lockfile --filter @forever-tee/video-renderer --ignore-scripts
       - name: Install FFmpeg
@@ -45,7 +51,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
       - name: Check custom renderer
-        run: node --test workers/video-renderer/custom/*.test.mjs
+        run: node --import ./scripts/test-protected-config.mjs --test workers/video-renderer/custom/*.test.mjs
       - name: Render current featured cutouts
         env:
           RENDER_ENVIRONMENT: ${{ inputs.environment }}

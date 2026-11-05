@@ -42,6 +42,29 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 fs.writeFileSync(process.env.FIXTURE_STARTED, 'started');
 const args = process.argv.slice(2);
+if (process.env.FIXTURE_PRESERVE) {
+  assert.equal(Object.hasOwn(process.env, 'OPENAI_API_KEY'), false);
+  assert.equal(Object.hasOwn(process.env, 'EMDASH_ENCRYPTION_KEY'), false);
+  if ((process.env.FIXTURE_PRESERVE_WAIT === 'list' && args[2] === 'secret') ||
+      (process.env.FIXTURE_PRESERVE_WAIT === 'deploy' && args[2] === 'deploy')) {
+    const descendant = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.send('ready')"], {stdio: ['ignore', 'ignore', 'ignore', 'ipc']});
+    descendant.once('message', () => {
+      fs.writeFileSync(process.env.FIXTURE_EVIDENCE, JSON.stringify({pid: process.pid, descendant: descendant.pid}));
+      setInterval(() => {}, 1000);
+    });
+  } else if (args[2] === 'secret') {
+    assert.deepEqual(args, ['x', 'wrangler', 'secret', 'list', '--format', 'json']);
+    fs.appendFileSync(process.env.FIXTURE_EVIDENCE, 'names\\n');
+    if (process.env.FIXTURE_SECRET_OUTPUT) process.stdout.write(process.env.FIXTURE_SECRET_OUTPUT);
+    else process.stdout.write(JSON.stringify(['EMDASH_ENCRYPTION_KEY', 'OPENAI_API_KEY', 'OWNER_EMAIL'].filter(name => name !== process.env.FIXTURE_MISSING_SECRET).map(name => ({name, type: 'secret_text'}))));
+    process.stderr.write('synthetic-provider-private-diagnostic');
+    process.exit(Number(process.env.FIXTURE_LIST_EXIT || 0));
+  } else {
+    assert.deepEqual(args, ['x', 'wrangler', 'deploy']);
+    fs.appendFileSync(process.env.FIXTURE_EVIDENCE, 'deploy\\n');
+    process.exit(0);
+  }
+} else {
 const file = args[args.indexOf('--secrets-file') + 1];
 // Reopen the path exactly as Wrangler does, including on the Linux CI runner.
 const binding = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -80,6 +103,7 @@ function ready() {
     process.exitCode = Number(process.env.FIXTURE_EXIT || 0);
   }
 }
+}
 `,
   );
   await chmod(join(bin, 'bun'), 0o700);
@@ -101,8 +125,13 @@ function ready() {
   return { directory, bin, temporary, evidence, started, env };
 }
 
-function launch(env: NodeJS.ProcessEnv, cwd: string, nodeArgs: string[] = []) {
-  const child = spawn(process.execPath, [...nodeArgs, script], {
+function launch(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  nodeArgs: string[] = [],
+  scriptArgs: string[] = [],
+) {
+  const child = spawn(process.execPath, [...nodeArgs, script, ...scriptArgs], {
     env,
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -209,21 +238,23 @@ void test('missing and malformed encryption keys fail before deployment without 
   }
 });
 
-void test('temporary directories inside the repository are rejected before writing the key', async () => {
+void test('temporary directories anywhere inside the monorepo are rejected before writing the key', async () => {
   const setup = await fixture();
   try {
-    const result = await launch(
-      { ...setup.env, TMPDIR: resolve() },
-      setup.directory,
-    ).completed;
-    assert.equal(result.code, 1);
-    assert.equal(
-      result.stderr.trim(),
-      'Deployment secrets require a temporary directory outside the repository',
-    );
-    assert.equal(result.stdout, '');
-    await assert.rejects(readFile(setup.evidence), { code: 'ENOENT' });
-    assert.deepEqual(await readdir(setup.temporary), []);
+    for (const temporary of [resolve(), resolve('../..')]) {
+      const result = await launch(
+        { ...setup.env, TMPDIR: temporary },
+        setup.directory,
+      ).completed;
+      assert.equal(result.code, 1);
+      assert.equal(
+        result.stderr.trim(),
+        'Deployment secrets require a temporary directory outside the repository',
+      );
+      assert.equal(result.stdout, '');
+      await assert.rejects(readFile(setup.evidence), { code: 'ENOENT' });
+      assert.deepEqual(await readdir(setup.temporary), []);
+    }
   } finally {
     await rm(setup.directory, { recursive: true, force: true });
   }
@@ -490,3 +521,124 @@ process.kill = (pid, signal) => {
     await rm(setup.directory, { recursive: true, force: true });
   }
 });
+
+void test('explicit preservation checks secret names and deploys without replacing any values', async () => {
+  const setup = await fixture();
+  try {
+    const env: NodeJS.ProcessEnv = { ...setup.env, FIXTURE_PRESERVE: 'true' };
+    delete env.OPENAI_API_KEY;
+    // emDash declares this key required globally; this fixture deliberately removes it.
+    Reflect.deleteProperty(env, 'EMDASH_ENCRYPTION_KEY');
+    const result = await launch(
+      env,
+      setup.directory,
+      [],
+      ['--preserve-existing-secrets'],
+    ).completed;
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout + result.stderr, '');
+    assert.equal(await readFile(setup.evidence, 'utf8'), 'names\ndeploy\n');
+    assert.deepEqual(await readdir(setup.temporary), []);
+  } finally {
+    await rm(setup.directory, { recursive: true, force: true });
+  }
+});
+
+void test('preservation fails closed for absent secrets, invalid metadata, listing failures and supplied replacements', async () => {
+  const setup = await fixture();
+  try {
+    for (const extra of [
+      { FIXTURE_MISSING_SECRET: 'EMDASH_ENCRYPTION_KEY' },
+      { FIXTURE_MISSING_SECRET: 'OPENAI_API_KEY' },
+      { FIXTURE_MISSING_SECRET: 'OWNER_EMAIL' },
+      { FIXTURE_SECRET_OUTPUT: 'not-json' },
+      {
+        FIXTURE_SECRET_OUTPUT: JSON.stringify([
+          { name: 'EMDASH_ENCRYPTION_KEY', type: 'unexpected' },
+        ]),
+      },
+      { FIXTURE_LIST_EXIT: '7' },
+      { OPENAI_API_KEY: syntheticKey },
+      { EMDASH_ENCRYPTION_KEY: syntheticEncryptionKey },
+    ]) {
+      await rm(setup.evidence, { force: true });
+      const env: NodeJS.ProcessEnv = { ...setup.env, FIXTURE_PRESERVE: 'true' };
+      delete env.OPENAI_API_KEY;
+      // emDash declares this key required globally; this fixture deliberately removes it.
+      Reflect.deleteProperty(env, 'EMDASH_ENCRYPTION_KEY');
+      const result = await launch(
+        { ...env, ...extra },
+        setup.directory,
+        [],
+        ['--preserve-existing-secrets'],
+      ).completed;
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, '');
+      assert.equal(result.stderr.includes(syntheticKey), false);
+      assert.equal(result.stderr.includes(syntheticEncryptionKey), false);
+      assert.equal(
+        result.stderr.includes('synthetic-provider-private-diagnostic'),
+        false,
+      );
+      const calls = await readFile(setup.evidence, 'utf8').catch(() => '');
+      assert.equal(calls.includes('deploy'), false);
+      assert.deepEqual(await readdir(setup.temporary), []);
+    }
+  } finally {
+    await rm(setup.directory, { recursive: true, force: true });
+  }
+});
+
+for (const phase of ['list', 'deploy']) {
+  void test(
+    `cancelling existing-secret ${phase} stops the entire process group`,
+    { timeout: 15000 },
+    async () => {
+      const setup = await fixture();
+      const env: NodeJS.ProcessEnv = {
+        ...setup.env,
+        FIXTURE_PRESERVE: 'true',
+        FIXTURE_PRESERVE_WAIT: phase,
+      };
+      delete env.OPENAI_API_KEY;
+      // emDash declares this key required globally; this fixture deliberately removes it.
+      Reflect.deleteProperty(env, 'EMDASH_ENCRYPTION_KEY');
+      const deployment = launch(
+        env,
+        setup.directory,
+        [],
+        ['--preserve-existing-secrets'],
+      );
+      try {
+        let evidence: unknown;
+        for (let attempt = 0; attempt < 500; attempt++) {
+          try {
+            evidence = JSON.parse(await readFile(setup.evidence, 'utf8'));
+            break;
+          } catch {
+            await setTimeout(10);
+          }
+        }
+        assert.ok(evidence && typeof evidence === 'object');
+        assert.ok('pid' in evidence && typeof evidence.pid === 'number');
+        assert.ok(
+          'descendant' in evidence && typeof evidence.descendant === 'number',
+        );
+        deployment.child.kill('SIGTERM');
+        const result = await deployment.completed;
+        assert.equal(result.code, null);
+        assert.equal(result.signal, 'SIGTERM');
+        assert.equal(result.stdout, '');
+        assert.equal(result.stderr.includes(syntheticKey), false);
+        assert.equal(result.stderr.includes(syntheticEncryptionKey), false);
+        await assertStopped(evidence.pid);
+        await assertStopped(evidence.descendant);
+        assert.deepEqual(await readdir(setup.temporary), []);
+      } finally {
+        deployment.child.kill('SIGTERM');
+        await deployment.completed;
+        await rm(setup.directory, { recursive: true, force: true });
+      }
+    },
+  );
+}

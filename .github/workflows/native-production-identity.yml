@@ -1,0 +1,78 @@
+name: Verify native Production identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
+jobs:
+  identity:
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Production
+    permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - name: Test the main-only Production verifier
+        run: node --import ./scripts/test-protected-config.mjs --test --test-concurrency=1 scripts/native-production-identity.test.mjs scripts/native-production-inspection.test.mjs scripts/native-production-storefront.test.mjs
+        env:
+          SHOP_PROTECTED_CONFIG_JSON: ""
+          SHOP_EVIDENCE_ENCRYPTION_KEY: ""
+          SHOP_EVIDENCE_KEY_VERSION: "v1"
+          SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
+      - name: Verify signed Production identity without AWS access or deployment
+        run: node scripts/native-production-identity.mjs
+      - name: Read the existing Production Worker, bindings, queue and migrations
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/native-production-inspection.mjs
+      - name: Verify the existing personal storefront and absence of Git auto-deploy
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/native-production-storefront.mjs
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90

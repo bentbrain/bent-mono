@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { readRegularFile } from '../src/shared/files.js';
 import { activeServiceOrigin } from '../src/server/proxy-configuration.js';
 import { originSchema } from '../src/shared/models.js';
+import { requireToolbarRelease } from './release-guard.js';
+
+if (process.argv.slice(2).some((argument) => argument !== '--dry-run'))
+  throw new Error('Unsupported frontend deployment argument.');
 
 const output = '.vercel/output';
 z.object({ version: z.literal(3), routes: z.array(z.unknown()) }).parse(
@@ -28,10 +32,12 @@ if (process.argv.includes('--dry-run')) {
     `Verified prebuilt Vercel payload: ${files.length} built files including the authenticated proxy.`,
   );
 } else {
+  const release = await requireToolbarRelease();
   const token = z.string().min(1).parse(process.env.VERCEL_TOKEN);
   const team = z.string().startsWith('team_').parse(process.env.VERCEL_ORG_ID);
   const project = z.string().startsWith('prj_').parse(process.env.VERCEL_PROJECT_ID);
   const request = async (path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> => {
+    if (body !== undefined) await requireToolbarRelease();
     const query = new URLSearchParams({ teamId: team });
     if (path === '/v13/deployments') query.set('prebuilt', '1');
     if (path.endsWith('/env')) query.set('upsert', 'true');
@@ -44,7 +50,7 @@ if (process.argv.includes('--dry-run')) {
         : AbortSignal.timeout(60_000),
       redirect: 'error',
     });
-    if (!response.ok) throw new Error(`Vercel API ${path} failed (${response.status}).`);
+    if (!response.ok) throw new Error(`Vercel release API failed (${response.status}).`);
     return response.json();
   };
   const resolved = z
@@ -103,10 +109,10 @@ if (process.argv.includes('--dry-run')) {
         outputDirectory: null,
         nodeVersion: '24.x',
       },
-      meta: { githubCommitSha: process.env.GITHUB_SHA ?? 'manual', githubCommitRef: 'main' },
+      meta: { githubCommitSha: release, githubCommitRef: 'main' },
     }),
   );
-  console.log(`Deployment created: https://${created.url}`);
+  console.log('Production deployment created.');
   await waitForDeploymentReady((signal) =>
     request(`/v13/deployments/${created.id}`, undefined, signal),
   );
@@ -115,5 +121,5 @@ if (process.argv.includes('--dry-run')) {
     originSchema.parse(process.env.FEEDBACK_URL),
     { timeoutMs: 2 * 60_000 },
   );
-  console.log(`Production deployment ready and release assets verified: https://${created.url}`);
+  console.log('Production deployment ready and release assets verified.');
 }

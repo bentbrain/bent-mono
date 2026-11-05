@@ -39,7 +39,7 @@ test.beforeEach(async ({ page, baseURL }) => {
   ).toBe(200);
   for (const name of [projectName, longProjectName]) {
     const result = await request.post('/api/projects', {
-      data: { name, origins: ['http://localhost:44321'] },
+      data: { name, origins: ['http://localhost:14321'] },
     });
     expect(result.status()).toBe(201);
     const project = z.object({ project: projectSchema }).parse(await result.json()).project;
@@ -49,7 +49,7 @@ test.beforeEach(async ({ page, baseURL }) => {
           data: {
             body: `Preserve iPhone Japan ${'UnbrokenFeedback'.repeat(15)}`,
             context: {
-              url: `http://localhost:44321/${'iPhone'.repeat(15)}`,
+              url: `http://localhost:14321/${'iPhone'.repeat(15)}`,
               viewport: { width: 1280, height: 800 },
               deployment: null,
               anchor: {

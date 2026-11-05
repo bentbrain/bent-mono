@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {createServer} from 'node:net';
@@ -29,7 +29,13 @@ try{
   worker.once('error',error=>{clearTimeout(timeout);reject(error);});
   worker.once('close',code=>{clearTimeout(timeout);reject(new Error('Worker exited '+code+'\n'+output));});
  });
- const base=`http://127.0.0.1:${port}/api/layout`;
+ const origin=`http://127.0.0.1:${port}`;
+ const release=await fetch(origin+'/api/release');assert.equal(release.status,200);
+ assert.equal(release.headers.get('cache-control'),'no-store');
+ assert.deepEqual(await release.json(),{sourceRevision:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()});
+ const head=await fetch(origin+'/api/release',{method:'HEAD'});assert.equal(head.status,200);assert.equal(await head.text(),'');
+ const invalid=await fetch(origin+'/api/release',{method:'PUT'});assert.equal(invalid.status,405);
+ const base=origin+'/api/layout';
  const initialResponse=await fetch(base);assert.equal(initialResponse.status,200);
  const initial=await initialResponse.json();assert.equal(initial.schema,1);
  const put=(layout,authenticated)=>fetch(base,{method:'PUT',headers:{'Content-Type':'application/json',...(authenticated?{Authorization:'Bearer worker-smoke-only'}:{})},body:JSON.stringify(layout)});

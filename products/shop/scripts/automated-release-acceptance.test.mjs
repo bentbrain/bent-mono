@@ -1,3 +1,4 @@
+import { sealReleaseEvidence } from "./release-evidence.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,15 +42,15 @@ test('automated acceptance requires a separate successful browser run and a full
     }
 });
 test('browser evidence is read from its original run artifact and rejects substituted files', async () => {
-    const env = { GITHUB_ACTIONS: 'true', RUNNER_TEMP: tmpdir(), GITHUB_TOKEN: 'test-token' };
+    const env = { GITHUB_SHA: source, GITHUB_ACTIONS: 'true', RUNNER_TEMP: tmpdir(), GITHUB_TOKEN: 'test-token' };
     const f = fixture();
     const download = async (command, args, options) => {
         assert.equal(command, 'gh');
         assert.equal(args[2], '300');
         assert.equal(args[6], 'preview-browser-evidence-300');
         assert.equal(options.env.GH_TOKEN, 'test-token');
-        await writeFile(join(args.at(-1), 'preview-smoke-before.json'), JSON.stringify(f.before));
-        await writeFile(join(args.at(-1), 'preview-smoke-after.json'), JSON.stringify(f.after));
+        await writeFile(join(args.at(-1), 'preview-smoke-before.json'), sealReleaseEvidence(f.before,{sourceCommit:source,runId:300,filename:'preview-smoke-before.json'}));
+        await writeFile(join(args.at(-1), 'preview-smoke-after.json'), sealReleaseEvidence(f.after,{sourceCommit:source,runId:300,filename:'preview-smoke-after.json'}));
     };
     assert.deepEqual(await readAutomatedBrowserEvidence(env, 300, download), [f.before, f.after]);
     await assert.rejects(readAutomatedBrowserEvidence({ ...env, GITHUB_ACTIONS: 'false' }, 300, download));

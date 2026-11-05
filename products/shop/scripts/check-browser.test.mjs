@@ -44,7 +44,7 @@ test("browser task covers fixtures, shared sources, dependency and workflow chan
     assert.match(action, /run: bun run test:e2e:ci/);
     assert.ok(action.indexOf("run: bun run test:e2e:ci") < action.indexOf("run: bun run check:ci"));
     const deploy = readFileSync(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
-    assert.match(deploy, /run: bun run --filter @forever-tee\/web test:e2e\n/);
+    assert.match(deploy, /node scripts\/protected-command\.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'\n          bun run --filter @forever-tee\/web test:e2e\n          SHOP_PROTECTED_SHELL/);
 });
 test("Turbo resolves real browser inputs and invalidates fixture and runtime changes", () => {
     const dryRun = overrides => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL("../../../node_modules/turbo/bin/turbo", import.meta.url)), "run", "test:e2e:local",

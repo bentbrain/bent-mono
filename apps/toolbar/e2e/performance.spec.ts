@@ -14,10 +14,10 @@ async function toolbar(page: Page): Promise<Frame> {
   });
   expect(signup.status()).toBe(200);
   const created = await page.request.post('/api/projects', {
-    data: { name: 'Performance fixture', origins: ['http://localhost:44321'] },
+    data: { name: 'Performance fixture', origins: ['http://localhost:14321'] },
   });
   const { project } = z.object({ project: projectSchema }).parse(await created.json());
-  await page.goto(`http://localhost:44321/?project=${project.id}`);
+  await page.goto(`http://localhost:14321/?project=${project.id}`);
   await expect
     .poll(() => page.frames().some((frame) => frame.url().includes('/toolbar?')))
     .toBe(true);
@@ -328,7 +328,7 @@ test('a delayed acknowledgement stays scoped to its dashboard project', async ({
       .locator('[data-slot="select-value"]'),
   ).toHaveText('Performance fixture');
   const created = await page.request.post('/api/projects', {
-    data: { name: 'Other project', origins: ['http://localhost:44321'] },
+    data: { name: 'Other project', origins: ['http://localhost:14321'] },
   });
   expect(created.status()).toBe(201);
   await page.reload();

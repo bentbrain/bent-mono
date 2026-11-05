@@ -17,32 +17,56 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   foundation:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: Production
     permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
       contents: read
       actions: read
       id-token: write
       deployments: write
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Test the Production foundation guards
-        run: node --test --test-concurrency=1 scripts/aws-personal-production-bootstrap.test.mjs scripts/native-production-foundation.test.mjs scripts/native-production-alert-recovery.test.mjs scripts/native-production-evidence.test.mjs
+        run: node --import ./scripts/test-protected-config.mjs --test --test-concurrency=1 scripts/aws-personal-production-bootstrap.test.mjs scripts/native-production-foundation.test.mjs scripts/native-production-alert-recovery.test.mjs scripts/native-production-evidence.test.mjs
+        env:
+          SHOP_PROTECTED_CONFIG_JSON: ""
+          SHOP_EVIDENCE_ENCRYPTION_KEY: ""
+          SHOP_EVIDENCE_KEY_VERSION: "v1"
+          SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-production-ci
+          role-to-assume: ${{ secrets.SHOP_AWS_PRODUCTION_ROLE_ARN }}
           aws-region: ap-southeast-2
-          allowed-account-ids: '{{SHOP:awsAccountId}}'
+          allowed-account-ids: ${{ secrets.SHOP_AWS_ACCOUNT_ID }}
           role-session-name: native-production-${{ github.run_id }}
           role-duration-seconds: 1800
           unset-current-credentials: true
@@ -52,4 +76,12 @@ jobs:
           NATIVE_OPERATION: ${{ inputs.operation }}
           NATIVE_ALERT_EMAIL: ${{ secrets.NATIVE_ALERT_EMAIL }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/native-production-foundation.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/native-production-foundation.mjs
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90

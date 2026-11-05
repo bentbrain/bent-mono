@@ -1,3 +1,4 @@
+import { renderTerraformModule } from "./deployment-config.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -10,7 +11,7 @@ import { terraformFailureSummary } from "./native-ci-terraform.mjs";
 import { assertReleasePaused } from "./native-release-pause.mjs";
 import { verifyStartupProbe } from "./native-ci-health.mjs";
 import { normalizeTerraformObservation } from "./native-ci-observations.mjs";
-import { PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_ORIGIN, productionImagePair, verifyProductionRuntime, } from "./native-production-runtime.mjs";
+import { CURRENT_PRODUCTION_IMAGE_DIGEST, CURRENT_PRODUCTION_SOURCE_DIGEST, HISTORICAL_PRODUCTION_IMAGE_DIGEST, HISTORICAL_PRODUCTION_SOURCE_DIGEST, PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_ORIGIN, productionImagePair, verifyProductionRuntime, } from "./native-production-runtime.mjs";
 const execute = promisify(execFile);
 const MODULE = fileURLToPath(new URL("../infra/story-video-production/", import.meta.url));
 const NAME = "forever-tee-video-production";
@@ -22,7 +23,9 @@ const check = (value, reason) => {
 };
 const targetPair = productionImagePair();
 const previousPair = productionImagePair(PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST);
-const pairs = [previousPair, targetPair];
+const historicalPair = productionImagePair(HISTORICAL_PRODUCTION_IMAGE_DIGEST, HISTORICAL_PRODUCTION_SOURCE_DIGEST);
+const currentPair = productionImagePair(CURRENT_PRODUCTION_IMAGE_DIGEST, CURRENT_PRODUCTION_SOURCE_DIGEST);
+const pairs = [previousPair, historicalPair, currentPair, targetPair];
 const functionAddresses = new Map([
     ["aws_lambda_function.renderer", { name: NAME, failure: false }],
     ["aws_lambda_function.failures", { name: `${NAME}-failures`, failure: true }],
@@ -115,17 +118,11 @@ export function inspectProductionImagePlan(plan) {
         previousImageDigest: observed[0], imageDigest: targetPair.imageDigest, sourceDigest: targetPair.sourceDigest, applied: false };
 }
 export async function verifyCurrentProductionRuntime(call) {
-    try {
-        return await verifyProductionRuntime(call, targetPair);
+    for (const pair of [targetPair, currentPair, historicalPair, previousPair]) {
+        try { return await verifyProductionRuntime(call, pair); }
+        catch { /* Only the exact configured, recorded or qualified pairs are eligible. */ }
     }
-    catch (targetError) {
-        try {
-            return await verifyProductionRuntime(call, previousPair);
-        }
-        catch {
-            throw new Error(`Production image update stopped: live runtime is not either recorded pair (${targetError.message}).`);
-        }
-    }
+    throw new Error("Production image update stopped: live runtime is not a recorded or qualified pair.");
 }
 export async function prepareProductionImage(candidate, env, store) {
     check(candidate.imageDigest === targetPair.imageDigest && candidate.sourceDigest === targetPair.sourceDigest, "candidate is not the qualified target pair.");
@@ -147,9 +144,10 @@ export async function prepareProductionImage(candidate, env, store) {
         TF_VAR_enable_alerts: "true", TF_VAR_alert_email: env.NATIVE_ALERT_EMAIL,
         TF_VAR_image_digest: targetPair.imageDigest, TF_VAR_source_digest: targetPair.sourceDigest };
     let diagnostic = 0;
+    const moduleConfig = await renderTerraformModule(MODULE, join(directory, "module"));
     const run = async (args) => {
         try {
-            return await execute(join(directory, "terraform"), args, { cwd: MODULE, env: tfEnv, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300000 });
+            return await execute(join(directory, "terraform"), args, { cwd: moduleConfig.directory, env: tfEnv, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 300000 });
         }
         catch (error) {
             const summary = { operation: args[0], ...terraformFailureSummary(error) };

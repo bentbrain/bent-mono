@@ -3,12 +3,18 @@ import { z } from 'zod';
 import { test, expect } from './fixtures.js';
 import { projectSchema, threadSchema } from '../src/shared/models.js';
 
+test.afterEach(async ({ page }) => {
+  // Background polling can still be inside route.fetch when assertions finish.
+  // Drain handlers while their API responses and browser context remain valid.
+  await page.unrouteAll({ behavior: 'wait' });
+});
+
 test.beforeEach(async ({ page }) => {
   await page.request.post('/api/auth/sign-up/email', {
     data: { name: 'Alex', email: `${randomUUID()}@example.invalid`, password: randomUUID() },
   });
   const response = await page.request.post('/api/projects', {
-    data: { name: 'Navigation test', origins: ['http://localhost:44321'] },
+    data: { name: 'Navigation test', origins: ['http://localhost:14321'] },
   });
   const { project } = z.object({ project: projectSchema }).parse(await response.json());
   for (const status of ['open', 'resolved']) {
@@ -16,7 +22,7 @@ test.beforeEach(async ({ page }) => {
       data: {
         body: `${status} conversation`,
         context: {
-          url: 'http://localhost:44321/',
+          url: 'http://localhost:14321/',
           viewport: { width: 1280, height: 800 },
           deployment: null,
           anchor: {
@@ -184,6 +190,45 @@ test('thread detail keeps the newest work when an older run is absent from the l
     dialog.getByRole('button', { name: 'Send remaining feedback', exact: true }),
   ).toBeDisabled();
   await expect(dialog.getByText('Ready for review', { exact: true })).toBeHidden();
+});
+
+let responseHandlerProbe: { completed: boolean } | undefined;
+// Registered after the route-draining hook. The probe checks actual completion,
+// including response parsing and fulfillment, before page-fixture disposal.
+test.afterEach(() => {
+  if (responseHandlerProbe) expect(responseHandlerProbe.completed).toBe(true);
+  responseHandlerProbe = undefined;
+});
+test('in-flight response handlers finish before their page is disposed', async ({ page }) => {
+  const probe = { completed: false };
+  responseHandlerProbe = probe;
+  let started = () => {
+    /* Assigned synchronously below. */
+  };
+  let finish = () => {
+    /* Assigned synchronously below. */
+  };
+  const pending = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  await page.route('**/health', async (route) => {
+    const response = await route.fetch();
+    started();
+    await gate;
+    const health = z.object({ ok: z.literal(true) }).parse(await response.json());
+    await route.fulfill({ response, json: health });
+    probe.completed = true;
+  });
+  await page.evaluate(() => {
+    void fetch('/health');
+  });
+  await pending;
+  // Keep a real route.fetch response unread across the test-body boundary.
+  // Teardown must drain the handler before Playwright disposes that response.
+  setTimeout(finish, 250);
 });
 
 test('a newer list summary cannot replace full detail after a delayed reply', async ({ page }) => {

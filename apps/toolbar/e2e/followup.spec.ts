@@ -17,7 +17,7 @@ for (const submission of ['toolbar', 'dashboard']) {
         await page.request.post('/api/projects', {
           data: {
             name: 'Map feedback',
-            origins: ['http://localhost:44321'],
+            origins: ['http://localhost:14321'],
             theme: { mode: 'light' },
           },
         })
@@ -29,7 +29,7 @@ for (const submission of ['toolbar', 'dashboard']) {
           data: {
             body: 'Fix drag selection on the map.',
             context: {
-              url: 'http://localhost:44321/',
+              url: 'http://localhost:14321/',
               viewport: { width: 1280, height: 900 },
               deployment: null,
               anchor: {
@@ -45,7 +45,7 @@ for (const submission of ['toolbar', 'dashboard']) {
         })
       ).json(),
     ).thread;
-    await page.goto(`http://localhost:44321/?project=${project.id}`);
+    await page.goto(`http://localhost:14321/?project=${project.id}`);
     await expect
       .poll(() => page.frames().some((frame) => frame.url().includes('/toolbar?')))
       .toBe(true);

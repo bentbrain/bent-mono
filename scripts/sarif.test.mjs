@@ -155,6 +155,34 @@ test("only the GitHub runner installation UUID is inert in tool metadata", async
   assert.throws(() => classifyReports([unknown], manifest, source), /unused or stale/);
 });
 
+test("main-only extraction telemetry is inert but changed metadata and extraction warnings fail", async context => {
+  const { source } = await fixture(context);
+  const original = report([finding()]);
+  const manifest = reviewed([original], source);
+  const main = structuredClone(original);
+  main.runs[0].tool.driver.notifications = [{
+    id: "cli/expected-extracted-files/typescript",
+    name: "cli/expected-extracted-files/typescript",
+    shortDescription: { text: "Expected extracted files" },
+    fullDescription: { text: "Files appearing in the source archive that are expected to be extracted." },
+    defaultConfiguration: { enabled: true },
+    properties: { tags: ["expected-extracted-files", "telemetry"], languageDisplayName: "TypeScript" },
+  }];
+  const before = JSON.stringify(main);
+  assert.equal(classifyReports([main], manifest, source).reviewed, 1);
+  assert.equal(JSON.stringify(main), before);
+  const changed = structuredClone(main);
+  changed.runs[0].tool.driver.notifications[0].properties.languageDisplayName = "Unknown";
+  assert.throws(() => classifyReports([changed], manifest, source), /unused or stale/);
+  for (const level of ["warning", "error", undefined, "unrecognized"]) {
+    const incomplete = structuredClone(main);
+    incomplete.runs[0].invocations = [{ executionSuccessful: true, toolExecutionNotifications: [
+      { descriptor: { id: "cli/expected-extracted-files/typescript" }, level, message: { text: "Source extraction incomplete" } },
+    ] }];
+    assert.throws(() => classifyReports([incomplete], manifest, source), /did not complete successfully/);
+  }
+});
+
 test("source, guards, tests, shared code, CI, dependencies and new files invalidate the global pin", async context => {
   const { root, source } = await fixture(context);
   const reports = [report([finding()])]; const manifest = reviewed(reports, source);

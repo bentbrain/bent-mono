@@ -1,3 +1,4 @@
+import { openReleaseEvidence } from "./release-evidence.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -13,6 +14,12 @@ export function cleanupCoordinatorPlan(journal) {
                 qualification_reference: JSON.stringify(reference) } }];
 }
 async function downloadPointer(api, runId, token, filename, parse) {
+    const run = await api(`actions/runs/${runId}`);
+    if (run.id !== runId || run.status !== 'completed' || !['success','failure'].includes(run.conclusion) || run.run_attempt !== 1 ||
+        run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || !/^[a-f0-9]{40}$/.test(run.head_sha ?? '') ||
+        run.path !== '.github/workflows/native-development.yml' || run.repository?.id !== Number(protectedConfig("githubRepositoryId")) ||
+        run.repository?.owner?.id !== Number(protectedConfig("githubOwnerId")) || run.head_repository?.id !== Number(protectedConfig("githubRepositoryId")))
+        throw Error('Evidence requires the authenticated original native workflow run.');
     const name = `qualification-reference-${runId}`;
     const listing = await api(`actions/runs/${runId}/artifacts?per_page=100`);
     if (!Array.isArray(listing.artifacts) || listing.total_count > 100)
@@ -28,14 +35,14 @@ async function downloadPointer(api, runId, token, filename, parse) {
         const path = join(directory, filename);
         let bytes;
         try {
-            bytes = await readRegularFile(path, { maxBytes: 4096 });
+            bytes = await readRegularFile(path, { maxBytes: 100000 });
         }
         catch (error) {
             if (error.code === 'ENOENT')
                 return null;
             throw error;
         }
-        return parse(bytes.toString('utf8'));
+        return parse(JSON.stringify(openReleaseEvidence(bytes.toString('utf8'), { sourceCommit: run.head_sha, runId, filename })));
     }
     finally {
         await rm(directory, { recursive: true, force: true });

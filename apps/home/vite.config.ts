@@ -1,5 +1,6 @@
 import vinext from "vinext";
 import {locationDefines} from "./config/location";
+import {releaseDefines} from "./config/release";
 import {publicMetadata} from "./config/public-metadata";
 import { defineConfig } from "vite";
 
@@ -19,7 +20,7 @@ export default defineConfig(async ({mode}) => {
     ...(isCodexSeatbeltSandbox
       ? {server: {watch: {useFsEvents: false, usePolling: true}}}
       : {}),
-    define:locationDefines(mode),
+    define:{...locationDefines(mode, 'public'), ...releaseDefines()},
     plugins: [
       publicMetadata(),
       vinext(),

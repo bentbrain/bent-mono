@@ -34,15 +34,29 @@ concurrency:
   group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   validate:
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
+      statuses: read
+      checks: read
       contents: read
       actions: read
       pull-requests: read
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
     steps:
@@ -61,36 +75,55 @@ jobs:
         run: |
           test "${{ inputs.environment }}" = "development"
           test "$FORCE_FULL" != "true"
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check Preview source before validation
         if: inputs.web_only_preview
-        run: node scripts/release-preflight.mjs --environment development --lane web
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment development --lane web
       - name: Reuse CI for the exact release commit
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/reuse-ci.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/reuse-ci.mjs
       - name: Check commit without existing CI
         if: steps.ci.outputs.reused != 'true'
-        uses: ./.github/actions/check
+        uses: ./products/shop/.github/actions/check
         env:
           TURBO_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.TURBO_TOKEN || '' }}
           TURBO_TEAM: ${{ github.ref == 'refs/heads/main' && vars.TURBO_TEAM || '' }}
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
 
   deploy:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
       contents: read
       actions: read
       deployments: read
     environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
       DEPLOY_ENV: ${{ inputs.environment }}
@@ -145,13 +178,19 @@ jobs:
                 ;;
             esac
           fi
-      - name: Install pnpm
+      - name: Install Bun
         uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Verify existing Worker before web-only preparation
         if: inputs.web_only_preview
         env:
@@ -165,18 +204,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCE_FULL: ${{ inputs.force_full }}
           WEB_ONLY_PREVIEW: ${{ inputs.web_only_preview }}
-        run: node scripts/deployment-plan.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/deployment-plan.mjs
       - name: Require a compatible native release path
         env:
           API_CHANGED: ${{ steps.changes.outputs.api }}
           LAMBDA_CHANGED: ${{ steps.changes.outputs.lambda }}
-        run: node scripts/native-release-gate.mjs
+        run: node --import ./scripts/public-release-logging.mjs scripts/native-release-gate.mjs
       - name: Install deployment dependencies
         if: steps.changes.outputs.api == 'true' || steps.changes.outputs.renderer == 'true'
         run: bun install --frozen-lockfile
+        working-directory: .
       - name: Apply D1 migrations
         if: steps.changes.outputs.api == 'true'
-        run: bun run --filter @forever-tee/api exec wrangler d1 migrations apply DB --env "$DEPLOY_ENV" --remote
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 migrations apply DB --env "$DEPLOY_ENV" --remote
+          SHOP_PROTECTED_SHELL
       - name: Configure Worker secrets
         if: steps.changes.outputs.api == 'true'
         env:
@@ -193,6 +236,7 @@ jobs:
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
           required=(
             BENT_SHIRT_OPERATIONS_SECRET
             CART_LINE_CAPABILITY_SECRET
@@ -247,16 +291,24 @@ jobs:
               SHOPIFY_CLIENT_SECRET: $shopifyClientSecret,
               WEB_ORIGINS: $webOrigins
             } | with_entries(select(.value != ""))' |
-            bun run --filter @forever-tee/api exec wrangler secret bulk --env "$DEPLOY_ENV"
+            cd workers/api && bunx --no-install wrangler secret bulk --env "$DEPLOY_ENV"
+          SHOP_PROTECTED_SHELL
       - name: Deploy story video renderer
         if: steps.changes.outputs.renderer == 'true'
-        run: bun run --filter @forever-tee/video-renderer exec wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/video-renderer && bunx --no-install wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+          SHOP_PROTECTED_SHELL
       - name: Deploy Worker
         if: steps.changes.outputs.api == 'true'
-        run: bun run --filter @forever-tee/api exec wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler deploy --env "$DEPLOY_ENV" --keep-vars
+          SHOP_PROTECTED_SHELL
       - name: Verify Development upload origin
         if: inputs.environment == 'development'
         run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
           headers_file="$(mktemp)"
           curl --silent --show-error \
             --dump-header "$headers_file" \
@@ -278,12 +330,19 @@ jobs:
             echo "Development Worker did not allow the stable Preview origin." >&2
             exit 1
           fi
+          SHOP_PROTECTED_SHELL
       - name: Catch up revision links created during deployment
         if: steps.changes.outputs.api == 'true'
-        run: bun run --filter @forever-tee/api exec wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-design-revisions.sql
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-design-revisions.sql
+          SHOP_PROTECTED_SHELL
       - name: Catch up placement created during deployment
         if: steps.changes.outputs.api == 'true'
-        run: bun run --filter @forever-tee/api exec wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-configured-product-placement.sql
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd workers/api && bunx --no-install wrangler d1 execute DB --env "$DEPLOY_ENV" --remote --file sql/catch-up-configured-product-placement.sql
+          SHOP_PROTECTED_SHELL
       - name: Verify Worker release
         env:
           FOREVER_TEE_API_SHARED_SECRET: ${{ secrets.FOREVER_TEE_API_SHARED_SECRET }}
@@ -293,17 +352,22 @@ jobs:
       - name: Pull Vercel environment
         if: steps.changes.outputs.web == 'true'
         run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd ../..
           if [ "$DEPLOY_ENV" = "production" ]; then
-            bun run dlx vercel@59.5.0 pull --yes --environment=production --token="$VERCEL_TOKEN"
+            bunx vercel@59.5.0 pull --yes --environment=production --token="$VERCEL_TOKEN"
           else
-            bun run dlx vercel@59.5.0 pull --yes --environment=preview --token="$VERCEL_TOKEN"
+            bunx vercel@59.5.0 pull --yes --environment=preview --token="$VERCEL_TOKEN"
           fi
+          SHOP_PROTECTED_SHELL
       - name: Deploy storefront
         if: steps.changes.outputs.web == 'true'
         run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          cd ../..
           if [ "$DEPLOY_ENV" = "production" ]; then
             deployment_url="$(
-              bun run dlx vercel@59.5.0 deploy \
+              bunx vercel@59.5.0 deploy \
                 --build-env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" \
                 --prod \
                 --token="$VERCEL_TOKEN"
@@ -314,7 +378,7 @@ jobs:
             turnstile_site_key="1x00000000000000000000AA"
             turnstile_secret="1x0000000000000000000000000000000AA"
             deployment_url="$(
-              bun run dlx vercel@59.5.0 deploy \
+              bunx vercel@59.5.0 deploy \
                 --build-env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" \
                 --build-env "NEXT_PUBLIC_TURNSTILE_SITE_KEY=$turnstile_site_key" \
                 --env "NEXT_PUBLIC_TURNSTILE_SITE_KEY=$turnstile_site_key" \
@@ -323,18 +387,22 @@ jobs:
                 --token="$VERCEL_TOKEN"
             )"
             preview_alias="${WEB_ORIGIN#https://}"
-            bun run dlx vercel@59.5.0 alias set \
+            bunx vercel@59.5.0 alias set \
               "$deployment_url" \
               "$preview_alias" \
               --token="$VERCEL_TOKEN"
           fi
-          echo "### $DEPLOY_ENV deployment" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$DEPLOY_ENV" = "production" ]; then
-            echo "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "$WEB_ORIGIN" >> "$GITHUB_STEP_SUMMARY"
-            echo "Immutable deployment: $deployment_url" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          printf '%s\n' "$deployment_url" "$WEB_ORIGIN"
+          echo "Storefront deployment completed; immutable details are in encrypted diagnostics." >> "$GITHUB_STEP_SUMMARY"
+          SHOP_PROTECTED_SHELL
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
 
   e2e:
     if: inputs.environment == 'development'
@@ -343,6 +411,10 @@ jobs:
     timeout-minutes: 20
     environment: Preview
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
       E2E_BASE_URL: ${{ vars.WEB_ORIGIN }}
@@ -351,22 +423,42 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
-      - name: Install pnpm
+      - name: Install Bun
         uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - run: bun install --frozen-lockfile
-      - run: bun run --filter @forever-tee/web exec playwright install --with-deps chromium
-      - run: bun run --filter @forever-tee/web test:e2e
+        working-directory: .
+      - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
+      - run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          bun run --filter @forever-tee/web test:e2e
+          SHOP_PROTECTED_SHELL
+      - name: Seal private browser diagnostics
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-browser-artifacts.mjs
       - name: Save browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-failures
           path: |
-            apps/web/playwright-report
-            apps/web/test-results
+            ${{ runner.temp }}/sealed-browser-evidence
           retention-days: 7
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90

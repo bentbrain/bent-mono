@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { releaseTree, releaseBlob } from "./monorepo-source.mjs";
 import { createHash } from 'node:crypto';
 import { providerIdentityIsolated } from './provider-identity-isolation.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -39,13 +39,13 @@ export function isolatedShippingLeaf(source) {
   });
 }
 function gitTree(source) {
-  const output=execFileSync('git',['ls-tree','-r','-z',source],{encoding:'utf8',maxBuffer:8*1024*1024});
+  const output=releaseTree(source);
   return output.split('\0').filter(Boolean).map(record=>{
     const [header,...path]=record.split('\t'),[mode,type,oid]=header.split(' ');
     return {path:path.join('\t'),mode,type,oid};
   });
 }
-const gitBlob=(source,path)=>execFileSync('git',['show',`${source}:${path}`],{encoding:'utf8',maxBuffer:2*1024*1024});
+const gitBlob=releaseBlob;
 export function renderingInputManifest(source,{tree=gitTree,read=gitBlob,nodeVersion=process.version,boundary=commerceBoundary}={}) {
   if (!['isolated-printify-webhooks-v1',commerceBoundary].includes(boundary) || !/^[a-f0-9]{40}$/.test(source) || !/^v24\./.test(nodeVersion)) return null;
   const entries=tree(source);

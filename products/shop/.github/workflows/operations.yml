@@ -37,6 +37,10 @@ concurrency:
   group: operations-${{ inputs.environment }}
   cancel-in-progress: false
 
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   operate:
     runs-on: ubuntu-latest
@@ -72,13 +76,15 @@ jobs:
             [[ "$CONFIGURED_PRODUCT_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]
             test "$ACTION" = "refresh-print-assets"
           fi
-      - name: Install pnpm
+      - name: Install Bun
         uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.18.0
+          package-manager-cache: false
       - name: Install operations dependencies
         run: bun install --frozen-lockfile --filter @forever-tee/api...
       - name: Run operation

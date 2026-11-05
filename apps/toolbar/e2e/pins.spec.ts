@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { projectSchema, threadSchema } from '../src/shared/models.js';
 import { test, expect } from './pins.fixtures.js';
 
-const website = 'http://localhost:44331';
+const website = 'http://localhost:14331';
 const service = new URL(website);
 service.port = String(Number(service.port) - 1);
 
@@ -859,7 +859,7 @@ test('forged and oversized messages cannot render pins or open another thread; s
   const wrongSource = page.frames().find((frame) => frame.url().endsWith('/pin-spoof'));
   if (!wrongSource) throw new Error('Wrong-source fixture missing');
   await wrongSource.evaluate((message) => {
-    parent.postMessage(message, 'http://localhost:44331');
+    parent.postMessage(message, 'http://localhost:14331');
   }, forged);
   // Wait for a round-trip through the authoritative frame before inspecting the result.
   await frame.evaluate(
@@ -956,7 +956,7 @@ test('forged and oversized messages cannot render pins or open another thread; s
   await expect.poll(async () => (await pins(page)).length).toBe(0);
   expect((await pinMessages(page)).at(-1)?.items).toEqual([]);
   await frame.evaluate((message) => {
-    parent.postMessage(message, 'http://localhost:44331');
+    parent.postMessage(message, 'http://localhost:14331');
   }, forged);
   expect(await pins(page)).toEqual([]);
 });
@@ -1358,7 +1358,7 @@ test('destroy removes moving pins and stops geometry reads and animation registr
   await instrument(page);
   const project = await createProject(page);
   await createThread(page, project.id, '#lifecycle-anchor', 'Lifecycle feedback');
-  await page.route('http://localhost:44330/embed-module.js', async (route) => {
+  await page.route('http://localhost:14330/embed-module.js', async (route) => {
     const response = await route.fetch();
     await route.fulfill({
       response,
@@ -1372,13 +1372,13 @@ test('destroy removes moving pins and stops geometry reads and animation registr
     anchor.textContent = 'Lifecycle anchor';
     anchor.style.cssText = 'position:fixed;left:20px;top:160px;width:100px;height:50px';
     document.body.append(anchor);
-    const address = 'http://localhost:44330/embed-module.js';
+    const address = 'http://localhost:14330/embed-module.js';
     const library: unknown = await import(address);
     if (typeof library !== 'object' || library === null) throw new Error('Embed module missing');
     const mount: unknown = Reflect.get(library, 'mountFeedback');
     if (typeof mount !== 'function') throw new Error('Embed mount function missing');
     const controller: unknown = Reflect.apply(mount, null, [
-      { server: 'http://localhost:44330', projectId },
+      { server: 'http://localhost:14330', projectId },
     ]);
     if (typeof controller !== 'object' || controller === null)
       throw new Error('Embed controller missing');

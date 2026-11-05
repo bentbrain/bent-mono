@@ -12,6 +12,25 @@ concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  release-qualification:
+    name: Release qualification
+    if: always()
+    needs: [checks, browser, shop, public-source, secrets, dependencies, codeql]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every Quality job
+        env:
+          QUALITY_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module -e '
+            const jobs = JSON.parse(process.env.QUALITY_RESULTS);
+            const expected = ["checks", "browser", "shop", "public-source", "secrets", "dependencies", "codeql"];
+            if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
+                Object.values(jobs).some(job => job.result !== "success")) {
+              throw new Error("Every Quality job must succeed before production release");
+            }
+          '
   checks:
     name: ${{ matrix.check }}
     runs-on: ubuntu-latest

@@ -1,4 +1,5 @@
-import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import { sealReleaseEvidence, openReleaseEvidence } from "./release-evidence.mjs";
+import { protectedConfig } from "./protected-config.mjs";
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -24,7 +25,7 @@ if (import.meta.main) {
     const api = githubApi({ token: env.GH_TOKEN, repository: env.GITHUB_REPOSITORY });
     const record = verifySmokeBaselines(env.GITHUB_SHA, await componentBaselines({ api, target: 'preview' }));
     const before = join(env.RUNNER_TEMP, 'preview-smoke-before.json');
-    if (phase === 'after' && !isDeepStrictEqual(record, JSON.parse(resolveProtectedTemplate(await readFile(before, 'utf8')))))
+    if (phase === 'after' && !isDeepStrictEqual(record, openReleaseEvidence(await readFile(before, 'utf8'), {sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:'preview-smoke-before.json'})))
         throw Error('Preview sources changed during the camera smoke.');
-    await writeFile(join(env.RUNNER_TEMP, `preview-smoke-${phase}.json`), JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+    await writeFile(join(env.RUNNER_TEMP, `preview-smoke-${phase}.json`), sealReleaseEvidence(record,{sourceCommit:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,filename:`preview-smoke-${phase}.json`}), { flag: 'wx', mode: 0o600 });
 }

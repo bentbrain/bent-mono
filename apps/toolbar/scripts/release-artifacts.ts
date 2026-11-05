@@ -46,11 +46,42 @@ const releaseSchema = z.object({
     }),
   ),
 });
-const repository = () =>
-  z
-    .string()
-    .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
-    .parse(process.env.GITHUB_REPOSITORY);
+const repositorySchema = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+const migratedArchiveSchema = z
+  .object({
+    version: z.literal(1),
+    legacyAssetSha: z.string().regex(/^[a-f0-9]{40}$/),
+    archiveSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    newRepository: repositorySchema,
+    releaseTag: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/),
+    targetCommitish: z.string().regex(/^[a-f0-9]{40}$/),
+    assets: z
+      .array(
+        z
+          .object({
+            name: z.literal(releaseBundle),
+            size: z
+              .number()
+              .int()
+              .positive()
+              .max(8 * 1024 * 1024),
+            digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+          })
+          .strict(),
+      )
+      .length(1),
+  })
+  .strict();
+const repository = () => repositorySchema.parse(process.env.GITHUB_REPOSITORY);
+type ArchiveCommand = (args: string[], token?: string) => Promise<string>;
+const archiveCommand: ArchiveCommand = async (args, token) => {
+  const result = await invoke('gh', args, {
+    timeout: 60_000,
+    maxBuffer: 16 * 1024 * 1024,
+    env: token ? { ...process.env, GH_TOKEN: token } : process.env,
+  });
+  return result.stdout;
+};
 const tagFor = (version: string) =>
   `assets-${z
     .string()
@@ -112,19 +143,28 @@ function parseBundle(contents: Buffer) {
   return bundle;
 }
 
-export async function releaseMetadata(version: string) {
+async function metadataFor(
+  version: string,
+  source: string,
+  command: ArchiveCommand,
+  token?: string,
+) {
+  return metadataByTag(tagFor(version), source, command, token);
+}
+
+async function metadataByTag(tag: string, source: string, command: ArchiveCommand, token?: string) {
   try {
-    const result = await invoke(
-      'gh',
-      ['api', `repos/${repository()}/releases/tags/${tagFor(version)}`],
-      { timeout: 30_000 },
-    );
-    return releaseSchema.parse(JSON.parse(result.stdout));
+    const contents = await command(['api', `repos/${source}/releases/tags/${tag}`], token);
+    return releaseSchema.parse(JSON.parse(contents));
   } catch (error) {
     const failure = z.object({ stderr: z.string() }).safeParse(error);
-    if (failure.success && failure.data.stderr.includes('HTTP 404')) return null;
+    if (failure.success && /\bHTTP 404\b/.test(failure.data.stderr)) return null;
     throw new Error('Could not read the repository release artifact metadata.');
   }
+}
+
+export async function releaseMetadata(version: string) {
+  return metadataFor(version, repository(), archiveCommand);
 }
 
 export async function verifyReleaseArtifacts(
@@ -135,6 +175,10 @@ export async function verifyReleaseArtifacts(
   const release = releaseSchema.parse(metadata);
   if (release.tag_name !== tagFor(version) || release.target_commitish !== version)
     throw new Error('Release artifacts do not belong to the active commit.');
+  await verifyAssetContents(directory, release);
+}
+
+async function verifyAssetContents(directory: string, release: z.infer<typeof releaseSchema>) {
   const files = release.assets.some((asset) => asset.name === releaseBundle)
     ? [releaseBundle]
     : releaseFiles;
@@ -151,31 +195,69 @@ export async function verifyReleaseArtifacts(
   }
 }
 
-export async function retrieveReleaseArtifacts(version: string, directory: string) {
-  const metadata = await releaseMetadata(version);
+export async function retrieveReleaseArtifacts(
+  version: string,
+  directory: string,
+  options: { environment?: NodeJS.ProcessEnv; command?: ArchiveCommand } = {},
+) {
+  const environment = options.environment ?? process.env;
+  const command = options.command ?? archiveCommand;
+  let source = repositorySchema.parse(environment.GITHUB_REPOSITORY);
+  let tag = tagFor(version);
+  let token: string | undefined;
+  let migrated: z.infer<typeof migratedArchiveSchema> | undefined;
+  let metadata = await metadataFor(version, source, command);
+  if (!metadata && environment.TOOLBAR_MIGRATED_ARCHIVE_JSON) {
+    try {
+      migrated = migratedArchiveSchema.parse(JSON.parse(environment.TOOLBAR_MIGRATED_ARCHIVE_JSON));
+    } catch {
+      throw new Error('Invalid protected migrated-archive receipt.');
+    }
+    const asset = migrated.assets[0];
+    if (
+      !asset ||
+      migrated.legacyAssetSha !== version ||
+      migrated.newRepository !== source ||
+      asset.digest !== `sha256:${migrated.archiveSha256}`
+    )
+      throw new Error('Migrated asset receipt does not match the active release and archive.');
+    tag = migrated.releaseTag;
+    metadata = await metadataByTag(tag, source, command);
+    if (
+      metadata?.tag_name !== tag ||
+      metadata.target_commitish !== migrated.targetCommitish ||
+      metadata.assets.length !== 1 ||
+      metadata.assets[0]?.name !== asset.name ||
+      metadata.assets[0].size !== asset.size ||
+      metadata.assets[0].digest !== asset.digest
+    )
+      throw new Error('Migrated archive metadata differs from its protected receipt.');
+  } else if (!metadata && environment.TOOLBAR_LEGACY_ARCHIVE_REPOSITORY) {
+    const legacy = repositorySchema.parse(environment.TOOLBAR_LEGACY_ARCHIVE_REPOSITORY);
+    if (legacy === source) throw new Error('Legacy asset archive must be a separate repository.');
+    token = environment.TOOLBAR_LEGACY_ARCHIVE_TOKEN?.trim();
+    if (!token) throw new Error('Legacy asset archive requires its protected read credential.');
+    source = legacy;
+    metadata = await metadataFor(version, source, command, token);
+  }
   if (!metadata) throw new Error('The active commit has no archived release assets.');
   const temporary = await mkdtemp(join(tmpdir(), 'feedback-release-'));
   try {
     const files = metadata.assets.some((asset) => asset.name === releaseBundle)
       ? [releaseBundle]
       : releaseFiles;
-    for (const file of files)
-      await invoke(
-        'gh',
-        [
-          'release',
-          'download',
-          tagFor(version),
-          '--repo',
-          repository(),
-          '--pattern',
-          file,
-          '--dir',
-          temporary,
-        ],
-        { timeout: 60_000 },
-      );
-    await verifyReleaseArtifacts(temporary, version, metadata);
+    for (const file of files) {
+      try {
+        await command(
+          ['release', 'download', tag, '--repo', source, '--pattern', file, '--dir', temporary],
+          token,
+        );
+      } catch {
+        throw new Error('Could not download the archived browser assets.');
+      }
+    }
+    if (migrated) await verifyAssetContents(temporary, metadata);
+    else await verifyReleaseArtifacts(temporary, version, metadata);
     if (files.includes(releaseBundle)) {
       const bundle = parseBundle((await readRegularFile(`${temporary}/${releaseBundle}`)).contents);
       for (const file of bundle.files) {

@@ -41,18 +41,32 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: ${{ github.token }}
+
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   verify:
-    if: github.repository_id == '{{SHOP:githubRepositoryId}}' && github.repository_owner_id == '{{SHOP:githubOwnerId}}' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.operation == 'sweep-products' && 60 || 40 }}
     environment: Production
     permissions:
+      pull-requests: read
+      statuses: read
+      checks: read
       contents: read
       actions: read
       id-token: write
       deployments: write
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
     steps:
@@ -62,10 +76,14 @@ jobs:
           fetch-depth: 0
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           package-manager-cache: false
+      - name: Require authoritative exact-main monorepo quality
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check source and qualification before cloud preparation
         env:
           OPERATION: ${{ inputs.operation }}
@@ -73,23 +91,36 @@ jobs:
           NATIVE_VERIFY_RELEASE: ${{ inputs.verify_release }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
           NATIVE_PROMOTION_INPUT: ${{ inputs.promotion_input }}
-        run: node scripts/release-preflight.mjs --environment production --lane native --operation "$OPERATION"
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment production --lane native --operation "$OPERATION"
       - name: Check Production context and evidence guards
-        run: node --test --test-concurrency=1 scripts/native-production-ci.test.mjs scripts/native-production-candidate.test.mjs scripts/native-production-runtime.test.mjs scripts/native-production-image.test.mjs scripts/native-production-foundation.test.mjs scripts/native-ci-candidate.test.mjs scripts/native-production-worker.test.mjs scripts/native-production-monitor.test.mjs scripts/native-production-release.test.mjs scripts/native-production-canary.test.mjs scripts/native-production-web-release.test.mjs scripts/native-release-timing.test.mjs
-      - run: node --test --test-concurrency=1 scripts/native-production-release-inspection.test.mjs scripts/native-production-preflight-recovery.test.mjs scripts/native-production-creation-recovery.test.mjs scripts/native-production-rehearsal-recovery.test.mjs scripts/native-production-canary-recovery.test.mjs scripts/native-production-featured-video-recovery.test.mjs scripts/native-production-product-sweep.test.mjs
+        run: node --import ./scripts/test-protected-config.mjs --test --test-concurrency=1 scripts/native-production-ci.test.mjs scripts/native-production-candidate.test.mjs scripts/native-production-runtime.test.mjs scripts/native-production-image.test.mjs scripts/native-production-foundation.test.mjs scripts/native-ci-candidate.test.mjs scripts/native-production-worker.test.mjs scripts/native-production-monitor.test.mjs scripts/native-production-release.test.mjs scripts/native-production-canary.test.mjs scripts/native-production-web-release.test.mjs scripts/native-release-timing.test.mjs
+        env:
+          SHOP_PROTECTED_CONFIG_JSON: ""
+          SHOP_EVIDENCE_ENCRYPTION_KEY: ""
+          SHOP_EVIDENCE_KEY_VERSION: "v1"
+          SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
+      - run: node --import ./scripts/test-protected-config.mjs --test --test-concurrency=1 scripts/native-production-release-inspection.test.mjs scripts/native-production-preflight-recovery.test.mjs scripts/native-production-creation-recovery.test.mjs scripts/native-production-rehearsal-recovery.test.mjs scripts/native-production-canary-recovery.test.mjs scripts/native-production-featured-video-recovery.test.mjs scripts/native-production-product-sweep.test.mjs
+        env:
+          SHOP_PROTECTED_CONFIG_JSON: ""
+          SHOP_EVIDENCE_ENCRYPTION_KEY: ""
+          SHOP_EVIDENCE_KEY_VERSION: "v1"
+          SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
       - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          bun-version: 1.4.4
         if: inputs.operation == 'prepare-worker' || inputs.operation == 'release' || inputs.operation == 'promote' || inputs.operation == 'release-storefront' || inputs.operation == 'repair-featured-videos' || inputs.operation == 'sweep-products'
       - name: Install the Featured Design repair encoder
         if: inputs.operation == 'repair-featured-videos'
         run: sudo apt-get update --quiet && sudo apt-get install --yes --no-install-recommends ffmpeg
       - run: bun install --frozen-lockfile
+        working-directory: .
         if: inputs.operation == 'prepare-worker' || inputs.operation == 'release' || inputs.operation == 'promote' || inputs.operation == 'repair-featured-videos' || inputs.operation == 'sweep-products'
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         if: inputs.operation != 'repair-featured-videos' && inputs.operation != 'sweep-products'
         with:
-          role-to-assume: arn:aws:iam::{{SHOP:awsAccountId}}:role/forever-tee-video-production-ci
+          role-to-assume: ${{ secrets.SHOP_AWS_PRODUCTION_ROLE_ARN }}
           aws-region: ap-southeast-2
-          allowed-account-ids: '{{SHOP:awsAccountId}}'
+          allowed-account-ids: ${{ secrets.SHOP_AWS_ACCOUNT_ID }}
           role-session-name: native-production-${{ github.run_id }}
           role-duration-seconds: 3600
           unset-current-credentials: true
@@ -118,12 +149,20 @@ jobs:
           VERCEL_TOKEN: ${{ inputs.operation == 'release-storefront' && secrets.VERCEL_TOKEN || '' }}
           VERCEL_PROJECT_ID: ${{ inputs.operation == 'release-storefront' && secrets.VERCEL_PROJECT_ID || '' }}
           VERCEL_ORG_ID: ${{ inputs.operation == 'release-storefront' && secrets.VERCEL_ORG_ID || '' }}
-        run: node scripts/native-production-provision.mjs
+        run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/native-production-provision.mjs
       - name: Preserve release stage timings
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-timings-${{ github.run_id }}
           path: ${{ runner.temp }}/release-timings.ndjson
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve encrypted operational diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
           if-no-files-found: ignore
           retention-days: 90

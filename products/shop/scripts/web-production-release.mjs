@@ -1,3 +1,4 @@
+import { REPOSITORY_ROOT, storefrontSourceManifest } from "./monorepo-source.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -242,21 +243,7 @@ export async function releaseWebOnlyProduction(env = process.env) {
     check(status.stdout.trim() === "", "clean CI source checkout required.");
     const head = (await execute("git", ["rev-parse", "HEAD"])).stdout.trim();
     check(head === commit, "checked-out source commit.");
-    const tracked = (await execute("git", [
-        "ls-files",
-        "apps/web",
-        "packages",
-        "bun.lock",
-        "package.json",
-        "package.json",
-    ])).stdout.trim().split("\n").filter(Boolean);
-    const manifest = [];
-    for (const path of tracked) {
-        manifest.push({
-            path,
-            sha256: createHash("sha256").update(await readFile(path)).digest("hex"),
-        });
-    }
+    const manifest = await storefrontSourceManifest();
     await save("storefront-source.json", { files: manifest, sourceCommit: commit });
     const cliEnv = {
         CI: "1",
@@ -267,16 +254,16 @@ export async function releaseWebOnlyProduction(env = process.env) {
     };
     const cli = async (args) => {
         try {
-            return (await execute("bun", ["dlx", "vercel@59.5.0", ...args, `--token=${env.VERCEL_TOKEN}`], { encoding: "utf8", env: cliEnv, maxBuffer: 4 * 1024 * 1024, timeout: 1200000 })).stdout.trim();
+            return (await execute("bunx", ["vercel@59.5.0", ...args, `--token=${env.VERCEL_TOKEN}`], { cwd: REPOSITORY_ROOT, encoding: "utf8", env: cliEnv, maxBuffer: 4 * 1024 * 1024, timeout: 1200000 })).stdout.trim();
         }
         catch {
             throw new Error("Web-only Production Vercel command failed or returned an uncertain response. Inspect the saved evidence before recovery.");
         }
     };
     await cli(["pull", "--yes", "--environment=production"]);
-    const linked = JSON.parse(resolveProtectedTemplate(await readFile(".vercel/project.json", "utf8")));
+    const linked = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../../../.vercel/project.json", import.meta.url), "utf8")));
     check(linked.projectId === PROJECT && linked.orgId === TEAM, "CLI project linkage.");
-    verifyProductionWebEnvironment(parseEnv(await readFile(".vercel/.env.production.local", "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
+    verifyProductionWebEnvironment(parseEnv(await readFile(new URL("../../../.vercel/.env.production.local", import.meta.url), "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
     const previous = { id: previousId, sourceCommit: old.meta.githubCommitSha };
     const result = await executeWebOnlyPromotion({
         previous,

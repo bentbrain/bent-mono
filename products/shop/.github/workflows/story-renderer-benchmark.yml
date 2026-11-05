@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: products/shop
+
 jobs:
   build:
     if: inputs.mode == 'images'

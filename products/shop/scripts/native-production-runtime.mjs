@@ -1,3 +1,4 @@
+import { promotionInput } from "./release-promotion-input.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual as equal } from "node:util";
 import { inspectAlertRecoveryPlan } from "./native-production-alert-recovery.mjs";
@@ -7,8 +8,14 @@ const check = (value, reason) => { if (!value)
 const PRODUCTION_RUNTIME_RESOURCES = ["aws_lambda_function.renderer", "aws_lambda_function.failures", "aws_lambda_function_event_invoke_config.renderer", "aws_lambda_event_source_mapping.failures"];
 export const PREVIOUS_PRODUCTION_SOURCE_DIGEST = protectedConfig("resource_482283ec6ab3");
 export const PREVIOUS_PRODUCTION_IMAGE_DIGEST = "sha256:" + protectedConfig("resource_dd027d663b05");
-export const PRODUCTION_SOURCE_DIGEST = protectedConfig("resource_483d1baf8d67");
-export const PRODUCTION_IMAGE_DIGEST = "sha256:" + protectedConfig("resource_aa4c5d08d8b6");
+export const HISTORICAL_PRODUCTION_SOURCE_DIGEST = protectedConfig("resource_483d1baf8d67");
+export const HISTORICAL_PRODUCTION_IMAGE_DIGEST = "sha256:" + protectedConfig("resource_aa4c5d08d8b6");
+export const CURRENT_PRODUCTION_IMAGE_DIGEST = protectedConfig("currentProductionImageDigest");
+export const CURRENT_PRODUCTION_SOURCE_DIGEST = protectedConfig("currentProductionSourceDigest");
+check(/^sha256:[a-f0-9]{64}$/.test(CURRENT_PRODUCTION_IMAGE_DIGEST) && /^[a-f0-9]{64}$/.test(CURRENT_PRODUCTION_SOURCE_DIGEST), "configured current live pair.");
+const selectedCandidate = promotionInput(process.env)?.manifest.candidate;
+export const PRODUCTION_SOURCE_DIGEST = selectedCandidate?.sourceDigest ?? CURRENT_PRODUCTION_SOURCE_DIGEST;
+export const PRODUCTION_IMAGE_DIGEST = selectedCandidate?.imageDigest ?? CURRENT_PRODUCTION_IMAGE_DIGEST;
 export const PRODUCTION_IMAGE_URI = protectedConfig("awsAccountId") + ".dkr.ecr.ap-southeast-2.amazonaws.com/forever-tee-video-development@" + (PRODUCTION_IMAGE_DIGEST);
 export const PRODUCTION_ORIGIN = "https://forever-tee-api.socialqueue.workers.dev";
 export const productionImagePair = (imageDigest = PRODUCTION_IMAGE_DIGEST, sourceDigest = PRODUCTION_SOURCE_DIGEST) => ({

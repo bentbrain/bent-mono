@@ -1,3 +1,4 @@
+import { PRODUCT_ROOT, REPOSITORY_ROOT, releasePath } from "./monorepo-source.mjs";
 import { applicationContractPath } from "./contract-consumers.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { githubApi, output, summary } from "./github-actions.mjs";
@@ -63,14 +64,14 @@ export async function previousRelease({ api, environment, repository, runId }) {
   return undefined;
 }
 
-export function gitChanges(base, sha, cwd = process.cwd()) {
+export function gitChanges(base, sha, cwd = PRODUCT_ROOT) {
   if (![base, sha].every((ref) => /^[a-f0-9]{40}$/.test(ref ?? ""))) return undefined;
   const ancestor = spawnSync("git", ["merge-base", "--is-ancestor", base, sha], { cwd });
   if (ancestor.status !== 0) return undefined;
   // Disabling rename detection includes both deleted and added component paths.
   return execFileSync("git", ["diff", "--name-only", "--no-renames", "-z", base, sha], {
     cwd, encoding: "utf8",
-  }).split("\0").filter(Boolean);
+  }).split("\0").filter(Boolean).map(path => cwd.startsWith(REPOSITORY_ROOT) ? releasePath(path) : path);
 }
 
 export async function deploymentPlan({ forceFull, changes = gitChanges, sha, ...context }) {

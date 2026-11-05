@@ -14,7 +14,7 @@ test('a rejected real grant refresh permits explicit reapproval', async ({ page 
   const project = z.object({ project: projectSchema }).parse(
     await (
       await page.request.post('/api/projects', {
-        data: { name: 'Recovery', origins: ['http://localhost:44321'] },
+        data: { name: 'Recovery', origins: ['http://localhost:14321'] },
       })
     ).json(),
   ).project;
@@ -23,7 +23,7 @@ test('a rejected real grant refresh permits explicit reapproval', async ({ page 
       ? route.continue()
       : route.fulfill({ status: 401, json: { error: 'Cookie unavailable' } }),
   );
-  await page.goto(`http://localhost:44321/?project=${project.id}#feedback-connect`);
+  await page.goto(`http://localhost:14321/?project=${project.id}#feedback-connect`);
   const host = page.locator('[data-feedback-host]');
   await expect(host).toBeVisible();
   const frame = page.frames().find((frame) => frame.url().includes('/toolbar?'));
@@ -43,7 +43,7 @@ test('a rejected real grant refresh permits explicit reapproval', async ({ page 
   expect(
     (
       await page.request.post('/api/auth/sign-out', {
-        headers: { Origin: 'http://localhost:44320' },
+        headers: { Origin: 'http://localhost:14320' },
         data: {},
       })
     ).status(),

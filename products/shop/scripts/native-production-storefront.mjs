@@ -14,7 +14,7 @@ export async function inspectProductionStorefront(env = process.env, request = f
   check(response.ok, `read returned HTTP ${response.status}.`);
   const project = await response.json();
   check(project.id === PROJECT && project.accountId === TEAM && project.name === "forever-tee-web" &&
-    project.rootDirectory === "apps/web", "project identity and root.");
+    project.rootDirectory === "products/shop/apps/web", "project identity and root.");
   check(project.link === null || project.link === undefined, "a Git connection could deploy outside the reviewed Actions workflow.");
   const target = project.targets?.production;
   check(/^dpl_[A-Za-z0-9]+$/.test(target?.id ?? "") && target.target === "production" && target.readyState === "READY" &&
@@ -22,7 +22,7 @@ export async function inspectProductionStorefront(env = process.env, request = f
     /^[a-f0-9]{40}$/.test(target.meta?.githubCommitSha ?? ""), "existing Production deployment and domain.");
   // Project responses may contain environment configuration. Never return or
   // log the full response, deployment metadata, or arbitrary settings.
-  return { productionStorefrontInspected: true, projectId: PROJECT, teamId: TEAM, rootDirectory: "apps/web",
+  return { productionStorefrontInspected: true, projectId: PROJECT, teamId: TEAM, rootDirectory: "products/shop/apps/web",
     gitConnected: false, deploymentId: target.id, deployedSourceCommit: target.meta.githubCommitSha,
     domain: "shop.bent.build", inspectionSourceCommit: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID,
     applicationMutations: false, nativePromotionReady: false };

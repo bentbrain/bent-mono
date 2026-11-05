@@ -92,10 +92,10 @@ test("web-only Production stages only Vercel and shares the Production release l
     const workflow = readFileSync(new URL("../.github/workflows/web-production.yml", import.meta.url), "utf8");
     assert.match(workflow, /group: deploy-production/);
     assert.match(workflow, /environment: Production/);
-    assert.match(workflow, /node scripts\/reuse-ci\.mjs/);
-    assert.match(workflow, /node scripts\/web-production-release\.mjs/);
+    assert.match(workflow, /node --import \.\/scripts\/public-release-logging\.mjs scripts\/reuse-ci\.mjs/);
+    assert.match(workflow, /node --import \.\/scripts\/public-release-logging\.mjs scripts\/web-production-release\.mjs/);
     const install = workflow.indexOf("bun install --frozen-lockfile");
-    const release = workflow.indexOf("node scripts/web-production-release.mjs");
+    const release = workflow.indexOf("scripts/web-production-release.mjs");
     assert.ok(install >= 0 && install < release);
     assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
     assert.doesNotMatch(workflow, /wrangler|aws-actions|CLOUDFLARE|video-renderer|terraform|workers\/api/);

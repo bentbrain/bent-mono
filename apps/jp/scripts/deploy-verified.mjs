@@ -92,7 +92,7 @@ async function writeSecrets() {
 
   const temporary = realpathSync(tmpdir());
   const repository = realpathSync(
-    fileURLToPath(new URL('../', import.meta.url)),
+    fileURLToPath(new URL('../../../', import.meta.url)),
   );
   const location = relative(repository, temporary);
   if (
@@ -127,22 +127,98 @@ async function writeSecrets() {
   return file;
 }
 
-let outcome;
-try {
-  const file = await writeSecrets();
+async function runWrangler(args, capture = false) {
   if (interrupted) throw new Error('Deployment cancelled before startup');
-  child = spawn('bun', ['x', 'wrangler', 'deploy', '--secrets-file', file], {
-    stdio: ['ignore', 'inherit', 'inherit'],
+  childClosed = false;
+  child = spawn('bun', ['x', 'wrangler', ...args], {
+    stdio: [
+      'ignore',
+      capture ? 'pipe' : 'inherit',
+      capture ? 'pipe' : 'inherit',
+    ],
     env: process.env,
     detached: processGroup,
   });
-  outcome = await new Promise((resolve) => {
+  let output = '';
+  if (capture) {
+    child.stdout.setEncoding('utf8').on('data', (part) => {
+      output += part;
+      if (output.length > 1024 * 1024) interrupt('SIGTERM');
+    });
+    // Provider diagnostics can contain account information. Do not echo them.
+    child.stderr.resume();
+  }
+  const result = await new Promise((resolve) => {
     child.once('error', () => resolve({ code: 1 }));
     child.once('close', (code, signal) => {
       childClosed = true;
       resolve({ code: code ?? 1, signal });
     });
   });
+  await stopClosedChild();
+  child = undefined;
+  if (capture && (result.code !== 0 || result.signal || interrupted))
+    throw new Error('Unable to verify existing Worker secret names');
+  return { ...result, output };
+}
+
+async function verifyExistingSecrets() {
+  // Preservation is explicit. Supplying replacement values at the same time is
+  // ambiguous and must never rotate an existing encryption key accidentally.
+  const supplied = [
+    process.env.OPENAI_API_KEY,
+    process.env.EMDASH_ENCRYPTION_KEY,
+  ].some((value) => value !== undefined);
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.EMDASH_ENCRYPTION_KEY;
+  if (supplied)
+    throw new Error(
+      'Existing-secret mode does not accept replacement secret values',
+    );
+  const { output } = await runWrangler(
+    ['secret', 'list', '--format', 'json'],
+    true,
+  );
+  let names;
+  try {
+    const entries = JSON.parse(output);
+    if (
+      !Array.isArray(entries) ||
+      entries.some(
+        (entry) =>
+          entry === null ||
+          typeof entry !== 'object' ||
+          typeof entry.name !== 'string' ||
+          entry.type !== 'secret_text',
+      )
+    )
+      throw new Error('Invalid secret metadata');
+    names = new Set(entries.map((entry) => entry.name));
+  } catch {
+    throw new Error('Unable to verify existing Worker secret names');
+  }
+  for (const name of [
+    'EMDASH_ENCRYPTION_KEY',
+    'OPENAI_API_KEY',
+    'OWNER_EMAIL',
+  ]) {
+    if (!names.has(name))
+      throw new Error(`Existing Worker secret ${name} is required`);
+  }
+}
+
+let outcome;
+try {
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === '--preserve-existing-secrets') {
+    await verifyExistingSecrets();
+    outcome = await runWrangler(['deploy']);
+  } else if (args.length === 0) {
+    const file = await writeSecrets();
+    outcome = await runWrangler(['deploy', '--secrets-file', file]);
+  } else {
+    throw new Error('Use no arguments or --preserve-existing-secrets');
+  }
 } catch (error) {
   // Setup errors contain no secret values. Child startup errors use code 1.
   console.error(error.message);

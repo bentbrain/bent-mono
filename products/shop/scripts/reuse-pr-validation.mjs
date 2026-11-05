@@ -1,3 +1,4 @@
+import { releasePath, REPOSITORY_ROOT } from "./monorepo-source.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -14,7 +15,7 @@ const complete = (result, key) => Array.isArray(result[key]) && Number.isSafeInt
     result.total_count === result[key].length && result.total_count <= 100;
 // Unknown paths are policy. Package/configuration, CI, scripts, lockfiles and
 // patches must be unchanged from the independently verified protected parent.
-export function unchangedPrPolicy(base, source, diff = (before, after) => execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', before, after], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })) {
+export function unchangedPrPolicy(base, source, diff = (before, after) => execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', before, after], { cwd: REPOSITORY_ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).split('\0').filter(Boolean).map(releasePath).join('\0')) {
     if (!sha(base) || !sha(source))
         return false;
     return diff(base, source).split('\0').filter(Boolean).every(path => /^(?:apps\/web\/(?:src|public|e2e)\/|workers\/(?:api|video-renderer)\/src\/|packages\/[^/]+\/src\/|assets\/|docs\/)/.test(path) || path === 'README.md');
