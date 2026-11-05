@@ -116,7 +116,16 @@ function analysisIdentity(run) {
       summary.queries.map(query => query.uses).sort().join(",") !== "security-and-quality,security-extended") {
     fail("CodeQL query configuration must retain both complete security suites.");
   }
-  return digest({ tool: run.tool, codeqlConfigSummary: summary });
+  // The installation UUID changes on every hosted runner. Preserve every
+  // component/pack path and all other metadata, and leave raw SARIF untouched.
+  const tool = structuredClone(run.tool);
+  const installation = /^file:\/\/\/home\/runner\/work\/_temp\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/codeql\/qlpacks\//;
+  for (const extension of tool.extensions ?? []) {
+    for (const location of extension.locations ?? []) {
+      if (typeof location.uri === "string") location.uri = location.uri.replace(installation, "codeql-pack:///");
+    }
+  }
+  return digest({ tool, codeqlConfigSummary: summary });
 }
 
 export function describeResult(run, result) {

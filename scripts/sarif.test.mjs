@@ -129,6 +129,32 @@ test("all traces, messages, fingerprints, tool and query metadata are bound", as
   }
 });
 
+test("only the GitHub runner installation UUID is inert in tool metadata", async context => {
+  const { source } = await fixture(context);
+  const original = report([finding()]);
+  const prefix = "file:///home/runner/work/_temp/11111111-1111-4111-8111-111111111111/codeql/qlpacks/";
+  original.runs[0].tool.extensions[0].locations = [
+    { uri: `${prefix}codeql/javascript-queries/2.5.0/` },
+    { uri: `${prefix}codeql/javascript-queries/2.5.0/qlpack.yml` },
+  ];
+  const manifest = reviewed([original], source);
+  const relocated = structuredClone(original);
+  for (const location of relocated.runs[0].tool.extensions[0].locations) {
+    location.uri = location.uri.replace("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222");
+  }
+  const before = JSON.stringify(relocated);
+  assert.equal(classifyReports([relocated], manifest, source).reviewed, 1);
+  assert.equal(JSON.stringify(relocated), before, "Raw metadata remains intact.");
+  for (const suffix of ["codeql/javascript-queries/2.6.0/qlpack.yml", "codeql/different-queries/2.5.0/qlpack.yml"]) {
+    const changed = structuredClone(relocated);
+    changed.runs[0].tool.extensions[0].locations[1].uri = `${prefix}${suffix}`;
+    assert.throws(() => classifyReports([changed], manifest, source), /unused or stale/);
+  }
+  const unknown = structuredClone(relocated);
+  unknown.runs[0].tool.extensions[0].locations[0].uri = "file:///unexpected/pack/location";
+  assert.throws(() => classifyReports([unknown], manifest, source), /unused or stale/);
+});
+
 test("source, guards, tests, shared code, CI, dependencies and new files invalidate the global pin", async context => {
   const { root, source } = await fixture(context);
   const reports = [report([finding()])]; const manifest = reviewed(reports, source);

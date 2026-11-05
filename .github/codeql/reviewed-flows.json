@@ -1,5 +1,1478 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": null,
-  "records": []
+  "sourceManifestSha256": "8274538e8c532b6b40f53e7b6861c90f87d08eeeb4a56ef6786be6dcace0804c",
+  "records": [
+    {
+      "id": "shop-runtime-purchase-readiness-origin",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/request-forgery",
+      "fingerprint": {
+        "primaryLocationLineHash": "4167036a636f330c:1",
+        "primaryLocationStartColumnFingerprint": "23"
+      },
+      "canonicalFlowSha256": "46b13217fc4e4c6f82c85c1c2d2efed8aa63541de11d91ed3c5976be4df52d04",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The incoming request contributes only a 36-character hex/hyphen identifier matched by an anchored full-path regex. The fetch origin comes solely from server-side FOREVER_TEE_API_URL, validated as HTTP(S) configuration, and the path has a fixed internal prefix and suffix. Incoming origin/query cannot select a destination; redirects are rejected, the service secret is server-side, and the response exposes only public readiness fields. Hostile-origin/path and redirect regressions cover this boundary.",
+      "guardPaths": [
+        "products/shop/apps/web/src/server/product-purchase-readiness.ts",
+        "products/shop/apps/web/src/env.ts"
+      ],
+      "testPaths": [
+        "products/shop/apps/web/src/server/product-purchase-readiness.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-story-events-origin",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/request-forgery",
+      "fingerprint": {
+        "primaryLocationLineHash": "198c85757f747366:1",
+        "primaryLocationStartColumnFingerprint": "23"
+      },
+      "canonicalFlowSha256": "32058d025ded6d108345380db127a5daaf29532a86cd630e3cf29da5bc77541a",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The events BFF extracts only the anchored hex/hyphen product identifier and constructs a fixed internal events path against server-only FOREVER_TEE_API_URL. The request host and query are discarded. Service authentication stays in an upstream header, redirects are manual, failed redirects are returned without Location, and only successful event-stream content is streamed. Tests exercise encoded slash/backslash rejection, a hostile incoming host/query and an upstream redirect.",
+      "guardPaths": [
+        "products/shop/apps/web/src/server/story-video-bff.ts",
+        "products/shop/apps/web/src/env.ts"
+      ],
+      "testPaths": [
+        "products/shop/apps/web/src/server/story-video-bff.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-story-video-origin",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/request-forgery",
+      "fingerprint": {
+        "primaryLocationLineHash": "92e339b4e6525ee:1",
+        "primaryLocationStartColumnFingerprint": "17"
+      },
+      "canonicalFlowSha256": "d233c125a2141b7937dfc788ff14e7e5e02522da2be5fff07737b59a67fb34b3",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Both CodeQL trace branches are restricted by the full pathname regex: the product identifier contains only hex/hyphens and colour is exactly black, cream or white. A fixed absolute internal pathname is resolved against server-only FOREVER_TEE_API_URL; the incoming host/query do not enter that base. Fetch uses manual redirects and the response header allowlist excludes Location and service authentication. The direct BFF tests verify these destination and disclosure boundaries.",
+      "guardPaths": [
+        "products/shop/apps/web/src/server/story-video-bff.ts",
+        "products/shop/apps/web/src/env.ts"
+      ],
+      "testPaths": [
+        "products/shop/apps/web/src/server/story-video-bff.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-artwork-preview-benchmark-161",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "71db476c824f85e5:1",
+        "primaryLocationStartColumnFingerprint": "22"
+      },
+      "canonicalFlowSha256": "e33970abc259fc00d7607cf7390a9f32a500b4f0bce265145843515d050f7e35",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Repository camera/artwork fixtures, generated by fixtureImages rather than caller-selected file paths, are intentionally POSTed to the locally spawned Images benchmark on fixed 127.0.0.1:8795. Its config pins source hashes; there is no arbitrary remote destination or directory enumeration. readProbe bounds event names, base64 and byte lengths, with malformed-event/length/path cases tested. Cloudflare Images processing is the documented benchmark capability; this is not a general file exfiltration endpoint.",
+      "guardPaths": [
+        "products/shop/scripts/artwork-preview-benchmark.mjs",
+        "products/shop/scripts/artwork-preview-benchmark/worker.ts"
+      ],
+      "testPaths": [
+        "products/shop/scripts/artwork-preview-benchmark.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-aws-personal-sso-21",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "5a1433ef710e1ec3:1",
+        "primaryLocationStartColumnFingerprint": "24"
+      },
+      "canonicalFlowSha256": "b997eaeecac2370f6d5a36821575532cf5ca897525042a14c0e13666454013f9",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The one SHA1-derived personal SSO cache supplies an accessToken only after exact approved startUrl, region, nonempty token and unexpired session checks. The token is deliberately sent as the AWS SSO bearer header to fixed HTTPS portal.sso.ap-southeast-2.amazonaws.com for the fixed personal account, with redirects denied and a 10s deadline. The test verifies the exact cache/origin/account, one read, token-free output and rejection before HTTP for another portal. This is required authentication, not arbitrary file disclosure.",
+      "guardPaths": [
+        "products/shop/scripts/aws-personal-sso.mjs",
+        "products/shop/scripts/aws-personal-guard.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/aws-personal.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-featured-composition-release-26",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "c7f2060f814df15c:1",
+        "primaryLocationStartColumnFingerprint": "43"
+      },
+      "canonicalFlowSha256": "9cec5caae8ceaa5e07082b973200bf897a2aa976a084d0f84fc5745d24f39442",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The repository composition manifest supplies validated product/source/job IDs to fixed-account Cloudflare query/object paths and publication bodies. compositionContext requires the owner, exact first-attempt protected main workflow/account and fixed Worker origin; compositionRecords checks distinct UUIDs, bounded source hashes/placement and supported products/jobs. API calls deny redirects; immutable writes use conditional create and readback equality. Context, invalid-manifest and rollback/recovery tests exercise these boundaries. This is the intended reviewed content publication path, not an arbitrary-host upload.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-featured-composition-release-182",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "4a968f12f972b30f:1",
+        "primaryLocationStartColumnFingerprint": "29"
+      },
+      "canonicalFlowSha256": "44ca396704f1f1bc8b205e05c7d8cce3a70d6b92b931bcbebb0b7760e27542f1",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "A product UUID from the reviewed manifest is used only in the print-assets-refresh query of the exact protected Worker origin checked by compositionContext. compositionRecords validates those distinct product identities before this loop; the POST uses an operations secret, redirect:error, a deadline and success check. Context tests reject another origin/account/actor and record tests reject malformed identities. The transfer intentionally requests assets for newly created reviewed products; it does not transmit arbitrary local file bytes or credentials to a manifest-selected host.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-native-ci-qualification-verification-11",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "7a16211eaf01b96:1",
+        "primaryLocationStartColumnFingerprint": "31"
+      },
+      "canonicalFlowSha256": "1342e6673867ec43cc8e8968d43becc5fa2da68c17858adf2c7d4d0c2a1e3307",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "A saved qualification receipt contributes only a positive safe-integer run ID to the fixed repository GitHub Actions API path. Explicit verify-qualification operation, authenticated workflow context, token, schema and exact release pairing are checked before HTTP; redirects are denied. The returned ID is checked, and qualification verification authenticates workflow/source and immutable artifacts. Tests reject local/push/rerun/different-release/missing-token contexts before requests and failed original runs before artifact reads. This is authenticated provenance lookup, not arbitrary file-to-host disclosure.",
+      "guardPaths": [
+        "products/shop/scripts/native-ci-qualification-verification.mjs",
+        "products/shop/scripts/native-ci-operation.mjs",
+        "products/shop/scripts/native-production-qualification.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-ci-qualification-verification.test.mjs",
+        "products/shop/scripts/native-production-qualification.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-file-http-native-production-ci-62",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "7a1621ba420fa3f:1",
+        "primaryLocationStartColumnFingerprint": "31"
+      },
+      "canonicalFlowSha256": "e853958f74bb83b60fb18c507fb899a8fccf692ba0085beca3311f1eb73e20d1",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Local promotion evidence selects only allowlisted original run IDs or IDs admitted by the schema/source-bound promotion input. assertProductionContext checks exact repository/owner/main/first-attempt workflow and explicit operation before the fixed HTTPS GitHub repository run lookup; redirects are denied. Response ID, success, attempt, event and both repository identities must match. Tests reject unpinned IDs, failed/rerun/foreign runs and malformed promotion input. This is required original-run provenance checking, not a configurable network destination.",
+      "guardPaths": [
+        "products/shop/scripts/native-production-ci.mjs",
+        "products/shop/scripts/release-manifest.mjs",
+        "products/shop/scripts/release-promotion-input.mjs",
+        "products/shop/scripts/native-production-candidate.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-production-ci.test.mjs",
+        "products/shop/scripts/release-promotion-input.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-saved-fixture-development-probe",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "f9ab2adcaca313de:1",
+        "primaryLocationStartColumnFingerprint": "27"
+      },
+      "canonicalFlowSha256": "55bf6bfbf181fdd6cf4a73b1625ed72187161acbc9112a88d6d1d75cf672939c",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "This explicit operator-run development smoke tool reads a saved fixture identifier and uses it in a GET path at the literal development API_ORIGIN, not as a host. It verifies the preview API matches that pinned origin, requires the service secret, supplies a fresh random owner, rejects redirects and requires the source probe to be 404 before fixture mutation. The later source lookup is parameterized and artwork size/hash are checked. No remote request can nominate a local file to upload.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/aws-lambda/smoke-app-confirmation.mjs",
+        "products/shop/workers/video-renderer/aws-lambda/cloudflare-development.mjs",
+        "products/shop/workers/api/src/anonymous-design-api.ts"
+      ],
+      "testPaths": [
+        "products/shop/workers/api/src/anonymous-design-api.test.ts",
+        "products/shop/workers/video-renderer/aws-lambda/infrastructure.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-comparison-artwork-upload",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "231cafc036c08ff:1",
+        "primaryLocationStartColumnFingerprint": "6"
+      },
+      "canonicalFlowSha256": "40ccff19c839862f2b659f5e7880386fbce1b650ac90c55b404f78b8c0600ab8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The operator explicitly selects the artwork file and isolated benchmark endpoint. The endpoint must pass the anchored HTTPS benchmark-host allowlist before the artwork is read, and a benchmark token is required. Local artwork/mockups become base64 data only in the render-batch JSON body; filenames or file contents do not choose the destination. Fixed product variants, bounded rounds and per-run UUID cache keys preserve the intended authorized video-comparison operation.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/compare-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-inspection-benchmark-origin",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "2d51d120136708e6:1",
+        "primaryLocationStartColumnFingerprint": "29"
+      },
+      "canonicalFlowSha256": "2527021d8b5507d57ef8388ba7bef47160206189fa35147414ef7a28b1c47f5d",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The endpoint read from the operator-selected local inspection JSON must match the anchored HTTPS forever-tee-story-video-benchmark host pattern under the fixed workers.dev account subdomain before fetch. The only request path is /render and a separately supplied benchmark bearer token is required. This is deliberate cached benchmark retrieval; cache-hit and media assertions reject a run that renders anew or returns unexpected media. It is not an HTTP endpoint accepting an arbitrary caller URL.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/inspect.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs",
+        "products/shop/workers/video-renderer/src/stored-render.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-inspection-cached-key",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "a64cd07ec423fa7e:1",
+        "primaryLocationStartColumnFingerprint": "9"
+      },
+      "canonicalFlowSha256": "86618c6e6e6c60673db0b828854d1c29bd39ccdfbf8f3ec3f60c3be54e7bc959",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The local inspection fixture supplies an R2 cache key only in x-story-video-key; it cannot select the request host, which has already passed the anchored isolated-benchmark HTTPS host check. The remote Worker requires its configured bearer token, validates the story key and reads its own story-video bucket. The inspection requires a cache-hit response before saving or analysing the media. Existing authorization and private-storage tests cover the server boundary; the inspection CLI itself is a manual tool.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/inspect.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs",
+        "products/shop/workers/video-renderer/src/storage-contract.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs",
+        "products/shop/workers/video-renderer/src/stored-render.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-batch-benchmark-artwork-upload",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "949485bf463fce54:1",
+        "primaryLocationStartColumnFingerprint": "6"
+      },
+      "canonicalFlowSha256": "09880cadcf24dda42a1a8daf7114a7964a75cbdc56b4e393b3585e4a26bb1fae",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Both traces send the explicitly selected local artwork as base64 data inside the shared render-batch POST body. The target and bearer token are required operator environment configuration, independent of file contents; mockups come from the fixed local product list. The program is an operator CLI rather than an HTTP route. The benchmark Worker enforces its token, and the local synthetic-endpoint regression executes this CLI while checking its private output handling.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-batch-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-remote-benchmark-render-inputs",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "ecd491d16a8aafd0:1",
+        "primaryLocationStartColumnFingerprint": "6"
+      },
+      "canonicalFlowSha256": "338f51cc3d16dacc6ab5b26a6eea9c527c2694159db5b832e82dff9f27abb1b4",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "All four traces transfer the operator-selected artwork and fixed product mockup bytes as base64 fields of the /render POST JSON body. The target and token are explicit required operator environment configuration and cannot be selected by those file bytes. This is the requested remote-render benchmark operation, not an automatic read of credential files. The Worker token guard and real CLI regression against a synthetic local renderer cover the relevant invocation boundary.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-encoded-video-private-storage",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "7e80ee26b045effa:1",
+        "primaryLocationStartColumnFingerprint": "6"
+      },
+      "canonicalFlowSha256": "8c83ab15436449c8ff45576508d4aaa8aa9f5ce4abfc8b6f80d4e09e331624b5",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The bytes originate from the local encoder output story.mp4 inside a private mkdtemp directory and are intentionally PUT to the literal http://story-storage.internal/video address. They cannot change that address. The container disables general Internet access and registers a private outbound handler, which validates output key/size and streams to its bound R2 bucket. Artwork hashes and storage acknowledgements are verified; tests cover exact bytes, key isolation, failed/truncated storage and checksum rejection.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/stored-render.mjs",
+        "products/shop/workers/video-renderer/src/renderer.mjs",
+        "products/shop/workers/video-renderer/src/storage-contract.mjs",
+        "products/shop/workers/video-renderer/src/storage-proxy.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/stored-render.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-backup-renderer-release-108",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "214a6470fdb6e6c1:1",
+        "primaryLocationStartColumnFingerprint": "54"
+      },
+      "canonicalFlowSha256": "405b03bc30627ebdc368d2bf59d8bc5eb66f6355fdde6ca5644297020fbc0db6",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Authenticated R2 bytes for the original backup intent are deliberately retained as fixed original-intent.json. assertBackupRecovery first binds original source/run, exact environment/resources, immutable image/bundle and live completed deployment/native baseline; Git ancestry and unchanged runtime inputs are checked. Owner/protected-main/account guards and fixed Cloudflare origin deny general remote inputs. Recovery tests reject changed identities/images/keys/baselines. The file is diagnostic JSON for the same operation, not executable downloaded code or a remote-chosen pathname.",
+      "guardPaths": [
+        "products/shop/scripts/backup-renderer-release.mjs",
+        "products/shop/scripts/backup-renderer-policy.mjs",
+        "products/shop/scripts/editorial-source.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/backup-renderer-policy.test.mjs",
+        "products/shop/scripts/editorial-source.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-backup-renderer-release-143",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4a48f8ca840fb071:1",
+        "primaryLocationStartColumnFingerprint": "45"
+      },
+      "canonicalFlowSha256": "935fd0029baa58443749f53642117fc46dfbbfec01e0a10544c219b116ec0797",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Fixed intent.json preserves the prepared backup source, immutable image/bundle/config hashes and validated native/backup baseline observations before mutation. backupContext restricts owner/protected first-attempt workflow/account; assertInactiveBackup and inspect require the existing unpaused native pair and one ready backup. Conditional durable preservation and baseline recheck guard release sequencing. Tests cover context, incompatible receipts and recovery drift. Network-derived metadata is intentionally JSON evidence at a fixed output path; it is not directly executed or accepted without release validation.",
+      "guardPaths": [
+        "products/shop/scripts/backup-renderer-release.mjs",
+        "products/shop/scripts/backup-renderer-policy.mjs",
+        "products/shop/scripts/editorial-source.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/backup-renderer-policy.test.mjs",
+        "products/shop/scripts/editorial-source.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-backup-renderer-release-186",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "9eaf8b254ec9a867:1",
+        "primaryLocationStartColumnFingerprint": "52"
+      },
+      "canonicalFlowSha256": "c6f8f4140839a20d231a7249fdccbc41111476bf72504083d80c63124f400835",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "An authenticated, random-token, run-specific temporary probe returns render-event JSON, which readRenderEvents redacts before fixed render-events.json persistence. Readiness must identify the exact run, and renderEditorialProbe checks x-editorial-operation and refuses ambiguous replay. Ready-key/cache/complete-count/no-error checks follow before qualification. Tests reject wrong identity/secret, uncertain responses and repeated handled renders, and verify token redaction. Saving diagnostic events is intentional; this file is not executable or a release approval by itself.",
+      "guardPaths": [
+        "products/shop/scripts/backup-renderer-release.mjs",
+        "products/shop/scripts/backup-renderer-policy.mjs",
+        "products/shop/scripts/editorial-source.mjs",
+        "products/shop/scripts/editorial-worker-probe.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/backup-renderer-policy.test.mjs",
+        "products/shop/scripts/editorial-source.test.mjs",
+        "products/shop/scripts/editorial-worker-probe.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-backup-renderer-release-193",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "68783b308bea14a2:1",
+        "primaryLocationStartColumnFingerprint": "43"
+      },
+      "canonicalFlowSha256": "b9cd25a2ba56507aecfb5a7968619ad14a328b2c400bf395fe4be4dc84af7d06",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The fixed cloud.mp4 file is the explicit output of the authenticated temporary synthetic backup renderer. The URL uses a numeric run-derived probe name on the fixed workers.dev suffix; redirects are denied, HTTP success/video/mp4 and0<size<32MB are checked. compareBackupVideo then decodes and compares against the known synthetic fixture before a receipt is qualified. Probe tests cover identity and no ambiguous retries, while policy tests require valid decoded-frame evidence. The download is necessary media qualification, not arbitrary executable upload; live codec integration is not claimed by unit tests.",
+      "guardPaths": [
+        "products/shop/scripts/backup-renderer-release.mjs",
+        "products/shop/scripts/backup-renderer-policy.mjs",
+        "products/shop/scripts/editorial-source.mjs",
+        "products/shop/scripts/editorial-worker-probe.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/backup-renderer-policy.test.mjs",
+        "products/shop/scripts/editorial-source.test.mjs",
+        "products/shop/scripts/editorial-worker-probe.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-backup-renderer-release-208",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "89ee463d779628ae:1",
+        "primaryLocationStartColumnFingerprint": "46"
+      },
+      "canonicalFlowSha256": "5bad09da46417b0d3ac2c0db1bb502b24c7256a775a40a0247a659994d3ed581",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Fixed receipt.json is written only after exact deployed backup bundle hash/version/image binding, successful synthetic render/frame comparison, temporary probe/output cleanup and unchanged native/backup baseline. Owner/protected-workflow/account context and immutable durable receipt preservation remain enforced. Tests reject unqualified/uncleaned receipts, wrong image host/source/frame evidence and recovery baseline drift. Its remote version/container fields are intentionally retained provenance metadata, not dynamic local filenames or downloaded executable source.",
+      "guardPaths": [
+        "products/shop/scripts/backup-renderer-release.mjs",
+        "products/shop/scripts/backup-renderer-policy.mjs",
+        "products/shop/scripts/editorial-source.mjs",
+        "products/shop/scripts/editorial-worker-probe.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/backup-renderer-policy.test.mjs",
+        "products/shop/scripts/editorial-source.test.mjs",
+        "products/shop/scripts/editorial-worker-probe.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-119",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "3b99463e41ae10d0:1",
+        "primaryLocationStartColumnFingerprint": "55"
+      },
+      "canonicalFlowSha256": "3f023eb597ac9281548d45c087adbc938f09d8f42b05ca9e92fdaa595a544ec8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Catalogue rows read from the authenticated fixed-account D1 API are converted into fixed print-resolution.json only after verifyCompositionPrintResolution requires every current geometry to meet the application print-source PPI limit. The rows are bounded in number and must stay equal to the saved intent before creation. Exact owner/workflow/account/release context and composition identity guards apply. Tests demonstrate the approved portrait passes all geometries and an enlarged crop fails the largest. This is intended preflight evidence; JSON metadata is not executable.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-122",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "5a4bbd804f79ca85:1",
+        "primaryLocationStartColumnFingerprint": "45"
+      },
+      "canonicalFlowSha256": "158492ecde39e37ccca52ee80be405954f794ee5ec4545af3a24eb7b38e841ff",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Fixed intent.json retains the authenticated previous operation intent or a fresh reviewed manifest plus source/baseline/geometries. Production must equal the protected approved manifest; compositionRecords validates identities/bounds and recovery geometry equality is required, with synthetic-only cleanup verification when applicable. Protected owner/account/workflow context and conditional immutable R2 preservation are enforced. Tests cover malformed manifests, same-ID recovery, release drift and unsafe cleanup. Network data is deliberately retained as evidence rather than interpreted as arbitrary local code/path.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-145",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "7dca4c94c7680346:1",
+        "primaryLocationStartColumnFingerprint": "23"
+      },
+      "canonicalFlowSha256": "93c2a7d6ad54d784d128ed848cb1d849f55a2f0eec9cb5bd7497028e7def9a7a",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The network-derived previous manifest is not downloaded JavaScript: compositionRecords validates its UUIDs, source bounds and exact products/jobs, Production additionally requires equality to the approved manifest, and cleanup is synthetic-only. The module at a fixed mkdtemp worker.mjs imports only the trusted repository compositionOperation; all variable manifest/release/environment/intent/run data is inserted with JSON.stringify as literals. Context/record tests reject malformed identities and stale release/partial records. The generated module is an intentional sealed operation payload; no arbitrary source text is evaluated.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-172",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "962d3c8811afc455:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "3bffd6ec0977fdb82afe8068b6591926e85f1720c9f45257c2ea44c73bf0b422",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "During authorized synthetic cleanup, the token-authenticated temporary Worker GET snapshot is persisted to fixed media-state.json before DELETE and cleanup acknowledgement. The owner/protected-main/account context, exact run readiness and unchanged release baseline precede the request; cleanup intent binds original source/environment/resources and excludes customer artwork. Tests reject wrong run readiness, changed cleanup baselines and Production/customer cleanup. This is intentionally retained diagnostic JSON, not a trusted release receipt or remote-chosen file path.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs",
+        "products/shop/scripts/editorial-worker-probe.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs",
+        "products/shop/scripts/editorial-worker-probe.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-180",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "b0aa6427ef1c45a2:1",
+        "primaryLocationStartColumnFingerprint": "47"
+      },
+      "canonicalFlowSha256": "132b7bc7bc9f44864250bd831873a2366a146f4b390b47c61d6a25d067d93010",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "An authorized temporary composition Worker POST must report committed:true before fixed creation.json records the response. The Worker code is the trusted repository transaction with sealed reviewed manifest and random operation token; release baseline is rechecked immediately before the transaction. Record tests cover exact immutable records, paused/changed release preconditions, batch rollback and resumable same-ID recovery. The saved response is intentional transaction evidence, not executable content; later media/cleanup checks are still required for qualification.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-189",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "ecc2fe563952b9d5:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "bdf9af2c96658e92f049dd49c5e5e3bd2efa056581c8bef9058d13872dbb4f43",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The polling GET result from the authenticated run-specific temporary Worker is intentionally saved as fixed media-state.json, including incomplete states useful for recovery. The loop has an 8minute deadline and bounded terminal-attempt failure; verifyCompositionMedia, exact geometry presence and hashes must pass after readiness before any qualified receipt. Context and media tests reject wrong release/readiness/object metadata/attempts. The diagnostic snapshot itself does not establish acceptance and cannot select a local filename or executable source.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-204",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "8d128ded4349d8b5:1",
+        "primaryLocationStartColumnFingerprint": "40"
+      },
+      "canonicalFlowSha256": "7374a72aaa924a2140f06053fbb09dbf61243d6250123920c7c7decf39c62211",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "A video object fetched from the fixed protected R2 bucket is written for visual verification only after verifyCompositionMedia binds each job/product/colour/source/composition/renderer/attempt and object size to the reviewed manifest, then SHA256 matches the object metadata. The output name uses an already-matched product UUID and supported colour; ffmpeg decoding is required. Media tests reject mismatched sizes/composition/attempts and record tests bound identities. This is intended media evidence, with actual codec/cloud integration left to protected qualification.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-207",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "5cdeee436f2456e4:1",
+        "primaryLocationStartColumnFingerprint": "43"
+      },
+      "canonicalFlowSha256": "31527c05b7ce916886244a6b5c2d430181bb0652e990bdb222c6ae870e18755e",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The same reviewed-job/source/renderer/attempt/object-size checks and R2 body SHA256 comparison protect the White video copied to the constant cloud.mp4 comparison input. Only a manifest-supported White job reaches this write; the image/video comparison must finish before a qualified Development receipt. Tests exercise malformed media/readiness, exact identity contracts and safe transactional records. The file is intentionally a synthetic qualification artifact rather than an arbitrary remote executable or pathname; unit tests do not substitute for live visual qualification.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-212",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "5691c6474523794c:1",
+        "primaryLocationStartColumnFingerprint": "73"
+      },
+      "canonicalFlowSha256": "a1e540c0f7cf2a76589c7f417757ff3de6cdb81bd668a79397b41340584aa0f8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Ready print-object bytes are fetched from the fixed account/bucket, SHA256 checked and PNG dimensions matched before this write. compositionPrintFilename additionally requires membership in the validated manifest and safe decoration-method/geometry syntax with exact positive dimensions<=12000, preventing remote product/geometry path traversal. Its regression test rejects unrelated IDs, traversals and dimension mismatch; media tests require ready hashed assets. Downloaded PNG evidence is intentional and its filename is constrained rather than taken directly from the network.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-233",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "c85b83d57913c10c:1",
+        "primaryLocationStartColumnFingerprint": "54"
+      },
+      "canonicalFlowSha256": "21fbddc3056512be4f5cb556850e099db683be36d2a1f287e54d538ae3f422e2",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "After synthetic-only cleanup and temporary Worker removal confirmation, the script constructs a fixed-field cleanup receipt bound to exact original intent hash/source/run/command and current release/environment. It is conditionally preserved with byte-for-byte readback, then written to fixed cleanup-receipt.json. Tests reject Production cleanup, changed source/resources/baseline and customer-artwork manifests. Remote baseline and previous-intent metadata are intentionally retained provenance, not executable content or an unvalidated release-approval shortcut.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-featured-composition-release-241",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "89ee463d779628ae:1",
+        "primaryLocationStartColumnFingerprint": "46"
+      },
+      "canonicalFlowSha256": "62c9661bf719b2e031be5591083c773d4b0edc83beaa4d6839e971e90893c62f",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The final fixed receipt.json is constructed only after required media/source/hash/geometry/readiness checks, comparisons for Development, unchanged release baseline and temporary operation cleanup; it records qualified/cleaned state and immutable source/run/command/product/version identities. Conditional R2 creation/readback prevents replacing a different receipt. Policy and record tests reject unsafe release/media/cleanup and transactional drift. The network-to-file trace is intended release evidence, and the receipt is subject to independent original-run qualification rather than raw JSON trust.",
+      "guardPaths": [
+        "products/shop/scripts/featured-composition-release.mjs",
+        "products/shop/scripts/featured-composition-policy.mjs",
+        "products/shop/scripts/featured-composition-records.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-composition-policy.test.mjs",
+        "products/shop/scripts/featured-composition-records.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-preview-61",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "1a0784652f9f04a:1",
+        "primaryLocationStartColumnFingerprint": "56"
+      },
+      "canonicalFlowSha256": "e67ec8ab58659963683567a32eb803bbd1baf7391fc0d9569f87ffb55c572021",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "This explicit local artwork-capture CLI selects only fixed Preview/Production Worker origins and requires explicit product IDs for Production. It checks configured-shirt/readiness, body SHA256 against advertised revision, rereads identical design/product records, validates image metadata/placement and writes counter-based source/artwork filenames chosen locally. It does not execute image bytes or accept a remote filename. Listed tests cover image rendering/print planning contracts, not every CLI HTTP branch; those source-inspected integrity/origin checks and trusted deployed API are the safety basis for this intended download.",
+      "guardPaths": [
+        "products/shop/scripts/lifestyle/preview.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/lifestyle-render.test.mjs",
+        "products/shop/workers/api/src/print-assets.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-ci-terraform-142",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "982c8595a6a145c8:1",
+        "primaryLocationStartColumnFingerprint": "25"
+      },
+      "canonicalFlowSha256": "bfe436c1b5340df015caad2cf0d77b06b44d3b5b326b6f2dec341073e8defa71",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The Development installer intentionally downloads a fixed Terraform 1.12.2 HTTPS ZIP with redirects denied, compares the full body SHA256 to the protected reviewed ZIP_HASH before any write/unzip, and uses exclusive 0600 terraform.zip inside mkdtemp. Exact Development workflow/account and cloud-only x86 context precede it; credentials/endpoints are isolated for execution. Tests cover CI operation/plan mutation boundaries and diagnostics, not the live archive download. Source-inspected fixed URL/checksum ordering prevents arbitrary executable download; no unit-test claim of cloud qualification is made.",
+      "guardPaths": [
+        "products/shop/scripts/native-ci-terraform.mjs",
+        "products/shop/scripts/native-ci-aws.mjs",
+        "products/shop/scripts/native-ci-identity.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-ci-terraform.test.mjs",
+        "products/shop/scripts/native-ci-operation.test.mjs",
+        "products/shop/scripts/native-ci-aws.test.mjs",
+        "products/shop/scripts/native-ci-identity.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-production-foundation-111",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "66702ae4cfb27e19:1",
+        "primaryLocationStartColumnFingerprint": "22"
+      },
+      "canonicalFlowSha256": "bac039ac0151739c0e8e523ef50bb89f7c8b0b1988cd4ba16b34450cc7375c45",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Authenticated original GitHub run/journal metadata and verified qualification data are intentionally persisted by foundationEvidenceSaver as private immutable release evidence. The helper allows only safe basenames/no dotdot, writes a separate evidence-prefixed path wx 0600 inside the owned runner directory, and uploads to the fixed expected-owner bucket with If-None-Match and a version acknowledgement. Tests verify permission bits, no overwrite/collision, traversal rejection and original-run/context guards. The file is evidence, not code to execute or an arbitrary remote-selected destination.",
+      "guardPaths": [
+        "products/shop/scripts/native-production-foundation.mjs",
+        "products/shop/scripts/native-production-foundation-contract.mjs",
+        "products/shop/scripts/native-production-ci.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-production-evidence.test.mjs",
+        "products/shop/scripts/native-production-foundation.test.mjs",
+        "products/shop/scripts/native-production-ci.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-production-foundation-143",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "982c8595a6a145c8:1",
+        "primaryLocationStartColumnFingerprint": "25"
+      },
+      "canonicalFlowSha256": "fc33d54c1d70ceac0cdd347cb46a5a91c4646706d126e900cbedd8c0aa69cd47",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The Production foundation intentionally installs Terraform from one fixed versioned Hashicorp HTTPS URL with redirect:error. It hashes all downloaded bytes and requires the protected reviewed SHA256 before exclusive 0600 archive write and unzip in a fresh private runner directory; exact main first-attempt workflow, account/session and fixed module inventory precede it. Tests exercise context/resource-plan limits and evidence-file safety, not the live downloader. This pinned executable input is intentional; checksum ordering is source-inspected and cannot be replaced by an arbitrary URL/body.",
+      "guardPaths": [
+        "products/shop/scripts/native-production-foundation.mjs",
+        "products/shop/scripts/native-production-foundation-contract.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-production-foundation.test.mjs",
+        "products/shop/scripts/native-production-evidence.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-production-image-143",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "bb40480df70e6543:1",
+        "primaryLocationStartColumnFingerprint": "25"
+      },
+      "canonicalFlowSha256": "a9381f93e065546faadc8d1cc03a2e5746cc810280a20a79c6060948fcbce28f",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "For the exact qualified target image/source and fixed module inventory, authenticated Production CI downloads only the fixed Terraform 1.12.2 Hashicorp HTTPS archive, denies redirects and checks its protected reviewed ZIP_HASH before wx 0600 write/unzip inside mkdtemp. Production credentials require the exact account/role/session and disable external credential/endpoint fallbacks. Tests reject wrong runtime/image plan/observations and CI identities; they do not execute the live downloader. This is a deliberately pinned executable build input, with source-inspected hash enforcement rather than arbitrary network code.",
+      "guardPaths": [
+        "products/shop/scripts/native-production-image.mjs",
+        "products/shop/scripts/native-production-ci.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-production-image.test.mjs",
+        "products/shop/scripts/native-production-ci.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-production-provision-72",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "982c8595a6a145c8:1",
+        "primaryLocationStartColumnFingerprint": "25"
+      },
+      "canonicalFlowSha256": "c4cfadddd065f4991a36707f100e46f148c184c348bda24ec13b30b589970fa8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Runtime provisioning is gated by verified candidate/acceptance, explicit authenticated Production operation and absent existing functions before a fixed Terraform 1.12.2 HTTPS download. Redirects are denied and the entire archive must match the protected reviewed SHA256 before wx 0600 private-file write/unzip; exact module/source inventory remains pinned. Tests exercise runtime-plan/resource limits, collision/unchanged-state guards and Production identity, not a live binary installation. The download is intended and content-pinned; it does not admit a caller-controlled URL/executable.",
+      "guardPaths": [
+        "products/shop/scripts/native-production-provision.mjs",
+        "products/shop/scripts/native-production-ci.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-production-runtime.test.mjs",
+        "products/shop/scripts/native-production-ci.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-paid-order-product-recovery-61",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "bbc38f557ee8fa02:1",
+        "primaryLocationStartColumnFingerprint": "49"
+      },
+      "canonicalFlowSha256": "1b1a511d5a40c0e515b6b7106ce1ecdce89fae51657304531ac7f3065a0d8a96",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The recovery CLI requires exact owner hosted first-attempt protected Production workflow, pinned order/product/request identities, body-bound GitHub OIDC and the fixed Worker origin. It validates the response target/hash/plan/source/release/run/mutation flags, then projects only safe fields into fixed order-product-recovery-result.json using wx 0600. Tests verify intent-before-request, safe projection excludes private upstream address/token fields, drift rejection and no uncertain retry. This is intentional private recovery evidence, not raw customer upload or an arbitrary file sink.",
+      "guardPaths": [
+        "products/shop/scripts/paid-order-product-recovery.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/paid-order-product-recovery.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-paid-order-provider-recovery-64",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "5b8ceed96edf7999:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "d78044f69c843e03578cf238d36e5b37fc8af90e46dd2e90f44fcbc34e0574ed",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The exact protected owner Production workflow permits only pinned order/fulfilment/provider/request identities and explicit reviewed plan/apply with body-bound OIDC to the fixed Worker. Response IDs/request/plan/source/release/run/mutation fields must match before a safe projection is saved wx 0600 as constant order-provider-recovery-result.json. Tests cover both pinned orders, exclude private response address/token fields, reject target/source/apply drift and forbid uncertain retries. Network receipt persistence is intentional and does not expose raw customer data or control the pathname.",
+      "guardPaths": [
+        "products/shop/scripts/paid-order-provider-recovery.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/paid-order-provider-recovery.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-native-shipping-qualification-175",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "b9bd187e1529a8a8:1",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "d4c93e4a643b925d5005983422255491bdb326001f50d1646690ef0346ea4872",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "An authenticated fixed-account Cloudflare create response must match the exact run-specific disposable database name and UUID before it becomes databaseId in a fixed wrangler.json. The config is written wx 0600 in a newly created 0700 runner directory, contains fixed bindings, and is used only by explicit Development shipping qualification with a nonce/proof and no provider credentials in the child. Tests reject local/foreign/rerun contexts, verify durable intent and fixed database scope, and block stranded/partial qualification. The generated remote D1 test config is intentional, not arbitrary executable/file content.",
+      "guardPaths": [
+        "products/shop/scripts/native-shipping-qualification.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/native-shipping-qualification.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-script-http-file-paid-order-validation-recovery-58",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "c73078cef49cdad9:1",
+        "primaryLocationStartColumnFingerprint": "52"
+      },
+      "canonicalFlowSha256": "1a345d3ba835d52dc8ca039ff8e618630c0e53d833c3a7f00abf930ca76ed8c4",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The protected hosted owner first-attempt Production workflow signs the exact reviewed operation body for the fixed Worker and order. Response readiness/name/plan/source/release/run/provider/order-mutation fields are validated, with unchanged expected plan and normal-validation requirement for apply, then only safe receipt fields are saved wx 0600 to fixed order-validation-recovery-result.json. Tests assert safe projection excludes upstream address/token data, reject foreign/local/rerun/source/target changes and never retry an uncertain apply. This is intended recovery evidence rather than arbitrary network upload.",
+      "guardPaths": [
+        "products/shop/scripts/paid-order-validation-recovery.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/paid-order-validation-recovery.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-lifecycle-result-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "cad0d270fad424c6:1",
+        "primaryLocationStartColumnFingerprint": "49"
+      },
+      "canonicalFlowSha256": "c287632320cb4536ee73b3b2bf9e8fbbbbfa1bc54fbb3ca5eb04e7c356e1123e",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The tool intentionally saves authenticated product-lifecycle response status and JSON to the literal product-lifecycle-result.json using exclusive creation. Network data reaches the file data argument, never its path or executable source. Dispatch requires main-repository Actions context, an HTTPS Worker, operations authentication and a signed identity bound to the exact request; the server verifies workflow/environment and action authority. Saving the receipt preserves recovery evidence after uncertain mutations.",
+      "guardPaths": [
+        "products/shop/workers/api/scripts/product-lifecycle.mjs",
+        "products/shop/workers/api/src/product-lifecycle.ts",
+        "products/shop/workers/api/src/operations-identity.ts",
+        "products/shop/workers/api/src/service-auth.ts"
+      ],
+      "testPaths": [
+        "products/shop/workers/api/src/product-lifecycle.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-featured-update-result-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "ff6e361cf26d51b5:1",
+        "primaryLocationStartColumnFingerprint": "49"
+      },
+      "canonicalFlowSha256": "64125742ddc9fb907f6905a833398c670873c9579495941989ecf386a6781631",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The response status and JSON from the authenticated featured-products operation are deliberately saved in the literal featured-products-result.json with flag wx. Request data cannot select that output path. The command pins the first main-branch hosted workflow run, requires the owner for replacement, validates distinct product UUIDs/revision and binds OIDC to the exact request body; HTTPS dispatch rejects redirects. The CLI VM tests verify exclusive receipts and server tests verify identity and owner checks.",
+      "guardPaths": [
+        "products/shop/workers/api/scripts/featured-products.mjs",
+        "products/shop/workers/api/src/featured-products.ts",
+        "products/shop/workers/api/src/operations-identity.ts",
+        "products/shop/workers/api/src/service-auth.ts"
+      ],
+      "testPaths": [
+        "products/shop/scripts/featured-products-operations.test.mjs",
+        "products/shop/workers/api/src/featured-products.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-lifecycle-cache-status-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "309644299a84ed8f:1",
+        "primaryLocationStartColumnFingerprint": "48"
+      },
+      "canonicalFlowSha256": "20c5fd08b082fc19055532e149f9cde14cf931c03a1df938b0bda3ad5daf66d8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Only the numeric HTTP status of the authenticated storefront cache-invalidation response is serialized into the literal product-lifecycle-cache.json with exclusive creation. The storefront URL is protected operator environment configuration, requires HTTPS, and fetch rejects redirects. This evidence is saved only after the authenticated lifecycle transition succeeds; the response cannot choose a filename or supply executable content. Lifecycle identity/body and transition authorization tests remain in place.",
+      "guardPaths": [
+        "products/shop/workers/api/scripts/product-lifecycle.mjs",
+        "products/shop/workers/api/src/product-lifecycle.ts",
+        "products/shop/workers/api/src/operations-identity.ts",
+        "products/shop/workers/api/src/service-auth.ts"
+      ],
+      "testPaths": [
+        "products/shop/workers/api/src/product-lifecycle.test.ts"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-print-benchmark-report-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4a6e3abab716537a:1",
+        "primaryLocationStartColumnFingerprint": "52"
+      },
+      "canonicalFlowSha256": "1c97ce553893991396c73dae7efe7e3bb6ceeb25b45512779cc8e2953e8e1511",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "These traces propagate a bounded request failure/status into report.failure and serialize the benchmark report as data at the fixed .data/print-benchmark/report.json path, with mode 0600 below a 0700 directory. They do not control that path. The benchmark requires the exact first main workflow/source, personal account/role/region and private versioned bucket before execution. Keeping failure evidence is deliberate; nothing reads that JSON as executable code or publishes it as source.",
+      "guardPaths": [
+        "products/shop/workers/print-benchmark/run.mjs",
+        "products/shop/workers/print-benchmark/runtime/contract.mjs",
+        "products/shop/workers/print-benchmark/metrics.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/print-benchmark.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-print-benchmark-fixture-download",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "38acc2c863e6fc1a:1",
+        "primaryLocationStartColumnFingerprint": "22"
+      },
+      "canonicalFlowSha256": "87225822e841f3313790afb3bebeb356ba69e6feeef9503ec76816b9d36b77a8",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The fetched artwork bytes are deliberately saved as a private local benchmark fixture. The source R2 key must match the allowed immutable artwork/blob key patterns; the response is byte-bounded and SHA-256 checked before writing. The destination uses only the name from the bundled local plans under .data/print-benchmark, not a network field. Main/source/account/role and private-bucket guards isolate the operation, and fixture/runtime budget tests preserve those limits.",
+      "guardPaths": [
+        "products/shop/workers/print-benchmark/run.mjs",
+        "products/shop/workers/print-benchmark/runtime/contract.mjs",
+        "products/shop/workers/print-benchmark/fixtures.json",
+        "products/shop/workers/print-benchmark/prepare-plans.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/print-benchmark.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-development-confirmation-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "c4f71d52a21870fb:1",
+        "primaryLocationStartColumnFingerprint": "48"
+      },
+      "canonicalFlowSha256": "efb3b5c424b0dfd7659dddbbc29e7f85e72ade1bfb408ac32d1ec59ccdeb8827",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Products returned by the fixed development confirmation API are intentionally recorded in report.json inside a newly created private app-confirmation directory with exclusive creation. Remote fields become JSON data only; neither the directory nor basename comes from the response. The script verifies the pinned API, preview service credential, fresh-owner isolation, saved artwork hash and all-four-ready/database/media checks before the report. It is manual development evidence, not a production deployment or public-source export.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/aws-lambda/smoke-app-confirmation.mjs",
+        "products/shop/workers/video-renderer/aws-lambda/cloudflare-development.mjs",
+        "products/shop/workers/api/src/anonymous-design-api.ts"
+      ],
+      "testPaths": [
+        "products/shop/workers/api/src/anonymous-design-api.test.ts",
+        "products/shop/workers/video-renderer/aws-lambda/infrastructure.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-comparison-cached-media-output",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4aa5261bf979cc47:1",
+        "primaryLocationStartColumnFingerprint": "24"
+      },
+      "canonicalFlowSha256": "00704093ee394237cdd0803b89967d9143cda65d1e704dc1dde1bc5dcbea5eaf",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The comparison deliberately saves cached MP4 response bytes for human/media-quality review. Its output directory is explicit operator configuration; the label is restricted to [a-z0-9-]+ and the product suffixes come from a fixed local list. The benchmark endpoint has an anchored HTTPS host allowlist and bearer authentication; cache-hit and exact response-size assertions precede writing. Network data is the file payload, not its filename or a script to be run.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/compare-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-inspection-cached-media-output",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "d6e09d704811bc63:1",
+        "primaryLocationStartColumnFingerprint": "22"
+      },
+      "canonicalFlowSha256": "e62efc20a6057657f196f80f36800a18a53c0333b8a56a6d93e69d77c0fc81b7",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The inspected video response is intentionally written as MP4 data to an operator-selected output directory. Each basename comes from the local inspection fixture and must match [a-z0-9-]+, while the endpoint must match the isolated benchmark HTTPS host pattern and requires its bearer token. A 200/cache-hit response is required before writing; subsequent ffprobe/SSIM checks inspect media rather than execute it as source. Remote bytes cannot choose the output path.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/inspect.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs",
+        "products/shop/workers/video-renderer/src/stored-render.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-latency-progress-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "463cd121356eee7c:1",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "e186480548fffd15e1e44cf1299da83679718cc9444d9b83db7d2d2fe2046341",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Cloudflare query results supply a source revision identifier inside a JSON progress report. The output is the fixed latency.json basename in a private mkdtemp run directory, chosen before benchmark dispatch; network data never selects it. Cloudflare access uses an operator token and protected environment-specific database identity, development rendering requires a fresh benchmark token, and production excludes the benchmark endpoint. The write deliberately preserves incremental measurement evidence.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/latency.mjs",
+        "products/shop/workers/video-renderer/benchmarks/idle-state.mjs",
+        "products/shop/workers/video-renderer/benchmarks/trace.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/benchmarks/idle-state.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-featured-render-actions-summary",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "72d8322bc7b89077:1",
+        "primaryLocationStartColumnFingerprint": "0"
+      },
+      "canonicalFlowSha256": "cc42f957e2e855aca2f169102a44fa35e44cb3a6d34a799c34b527e380e1dd5a",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Validated product metadata is intentionally appended as render-summary text/JSON to the Actions-provided GITHUB_STEP_SUMMARY file. The remote API cannot choose that path. Input preparation pins the selected environment API, uses service authentication with redirects rejected, validates product/revision UUIDs, base-product allowlists, placement and artwork metadata, verifies artwork size/hash and rechecks the featured selection. Tests reject origin substitution, external artwork URLs, changed selection and corrupt artwork.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/custom/render.mjs",
+        "products/shop/workers/video-renderer/custom/inputs.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/custom/inputs.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-latency-readiness-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4618231d11fd9631:1",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "c258d2d0b9bba3eed67bb7ea146fe13f111dc068165b200fbd2d69243e6232a4",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The readiness report deliberately records authenticated Cloudflare job timing/queue settings and configured-family identifiers as JSON data. Its path is latency.json inside this invocation's private mkdtemp directory and is independent of all four traced response branches. The script verifies complete family/media readiness before this checkpoint and preserves measurements before optional diagnostics. Protected database/environment selection, token guards and batch/idle boundary tests remain intact.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/latency.mjs",
+        "products/shop/workers/video-renderer/benchmarks/idle-state.mjs",
+        "products/shop/workers/video-renderer/benchmarks/trace.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/benchmarks/idle-state.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-latency-diagnostic-checkpoint",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4618231d11fd9631:2",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "5c271286f8ffdfdd7163c0308a9856ac117b5c534c6ab97d0f8ded438b70b42e",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "This second checkpoint overwrites only the invocation-owned latency.json with the same readiness evidence plus optional filtered profiling/failure diagnostics. All traced remote queue/timing/family fields are file data; the private directory and basename are fixed locally. Trace collection retains bounded numeric readiness fields and redacts bearer strings, and deployed pipeline flags are checked after the diagnostic snapshot. Saving evidence before a later failure is intended benchmark behavior.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/latency.mjs",
+        "products/shop/workers/video-renderer/benchmarks/idle-state.mjs",
+        "products/shop/workers/video-renderer/benchmarks/trace.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/benchmarks/idle-state.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-latency-idle-proof-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4618231d11fd9631:3",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "92fc6e63e4eb509e942edb93ff6f9964b0162252e0ce9599a099cd7166adad4b",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The final checkpoint serializes the measured family/queue/job results and, where applicable, verified idle proof to the existing private run-local latency.json. It does not derive an output filename from the four remote response branches. Actual container runtime state, lane count and timing ordering determine idle success, and first-attempt/notification assertions remain enforced. Existing idle-proof and batch tests cover those guards; the cloud latency command itself is not run by this assessment.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/benchmarks/latency.mjs",
+        "products/shop/workers/video-renderer/benchmarks/idle-state.mjs",
+        "products/shop/workers/video-renderer/benchmarks/trace.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/benchmarks/idle-state.test.mjs",
+        "products/shop/workers/video-renderer/src/batch.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-batch-benchmark-media-output",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4cf84bbeda3aca8:1",
+        "primaryLocationStartColumnFingerprint": "24"
+      },
+      "canonicalFlowSha256": "b087cf77f7620dad75f603dca7d6167bc7bf633c1f2097c2446e5545bebce561",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The authenticated /render cache response is intentionally saved as MP4 data. The output directory is freshly allocated with mkdtemp and each basename comes from the fixed local product list, so response content cannot select a file or overwrite a shared predictable temporary path. Failed cache reads are rejected. The synthetic-endpoint CLI regression verifies all four outputs are in a distinct 0700 directory, and the Worker bearer-token guard remains tested.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-batch-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-batch-benchmark-json-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4d64eaaabe3193e1:1",
+        "primaryLocationStartColumnFingerprint": "0"
+      },
+      "canonicalFlowSha256": "82949b6bd62f18dfe2b60f61baa843089d1839731cfc23dbb60797fe4da71718",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "Batch and shutdown-state response fields are deliberately serialized into the optional JSON report at STORY_BENCHMARK_REPORT, a path explicitly supplied by the operator rather than by the network. The target/token are required operator configuration; failed batch/state/cache reads and failure to reach a stopped state abort the command. This report is measurement evidence, not executable code. The CLI regression exercises the batch state and cached-output path against a synthetic local service.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-batch-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-remote-benchmark-media-output",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "cd4bf2becd59fc53:1",
+        "primaryLocationStartColumnFingerprint": "24"
+      },
+      "canonicalFlowSha256": "d2e2b4517453f321b7d768422d2eca66caaf0913d33e410eac0371b2c1096f57",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "A successful authenticated render response is intentionally written as MP4 data in a fresh mkdtemp directory. The basename combines local benchmark labels and fixed product identifiers; no response bytes or headers select it. Non-success responses abort before writing and the former shared predictable temporary output has been removed. The actual CLI regression verifies separate invocations own distinct 0700 directories and preserve the returned media bytes.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-remote-benchmark-json-report",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "6cd11b7ec5f9f5e2:1",
+        "primaryLocationStartColumnFingerprint": "28"
+      },
+      "canonicalFlowSha256": "3344e14286d83e4950cc84963dc14eb49a1f6a80c21d91a69d35bd0eee33d39e",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The remote benchmark deliberately serializes measured health, render/cache and timing results into an optional report file selected solely by the operator via STORY_BENCHMARK_REPORT. The three traces enter report data, including video byte count and health JSON, not the path argument. Artwork/mockups and endpoint/token are explicit operator inputs and failed render/cache reads are rejected. The artifact is benchmark evidence and is not evaluated as code or imported into public source.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-remote.mjs",
+        "products/shop/workers/video-renderer/src/worker.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.mjs"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/src/benchmark-output.test.mjs",
+        "products/shop/workers/video-renderer/src/server-auth.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/1 — final-head/current-base review venue; this reference grants no approval."
+      }
+    }
+  ]
 }
