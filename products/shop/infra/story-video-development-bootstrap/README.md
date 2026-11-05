@@ -346,7 +346,7 @@ Each plan privately renders exactly the lockfile, four HCL files, runtime
 `tf.json` and three policy JSON files. It records both template and resolved byte
 hashes. Only the private copy changes the historical relative provider-config
 path to the guard's exact absolute path, pins Terraform 1.12.2, checks locked AWS
-provider 6.62.0, adds expected backend owner and stages the unselected Production
+provider 6.62.0, attests the expected owner separately and stages the unselected Production
 subject. The tracked module and historical records remain intact.
 
 Initialization uses existing S3 bucket/key/KMS/account/region, encryption, native
@@ -378,3 +378,9 @@ complete query suites and the original SARIF, and obtain fresh analysis and
 independent final-head/current-base review before merging or live use. Run full
 Shop `check:ci` and `test:e2e:local` before the final PR push. Neither this migration
 nor its fixtures waive those gates or alter any query.
+
+The Shop Quality job installs the checksum-verified Terraform 1.12.2 binary and
+sets `SHOP_TRUST_SCHEMA_TERRAFORM`, so its native backend-schema regression is
+mandatory in CI. Local runs can set that variable to the exact installed binary.
+The synthetic probe stops during schema decoding before credentials, provider
+downloads or backend access.

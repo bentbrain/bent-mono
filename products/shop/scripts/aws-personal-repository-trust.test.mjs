@@ -212,7 +212,8 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
             process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
         } };
 }
-// Opt in with the exact installed binary. No credentials, provider download or
+// CI supplies the pinned binary; local runs opt in with the exact installed tool.
+// No credentials, provider download or
 // backend configuration can run: the deliberately unknown attribute stops init
 // during native schema decoding. Every rendered backend argument is decoded too.
 test("native Terraform 1.12.2 accepts the rendered S3 backend schema before configuration", { skip: !process.env.SHOP_TRUST_SCHEMA_TERRAFORM }, async t => {

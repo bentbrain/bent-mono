@@ -90,12 +90,21 @@ jobs:
     name: shop
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SHOP_TRUST_SCHEMA_TERRAFORM: ${{ runner.temp }}/shop-trust-terraform/terraform
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - name: Install pinned Terraform for backend schema regression
+        run: |
+          archive="$RUNNER_TEMP/terraform_1.12.2_linux_amd64.zip"
+          curl --fail --silent --show-error --location --output "$archive" https://releases.hashicorp.com/terraform/1.12.2/terraform_1.12.2_linux_amd64.zip
+          printf '%s  %s\n' '1eaed12ca41fcfe094da3d76a7e9aa0639ad3409c43be0103ee9f5a1ff4b7437' "$archive" | sha256sum --check --status
+          mkdir "$RUNNER_TEMP/shop-trust-terraform"
+          unzip -q "$archive" -d "$RUNNER_TEMP/shop-trust-terraform"
       - run: node scripts/install-browsers.mjs shop
       - run: node scripts/ci-check.mjs shop
   public-source:
