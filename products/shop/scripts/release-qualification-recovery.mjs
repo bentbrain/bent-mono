@@ -1,6 +1,7 @@
 import { protectedConfig } from "./protected-config.mjs";
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, lstat, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { readRegularFile } from './read-regular-file.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recoveryReference, rendererReference } from './native-qualification-reference.mjs';
@@ -25,18 +26,16 @@ async function downloadPointer(api, runId, token, filename, parse) {
     try {
         execFileSync('gh', ['run', 'download', String(runId), '--repo', 'bentbrain/bent-mono', '--name', name, '--dir', directory], { env: { ...process.env, GH_TOKEN: token }, stdio: ['ignore', 'ignore', 'pipe'], timeout: 30000 });
         const path = join(directory, filename);
-        let stat;
+        let bytes;
         try {
-            stat = await lstat(path);
+            bytes = await readRegularFile(path, { maxBytes: 4096 });
         }
         catch (error) {
             if (error.code === 'ENOENT')
                 return null;
             throw error;
         }
-        if (!stat.isFile() || stat.size > 4096)
-            throw Error('Invalid qualification pointer file.');
-        return parse(await readFile(path, 'utf8'));
+        return parse(bytes.toString('utf8'));
     }
     finally {
         await rm(directory, { recursive: true, force: true });

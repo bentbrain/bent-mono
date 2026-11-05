@@ -1,8 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 
 const root = resolve(import.meta.dirname, "../../..");
+const outputDirectory = await mkdtemp(join(tmpdir(), "forever-tee-remote-"));
 const endpoint = requiredEnvironment(
   "REMOTE_BENCHMARK_URL",
   "VERCEL_BENCHMARK_URL",
@@ -113,7 +115,7 @@ async function render(product, artwork, label) {
   if (!response.ok) {
     throw new Error(`Render failed with ${String(response.status)}: ${video.toString("utf8")}`);
   }
-  const output = `/tmp/forever-tee-vercel-${label}-${product.id}.mp4`;
+  const output = join(outputDirectory, `${label}-${product.id}.mp4`);
   await writeFile(output, video);
   return {
     assetLoadTimeMs: numericHeader(response.headers, "x-asset-load-time-ms"),

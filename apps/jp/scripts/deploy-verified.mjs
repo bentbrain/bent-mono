@@ -11,12 +11,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Called only by Deploy, after require-checks verifies the checked-out SHA.
 let directory;
 let child;
+let childClosed = false;
 let interrupted;
 let killTimer;
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
@@ -40,6 +42,27 @@ function stopChild(signal) {
       }
     }
     throw error;
+  }
+}
+
+async function stopClosedChild() {
+  const deadline = performance.now() + 250;
+  for (;;) {
+    try {
+      stopChild('SIGKILL');
+      return;
+    } catch (error) {
+      // macOS can briefly retain an exited process group. Reconcile only after
+      // close; a live or persistently inaccessible group remains a failure.
+      if (
+        !processGroup ||
+        !childClosed ||
+        error.code !== 'EPERM' ||
+        performance.now() >= deadline
+      )
+        throw error;
+      await delay(10);
+    }
   }
 }
 
@@ -115,7 +138,10 @@ try {
   });
   outcome = await new Promise((resolve) => {
     child.once('error', () => resolve({ code: 1 }));
-    child.once('close', (code, signal) => resolve({ code: code ?? 1, signal }));
+    child.once('close', (code, signal) => {
+      childClosed = true;
+      resolve({ code: code ?? 1, signal });
+    });
   });
 } catch (error) {
   // Setup errors contain no secret values. Child startup errors use code 1.
@@ -124,7 +150,7 @@ try {
 } finally {
   clearTimeout(killTimer);
   try {
-    stopChild('SIGKILL');
+    await stopClosedChild();
   } finally {
     if (directory) rmSync(directory, { recursive: true, force: true });
     for (const signal of signals) process.off(signal, interrupt);

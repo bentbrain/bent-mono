@@ -3,7 +3,6 @@ import test from "node:test";
 import { analyzeProductColor, backfillProductColors, configureMissingFamilies, createLegacyProducts, createMissingVideoJobs, normalizeIncompatibleVideoJobIds, validateAudit, waitForCompleteProducts, } from "./native-production-product-sweep.mjs";
 const id = "11111111-1111-4111-8111-111111111111";
 const owner = "a".repeat(64);
-const sha = "b".repeat(64);
 test("the product sweep requires complete colours, two products per family and two ready videos per product", () => {
     const complete = validateAudit({ ready_designs: 4, complete_colors: 4, finalized_designs: 3, active_products: 6,
         default_mismatches: 0, complete_families: 3, video_jobs: 12, ready_videos: 12, terminal_videos: 0 });

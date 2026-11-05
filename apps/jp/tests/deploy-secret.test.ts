@@ -455,3 +455,38 @@ process.kill = (pid, signal) => {
     await rm(setup.directory, { recursive: true, force: true });
   }
 });
+
+void test('a briefly visible exited process group is reconciled without losing cleanup', async () => {
+  const setup = await fixture();
+  try {
+    const preload = join(setup.directory, 'synthetic-delayed-group-exit.mjs');
+    await writeFile(
+      preload,
+      `
+const original = process.kill.bind(process);
+let probes = 0;
+process.kill = (pid, signal) => {
+  if (pid < 0 && signal === 'SIGKILL') {
+    const error = new Error('Synthetic delayed exited-group race');
+    error.code = 'EPERM';
+    throw error;
+  }
+  if (pid < 0 && signal === 0 && probes++ < 3) return true;
+  return original(pid, signal);
+};
+`,
+    );
+    const result = await launch(setup.env, setup.directory, [
+      '--import',
+      preload,
+    ]).completed;
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout === '' && result.stderr === '', true);
+    const file = await readEvidence(setup.evidence);
+    await assert.rejects(readFile(file), { code: 'ENOENT' });
+    assert.deepEqual(await readdir(setup.temporary), []);
+  } finally {
+    await rm(setup.directory, { recursive: true, force: true });
+  }
+});

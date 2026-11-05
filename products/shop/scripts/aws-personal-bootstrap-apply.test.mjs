@@ -90,3 +90,13 @@ test("private journal writes sync to disk, reject a second owner and never overw
         await rm(directory, { recursive: true });
     }
 });
+
+test("OIDC audience must be an array containing the exact STS audience", async () => {
+    for (const ClientIDList of ["prefix-sts.amazonaws.com-suffix", "sts.amazonaws.com", ["prefix-sts.amazonaws.com-suffix"]]) {
+        const call = async args => {
+            if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ ...provider, ClientIDList });
+            throw absent(args);
+        };
+        await assert.rejects(checkBootstrapVacancies(call), /issuer\/audience/);
+    }
+});

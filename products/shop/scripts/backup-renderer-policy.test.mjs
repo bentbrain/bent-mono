@@ -32,7 +32,7 @@ test("Production must reuse the exact qualified Preview image and source with de
         workerVersion: "11223344-1234-1234-1234-112233445566", frames: [0, 2, 4].map(second => ({ second, rmse: 1 })) };
     assertBackupReceipt(receipt, env.GITHUB_SHA);
     for (const change of [{ sourceCommit: "d".repeat(40) }, { qualified: false }, { cleaned: false },
-        { image: "registry.cloudflare.com/work/image:latest" }, { frames: [] }, { frames: [{ rmse: NaN }, { rmse: 0 }, { rmse: 0 }] },
+        { image: "registry.cloudflare.com/work/image:latest" }, { image: receipt.image.replace("registry.cloudflare.com", "registryXcloudflareXcom") }, { frames: [] }, { frames: [{ rmse: NaN }, { rmse: 0 }, { rmse: 0 }] },
         { frames: [{ rmse: 6 }, { rmse: 0 }, { rmse: 0 }] }])
         assert.throws(() => assertBackupReceipt({ ...receipt, ...change }, env.GITHUB_SHA));
 });

@@ -1,4 +1,3 @@
-import { protectedConfig } from "./protected-config.mjs";
 import { assertProductionContext, productionAWS } from "./native-production-ci.mjs";
 import { productionCloudflare, inspectProductionConsumer } from "./native-production-cloudflare.mjs";
 import { productionReleaseStore } from "./native-production-release-store.mjs";

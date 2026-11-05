@@ -1,6 +1,7 @@
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { readFile, mkdtemp, lstat } from "node:fs/promises";
+import { readRegularFile } from "./read-regular-file.mjs";
 import { join } from "node:path";
 import { BOOTSTRAP_DIRECTORY, BOOTSTRAP_PRIVATE, sourceDigest } from "./aws-personal-bootstrap.mjs";
 import { guardedPersonalCall, personalEnvironment } from "./aws-personal-guard.mjs";
@@ -76,8 +77,7 @@ export async function runBootstrapStateMigration(args, dependencies) {
     const sourceHash = await sourceDigest();
     const snapshots = [];
     for (const path of [STATE, `${STATE}.backup`, BACKEND]) {
-        check((await lstat(path)).isFile(), "ordinary original state/backup files required.");
-        snapshots.push({ path, sha256: sha(await readFile(path)) });
+        snapshots.push({ path, sha256: sha(await readRegularFile(path)) });
     }
     const review = { ...inspected, sourceHash, snapshots, accountId: protectedConfig("awsAccountId"), region: "ap-southeast-2", bucket: BUCKET, key: KEY, kmsKey: KMS,
         conditionalCreate: true, resourceMutations: false, developmentCIHasAccess: false };

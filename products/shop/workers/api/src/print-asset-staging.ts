@@ -232,64 +232,65 @@ export function createPrintStagingSession(env: StagingEnv, configuredProductId: 
         await measure("uploadIdMs", () => env.DB.prepare("UPDATE print_asset_staging SET upload_id = ?, state = 'uploading' WHERE id = ?")
           .bind(upload.uploadId, id).run());
         const parts: R2UploadedPart[] = [];
-        let part = new Uint8Array(PRINT_STAGING_PART_BYTES);
-        let alternate: Uint8Array<ArrayBuffer> | null = null;
-        const flushParts = async () => {
-          const results = await Promise.allSettled(uploads);
-          uploads.length = 0;
-          for (const result of results) {
-            if (result.status === "rejected") throw result.reason;
-            parts.push(result.value);
-          }
-        };
-        const queuePart = (bytes: Uint8Array) => {
-          const number = parts.length + uploads.length + 1;
-          const pending = measure("uploadMs", () => upload.uploadPart(number, bytes));
-          // Observe rejection immediately while the next bounded part is read.
-          void pending.catch(() => undefined);
-          uploads.push(pending);
-        };
-        let filled = 0;
         let byteLength = 0;
         const digest = createHash("sha256");
-        for (;;) {
-          assertActive();
-          const prefix = pending.shift();
-          const next = prefix ? { done: false, value: prefix } : await measure("inputReadMs", read);
-          assertActive();
-          if (next.done) break;
-          byteLength += next.value.byteLength;
-          if (byteLength > maxBytes) throw new Error("Rendered print asset exceeds the storage limit.");
-          digest.update(next.value);
-          let offset = 0;
-          while (offset < next.value.byteLength) {
-            const size = Math.min(part.byteLength - filled, next.value.byteLength - offset);
-            part.set(next.value.subarray(offset, offset + size), filled);
-            filled += size;
-            offset += size;
-            if (filled === part.byteLength) {
-              assertActive();
-              if (parts.length === 0 && uploads.length === 0) {
-                // Admit an optional second buffer only once a full part needs
-                // uploading. Small outputs consume no additional shared bytes.
-                try { releasePipeline = printBufferAdmission.reserve(PRINT_STAGING_PART_BYTES); }
-                catch (error) { if (!isPrintMemoryCapacityError(error)) throw error; }
-                if (releasePipeline) alternate = new Uint8Array(PRINT_STAGING_PART_BYTES);
+        // Buffer references end here before the multipart completion and commit.
+        {
+          let part = new Uint8Array(PRINT_STAGING_PART_BYTES);
+          let alternate: Uint8Array<ArrayBuffer> | null = null;
+          const flushParts = async () => {
+            const results = await Promise.allSettled(uploads);
+            uploads.length = 0;
+            for (const result of results) {
+              if (result.status === "rejected") throw result.reason;
+              parts.push(result.value);
+            }
+          };
+          const queuePart = (bytes: Uint8Array) => {
+            const number = parts.length + uploads.length + 1;
+            const pending = measure("uploadMs", () => upload.uploadPart(number, bytes));
+            // Observe rejection immediately while the next bounded part is read.
+            void pending.catch(() => undefined);
+            uploads.push(pending);
+          };
+          let filled = 0;
+          for (;;) {
+            assertActive();
+            const prefix = pending.shift();
+            const next = prefix ? { done: false, value: prefix } : await measure("inputReadMs", read);
+            assertActive();
+            if (next.done) break;
+            byteLength += next.value.byteLength;
+            if (byteLength > maxBytes) throw new Error("Rendered print asset exceeds the storage limit.");
+            digest.update(next.value);
+            let offset = 0;
+            while (offset < next.value.byteLength) {
+              const size = Math.min(part.byteLength - filled, next.value.byteLength - offset);
+              part.set(next.value.subarray(offset, offset + size), filled);
+              filled += size;
+              offset += size;
+              if (filled === part.byteLength) {
+                assertActive();
+                if (parts.length === 0 && uploads.length === 0) {
+                  // Admit an optional second buffer only once a full part needs
+                  // uploading. Small outputs consume no additional shared bytes.
+                  try { releasePipeline = printBufferAdmission.reserve(PRINT_STAGING_PART_BYTES); }
+                  catch (error) { if (!isPrintMemoryCapacityError(error)) throw error; }
+                  if (releasePipeline) alternate = new Uint8Array(PRINT_STAGING_PART_BYTES);
+                }
+                queuePart(part);
+                if (uploads.length === (alternate ? 2 : 1)) await flushParts();
+                // Only the other admitted buffer can be filled during upload.
+                // Both acknowledgements precede reuse of either buffer.
+                if (alternate) { const previous = part; part = alternate; alternate = previous; }
+                filled = 0;
               }
-              queuePart(part);
-              if (uploads.length === (alternate ? 2 : 1)) await flushParts();
-              // Only the other admitted buffer can be filled during upload.
-              // Both acknowledgements precede reuse of either buffer.
-              if (alternate) { const previous = part; part = alternate; alternate = previous; }
-              filled = 0;
             }
           }
+          if (byteLength === 0) throw new Error("Rendered print asset is empty.");
+          if (filled) queuePart(part.subarray(0, filled));
+          await flushParts();
         }
-        if (byteLength === 0) throw new Error("Rendered print asset is empty.");
-        if (filled) queuePart(part.subarray(0, filled));
-        await flushParts();
-        part = new Uint8Array(0);
-        alternate = null;
         assertActive();
         const completed = await measure("completeMs", () => upload.complete(parts));
         assertActive();

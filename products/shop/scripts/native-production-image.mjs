@@ -10,7 +10,7 @@ import { terraformFailureSummary } from "./native-ci-terraform.mjs";
 import { assertReleasePaused } from "./native-release-pause.mjs";
 import { verifyStartupProbe } from "./native-ci-health.mjs";
 import { normalizeTerraformObservation } from "./native-ci-observations.mjs";
-import { PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST, PRODUCTION_ORIGIN, productionImagePair, verifyProductionRuntime, } from "./native-production-runtime.mjs";
+import { PREVIOUS_PRODUCTION_IMAGE_DIGEST, PREVIOUS_PRODUCTION_SOURCE_DIGEST, PRODUCTION_ORIGIN, productionImagePair, verifyProductionRuntime, } from "./native-production-runtime.mjs";
 const execute = promisify(execFile);
 const MODULE = fileURLToPath(new URL("../infra/story-video-production/", import.meta.url));
 const NAME = "forever-tee-video-production";

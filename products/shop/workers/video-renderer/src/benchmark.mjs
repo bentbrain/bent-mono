@@ -1,11 +1,13 @@
-import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 import { renderStoryVideo } from "./renderer.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
+const outputDirectory = await mkdtemp(join(tmpdir(), "forever-tee-story-"));
 const artwork = process.env.STORY_ARTWORK ?? "/tmp/forever-tee-saved-design.png";
-const output = process.env.STORY_OUTPUT ?? "/tmp/forever-tee-cloud-render.mp4";
+const output = process.env.STORY_OUTPUT ?? join(outputDirectory, "render.mp4");
 const mockup = process.env.STORY_MOCKUP ??
   resolve(root, "apps/web/public/mockups/tee-white-cutout-v1.png");
 

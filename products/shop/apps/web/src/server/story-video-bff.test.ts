@@ -14,6 +14,35 @@ describe("story-video BFF", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    "https://attacker.invalid/api/configured-product-video/%2f%2fattacker.invalid/white.mp4",
+    "https://attacker.invalid/api/configured-product-video/47cba7a2-498e-44cc-9769-b37641e6a63a%5cattacker.invalid/white.mp4",
+    "https://attacker.invalid/api/configured-product-video/47cba7a2-498e-44cc-9769-b37641e6a63a/%2f%2fattacker.invalid.mp4",
+  ])("rejects path components that could change the upstream destination: %s", async url => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    expect((await storyVideoBff(new Request(url))).status).toBe(404);
+    expect((await storyVideoEventsBff(new Request(url.replace(/white\.mp4$/, "events")))).status).toBe(404);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("keeps a hostile request origin and query out of the upstream origin and path", async () => {
+    const upstream = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 302,
+      headers: { location: "https://attacker.invalid/collect", "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", upstream);
+    const prefix = "https://attacker.invalid/api/configured-product-video/47cba7a2-498e-44cc-9769-b37641e6a63a";
+    const video = await storyVideoBff(new Request(`${prefix}/white.mp4?url=https://attacker.invalid`));
+    const events = await storyVideoEventsBff(new Request(`${prefix}/events?url=https://attacker.invalid`));
+    expect(video.headers.has("location")).toBe(false);
+    expect(events.headers.has("location")).toBe(false);
+    expect(upstream).toHaveBeenNthCalledWith(1,
+      new URL("https://api.example.com/v2/internal/configured-products/47cba7a2-498e-44cc-9769-b37641e6a63a/story-videos/white"),
+      expect.objectContaining({ redirect: "manual" }));
+    expect(upstream).toHaveBeenNthCalledWith(2,
+      new URL("https://api.example.com/v2/internal/configured-products/47cba7a2-498e-44cc-9769-b37641e6a63a/story-video-events"),
+      expect.objectContaining({ redirect: "manual" }));
+  });
+
   it("forwards readiness without exposing service authentication", async () => {
     const upstreamFetch = vi.fn(() =>
       Promise.resolve(Response.json(

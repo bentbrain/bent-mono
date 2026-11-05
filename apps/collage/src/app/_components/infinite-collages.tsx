@@ -69,7 +69,7 @@ export default function InfiniteCollages({
       {hasNextPage && (
         <InfiniteScrollTrigger
           onInView={() => void fetchNextPage()}
-          hasNextPage={hasNextPage ?? false}
+          hasNextPage={true}
           isFetchingNextPage={isFetchingNextPage}
         />
       )}

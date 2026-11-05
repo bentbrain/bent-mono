@@ -1,6 +1,7 @@
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
-import { readFile, mkdtemp, lstat } from "node:fs/promises";
+import { readFile, mkdtemp } from "node:fs/promises";
+import { readRegularFile } from "./read-regular-file.mjs";
 import { join } from "node:path";
 import { TERRAFORM_DIRECTORY, TERRAFORM_PRIVATE } from "./aws-personal-terraform.mjs";
 import { guardedPersonalCall, personalEnvironment, PERSONAL_ACCOUNT } from "./aws-personal-guard.mjs";
@@ -53,8 +54,7 @@ export function migrationArguments(args) {
 }
 async function optionalBytes(path) {
     try {
-        check((await lstat(path)).isFile(), "state/backup must be an ordinary file.");
-        return await readFile(path);
+        return await readRegularFile(path);
     }
     catch (error) {
         if (error.code === "ENOENT")

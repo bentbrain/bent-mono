@@ -512,7 +512,7 @@ for (const width of [390, 1440]) {
     await page.clock.runFor(2_100);
     const image=frame.locator('[data-variant-active="true"] img');
     await expect(image).toBeVisible();
-    await expect.poll(()=>image.evaluate(node=>node instanceof HTMLImageElement&&node.complete&&node.naturalWidth>0)).toBe(true);
+    await expect.poll(()=>image.evaluate(node => node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0)).toBe(true);
     await expect(frame.getByRole("status")).toHaveCount(0);
     expect(await frame.boundingBox()).toEqual(bounds);
   });

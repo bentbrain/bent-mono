@@ -76,7 +76,7 @@ function decide(pet:Pet,graph:PetGraph,random:()=>number,occupied:readonly strin
  const candidates=[...groups.values()].flatMap(group=>{
   const n=group[Math.floor(random()*group.length)];if(!n)return[];
   const distance=Math.hypot(n.x-pet.x,n.z-pet.z),novelty=pet.recent.includes(n.surface)?.25:1;
-  let weight=1;
+  let weight:number;
   if(activity==='sleep')weight=(n.softFloor?.6:comfort(n,graph)**3*5)*(n.surface===pet.favourite?1.2:1)/(1+distance*.15);
   else if(activity==='watch')weight=(n.height>.3?2:0.15)/(1+distance);
   else if(activity==='explore')weight=novelty*(n.height>0?2:.35)/(1+distance*.2);

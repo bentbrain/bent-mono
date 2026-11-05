@@ -320,7 +320,7 @@ test('Hommey bedding changes cloth and piping per bed without recolouring timber
  world.update({...options,items:beds});
  const colour=(id:string,role:string)=>world.scene.meshes.find(m=>m.name.startsWith(id+'/')&&m.material?.name.includes(role))?.material;
  const green=colour('green-bed','bedding-fabric'),pink=colour('pink-bed','bedding-fabric'),trim=colour('pink-bed','bedding-trim'),wood=colour('pink-bed','finish-primary');
- if(!(green instanceof StandardMaterial&&pink instanceof StandardMaterial&&trim instanceof StandardMaterial&&wood instanceof StandardMaterial))throw Error('Missing bed materials');
+ if(!((green instanceof StandardMaterial)&&(pink instanceof StandardMaterial)&&(trim instanceof StandardMaterial)&&(wood instanceof StandardMaterial)))throw Error('Missing bed materials');
  expect(green.diffuseColor.toHexString().toLowerCase()).toBe('#b3c7b8');expect(pink.diffuseColor.toHexString().toLowerCase()).toBe('#df9fa3');expect(trim.diffuseColor.toHexString().toLowerCase()).toBe('#733a45');
  const frame=wood.diffuseColor.toHexString();
  world.update({...options,items:beds.map(b=>({...b,bedding:'spearmint'}))});
@@ -379,7 +379,7 @@ test('Placed TV uses an emissive animated screen and casts forward light in ever
  for(const rotation of [0,1,2,3] satisfies readonly (0|1|2|3)[]){
   const tv={id:'qa-tv',productId:'lg-g4',x:3,z:4,rotation,entityId:''};
   world.update({...options,items:[tv],hass:active});world.render(0);world.render(200);
-  const screen=world.scene.meshes.filter(m=>m.isEnabled()&&(m.name.startsWith('qa-tv/')||m.name==='screen-face')).map(m=>m.material).find(m=>m instanceof StandardMaterial&&m.name.includes('screen-lit'));
+  const screen=world.scene.meshes.filter(m=>m.isEnabled()&&(m.name.startsWith('qa-tv/')||m.name==='screen-face')).map(m=>m.material).find(m=>(m instanceof StandardMaterial)&&m.name.includes('screen-lit'));
   expect(screen instanceof StandardMaterial).toBe(true);if(!(screen instanceof StandardMaterial))throw Error('Missing TV screen');
   expect(screen.emissiveTexture?.name).toBe('Apple TV pixel picture');expect(screen.emissiveColor.r).toBe(1);
   const light=world.sources.get('qa-tv/screen');expect(light?.light.isEnabled()).toBe(true);expect(light?.bulb.isEnabled()).toBe(false);
@@ -394,7 +394,7 @@ test('Kitchen strip and TV cannot crowd room lamps out of the floor lighting bud
  const items=[{id:'floor-lamp',productId:'okensand',x:2.5,z:3.5,rotation:0,entityId:'light.lamp'},{id:'pendant',productId:'gullsudare',x:3.3,z:5,rotation:0,entityId:'light.pendant'},{id:'tv',productId:'lg-g4',x:4.66,z:3,rotation:1,entityId:''}] satisfies typeof options.items;
  for(const q of [0,1,2,3] satisfies readonly (0|1|2|3)[]){
  world.update({...options,q,items,environment:night});world.render();
- const floor=world.scene.meshes.find(m=>m.name.startsWith('floor-')&&m.material instanceof StandardMaterial);if(!floor||!(floor.material instanceof StandardMaterial))throw Error('Missing lit floor');
+ const floor=world.scene.meshes.find(m=>m.name.startsWith('floor-')&&(m.material instanceof StandardMaterial));if(!floor||!((floor.material instanceof StandardMaterial)))throw Error('Missing lit floor');
  const rendered=floor.lightSources.slice(0,floor.material.maxSimultaneousLights);
  const lamp=world.sources.get('floor-lamp');if(!lamp)throw Error('Missing room lamp');
  expect(rendered.includes(lamp.light)).toBe(true);
@@ -561,7 +561,7 @@ test('Mirror cache survives unrelated clock animation and refreshes after lighti
  try{
   world.update(state,true);world.render(1000);
   const glass=world.scene.meshes.find(m=>m.name.startsWith('cache-mirror/')&&m.material?.name.includes('mirror-silver'));
-  if(!(glass?.material instanceof StandardMaterial&&glass.material.reflectionTexture instanceof MirrorTexture))throw Error('Missing mirror');
+  if(!((glass?.material instanceof StandardMaterial)&&(glass.material.reflectionTexture instanceof MirrorTexture)))throw Error('Missing mirror');
   const texture=glass.material.reflectionTexture,refresh=spyOn(texture,'resetRefreshCounter');
   try{
    world.render(1200);expect(refresh).not.toHaveBeenCalled();

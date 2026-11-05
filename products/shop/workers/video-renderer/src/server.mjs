@@ -79,9 +79,9 @@ const server = createServer(async (request, response) => {
     });
     response.end(result.video);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    console.error("Story video rendering failed.", error);
     response.writeHead(500, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: message }));
+    response.end(JSON.stringify({ error: "Story video rendering failed." }));
   }
 });
 

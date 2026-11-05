@@ -859,7 +859,7 @@ describe("existing Printify product recovery", () => {
             await db.prepare(sql).run();
         await db.prepare("UPDATE native_video_release_control SET paused = 0, current_release_id = 'native-12345' WHERE singleton = 1").run();
         const shopify = adminOrderFetcher(payload);
-        const fetcher: typeof fetch = (input, init) => fetchInputUrl(input).includes("api.printify.com")
+        const fetcher: typeof fetch = (input, init) => new URL(fetchInputUrl(input)).hostname === "api.printify.com"
             ? provider(input, init) : shopify(input, init);
         return { payload, target: row, provider, fetcher };
     }
@@ -909,7 +909,7 @@ describe("existing Printify product recovery", () => {
             ...(failure === "address" ? { address: "WARNING" } : {}),
             ...(failure === "fraud" ? { fraud: "PENDING" } : {}),
         });
-        const fetcher: typeof fetch = (input, init) => fetchInputUrl(input).includes("api.printify.com")
+        const fetcher: typeof fetch = (input, init) => new URL(fetchInputUrl(input)).hostname === "api.printify.com"
             ? fixture.provider(input, init) : shopify(input, init);
         const target = failure === "target hash" ? { ...fixture.target, requestSha256: "a".repeat(64) } : fixture.target;
         expect(await recoverPaidOrderProduct(workerEnv(), target, "native-12345", undefined, fetcher, time)).toMatchObject({ ready: false });
@@ -926,7 +926,7 @@ describe("existing Printify product recovery", () => {
             .toMatchObject({ ready: false, code: "RECOVERY_PLAN_CHANGED" });
         const fetcher: typeof fetch = async (input, init) => {
             const result = await fixture.fetcher(input, init);
-            if (fetchInputUrl(input).includes("api.printify.com"))
+            if (new URL(fetchInputUrl(input)).hostname === "api.printify.com")
                 await testPlatform().env.DB.prepare(`INSERT INTO fulfilment_exceptions
         (id, paid_order_id, code, summary, status, created_at) VALUES ('concurrent', ?, 'OTHER', 'Review', 'open', ?)`)
                     .bind(fixture.target.orderId, time()).run();
@@ -942,7 +942,7 @@ describe("existing Printify product recovery", () => {
         const fixture = await failedProduct();
         const fetcher: typeof fetch = async (input, init) => {
             const response = await fixture.fetcher(input, init);
-            if (!fetchInputUrl(input).includes("api.printify.com"))
+            if (new URL(fetchInputUrl(input)).hostname !== "api.printify.com")
                 return response;
             const product = Schema.decodeUnknownSync(PrintifyProductionProductSchema)(await response.json());
             return Response.json({ ...product,
@@ -1002,7 +1002,7 @@ describe("existing Printify order recovery", () => {
         for (const sql of controls.split("--> statement-breakpoint"))
             await db.prepare(sql).run();
         await db.prepare("UPDATE native_video_release_control SET paused = 0, current_release_id = 'native-12345' WHERE singleton = 1").run();
-        const fetcher: typeof fetch = (input, init) => fetchInputUrl(input).includes("api.printify.com")
+        const fetcher: typeof fetch = (input, init) => new URL(fetchInputUrl(input)).hostname === "api.printify.com"
             ? provider(input, init) : shopify(input, init);
         return { target, provider, fetcher, payload, mismatch: () => { matching = false; } };
     }
@@ -1072,7 +1072,7 @@ describe("existing Printify order recovery", () => {
             ...(change === "address" ? { address2: "Changed" } : {}),
             ...(change === "fraud" ? { fraud: "PENDING" } : {}),
         });
-        const fetcher: typeof fetch = (input, init) => fetchInputUrl(input).includes("api.printify.com")
+        const fetcher: typeof fetch = (input, init) => new URL(fetchInputUrl(input)).hostname === "api.printify.com"
             ? fixture.provider(input, init) : shopify(input, init);
         expect(await recoverPaidOrderProvider(workerEnv(), fixture.target, "native-12345", undefined, fetcher, time))
             .toMatchObject({ ready: false });

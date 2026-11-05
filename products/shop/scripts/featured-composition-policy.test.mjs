@@ -2,7 +2,7 @@ import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mj
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { compositionContext, verifyCompositionBaseline, verifyCompositionMedia, verifyCompositionPrintResolution, verifyCompositionCleanupIntent } from "./featured-composition-policy.mjs";
+import { compositionContext, verifyCompositionBaseline, verifyCompositionMedia, verifyCompositionPrintResolution, verifyCompositionCleanupIntent, compositionPrintFilename } from "./featured-composition-policy.mjs";
 const env = { GITHUB_ACTIONS: "true", RUNNER_ENVIRONMENT: "github-hosted", GITHUB_REPOSITORY: "bentbrain/bent-mono", GITHUB_REPOSITORY_ID: protectedConfig("githubRepositoryId"),
     GITHUB_REPOSITORY_OWNER_ID: protectedConfig("githubOwnerId"), GITHUB_ACTOR_ID: protectedConfig("githubOwnerId"), GITHUB_REF: "refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1",
     GITHUB_SHA: "a".repeat(40), GITHUB_RUN_ID: "12345", GITHUB_WORKFLOW_REF: "bentbrain/bent-mono/.github/workflows/featured-composition.yml@refs/heads/main",
@@ -71,4 +71,14 @@ test("publication can pin the unchanged qualified runtime while recording newer 
     assert.equal(context.toolingCommit, env.GITHUB_SHA);
     assert.throws(() => compositionContext({ ...env, COMPOSITION_QUALIFIED_SOURCE: "main" }));
     assert.throws(() => compositionContext({ ...env, COMPOSITION_ENVIRONMENT: "development", COMPOSITION_QUALIFIED_SOURCE: source }));
+});
+
+test("print evidence filenames stay within the reviewed product and geometry", () => {
+    const productId = "11111111-1111-4111-8111-111111111111";
+    const manifest = { products: [{ id: productId }] };
+    const asset = { configured_product_id: productId, geometry_key: "dtg:2400x3000", width_px: 2400, height_px: 3000 };
+    assert.equal(compositionPrintFilename(manifest, asset), `${productId}-dtg-2400x3000.png`);
+    for (const override of [{ configured_product_id: "../../outside" }, { geometry_key: "../../outside:2400x3000" },
+        { geometry_key: "dtg:2400x3000/../../outside" }, { width_px: 1 }])
+        assert.throws(() => compositionPrintFilename(manifest, { ...asset, ...override }));
 });

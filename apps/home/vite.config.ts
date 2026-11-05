@@ -1,6 +1,6 @@
 import vinext from "vinext";
-import {locationDefines} from "./build/location";
-import {publicMetadata} from "./build/public-metadata";
+import {locationDefines} from "./config/location";
+import {publicMetadata} from "./config/public-metadata";
 import { defineConfig } from "vite";
 
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -16,9 +16,9 @@ export default defineConfig(async ({mode}) => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    ...(isCodexSeatbeltSandbox
+      ? {server: {watch: {useFsEvents: false, usePolling: true}}}
+      : {}),
     define:locationDefines(mode),
     plugins: [
       publicMetadata(),

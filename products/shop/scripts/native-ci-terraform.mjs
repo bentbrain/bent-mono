@@ -212,6 +212,3 @@ export async function prepareDevelopmentImage(candidate, env = process.env, { re
             return { ...evidence, applied: true };
         } };
 }
-async function planDevelopmentImage(candidate, env = process.env) {
-    return (await prepareDevelopmentImage(candidate, env)).review;
-}

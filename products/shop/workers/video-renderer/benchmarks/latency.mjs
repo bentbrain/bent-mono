@@ -1,5 +1,7 @@
 import { protectedConfig } from "../../../scripts/protected-config.mjs";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { captureQueueTrace } from "./trace.mjs";
 import { allContainersStopped } from "./idle-state.mjs";
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -113,6 +115,9 @@ function jobsForBatch(batchId) {
         }));
     });
 }
+const reportDirectory = await mkdtemp(join(tmpdir(), "story-video-latency-"));
+const reportPath = join(reportDirectory, "latency.json");
+console.info(JSON.stringify({ reportPath }));
 const reports = [];
 let cleanupBenchmark = async () => undefined;
 let trace;
@@ -222,7 +227,7 @@ try {
                         throw new Error("Expected four fresh videos.");
                     const report = { concurrency, temperature, events, totalMs: Math.round(performance.now() - start) };
                     reports.push(report);
-                    await writeFile("/tmp/story-video-latency.json", JSON.stringify({ sourceRevision: source.design_revision_id, reports }, null, 2));
+                    await writeFile(reportPath, JSON.stringify({ sourceRevision: source.design_revision_id, reports }, null, 2));
                     console.info(JSON.stringify(report));
                     if (temperature === "warm")
                         await stopAndVerify(jobs);
@@ -377,11 +382,11 @@ try {
     const family = { storefront, configuration, lanes, notificationMode, queueSettings, observedNotificationModes: [...observedNotificationModes], designRevisionId: configured[0].designRevisionId, familyStartedAt, firstSnapshotAfterMs, prewarmed: !cold, warmupAttempts, designId: draft.id, products: configured.map((product) => product.id),
         notifications: [...notifications.values()], jobs: timings[0].results, media };
     // Preserve the measured readiness result even if diagnostic collection fails.
-    await writeFile("/tmp/story-video-latency.json", JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
+    await writeFile(reportPath, JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
     if (trace) {
         family.profile = await trace.results(family.products);
         family.failures = trace.failures(family.designRevisionId);
-        await writeFile("/tmp/story-video-latency.json", JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
+        await writeFile(reportPath, JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
         if (family.profile.some((item) => item.timings.renderLanes !== lanes ||
             item.timings.notificationPush !== (notificationMode === "push" ? 1 : 0) ||
             notificationMode === "push" && item.timings.notificationDelivered !== 1)) {
@@ -390,7 +395,7 @@ try {
     }
     if (verifyIdle)
         family.idleProof = await verifyIdle();
-    await writeFile("/tmp/story-video-latency.json", JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
+    await writeFile(reportPath, JSON.stringify({ sourceRevision: source.design_revision_id, reports, family }, null, 2));
     console.info(JSON.stringify({ family }));
     if (!production && (observedNotificationModes.size !== 1 || !observedNotificationModes.has(notificationMode))) {
         throw new Error("The storefront event stream did not use the requested notification mode.");

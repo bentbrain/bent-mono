@@ -93,7 +93,7 @@ export class StaticShadowCache {
   const render=map.customRenderFunction;if(!render)return;
   map.getCustomRenderList=(face,list)=>{
    if(!this.available||!this.faces.get(face)?.valid)return null;
-   if(list!==this.previousList){this.previousList=list;this.moving=list?.filter(mesh=>mesh instanceof Mesh&&Boolean(mesh.morphTargetManager||mesh.skeleton||mesh.hasThinInstances||mesh.instances.length))??[];}
+   if(list!==this.previousList){this.previousList=list;this.moving=list?.filter(mesh=>(mesh instanceof Mesh)&&Boolean(mesh.morphTargetManager||mesh.skeleton||mesh.hasThinInstances||mesh.instances.length))??[];}
    return this.moving;
   };
   map.onBeforeRenderObservable.add(face=>{this.faceIndex=face;});

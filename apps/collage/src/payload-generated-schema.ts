@@ -18,7 +18,7 @@ import {
   integer,
   jsonb,
 } from "@payloadcms/db-postgres/drizzle/pg-core";
-import { sql, relations } from "@payloadcms/db-postgres/drizzle";
+import { relations } from "@payloadcms/db-postgres/drizzle";
 
 export const users = pgTable(
   "users",

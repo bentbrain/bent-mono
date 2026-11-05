@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   if (!cart?.checkoutUrl || cart.totalQuantity < 1) {
     return cartRedirect(request, "Your cart is empty.", requestId);
   }
-  let checkoutLocation = cart.checkoutUrl;
+  let checkoutLocation: string;
   try {
     const upgrades = new Map<string, string>();
     await Promise.all(cart.lines.nodes.map(async (line) => {

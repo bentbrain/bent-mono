@@ -11,7 +11,7 @@ import {PBRMaterial} from '@babylonjs/core/Materials/PBR/pbrMaterial';
 export function enforceLightBudget(scene:Scene):void{
  const available=scene.getEngine().getCaps().maxTexturesImageUnits;
  const budget=Math.max(1,Math.min(12,(available||16)-4));
- for(const material of scene.materials)if(material instanceof StandardMaterial||material instanceof PBRMaterial){
+ for(const material of scene.materials)if((material instanceof StandardMaterial)||(material instanceof PBRMaterial)){
   if(material.maxSimultaneousLights>budget)material.maxSimultaneousLights=budget;
   // An old program can have incompatible morph/clip-plane inputs after a view
   // change. WebKit rejects that draw; wait for the matching program instead.
@@ -27,11 +27,11 @@ export function prioritizeRoomLights(scene:Scene,nominalIntensity?:ReadonlyMap<L
   function contribution(light:Light):number{
    const intensity=nominalIntensity?.get(light)??light.intensity;
    if(intensity<=0)return -1;
-   if(!(light instanceof PointLight||light instanceof SpotLight))return 1e6;
+   if(!((light instanceof PointLight)||(light instanceof SpotLight)))return 1e6;
    const delta=centre.subtract(light.position),distance=delta.length();
    if(distance>=light.range)return 0;
    let cone=1;
-   if(light instanceof SpotLight&&distance>.001){const alignment=Vector3.Dot(delta.scale(1/distance),light.direction.normalizeToNew());cone=Math.max(0,(alignment-Math.cos(light.angle/2))/(1-Math.cos(light.angle/2)));}
+   if((light instanceof SpotLight)&&distance>.001){const alignment=Vector3.Dot(delta.scale(1/distance),light.direction.normalizeToNew());cone=Math.max(0,(alignment-Math.cos(light.angle/2))/(1-Math.cos(light.angle/2)));}
    return intensity*cone*Math.max(0,1-(distance/light.range)**4)/Math.max(.04,distance*distance);
   }
   const scores=new Map(mesh.lightSources.map(light=>[light,contribution(light)]));

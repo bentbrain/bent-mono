@@ -63,6 +63,15 @@ export function verifyCompositionPrintResolution(manifest, geometries) {
         return { productId: product.productId, geometry: geometry.geometry_key, ppi: result.ppi };
     }));
 }
+export function compositionPrintFilename(manifest, asset) {
+    const geometry = /^([a-z0-9][a-z0-9_-]{0,31}):([1-9][0-9]*)x([1-9][0-9]*)$/.exec(asset.geometry_key ?? "");
+    check(manifest.products.some(product => product.id === asset.configured_product_id) && geometry &&
+        Number.isInteger(asset.width_px) && asset.width_px > 0 && asset.width_px <= 12000 &&
+        Number.isInteger(asset.height_px) && asset.height_px > 0 && asset.height_px <= 12000 &&
+        Number(geometry[2]) === asset.width_px && Number(geometry[3]) === asset.height_px,
+        "print output must name a reviewed product and its exact bounded geometry.");
+    return `${asset.configured_product_id}-${geometry[1]}-${geometry[2]}x${geometry[3]}.png`;
+}
 export function verifyCompositionCleanupIntent(context, intent, before) {
     check(context.operation === "cleanup" && context.environment === "development" && intent?.schemaVersion === 1 &&
         intent.environment === "development" && intent.operation === "create" && intent.sourceCommit === context.cleanupSource &&

@@ -2,7 +2,8 @@ import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mj
 import { isDeepStrictEqual as equal } from 'node:util';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, lstat, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { readRegularFile } from './read-regular-file.mjs';
 import { join } from 'node:path';
 const execute = promisify(execFile);
 const check = (condition, reason) => {
@@ -47,9 +48,9 @@ export async function readAutomatedBrowserEvidence(env, runId, run = execute) {
         await run('gh', ['run', 'download', String(runId), '--repo', 'bentbrain/bent-mono', '--name', `preview-browser-evidence-${runId}`, '--dir', directory], { env: { PATH: process.env.PATH, GH_TOKEN: env.GITHUB_TOKEN }, timeout: 30000, maxBuffer: 65536 });
         const records = [];
         for (const name of ['before', 'after']) {
-            const path = join(directory, `preview-smoke-${name}.json`), stat = await lstat(path);
-            check(stat.isFile() && stat.size > 0 && stat.size <= 16384, 'bounded original browser observations');
-            records.push(JSON.parse(resolveProtectedTemplate(await readFile(path, 'utf8'))));
+            const path = join(directory, `preview-smoke-${name}.json`);
+            records.push(JSON.parse(resolveProtectedTemplate(await readRegularFile(path, { minBytes: 1, maxBytes: 16384,
+                message: 'Automated acceptance rejected: bounded original browser observations' }))));
         }
         return records;
     }

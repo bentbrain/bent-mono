@@ -122,7 +122,7 @@ if (!image) {
     await wrangler(["containers", "build", buildContext, "--tag", tag, "--push"]);
     const tagged = `registry.cloudflare.com/${BACKUP_ACCOUNT}/${tag}`;
     const metadata = JSON.parse(await run("docker", ["image", "inspect", tagged]));
-    const digests = metadata[0]?.RepoDigests?.filter(value => new RegExp(`^registry.cloudflare.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(value));
+    const digests = metadata[0]?.RepoDigests?.filter(value => new RegExp(`^registry\\.cloudflare\\.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(value));
     check(digests?.length === 1, "pushed immutable backup image required.");
     image = digests[0];
 }

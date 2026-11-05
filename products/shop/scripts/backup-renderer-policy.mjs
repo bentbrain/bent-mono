@@ -39,7 +39,7 @@ export function assertBackupReceipt(receipt, sourceCommit) {
     check(receipt?.schemaVersion === 1 && receipt.environment === "development" && receipt.sourceCommit === sourceCommit &&
         receipt.qualified === true && receipt.cleaned === true && receipt.contract === "two-source-v2" &&
         /^[1-9][0-9]+$/.test(receipt.runId ?? "") &&
-        new RegExp(`^registry.cloudflare.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(receipt.image ?? "") &&
+        new RegExp(`^registry\\.cloudflare\\.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(receipt.image ?? "") &&
         /^[a-f0-9]{64}$/.test(receipt.bundleSha256 ?? "") && /^[a-f0-9-]{36}$/.test(receipt.workerVersion ?? "") &&
         Array.isArray(receipt.frames) && receipt.frames.length === 3 &&
         receipt.frames.every(frame => Number.isFinite(frame.rmse) && frame.rmse < 6), "qualified exact-source Preview backup receipt required.");
@@ -64,7 +64,7 @@ export function assertBackupRecovery(intent, context, source, live, nativeBefore
     }
     check(intent.intentKey === `editorial/backup/${source}/${context.environment}-intent.json` &&
         intent.receiptKey === `editorial/backup/${source}/${context.environment}.json`, "original evidence keys required.");
-    check(new RegExp(`^registry.cloudflare.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(intent.image ?? "") &&
+    check(new RegExp(`^registry\\.cloudflare\\.com/${BACKUP_ACCOUNT}/featured-backup@sha256:[a-f0-9]{64}$`).test(intent.image ?? "") &&
         /^[a-f0-9]{64}$/.test(intent.bundleSha256 ?? ""), "immutable original image and bundle required.");
     check(live.container.id === context.containerId && live.container.image === intent.image &&
         live.workerVersion !== intent.before?.workerVersion && live.container.version === intent.before?.container?.version + 1, "recovery requires the completed original deployment, never a replacement.");

@@ -11,9 +11,11 @@ export default defineConfig({
   output: 'server',
   vite: {
     plugins: [tailwindcss()],
-    // EmDash's inline editor loads Focus/Placeholder outside the prebundled core.
-    // Keep their DecorationSet/EditorView constructors in the same client graph.
-    optimizeDeps: { include: ['@tiptap/pm/view'] },
+    // Keep the inline editor's view constructors shared and discover its HTML
+    // block before first use, so cold edit-mode visits do not trigger a reload.
+    optimizeDeps: {
+      include: ['@tiptap/pm/view', '@emdash-cms/admin/html-block'],
+    },
   },
   adapter: cloudflare({
     imageService: 'passthrough',

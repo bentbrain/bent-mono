@@ -32,6 +32,8 @@ Run application commands from their directories, or use Bun workspace filters. C
 
 The root `bun.lock` manages the workspace dependencies. The isolated AWS Lambda renderer image retains its existing frozen npm lock as a production image input; changing that image's dependency installer requires separate renderer qualification. Development and application workspace commands use Bun.
 
+CI runs the existing application checks and full CodeQL analysis. The blog retains its zero-finding requirement. Shop's intentional network/file transfers and fixed-origin requests require individually documented, source-pinned dispositions; unknown findings and stale records fail. Raw analysis remains available. Dispositions require independent review of the exact head and current base before any native false-positive dismissal or merge; they never authorize a production release.
+
 ## Shared design system
 
 `packages/design-tokens` defines the bent font, cobalt accents, backgrounds, border width and square corners. Import `@bent/design-tokens/tokens.css` and map the tokens to application styles without importing another application's global reset.

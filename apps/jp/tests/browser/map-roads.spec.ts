@@ -450,12 +450,26 @@ test('private GPS revisions never request external tiles in edit mode or native 
         mode === 'preview' ? new URLSearchParams(query) : new URLSearchParams();
       search.set('media', item.id);
       await page.goto(`/?${search.toString()}#japan-map`);
-      if (mode === 'edit')
+      if (mode === 'edit') {
+        const navigationStartedAt = await page.evaluate(
+          () => performance.timeOrigin,
+        );
+        const fixturePost = page.locator('article').filter({
+          has: page.getByRole('link', {
+            name: 'Synthetic private map post',
+            exact: true,
+          }),
+        });
+        await expect(fixturePost).toBeVisible();
         await expect(
-          page
+          fixturePost
             .locator('[contenteditable="true"]')
             .filter({ hasText: inlineText }),
         ).toBeVisible();
+        expect(await page.evaluate(() => performance.timeOrigin)).toBe(
+          navigationStartedAt,
+        );
+      }
       const map = page.locator('#japan-map');
       await expect(
         page.locator('[data-feedback-id="map-preview"]'),

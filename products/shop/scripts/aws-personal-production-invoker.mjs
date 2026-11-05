@@ -1,6 +1,7 @@
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, lstat } from "node:fs/promises";
+import { readRegularFile } from "./read-regular-file.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual as equal } from "node:util";
@@ -19,10 +20,9 @@ const sha = value => createHash("sha256").update(value).digest("hex");
 async function readPrivate(name) {
     const path = join(DIRECTORY, name);
     try {
-        const info = await lstat(path);
-        check(info.isFile() && info.size <= 16384 && (info.mode & 0o077) === 0, "private ordinary recovery files required.");
+        const bytes = await readRegularFile(path, { maxBytes: 16384, privateOnly: true });
         try {
-            return JSON.parse(resolveProtectedTemplate(await readFile(path)));
+            return JSON.parse(resolveProtectedTemplate(bytes));
         }
         catch {
             throw new Error("Private Production invoker recovery data cannot be read; its contents were not logged.");

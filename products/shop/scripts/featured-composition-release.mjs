@@ -9,8 +9,9 @@ import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { randomBytes } from "node:crypto";
 import { BACKUP_ACCOUNT, backupHash } from "./backup-renderer-policy.mjs";
-import { compositionContext, verifyCompositionBaseline, verifyCompositionMedia, verifyCompositionPrintResolution, verifyCompositionCleanupIntent } from "./featured-composition-policy.mjs";
+import { compositionContext, verifyCompositionBaseline, verifyCompositionMedia, verifyCompositionPrintResolution, verifyCompositionCleanupIntent, compositionPrintFilename } from "./featured-composition-policy.mjs";
 import { compositionRecords } from "./featured-composition-records.mjs";
+import { releaseAssetUrl } from "./release-asset-url.mjs";
 import { syntheticCompositionManifest, syntheticCompositionSource, compareCompositionVideo } from "../workers/video-renderer/qualification/composition-fixture.mjs";
 const env = process.env, context = compositionContext(env), execute = promisify(execFile);
 if (process.platform !== "linux")
@@ -94,7 +95,7 @@ const previousIntent = await readObject(context.bucket, intentKey, true);
 check(context.operation !== "create" ? !!previousIntent : !previousIntent, "use create only once, or recover the exact saved intent.");
 const manifest = previousIntent ? JSON.parse(previousIntent).manifest : context.environment === "production" ? approved : syntheticCompositionManifest(approved);
 check(context.environment !== "production" || equal(manifest, approved), "reviewed Production manifest changed.");
-const records = compositionRecords(manifest);
+compositionRecords(manifest);
 if (cleanupOnly) {
     verifyCompositionCleanupIntent(context, JSON.parse(previousIntent), before);
     for (const source of manifest.sources) {
@@ -126,8 +127,8 @@ if (!cleanupOnly)
             bytes = syntheticCompositionSource(source);
         else {
             const asset = approved.transfer.assets.find(asset => asset.file === source.file);
-            check(asset && /^https:\/\/api.github.com\/repos\/bentbrain\/bent-mono\/releases\/assets\/[1-9][0-9]+$/.test(asset.apiUrl) && asset.sha256 === source.sha256, "exact draft transfer asset required.");
-            let response = await fetch(asset.apiUrl, { redirect: "manual", signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/octet-stream", "X-GitHub-Api-Version": "2022-11-28" } });
+            check(asset && asset.sha256 === source.sha256, "exact draft transfer asset required.");
+            let response = await fetch(releaseAssetUrl(asset.apiUrl), { redirect: "manual", signal: AbortSignal.timeout(30000), headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/octet-stream", "X-GitHub-Api-Version": "2022-11-28" } });
             if (response.status === 302) {
                 const url = new URL(response.headers.get("location"));
                 check(url.protocol === "https:" && url.hostname === "release-assets.githubusercontent.com", "unexpected asset redirect.");
@@ -208,7 +209,7 @@ try {
         for (const asset of snapshot.assets) {
             const bytes = await readObject(context.bucket, asset.storage_key);
             check(backupHash(bytes) === asset.sha256 && bytes.readUInt32BE(16) === asset.width_px && bytes.readUInt32BE(20) === asset.height_px, "print object checksum/dimensions differ.");
-            await writeFile(join(output, `${asset.configured_product_id}-${asset.geometry_key.replaceAll(":", "-")}.png`), bytes);
+            await writeFile(join(output, compositionPrintFilename(manifest, asset)), bytes);
         }
         if (context.environment === "development")
             frames = await compareCompositionVideo(output, manifest);

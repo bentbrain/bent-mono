@@ -31,6 +31,9 @@
   },
   "include": [
     "next-env.d.ts",
+    "config/**/*.ts",
+    "vite.config.ts",
+    "vite.card.config.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "packages/**/*.ts",

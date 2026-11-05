@@ -1,6 +1,7 @@
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, lstat, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { readRegularFile } from './read-regular-file.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validationInputs, matchingValidation } from './validation-inputs.mjs';
@@ -17,10 +18,8 @@ async function download(api, runId, job, token) {
     const directory = await mkdtemp(join(tmpdir(), 'validation-inputs-'));
     try {
         execFileSync('gh', ['run', 'download', String(runId), '--repo', 'bentbrain/bent-mono', '--name', name, '--dir', directory], { env: { ...process.env, GH_TOKEN: token }, stdio: ['ignore', 'ignore', 'pipe'], timeout: 30000 });
-        const path = join(directory, `validation-inputs-${job}.json`), stat = await lstat(path);
-        if (!stat.isFile() || stat.size > 4096)
-            return null;
-        return JSON.parse(resolveProtectedTemplate(await readFile(path, 'utf8')));
+        const path = join(directory, `validation-inputs-${job}.json`);
+        return JSON.parse(resolveProtectedTemplate(await readRegularFile(path, { maxBytes: 4096 })));
     }
     finally {
         await rm(directory, { recursive: true, force: true });

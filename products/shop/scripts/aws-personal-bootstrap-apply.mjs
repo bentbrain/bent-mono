@@ -1,6 +1,7 @@
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
-import { open, readFile, mkdtemp, lstat } from "node:fs/promises";
+import { open, readFile, mkdtemp } from "node:fs/promises";
+import { readRegularFile } from "./read-regular-file.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APPROVED_BOOTSTRAP, BOOTSTRAP_DIRECTORY, BOOTSTRAP_PRIVATE, verifyBootstrapReview } from "./aws-personal-bootstrap.mjs";
@@ -27,10 +28,7 @@ export async function privateWrite(path, bytes) {
 }
 async function optionalRead(path) {
     try {
-        const info = await lstat(path);
-        if (!info.isFile())
-            throw new Error("Bootstrap state and journals must be ordinary files.");
-        return await readFile(path);
+        return await readRegularFile(path);
     }
     catch (error) {
         if (error.code === "ENOENT")
@@ -60,7 +58,7 @@ export async function checkBootstrapVacancies(call) {
     }
     const oidc = JSON.parse(await call(["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn",
         `arn:aws:iam::${PERSONAL_ACCOUNT}:oidc-provider/token.actions.githubusercontent.com`]));
-    if (oidc.Url !== "token.actions.githubusercontent.com" || !oidc.ClientIDList?.includes("sts.amazonaws.com")) {
+    if (oidc.Url !== "token.actions.githubusercontent.com" || !Array.isArray(oidc.ClientIDList) || !oidc.ClientIDList.some(audience => audience === "sts.amazonaws.com")) {
         throw new Error("Existing GitHub OIDC provider no longer matches the reviewed issuer/audience.");
     }
 }

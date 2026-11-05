@@ -1,8 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 
 const root = resolve(import.meta.dirname, "../../..");
+const outputDirectory = await mkdtemp(join(tmpdir(), "forever-tee-batch-"));
 const endpoint = requiredEnvironment("REMOTE_BENCHMARK_URL").replace(/\/$/, "");
 const token = requiredEnvironment("REMOTE_BENCHMARK_TOKEN");
 const artworkPath = process.env.STORY_ARTWORK ?? "/tmp/forever-tee-saved-design.png";
@@ -126,7 +128,7 @@ for (let index = 0; index < jobs.length; index += 1) {
   if (!cacheResponse.ok) {
     throw new Error(`Cache read failed with ${String(cacheResponse.status)}.`);
   }
-  const output = `/tmp/forever-tee-batch-${product.id}.mp4`;
+  const output = join(outputDirectory, `${product.id}.mp4`);
   await writeFile(output, video);
   cached.push({
     bytes: video.byteLength,

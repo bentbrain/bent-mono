@@ -121,14 +121,14 @@ export class ApartmentWorld {
   this.shell=makeShell(scene);
   this.lampGlow=new GlowLayer('lamp-shades',scene,{mainTextureFixedSize:512,blurKernelSize:6,camera:this.camera});this.lampGlow.intensity=.25;
   this.lampGlow.customEmissiveColorSelector=(_mesh,_subMesh,material,result)=>{
-   const glow=material instanceof StandardMaterial&&(material.name.includes('surface-#fff5d6-lit')||material.name.includes('lamp-diffuser-')||material.name.includes('lamp-bulb')||material.name.includes('diffuser-lit')||material.name==='kitchen-strip-diffuser'||material.name.includes('screen-lit'))?material.emissiveColor:Color3.Black();
+   const glow=(material instanceof StandardMaterial)&&(material.name.includes('surface-#fff5d6-lit')||material.name.includes('lamp-diffuser-')||material.name.includes('lamp-bulb')||material.name.includes('diffuser-lit')||material.name==='kitchen-strip-diffuser'||material.name.includes('screen-lit'))?material.emissiveColor:Color3.Black();
    result.set(glow.r,glow.g,glow.b,1);
   };
   this.sky=new HemisphericLight('sky',Vector3.Up(),scene);this.sky.intensity=.65;this.sky.groundColor=new Color3(.22,.18,.16);
   this.sun=new DirectionalLight('sun',new Vector3(-.5,-1,.5),scene);this.sun.position=new Vector3(10,20,-5);this.sun.intensity=1;
   this.sun.shadowMinZ=1;this.sun.shadowMaxZ=60;this.sun.autoCalcShadowZBounds=true;this.sun.shadowOrthoScale=.1;
   this.sunShadow=new ShadowGenerator(2048,this.sun,false,undefined,this.redShadowTextures);this.sunShadow.forceBackFacesOnly=true;this.sunShadow.bias=.001;this.sunShadow.normalBias=0;this.sunShadow.usePercentageCloserFiltering=true;this.sunShadow.filteringQuality=ShadowGenerator.QUALITY_LOW;
-  const gl=engine.getRenderingCanvas()?.getContext('webgl2');if(typeof WebGL2RenderingContext!=='undefined'&&gl instanceof WebGL2RenderingContext)this.shadowCachePool=new ShadowCachePool(gl);
+  const gl=engine.getRenderingCanvas()?.getContext('webgl2');if(typeof WebGL2RenderingContext!=='undefined'&&(gl instanceof WebGL2RenderingContext))this.shadowCachePool=new ShadowCachePool(gl);
   this.refreshCasters();
   scene.skipPointerMovePicking=true;
  }
@@ -186,7 +186,7 @@ export class ApartmentWorld {
   const meshes=root.getChildMeshes();
   // These animations select at most one authored pose. Keep a fixed shader
   // layout instead of recompiling while weights briefly pass through zero/two.
-  if(model==='pearl'||model==='maree'||model==='orange-cat-clock')for(const mesh of meshes)if(mesh instanceof Mesh&&mesh.morphTargetManager)mesh.morphTargetManager.numMaxInfluencers=1;
+  if(model==='pearl'||model==='maree'||model==='orange-cat-clock')for(const mesh of meshes)if((mesh instanceof Mesh)&&mesh.morphTargetManager)mesh.morphTargetManager.numMaxInfluencers=1;
   for(const mesh of meshes){mesh.receiveShadows=true;mesh.layerMask=CAMERA_LAYER;mesh.metadata={itemId:id};if(mesh instanceof Mesh){mesh.renderOutline=!mesh.material?.name.includes('diffuser')&&!mesh.material?.name.includes('textile-thread-');mesh.outlineColor=Color3.FromHexString('#303635');mesh.outlineWidth=photoModelIds.has(model)?.0015:model==='casalino'||model==='kd27'?.003:.009;}}
   const placed={root,entries,meshes,model};return placed;
  }
@@ -219,9 +219,9 @@ export class ApartmentWorld {
      for(const mesh of model.meshes)if(mesh.material?.name.includes('seat-pad'))mesh.setEnabled(placed.seatPad??false);
      const cord=model.meshes.find(m=>m.name==='pendant-cord');if(cord){const top=productFor(placed.productId)?.h??.7,height=Math.max(.001,2.7-baseHeight(placed)-top);cord.scaling.y=height*HEIGHT_SCALE;cord.position.y=(top+height/2)*HEIGHT_SCALE;}
      const bedding=BEDDING.find(b=>b.id===placed.bedding)??BEDDING[0];
-     if(placed.productId==='kirribilli'&&bedding)for(const mesh of model.meshes)if(mesh.material instanceof StandardMaterial&&mesh.material.name.includes('bedding-'))mesh.material.diffuseColor=Color3.FromHexString(mesh.material.name.includes('bedding-trim')?bedding.trim:bedding.color);
+     if(placed.productId==='kirribilli'&&bedding)for(const mesh of model.meshes)if((mesh.material instanceof StandardMaterial)&&mesh.material.name.includes('bedding-'))mesh.material.diffuseColor=Color3.FromHexString(mesh.material.name.includes('bedding-trim')?bedding.trim:bedding.color);
      const product=productFor(placed.productId),finish=product?.finishes?.find(f=>f.id===placed.finish)??product?.finishes?.[0];
-     for(const mesh of model.meshes)if(mesh.material instanceof StandardMaterial&&mesh.material.name.includes('finish-primary')){
+     for(const mesh of model.meshes)if((mesh.material instanceof StandardMaterial)&&mesh.material.name.includes('finish-primary')){
       if(finish)mesh.material.diffuseColor=Color3.FromHexString(placed.materialColor??finish.color);
       const clear=placed.productId==='magazine-rack'&&finish?.id==='clear';mesh.material.alpha=clear?.08:1;mesh.material.backFaceCulling=!clear;mesh.material.specularColor=clear?new Color3(.55,.6,.6):Color3.Black();
       mesh.material.specularPower=64;
@@ -295,7 +295,7 @@ export class ApartmentWorld {
    model.root.position.set(cat.x,(cat.height??0)*HEIGHT_SCALE,cat.z);model.root.rotation.y=-cat.direction*Math.PI/2;
    const pose=cat.animation+'_'+(cat.frame??0);
    if(this.poses.get(id)===pose)continue;this.poses.set(id,pose);
-   for(const mesh of model.meshes)if(mesh instanceof Mesh&&mesh.morphTargetManager){const manager=mesh.morphTargetManager;manager.areUpdatesFrozen=true;for(let i=0;i<manager.numTargets;i++){const t=manager.getTarget(i);t.influence=t.name===pose?1:0;}manager.areUpdatesFrozen=false;}
+   for(const mesh of model.meshes)if((mesh instanceof Mesh)&&mesh.morphTargetManager){const manager=mesh.morphTargetManager;manager.areUpdatesFrozen=true;for(let i=0;i<manager.numTargets;i++){const t=manager.getTarget(i);t.influence=t.name===pose?1:0;}manager.areUpdatesFrozen=false;}
   }
   for(const item of options.items){
    const model=this.models.get(item.id);if(!model)continue;
@@ -358,7 +358,7 @@ export class ApartmentWorld {
     const bulb=value.stripLength?MeshBuilder.CreateBox('strip/'+value.key,{width:.022,height:.009*HEIGHT_SCALE,depth:value.stripLength},this.scene):MeshBuilder.CreateSphere('bulb/'+value.key,{diameter:.095,segments:6},this.scene),material=new StandardMaterial(value.stripLength?'kitchen-strip-diffuser':'bulb-material',this.scene);bulb.material=material;bulb.layerMask=CAMERA_LAYER;material.disableLighting=true;
     source={...this.shadowCachePool?{cache:new StaticShadowCache(this.shadowCachePool,shadow)}:{},light,shadow,bulb,material,...value.ownerId?{ownerId:value.ownerId}:{}};this.sources.set(value.key,source);
    }
-   if(source.light instanceof SpotLight&&value.direction)source.light.direction.set(value.direction.x,value.direction.y,value.direction.z);
+   if((source.light instanceof SpotLight)&&value.direction)source.light.direction.set(value.direction.x,value.direction.y,value.direction.z);
    source.light.position.set(value.x,value.height*HEIGHT_SCALE,value.z);source.light.diffuse=rgb(value.color);source.light.intensity=value.brightness*.8*(value.power??1);source.light.setEnabled(o.sceneLights!==undefined||value.brightness>0);
    if(source.shadowStale&&source.light.intensity>0){source.shadow.getShadowMap()?.resetRefreshCounter();source.shadowStale=false;}
    source.bulb.position.copyFrom(source.light.position);
@@ -451,7 +451,7 @@ export class ApartmentWorld {
   const swing=Math.round(Math.sin(now*Math.PI*2/1800)*12)/12;
   let changed=false;
   for(const model of this.models.values())if(model.model==='orange-cat-clock'){
-   for(const mesh of model.meshes)if(mesh instanceof Mesh&&mesh.morphTargetManager){
+   for(const mesh of model.meshes)if((mesh instanceof Mesh)&&mesh.morphTargetManager){
     const manager=mesh.morphTargetManager;manager.areUpdatesFrozen=true;
     for(let i=0;i<manager.numTargets;i++){
      const target=manager.getTarget(i),weight=target.name==='clock-left'?Math.max(0,-swing):target.name==='clock-right'?Math.max(0,swing):0;

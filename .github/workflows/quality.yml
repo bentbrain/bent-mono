@@ -131,6 +131,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.18.0
       - uses: github/codeql-action/init@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:
           languages: javascript-typescript
@@ -143,3 +146,11 @@ jobs:
         env:
           SARIF_DIRECTORY: ${{ runner.temp }}/codeql-results
         run: node scripts/check-sarif.mjs
+      - name: Retain original CodeQL report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codeql-original-sarif
+          path: ${{ runner.temp }}/codeql-results/*.sarif
+          if-no-files-found: error
+          retention-days: 14
