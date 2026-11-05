@@ -1,4 +1,5 @@
 import { protectedConfig } from "../../../scripts/protected-config.mjs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import sharp from "sharp";
 import { expect, test } from "./test";
@@ -246,6 +247,31 @@ test("48 MP uploads above 8 MB reach the editor with every source byte retained"
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.locator("canvas.editor-direct-manipulation-cue")).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+});
+test("upload preserves a declaration accepted before mobile hydration", async ({ page }) => {
+    const fixture = await installCameraPreviewFixture(page, () => Promise.resolve("success"), 2.6, true);
+    const scripts = Promise.withResolvers<void>();
+    // Keep the server-rendered form usable while its client scripts are in flight.
+    // Only scripts are held, so styles and the native checkbox still work.
+    await page.route("**/_next/static/chunks/**", async route => {
+        if (route.request().resourceType() === "script") await scripts.promise;
+        await route.continue();
+    });
+    await page.goto("/create", { waitUntil: "commit" });
+    try {
+        await page.getByRole("checkbox").check();
+    } finally {
+        scripts.resolve();
+    }
+    await page.waitForLoadState("load");
+    await expect(page.getByRole("img", { name: "QR code to continue creating this design on a phone", includeHidden: true })).toHaveCount(0);
+    await expect(page.getByRole("checkbox")).toBeChecked();
+    await page.locator('input[type="file"]').setInputFiles(resolve("e2e/local/artwork.png"));
+    await page.getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.locator("canvas.editor-direct-manipulation-cue")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+    expect(fixture.sourceBytes()?.equals(await readFile(resolve("e2e/local/artwork.png")))).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.dataset["cameraRequested"])).toBeUndefined();
 });
 test("progressive upload keeps edits through refresh and print completion", async ({ page }, testInfo) => {
     const fixture = await installCameraPreviewFixture(page, () => Promise.resolve("success"), 2.6, true);

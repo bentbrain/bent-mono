@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileOnlyGate } from "@/components/mobile-only-gate";
 
+// Happy DOM has no canvas context. Browser tests exercise the actual QR renderer.
+vi.mock("qrcode", () => ({ default: { toCanvas: vi.fn(() => Promise.resolve()) } }));
+
 function installMatchMedia(matches: boolean) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let currentMatches = matches;
@@ -151,6 +154,37 @@ describe("MobileOnlyGate", () => {
     act(() => {
       root.unmount();
     });
+  });
+
+  it("preserves native form controls and consent during mobile hydration", async () => {
+    const landing = (
+      <MobileOnlyGate renderMobileFallback>
+        <form>
+          <input type="checkbox" required />
+          <input type="file" />
+        </form>
+      </MobileOnlyGate>
+    );
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(landing);
+    document.body.append(container);
+    const declaration = container.querySelector("input");
+    const upload = container.querySelector('input[type="file"]');
+    if (!declaration || !upload) throw new Error("Expected upload form.");
+    declaration.checked = true;
+    installMatchMedia(false);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    await act(async () => {
+      root = hydrateRoot(container, landing);
+      await Promise.resolve();
+    });
+    try {
+      expect(container.querySelector("input")?.checked).toBe(true);
+      expect(container.querySelector("input")).toBe(declaration);
+      expect(container.querySelector('input[type="file"]')).toBe(upload);
+    } finally {
+      act(() => { root?.unmount(); });
+    }
   });
 
   it("hydrates the server fallback into the computed desktop state", async () => {
