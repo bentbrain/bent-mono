@@ -403,7 +403,7 @@ test("owner/object changes at init, pull, plan and final apply barriers fail clo
         }
     }
 });
-test("actual CLI requires missing private configuration; IAM writes and argument overrides stay forbidden", async t => {
+test("actual CLI requires protected configuration; IAM writes and argument overrides stay forbidden", async t => {
     const h = await harness(t);
     for (const args of [["development", "plan", "-target=aws_iam_role.ci"], ["both", "plan"], ["production", "apply"], ["development", "plan", "--backend=x"], ["development", "recover"],
         ["development|production", "show", "--review=development-ABC123", `--plan-sha256=${"a".repeat(64)}`],
@@ -411,8 +411,8 @@ test("actual CLI requires missing private configuration; IAM writes and argument
         ["production", "show", "--review=development-ABC123", `--plan-sha256=${"a".repeat(64)}`]]) await assert.rejects(h.invoke(args));
     for (const args of [["iam", "update-assume-role-policy", "--role-name", "forever-tee-video-development-ci"], ["iam", "list-role-policies", "--role-name", "foreign"],
         ["iam", "get-role-policy", "--role-name", "forever-tee-video-production-ci", "--policy-name", "foreign"], ["iam", "get-policy-version", "--policy-arn", "foreign", "--version-id", "v7"]]) assert.throws(() => validatePersonalArguments(args));
-    const cli = spawnSync(process.execPath, ["scripts/aws-personal.mjs", "terraform", "bootstrap", "repository-trust", "development", "plan"], { cwd: new URL("../", import.meta.url), encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: h.directory, SHOP_PROTECTED_CONFIG_JSON: JSON.stringify(baseConfig) } });
-    assert.notEqual(cli.status, 0); assert.match(cli.stderr, /ENOENT|protected configuration/); assert.equal(h.commands.length, 0);
+    const cli = spawnSync(process.execPath, ["scripts/aws-personal.mjs", "terraform", "bootstrap", "repository-trust", "development", "plan"], { cwd: new URL("../", import.meta.url), encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: h.directory, SHOP_PROTECTED_CONFIG_JSON: "" } });
+    assert.equal(cli.status, 1); assert.equal(cli.stdout, ""); assert.match(cli.stderr, /Shop protected configuration is required\./); assert.equal(h.commands.length, 0);
 });
 test("real planning rejects unknown drift; saved apply rejects changed binary, baseline, state, backend or rendering", async t => {
     const drift = await harness(t, { drift: true }); await assert.rejects(drift.invoke(["development", "plan"]), /drift/);
