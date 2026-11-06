@@ -2,6 +2,7 @@ import { protectedConfig } from "./protected-config.mjs";
 import { pathToFileURL } from "node:url";
 import { assertProductionIdentityContext } from "./native-production-identity.mjs";
 import { workerContentManifest } from "./native-ci-worker.mjs";
+import { classifyProductionBaseline, NATIVE_PRODUCTION_QUEUE } from "./native-production-worker.mjs";
 const ACCOUNT = protectedConfig("cloudflareAccountId"), DATABASE = protectedConfig("resource_1a1378f0d1dc");
 const ROOT = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}`;
 const check = (value, reason) => { if (!value)
@@ -45,7 +46,8 @@ export async function inspectProductionCloudflare(env = process.env, request = f
     check(binding("DB")?.type === "d1" && binding("DB").id === DATABASE &&
         binding("DESIGN_ARTWORK")?.type === "r2_bucket" && binding("DESIGN_ARTWORK").bucket_name === "forever-tee-design-artwork-production", "existing Production database/artwork bindings.");
     const provider = binding("STORY_VIDEO_PROVIDER");
-    check(!provider || provider.type === "plain_text" && provider.text === "cloudflare", "unexpected provider; inspect the actual cutover history.");
+    check(!provider || provider.type === "plain_text" && ["cloudflare", "lambda"].includes(provider.text), "unexpected provider; inspect the actual cutover history.");
+    const currentProvider = provider?.text ?? "cloudflare", native = currentProvider === "lambda";
     const queueBinding = binding("STORY_VIDEO_JOBS");
     check(queueBinding?.type === "queue" && queueBinding.queue_name === "forever-tee-story-video-production", "queue name binding.");
     // Worker settings identify queue bindings by name, not by queue_id. Resolve
@@ -61,11 +63,13 @@ export async function inspectProductionCloudflare(env = process.env, request = f
     const consumerNames = [consumers?.[0]?.script_name, consumers?.[0]?.script, consumers?.[0]?.service].filter(name => name !== undefined);
     check(queue.queue_name === "forever-tee-story-video-production" && queue.queue_id === queueId &&
         Array.isArray(consumers) && consumers.length === 1 && consumerNames.length > 0 && consumerNames.every(name => name === "forever-tee-api") &&
-        consumers[0].type === "worker" && consumers[0].settings?.max_concurrency === 1, "Production queue identity and Cloudflare concurrency.");
+        consumers[0].type === "worker" && consumers[0].settings?.max_concurrency === (native ? NATIVE_PRODUCTION_QUEUE.max_concurrency : 1), "Production queue identity and provider concurrency.");
     const deployments = await api("/workers/scripts/forever-tee-api/deployments"), versions = await api("/workers/scripts/forever-tee-api/versions");
     const active = deployments.deployments?.[0]?.versions;
     check(active?.length === 1 && active[0].percentage === 100 && versions.items?.[0]?.id === active[0].version_id, "active/latest version mismatch.");
     const content = await workerContentManifest(await get("/workers/scripts/forever-tee-api/content/v2"));
+    if (native)
+        check(classifyProductionBaseline(settings, consumers[0], { workerVersion: active[0].version_id, content }) === "forward", "existing native Production baseline.");
     const after = await api("/workers/scripts/forever-tee-api/deployments");
     const latest = await api("/workers/scripts/forever-tee-api/versions");
     check(after.deployments?.[0]?.versions?.length === 1 && after.deployments[0].versions[0].version_id === active[0].version_id &&
@@ -84,7 +88,8 @@ export async function inspectProductionCloudflare(env = process.env, request = f
     }
     if (!columns.some(row => row.name === "execution_id"))
         missing.push("execution fence migration");
-    return { productionInspected: true, sourceCommit: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID, provider: "cloudflare", workerVersion: active[0].version_id,
+    check(!native || missing.length === 0, "existing native Production prerequisites.");
+    return { productionInspected: true, sourceCommit: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID, provider: currentProvider, workerVersion: active[0].version_id,
         workerContent: content, databaseId: DATABASE, queueId, queueSettings: consumers[0].settings,
         migrations: migrations.map(row => row.name), jobCounts: counts, missing, awsAccessAttempted: false, applicationMutations: false,
         nativePromotionReady: false };
