@@ -6,11 +6,23 @@ import { defineConfig } from 'astro/config';
 import emdash from 'emdash/astro';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
+import { builtinModules, createRequire } from 'node:module';
+
+// Use Astro's own Vite/Rolldown version for the native build plugin.
+const astroRequire = createRequire(import.meta.resolve('astro'));
+const { esmExternalRequirePlugin } = astroRequire('vite');
+const workerBuiltins = esmExternalRequirePlugin({
+  external: builtinModules.flatMap((name) => [name, `node:${name}`]),
+});
+workerBuiltins.apply = 'build';
+workerBuiltins.applyToEnvironment = (environment) =>
+  environment.config.consumer === 'server';
+
 export default defineConfig({
   site: 'https://jp.bent.build',
   output: 'server',
   vite: {
-    plugins: [tailwindcss()],
+    plugins: [workerBuiltins, tailwindcss()],
     // Keep the inline editor's view constructors shared and discover its HTML
     // block before first use, so cold edit-mode visits do not trigger a reload.
     optimizeDeps: {

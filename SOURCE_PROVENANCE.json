@@ -10,7 +10,20 @@
       "repository": "https://github.com/bentbrain/japan-blog",
       "revision": "9d98165008a9f9c06c0fae8a5f2f1f10b88189ea",
       "destination": "apps/jp",
-      "method": "audited source snapshot; original history remains upstream"
+      "method": "audited source snapshot; original history remains upstream",
+      "followups": [
+        {
+          "fromRevision": "9d98165008a9f9c06c0fae8a5f2f1f10b88189ea",
+          "revision": "74c23c321f2b58ee6fc12b18deb7938faa969ebf",
+          "commits": [
+            "db255c198243dfa5b27ec6515913b8b3d41f7426",
+            "70046a9670732c0395fb18f839c8422063126710",
+            "edacefb61313eb57c09378e2d44cb2f0a74bfa8f",
+            "74c23c321f2b58ee6fc12b18deb7938faa969ebf"
+          ],
+          "method": "audited source delta; monorepo adaptations and newer dependencies retained; original history remains upstream"
+        }
+      ]
     },
     {
       "repository": "https://github.com/bentbrain/apartment-guide",

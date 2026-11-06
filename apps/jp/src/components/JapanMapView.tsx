@@ -31,13 +31,19 @@ type MapItem = MapPoint & {
   src: string;
   poster: string;
   photoResolution?: string;
-  photo?: { src: string; srcSet?: string; sizes?: string };
+  photo?: {
+    src: string;
+    srcSet?: string;
+    sizes?: string;
+    width?: number;
+    height?: number;
+  };
 };
 const controlClass =
   'size-11 bg-background p-0 text-foreground hover:bg-foreground hover:text-background dark:bg-background dark:hover:bg-foreground';
 
 function MapPhoto({ item, onLoad }: { item: MapItem; onLoad: () => void }) {
-  const [photo, setPhoto] = useState(
+  const [photo, setPhoto] = useState<MapItem['photo']>(
     item.photoResolution ? undefined : item.photo || { src: item.poster },
   );
   const [failed, setFailed] = useState(false);
@@ -57,6 +63,14 @@ function MapPhoto({ item, onLoad }: { item: MapItem; onLoad: () => void }) {
     return (
       <img
         {...photo}
+        style={
+          photo.width && photo.height
+            ? {
+                width: `min(100%, ${String(photo.width)}px, ${String((55 * photo.width) / photo.height)}dvh)`,
+                aspectRatio: `${String(photo.width)} / ${String(photo.height)}`,
+              }
+            : undefined
+        }
         alt={item.title}
         loading="eager"
         onLoad={(event) => {
@@ -87,30 +101,60 @@ function MapPhoto({ item, onLoad }: { item: MapItem; onLoad: () => void }) {
 // visible photo, without preloading video bodies or the rest of the library.
 function MapPhotos({ items, index }: { items: MapItem[]; index: number }) {
   const [warm, setWarm] = useState(false);
+  const [reservedHeight, setReservedHeight] = useState(0);
+  const slot = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = slot.current;
+    if (!element) return;
+    // Metadata reserves image space before download. Observe the visible slot so
+    // cached neighbors also retain their space when activated without a load event.
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry)
+        setReservedHeight((current) =>
+          Math.max(current, entry.contentRect.height),
+        );
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
   const selected = items[index];
   const nearby = new Set([
     index,
     (index - 1 + items.length) % items.length,
     (index + 1) % items.length,
   ]);
-  return items.map((item, position) =>
-    item.kind === 'photo' &&
-    nearby.has(position) &&
-    (position === index || warm || selected?.kind === 'video') ? (
-      <div
-        key={item.id}
-        data-map-photo={position === index ? 'active' : 'preload'}
-        className={position === index ? 'contents' : 'hidden'}
-        aria-hidden={position !== index ? true : undefined}
-      >
-        <MapPhoto
-          item={item}
-          onLoad={() => {
-            setWarm(true);
-          }}
-        />
-      </div>
-    ) : null,
+  return (
+    <div
+      ref={slot}
+      className={
+        selected?.kind === 'video'
+          ? 'hidden'
+          : 'flex w-full shrink-0 flex-col justify-center'
+      }
+      style={{ minHeight: `min(55dvh, ${String(reservedHeight)}px)` }}
+    >
+      {items.map((item, position) =>
+        item.kind === 'photo' &&
+        nearby.has(position) &&
+        (position === index || warm || selected?.kind === 'video') ? (
+          <div
+            key={item.id}
+            data-map-photo={position === index ? 'active' : 'preload'}
+            className={position === index ? 'contents' : 'hidden'}
+            aria-hidden={position !== index ? true : undefined}
+          >
+            <MapPhoto
+              item={item}
+              onLoad={() => {
+                setWarm(true);
+              }}
+            />
+          </div>
+        ) : null,
+      )}
+    </div>
   );
 }
 

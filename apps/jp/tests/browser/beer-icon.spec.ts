@@ -39,7 +39,7 @@ for (const width of [390, 1280]) {
             });
           }
           const metrics = await icon.evaluate(
-            async (svg, { image, clip, box, scale }) => {
+            async (svg, { image, clip, scale }) => {
               const canvas = document.createElement('canvas');
               const context = canvas.getContext('2d');
               if (!context) throw new Error('Raster context required');
@@ -66,8 +66,9 @@ for (const width of [390, 1280]) {
                   (c) => Math.abs((pixels[i + c] ?? 0) - (color[c] ?? 0)) < 35,
                 );
               };
-              // Sample the actual screen raster, including fractional placement
-              // and crisp-edge snapping, rather than rasterizing an SVG copy.
+              // SVG roots snap their paint to CSS pixels even when their layout
+              // box is fractional. Normalize to the actual raster bounds so a
+              // high-DPR sample cannot include the handle's border by mistake.
               const coverage = (
                 left: number,
                 top: number,
@@ -78,9 +79,10 @@ for (const width of [390, 1280]) {
                 let ink = 0;
                 for (let y = 0; y < img.height; y++) {
                   for (let x = 0; x < img.width; x++) {
-                    const nx = (clip.x + (x + 0.5) / scale - box.x) / box.width;
-                    const ny =
-                      (clip.y + (y + 0.5) / scale - box.y) / box.height;
+                    const nx =
+                      (x + 0.5 - paintedLeft) /
+                      (paintedRight + 1 - paintedLeft);
+                    const ny = (y + 0.5 - first) / (last + 1 - first);
                     if (nx >= left && nx < right && ny >= top && ny < bottom) {
                       total++;
                       if (painted(x, y)) ink++;
@@ -92,11 +94,15 @@ for (const width of [390, 1280]) {
               };
               let first = img.height;
               let last = -1;
+              let paintedLeft = img.width;
+              let paintedRight = -1;
               for (let y = 0; y < img.height; y++) {
                 for (let x = 0; x < img.width; x++) {
                   if (painted(x, y)) {
                     first = Math.min(first, y);
                     last = Math.max(last, y);
+                    paintedLeft = Math.min(paintedLeft, x);
+                    paintedRight = Math.max(paintedRight, x);
                   }
                 }
               }

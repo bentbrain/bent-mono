@@ -5562,6 +5562,30 @@
       "perPrContracts": [],
       "representatives": [],
       "disposition": "Real current-token and same-post historical-reference authorization for deleted, never-imported images restored by Undo; retry, Redo, save and publication remain supported."
+    },
+    {
+      "file": "tests/browser/map-gallery-preload.spec.ts",
+      "titlePath": [
+        "map-gallery-preload.spec.ts",
+        "map popup reserves photo space during delayed navigation at 390px"
+      ],
+      "perPrBrowser": true,
+      "fullBrowser": true,
+      "perPrContracts": [],
+      "representatives": [],
+      "disposition": "Photo popup metadata and delayed image sizing across mixed orientations."
+    },
+    {
+      "file": "tests/browser/map-gallery-preload.spec.ts",
+      "titlePath": [
+        "map-gallery-preload.spec.ts",
+        "map popup reserves photo space during delayed navigation at 1991px"
+      ],
+      "perPrBrowser": true,
+      "fullBrowser": true,
+      "perPrContracts": [],
+      "representatives": [],
+      "disposition": "Photo popup metadata and delayed image sizing across mixed orientations."
     }
   ]
 }
