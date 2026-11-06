@@ -88,63 +88,113 @@ for (const width of [1792, 390])
           json: { items: body.items.filter((item) => ids.includes(item.id)) },
         });
       });
-      await page.reload();
-      await expect(page.locator('#media-list button')).toHaveCount(2);
-      await page.locator('#media-list img').evaluateAll(async (images) => {
-        await Promise.all(
-          images.map((image) =>
-            image instanceof HTMLImageElement
-              ? image.decode()
-              : Promise.reject(new Error('Image missing')),
-          ),
-        );
+      let releaseCategories = () => {};
+      const categoryGate = new Promise<void>((resolve) => {
+        releaseCategories = resolve;
       });
-      const closed = await dimensions(page);
-      for (const title of ['synthetic portrait', 'synthetic landscape']) {
-        const tile = page.getByRole('button', {
-          name: `${title}, draft`,
-          exact: true,
+      await page.route('**/api/trip/categories', async (route) => {
+        const response = await route.fetch();
+        const body = z
+          .object({
+            categories: z.array(z.unknown()),
+            icons: z.array(z.unknown()),
+          })
+          .parse(await response.json());
+        await categoryGate;
+        await route.fulfill({
+          response,
+          json: {
+            ...body,
+            categories: Array.from({ length: 12 }, (_, index) => ({
+              label: `synthetic late category ${String(index)}`,
+              normalized: `synthetic late category ${String(index)}`,
+              state: 'default',
+              canRetry: false,
+            })),
+          },
         });
-        await tile.focus();
-        await page.keyboard.press('Enter');
-        await expect(page.getByLabel('title', { exact: true })).toHaveValue(
-          title,
-        );
-        const selected = await dimensions(page);
-        selected.forEach((box, index) => {
-          expect(box.height).toBeCloseTo(closed[index]?.height || 0, 0);
-          expect(box.height).toBeCloseTo(box.imageHeight, 0);
-          expect(box.ratio).toBeCloseTo(box.naturalRatio, 2);
+      });
+      try {
+        await page.reload();
+        await expect(page.locator('#media-list button')).toHaveCount(2);
+        await page.locator('#media-list img').evaluateAll(async (images) => {
+          await Promise.all(
+            images.map((image) =>
+              image instanceof HTMLImageElement
+                ? image.decode()
+                : Promise.reject(new Error('Image missing')),
+            ),
+          );
         });
-        await expect(page.locator('#metadata img')).toHaveCount(0);
-        await expect(
-          page.locator(
-            'input[name="captured"],input[name="latitude"],input[name="longitude"]',
-          ),
-        ).toHaveCount(0);
-        await expect(page.locator('#metadata time')).toHaveAttribute(
-          'datetime',
-          '2099-10-15T01:23:45.678Z',
-        );
-        await expect(page.locator('#metadata time')).toContainText(
-          '10:23:45.678',
-        );
-        const panel = page.locator('#media-details');
-        expect(
-          await panel.evaluate(
-            (element) => element.getBoundingClientRect().height,
-          ),
-        ).toBeLessThanOrEqual(640);
-        await page.getByRole('button', { name: 'SAVE', exact: true }).focus();
-        await expect(
-          page.getByRole('button', { name: 'SAVE', exact: true }),
-        ).toBeInViewport();
-        await page.keyboard.press('Tab');
-        expect(
-          await page.evaluate(
-            () => document.documentElement.scrollWidth <= innerWidth,
-          ),
-        ).toBe(true);
+        const closed = await dimensions(page);
+        for (const title of ['synthetic portrait', 'synthetic landscape']) {
+          const tile = page.getByRole('button', {
+            name: `${title}, draft`,
+            exact: true,
+          });
+          await tile.focus();
+          await page.keyboard.press('Enter');
+          await expect(page.getByLabel('title', { exact: true })).toHaveValue(
+            title,
+          );
+          const selected = await dimensions(page);
+          selected.forEach((box, index) => {
+            expect(box.height).toBeCloseTo(closed[index]?.height || 0, 0);
+            expect(box.height).toBeCloseTo(box.imageHeight, 0);
+            expect(box.ratio).toBeCloseTo(box.naturalRatio, 2);
+          });
+          await expect(page.locator('#metadata img')).toHaveCount(0);
+          await expect(
+            page.locator(
+              'input[name="captured"],input[name="latitude"],input[name="longitude"]',
+            ),
+          ).toHaveCount(0);
+          await expect(page.locator('#metadata time')).toHaveAttribute(
+            'datetime',
+            '2099-10-15T01:23:45.678Z',
+          );
+          await expect(page.locator('#metadata time')).toContainText(
+            '10:23:45.678',
+          );
+          const panel = page.locator('#media-details');
+          expect(
+            await panel.evaluate(
+              (element) => element.getBoundingClientRect().height,
+            ),
+          ).toBeLessThanOrEqual(640);
+          await page.getByRole('button', { name: 'SAVE', exact: true }).focus();
+          await expect(
+            page.getByRole('button', { name: 'SAVE', exact: true }),
+          ).toBeInViewport();
+          // Loading categories adds controls above the already-focused SAVE button.
+          // Focus and visibility must survive that supported asynchronous response.
+          releaseCategories();
+          await expect(
+            page.getByRole('checkbox', {
+              name: 'synthetic late category 11',
+              exact: true,
+            }),
+          ).toHaveCount(1);
+          const save = page.getByRole('button', { name: 'SAVE', exact: true });
+          await expect(save).toBeFocused();
+          if (
+            process.env.MEDIA_FOCUS_EVIDENCE_DIR &&
+            title === 'synthetic portrait'
+          )
+            await page.screenshot({
+              path: `${process.env.MEDIA_FOCUS_EVIDENCE_DIR}/${String(width)}-${colorScheme}.png`,
+            });
+          await expect(save).toBeInViewport();
+          await page.keyboard.press('Tab');
+          expect(
+            await page.evaluate(
+              () => document.documentElement.scrollWidth <= innerWidth,
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        releaseCategories();
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
       }
     });
 

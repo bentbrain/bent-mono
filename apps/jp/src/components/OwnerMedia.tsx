@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type SubmitEvent,
+} from 'react';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OwnerQueryProvider } from './OwnerQueryProvider';
@@ -108,6 +114,19 @@ function Metadata({
   const [selectedCategories, setSelectedCategories] = useState(
     item.data.categories || [],
   );
+  const form = useRef<HTMLFormElement>(null);
+  const categoryIdentity = JSON.stringify(
+    categoryNames([...selectedCategories, ...categories]).map(
+      (category) => category.normalized,
+    ),
+  );
+  useLayoutEffect(() => {
+    // Categories can arrive after keyboard focus has scrolled a field into view.
+    // Keep that field visible when the added options change the panel's layout.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && form.current?.contains(focused))
+      focused.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [categoryIdentity]);
   const pin =
     latitude && longitude
       ? projection([Number(longitude), Number(latitude)])
@@ -146,6 +165,7 @@ function Metadata({
   }
   return (
     <form
+      ref={form}
       id="metadata"
       onSubmit={(event) => {
         void save(event);

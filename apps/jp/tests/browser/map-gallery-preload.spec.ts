@@ -23,12 +23,12 @@ test.beforeAll(async ({ browser, request, baseURL }) => {
     for (let index = 0; index < 6; index++) {
       const jpeg = await page.evaluate((index) => {
         const canvas = document.createElement('canvas');
-        canvas.width = 600;
-        canvas.height = 800;
+        canvas.width = index === 5 ? 800 : 600;
+        canvas.height = index === 4 ? 600 : index === 5 ? 600 : 800;
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Canvas required');
         context.fillStyle = `hsl(${String(index * 50)} 75% 60%)`;
-        context.fillRect(0, 0, 600, 800);
+        context.fillRect(0, 0, canvas.width, canvas.height);
         context.fillStyle = '#0647ff';
         context.font = '32px monospace';
         context.fillText(`synthetic photo ${String(index)}`, 35, 120);
@@ -202,5 +202,173 @@ for (const width of [390, 1991]) {
     await popup.getByRole('button', { name: 'Close map preview' }).click();
     await expect(popup).toHaveCount(0);
     await expect(page.locator('[data-map-photo]')).toHaveCount(0);
+  });
+}
+
+for (const width of [390, 1991]) {
+  test(`map popup reserves photo space during delayed navigation at ${String(width)}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+    await page.route('https://toolbar.bent.build/embed.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: '' }),
+    );
+    let releaseMetadata = () => {};
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    let releaseImage = () => {};
+    const imageGate = new Promise<void>((resolve) => {
+      releaseImage = resolve;
+    });
+    let releaseCachedNavigation = () => {};
+    const cachedGate = new Promise<void>((resolve) => {
+      releaseCachedNavigation = resolve;
+    });
+    let delayedSource = '';
+    await page.route('**/map-photo/**', async (route) => {
+      if (
+        route
+          .request()
+          .url()
+          .includes(`/map-photo/${fixtures[1] || ''}/`)
+      )
+        await cachedGate;
+      if (
+        route
+          .request()
+          .url()
+          .includes(`/map-photo/${fixtures[5] || ''}/`)
+      ) {
+        await metadataGate;
+        const response = await route.fetch();
+        const reference = route
+          .request()
+          .url()
+          .split(`/map-photo/${fixtures[5] || ''}/`)[1];
+        delayedSource = `/media-preview/${reference || ''}/`;
+        await route.fulfill({ response });
+      } else await route.continue();
+    });
+    await page.route('**/media-preview/**', async (route) => {
+      if (delayedSource && route.request().url().includes(delayedSource))
+        await imageGate;
+      await route.continue();
+    });
+    try {
+      await page.goto(`/?media=${fixtures[0] || ''}#japan-map`);
+      const popup = page.locator('[data-feedback-id="map-preview"]');
+      const active = popup.locator('[data-map-photo="active"] img');
+      await expect(active).toBeVisible();
+      await expect
+        .poll(() =>
+          active.evaluate(
+            (image) =>
+              image instanceof HTMLImageElement &&
+              image.complete &&
+              image.naturalWidth > 0,
+          ),
+        )
+        .toBe(true);
+      const before = await popup.boundingBox();
+      if (!before) throw new Error('Popup required');
+      await popup
+        .getByRole('button', { name: 'Next media at this location' })
+        .click();
+      await expect(popup.getByRole('status')).toHaveText('loading photo');
+      if (process.env.MAP_POPUP_EVIDENCE_DIR)
+        await popup.screenshot({
+          path: `${process.env.MAP_POPUP_EVIDENCE_DIR}/${String(width)}-metadata-pending.png`,
+        });
+      const pending = await popup.boundingBox();
+      expect(pending?.height).toBeCloseTo(before.height, 0);
+      releaseMetadata();
+      await expect(active).toHaveAttribute('alt', 'Synthetic preload 5');
+      await expect(active).toHaveAttribute('width', '800');
+      await expect(active).toHaveAttribute('height', '600');
+      expect(
+        await active.evaluate(
+          (image) => image instanceof HTMLImageElement && image.complete,
+        ),
+      ).toBe(false);
+      const pendingImage = await active.boundingBox();
+      if (!pendingImage) throw new Error('Pending image slot required');
+      expect(pendingImage.height).toBeGreaterThan(0);
+      expect(pendingImage.width / pendingImage.height).toBeCloseTo(4 / 3, 2);
+      const loading = await popup.boundingBox();
+      expect(loading?.height).toBeCloseTo(before.height, 0);
+      releaseImage();
+      await expect
+        .poll(() =>
+          active.evaluate(
+            (image) =>
+              image instanceof HTMLImageElement &&
+              image.complete &&
+              image.naturalWidth > 0,
+          ),
+        )
+        .toBe(true);
+      expect((await popup.boundingBox())?.height).toBeCloseTo(
+        loading?.height || 0,
+        0,
+      );
+      const loadedImage = await active.boundingBox();
+      expect(loadedImage?.width).toBeCloseTo(pendingImage.width, 0);
+      expect(loadedImage?.height).toBeCloseTo(pendingImage.height, 0);
+      if (process.env.MAP_POPUP_EVIDENCE_DIR)
+        await popup.screenshot({
+          path: `${process.env.MAP_POPUP_EVIDENCE_DIR}/${String(width)}-loaded.png`,
+        });
+      await popup
+        .getByRole('button', { name: 'Next media at this location' })
+        .click();
+      await expect(active).toHaveAttribute('alt', 'Synthetic preload 4');
+      await expect(active).toBeVisible();
+      await popup
+        .getByRole('button', { name: 'Previous media at this location' })
+        .click();
+      await expect(active).toHaveAttribute('alt', 'Synthetic preload 5');
+      // A cached taller neighbor activates without another load event. Its space
+      // must survive the following cold navigation too.
+      await page.goto(`/?media=${fixtures[5] || ''}#japan-map`);
+      await expect(popup.locator('img')).toHaveCount(3);
+      await expect
+        .poll(() =>
+          popup
+            .locator('img')
+            .evaluateAll((images) =>
+              images.every(
+                (image) =>
+                  image instanceof HTMLImageElement &&
+                  image.complete &&
+                  image.naturalWidth > 0,
+              ),
+            ),
+        )
+        .toBe(true);
+      const landscape = await popup.boundingBox();
+      await popup
+        .getByRole('button', { name: 'Previous media at this location' })
+        .click();
+      await expect(active).toHaveAttribute('alt', 'Synthetic preload 0');
+      await expect
+        .poll(async () => (await popup.boundingBox())?.height || 0)
+        .toBeGreaterThan(landscape?.height || 0);
+      const cached = await popup.boundingBox();
+      await popup
+        .getByRole('button', { name: 'Previous media at this location' })
+        .click();
+      await expect(popup.getByRole('status')).toHaveText('loading photo');
+      expect((await popup.boundingBox())?.height).toBeCloseTo(
+        cached?.height || 0,
+        0,
+      );
+    } finally {
+      releaseMetadata();
+      releaseImage();
+      releaseCachedNavigation();
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    }
   });
 }

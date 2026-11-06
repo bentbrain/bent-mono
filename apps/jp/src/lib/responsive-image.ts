@@ -89,12 +89,16 @@ export function mapPhoto(
       '(min-width: 672px) 614px, calc(100vw - 58px)',
     );
   const heightWidth = `${String((55 * dimensions.width) / dimensions.height)}dvh`;
-  return responsiveImage(
-    source,
-    `(min-width: 672px) min(614px, ${heightWidth}), min(calc(100vw - 58px), ${heightWidth})`,
-    Math.min(
-      dimensions.width,
-      Math.max(1, Math.round((1600 * dimensions.width) / dimensions.height)),
+  return {
+    ...responsiveImage(
+      source,
+      `(min-width: 672px) min(614px, ${heightWidth}), min(calc(100vw - 58px), ${heightWidth})`,
+      Math.min(
+        dimensions.width,
+        Math.max(1, Math.round((1600 * dimensions.width) / dimensions.height)),
+      ),
     ),
-  );
+    width: dimensions.width,
+    height: dimensions.height,
+  };
 }

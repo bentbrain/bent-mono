@@ -64,6 +64,7 @@ const sprites: Record<string, string[]> = {
   ],
 };
 // Eight rows keep the foam, solid mug and open handle distinct at cap height.
+// Whole CSS pixels prevent crisp-edge snapping from merging the foam at DPR1.
 // Keep the detailed 16px sprite for gallery filters and other larger uses.
 const compactBeer = [
   '01101000',
@@ -93,7 +94,9 @@ const path = sprite
 <svg
   class:list={[
     'pixel shrink-0',
-    counterIcon ? 'h-[1cap] w-[calc(12cap/13)]' : 'size-[1.7em] align-middle',
+    counterIcon
+      ? 'h-[1cap] w-[calc(12cap/13)] supports-[height:round(up,1cap,1px)]:h-[round(up,1cap,1px)] supports-[width:round(up,1cap,1px)]:w-[round(up,calc(12cap/13),1px)]'
+      : 'size-[1.7em] align-middle',
   ]}
   data-feedback-id={counterIcon ? 'beer-icon' : undefined}
   viewBox={counterIcon ? '0 0 8 8' : `0 ${centerPaint ? centeredY : 0} 16 16`}
