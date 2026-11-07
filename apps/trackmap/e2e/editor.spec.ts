@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { FitBaseType, FitEncoder } from "fit-file-parser/encoder";
+import { BufferSource, EncodedPacketSink, Input, MP4 } from "mediabunny";
 
 const gpx =
   '<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Synthetic river run</name><trkseg><trkpt lat="0" lon="0"><ele>10</ele><time>2026-01-01T00:00:00Z</time></trkpt><trkpt lat="0.01" lon="0.01"><ele>30</ele><time>2026-01-01T00:10:00Z</time></trkpt><trkpt lat="0.02" lon="0.005"><ele>15</ele><time>2026-01-01T00:20:00Z</time></trkpt></trkseg></trk></gpx>';
@@ -37,6 +38,37 @@ function gifFrames(bytes: Buffer) {
   }
   expect(bytes[offset]).toBe(0x3b);
   return frames;
+}
+
+async function mp4Metadata(bytes: Uint8Array) {
+  const input = new Input({ formats: [MP4], source: new BufferSource(bytes) });
+  try {
+    const tracks = await input.getVideoTracks();
+    expect(tracks).toHaveLength(1);
+    const track = tracks[0];
+    if (!track) throw new Error("Missing MP4 video track");
+    const timestamps = new Set<number>();
+    let frames = 0;
+    for await (const packet of new EncodedPacketSink(track).packets()) {
+      expect(Number.isFinite(packet.timestamp)).toBe(true);
+      expect(packet.timestamp).toBeGreaterThanOrEqual(0);
+      expect(packet.duration).toBeGreaterThan(0);
+      expect(packet.data.byteLength).toBeGreaterThan(0);
+      timestamps.add(packet.timestamp);
+      frames++;
+    }
+    expect(timestamps.size).toBe(frames);
+    return {
+      width: await track.getDisplayWidth(),
+      height: await track.getDisplayHeight(),
+      duration: await track.computeDuration(),
+      codec: await track.getCodec(),
+      frames,
+      audioTracks: (await input.getAudioTracks()).length,
+    };
+  } finally {
+    input.dispose();
+  }
 }
 
 test("imports, customizes and exports genuinely transparent PNGs and animated GIFs", async ({
@@ -347,6 +379,21 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
     HTMLMediaElement.prototype.load = function () {
       this.dispatchEvent(new Event("error"));
     };
+    const src = Object.getOwnPropertyDescriptor(
+      HTMLMediaElement.prototype,
+      "src",
+    );
+    if (!src?.get || !src.set)
+      throw new Error("Missing native media source descriptor");
+    const setSrc = src.set;
+    Object.defineProperty(HTMLMediaElement.prototype, "src", {
+      configurable: true,
+      get: src.get,
+      set(this: HTMLMediaElement, value: string) {
+        setSrc.call(this, value);
+        queueMicrotask(() => this.dispatchEvent(new Event("error")));
+      },
+    });
   });
   await page
     .getByLabel("Background photo or video", { exact: true })
@@ -397,43 +444,25 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   const second = downloadOrError();
   await page.getByRole("button", { name: "Export Story video" }).click();
   const secondDownload = await second;
+  await secondDownload.saveAs(info.outputPath("composite.mp4"));
   const secondPath = await secondDownload.path();
   if (!secondPath) throw new Error("Missing composited Story download");
   const composite = await readFile(secondPath);
-  const metadata = await page.evaluate(
-    async (clips) => {
-      const results = [];
-      for (const data of clips) {
-        const video = document.createElement("video");
-        video.muted = true;
-        video.playsInline = true;
-        video.src = URL.createObjectURL(
-          new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
-            type: "video/mp4",
-          }),
-        );
-        await new Promise<void>((resolve, reject) => {
-          video.onloadedmetadata = () => resolve();
-          video.onerror = () => reject(new Error("MP4 could not decode"));
-        });
-        const result = {
-          width: video.videoWidth,
-          height: video.videoHeight,
-          duration: video.duration,
-        };
-        URL.revokeObjectURL(video.src);
-        video.removeAttribute("src");
-        video.load();
-        results.push(result);
-      }
-      return results;
-    },
-    [mp4.toString("base64"), composite.toString("base64")],
-  );
+  // Read the downloaded container directly. Native playback is deliberately
+  // broken above; actual frame decoding is covered by both app reimports.
+  const metadata = await Promise.all([
+    mp4Metadata(mp4),
+    mp4Metadata(composite),
+  ]);
+  await expect(mp4Metadata(new Uint8Array([0, 1, 2, 3]))).rejects.toThrow();
   for (const clip of metadata) {
     expect(clip.width).toBe(1080);
     expect(clip.height).toBe(1920);
+    expect(clip.codec).toBe("avc");
+    expect(clip.audioTracks).toBe(0);
   }
+  expect(metadata[0].frames).toBe(900);
+  expect(metadata[1].frames).toBe(120);
   expect(metadata[0].duration).toBeGreaterThan(29.95);
   expect(metadata[0].duration).toBeLessThan(30.05);
   expect(metadata[1].duration).toBeGreaterThan(3.95);
