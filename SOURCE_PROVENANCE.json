@@ -35,7 +35,18 @@
       "repository": "https://github.com/bentbrain/feedback-toolbar",
       "revision": "947ce1b1550988dce2238889ac343f3ef6f52c8a",
       "destination": "apps/toolbar",
-      "method": "audited source snapshot; original history remains upstream"
+      "method": "audited source snapshot; original history remains upstream",
+      "followups": [
+        {
+          "fromRevision": "947ce1b1550988dce2238889ac343f3ef6f52c8a",
+          "revision": "8f448f222a833a15622ac89530bf229ff9cfe2ce",
+          "commits": [
+            "2a8fed8927e3c0641751b04fae06a653f6e77979",
+            "8f448f222a833a15622ac89530bf229ff9cfe2ce"
+          ],
+          "method": "audited source delta; monorepo adaptations and newer dependencies retained; original history remains upstream"
+        }
+      ]
     },
     {
       "repository": "https://github.com/bentbrain/forever-tee",
