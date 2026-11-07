@@ -23,12 +23,8 @@ export default function PrivacyPage() {
             refresh tokens are never included in tool results or exposed to the AI model.
           </p>
           <p>
-            The read-only pilot does not sell personal data and does not request vehicle-location or
+            The read-only service does not sell personal data and does not request vehicle-location or
             vehicle-command permissions.
-          </p>
-          <p>
-            Before public release, this notice will be expanded with retention, deletion and
-            operator contact details.
           </p>
         </CardContent>
       </Card>

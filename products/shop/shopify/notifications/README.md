@@ -11,17 +11,17 @@ npm --prefix shopify/notifications run build
 npm --prefix shopify/notifications run preview
 ```
 
-Open http://127.0.0.1:43822. Choose a template and a phone or desktop width. The fixture uses two publicly featured product configurations, a black M shirt and black tote, with synthetic order/payment/address data. Preview links are replaced with inert fragment links, and the frame is sandboxed. No email is sent and no order is created.
+Open http://127.0.0.1:43822. Choose a template and a phone or desktop width. The fixture uses two publicly featured product configurations, a black M shirt and black tote, with synthetic order/payment/address data. Preview links use inert fragment links inside a sandboxed frame. Sending emails and creating orders remain separate store operations.
 
 Change shared type, spacing, colour and alignment in `branding/email.css`. Change the logo or personalized thumbnail generation in `branding/build-template.mjs`. Edit specific notification wording in its source. Rebuild after edits and refresh the preview. Generated Liquid and a SHA-256 manifest are written to ignored `dist/`.
 
-The local renderer approximates Shopify's default CSS and provider-only filters. Its pickup-map expression has a preview-only compatibility substitution for a Shopify Ruby expression unsupported by LiquidJS. It is a development aid, not an exact Shopify or email-client emulator. Always check the final generated code in Shopify's preview before publishing. The preview clock is explicitly Australia/Brisbane, independent of the developer or CI machine's timezone.
+The local renderer approximates Shopify's default CSS and provider-only filters. Its pickup-map expression has a preview-only compatibility substitution for a Shopify Ruby expression unsupported by LiquidJS. Check the final generated code in Shopify's preview before publishing, and verify its rendering in email clients. The preview clock is explicitly Australia/Brisbane, independent of the developer or CI machine's timezone.
 
 ## CI and sync
 
-The Email notifications workflow parses and tests all templates, builds the distribution and uploads the exact generated files with a hash manifest. It uses no Shopify credentials and does not deploy.
+The Email notifications workflow parses and tests all templates, builds the distribution and uploads the exact generated files with a hash manifest. Publishing remains a separate Shopify Admin operation; the workflow runs without Shopify credentials.
 
-Shopify's public Admin API and CLI currently provide no customer-notification-template read/write operations. The store-management token works for product management and Files uploads, but does not expose the notification editor. Template deployment therefore uses [Shopify Admin](https://admin.shopify.com/store/mktup7-hr/settings/notifications/customer): open the notification, Edit code, replace the HTML with the corresponding generated file, Preview, Save, then reopen and compare the saved code. Browser automation can perform these steps. Do not build CI around undocumented Admin endpoints or browser-session cookies.
+Publish customer-notification templates through [Shopify Admin](https://admin.shopify.com/store/mktup7-hr/settings/notifications/customer): open the notification, Edit code, replace the HTML with the corresponding generated file, Preview, Save, then reopen and compare the saved code. Browser automation can perform these steps. Do not build CI around undocumented Admin endpoints or browser-session cookies.
 
 Before a later sync, compare the current template against the last published artifact. Preserve intentional changes made in Shopify since the last sync. Native Revert to previous is available; the generator also preserves the original header and image markup and tests an exact reverse transformation back to its source.
 

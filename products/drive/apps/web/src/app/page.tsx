@@ -16,7 +16,7 @@ const steps = [
     number: "01",
     title: "Add the plugin",
     description:
-      "Codex or ChatGPT discovers the hosted MCP service and requests a secure connection.",
+      "Add the plugin in Codex or ChatGPT to connect your Tesla account.",
   },
   {
     number: "02",
@@ -35,7 +35,7 @@ const securityFeatures = [
   "Tesla OAuth",
   "Encrypted rotating tokens",
   "Per-user isolation",
-  "No vehicle commands",
+  "Read-only vehicle access",
 ];
 
 export default function Home() {
@@ -50,7 +50,7 @@ export default function Home() {
             </span>
             <div>
               <p className="text-sm font-semibold">Bent Drive Copilot</p>
-              <p className="text-xs text-muted-foreground">Private vehicle intelligence</p>
+              <p className="text-xs text-muted-foreground">Read your Tesla vehicle status</p>
             </div>
           </div>
           <Button asChild variant="ghost">
@@ -70,8 +70,8 @@ export default function Home() {
               <span className="block text-muted-foreground">in the conversation.</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg leading-8 text-muted-foreground">
-              Connect your Tesla account to approved AI tools without sharing your Tesla password.
-              The first release can inspect vehicle state and cannot send commands.
+              Connect your Tesla account to approved AI tools for read-only vehicle status.
+              Sign in directly with Tesla. Your password stays with Tesla.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               {securityFeatures.map((label) => (

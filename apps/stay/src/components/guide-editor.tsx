@@ -323,8 +323,8 @@ export function GuideEditor({ initial }: { initial: CmsSnapshot }) {
               >
                 <h2 className="text-sm font-medium">AI-only notes</h2>
                 <p className="text-xs leading-6">
-                  Used to answer questions in chat. These notes stay off the
-                  visible guide cards.
+                  Chat uses these notes to answer questions. Guide cards show
+                  the topic content.
                 </p>
                 <AiNotes
                   key={article.id}

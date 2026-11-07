@@ -1,6 +1,6 @@
 # jp.bent.build
 
-Blog. Astro and emDash on Cloudflare Workers, with D1 records and R2 media.
+A blog built with Astro and emDash on Cloudflare Workers, with D1 records and R2 media.
 
 Public blog, categorised gallery, geolocated media map and beer counter. The owner uses a TipTap rich text editor with shadcn/Base UI controls and emDash passkey login. Owner tools preserve original media, fill missing capture metadata and export Instagram stories as PNG or animated MP4.
 
@@ -22,7 +22,7 @@ bunx emdash secrets generate
 bun run dev
 ```
 
-Save the generated encryption key in the ignored `.env`. EmDash applies the schema on the first request. Development-only setup is available at `/_emdash/api/setup/dev-bypass`; it never works in a production build. `bun run demo` adds removable sample content to the local database only. No sample entries are bundled in the production seed.
+Save the generated encryption key in the ignored `.env`. EmDash applies the schema on the first request. Development-only setup is available at `/_emdash/api/setup/dev-bypass`; it never works in a production build. `bun run demo` adds removable sample content to the local database only. Production seeds exclude sample entries.
 
 ```sh
 bun run lint
@@ -94,7 +94,7 @@ Day numbering uses the earliest published photo capture in Asia/Tokyo, with the 
 
 The Cloudflare `IMAGES` binding makes JPEG copies bounded to 1120 × 3360 pixels and 150 KB each. Copies have location and other embedded metadata removed and are reused under `newsletter-images/v1/` in the existing private media bucket. Originals and their capture records remain intact. Image URLs check the current published entry, media selection and public shop design before serving; removing or unpublishing a source stops access. Missing or oversized selected images block preparation rather than silently disappearing from a digest. Previewing the next digest also prepares its image copies. Saved drafts from an older template must be discarded and rebuilt before sending.
 
-Private send records and a revision-fenced lease prevent overlapping dispatch. The newsletter hook has a ten-minute timeout with a nine-minute send lease, including time for the final publication checks. Photos are prepared in batches of at most four, preserving their order. Expired preparation cannot create or send a broadcast. Each scheduled check reconciles interrupted runs against their saved provider ID after the active lease expires. A delivered broadcast is recorded as sent; a verified unsent draft stays blocked for owner recovery. Unknown outcomes never trigger a fresh broadcast automatically. The owner can resume an unchanged saved draft or discard a verified unsent draft so changed entries return to the next scheduled digest. A lost deletion response remains blocked until its saved ID is reconciled. Newsletter preview pages are private and sandboxed, and confirmation pages disable caching and referrers. No extra schema migration or deployment-workflow change is required.
+Private send records and a revision-fenced lease prevent overlapping dispatch. The newsletter hook has a ten-minute timeout with a nine-minute send lease, including time for the final publication checks. Photos are prepared in batches of at most four, preserving their order. Expired preparation cannot create or send a broadcast. Each scheduled check reconciles interrupted runs against their saved provider ID after the active lease expires. A delivered broadcast is recorded as sent; a verified unsent draft stays blocked for owner recovery. Unknown outcomes never trigger a fresh broadcast automatically. The owner can resume an unchanged saved draft or discard a verified unsent draft so changed entries return to the next scheduled digest. A lost deletion response remains blocked until its saved ID is reconciled. Newsletter preview pages are private and sandboxed, and confirmation pages disable caching and referrers.
 
 ## Design review and sample assets
 
@@ -106,4 +106,4 @@ For an existing database, add the optional field before deploying this feature: 
 
 The interface follows shop.bent.build and stay.bent.build. The shirt mark belongs to the same owner. Sample photographs and provenance are listed in `mockups/assets/sources.json`; the sample video pans a sample photograph. The application map uses Natural Earth's public-domain 1:10m country geometry, with its pinned source recorded in `src/lib/japan.json`. Geist Mono uses the SIL Open Font License. Dependency licences remain with their packages.
 
-The guarded monorepo Deploy route uses `node scripts/deploy-verified.mjs --preserve-existing-secrets` after the release checker. This mode verifies the existing Worker secret names `EMDASH_ENCRYPTION_KEY`, `OPENAI_API_KEY` and `OWNER_EMAIL` before deployment. It does not retrieve values or provide replacements. Missing names, failed metadata retrieval and simultaneous replacement values block deployment. Keep the original encryption key so existing settings remain decryptable. The no-argument wrapper still requires supplied encryption and API keys and retains its private temporary-file cleanup and cancellation checks.
+The guarded monorepo Deploy route uses `node scripts/deploy-verified.mjs --preserve-existing-secrets` after the release checker. This mode verifies the existing Worker secret names `EMDASH_ENCRYPTION_KEY`, `OPENAI_API_KEY` and `OWNER_EMAIL` before deployment. It checks secret names only and preserves their values. Missing names, failed metadata retrieval and simultaneous replacement values block deployment. Keep the original encryption key so existing settings remain decryptable. The no-argument wrapper still requires supplied encryption and API keys and retains its private temporary-file cleanup and cancellation checks.

@@ -1,6 +1,6 @@
 import type { RichDocument } from "./rich-text";
 export const defaultGuideIntro =
-  "Use this guide to find things around the apartment and see how everything works. Search the topics below or ask AI a question.";
+  "Find things around the apartment and instructions for using them. Search the topics below or ask AI a question.";
 export type GuideCategory = "Arrival" | "At home" | "The building" | "Help";
 export type GuideHome = {
   intro: string;

@@ -19,7 +19,7 @@ export default function Error({
   return (
     <div className="container mx-auto grid place-items-center">
       <Card className="grid w-full place-items-center gap-8 p-4 md:w-auto">
-        <h2>How embarrassing.. something went wrong</h2>
+        <h2>This page could not load.</h2>
         <Button
           variant={"outline"}
           onClick={

@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Bent Drive Copilot",
-  description: "A private, read-only AI connection to your Tesla account.",
+  description: "Read-only access to your Tesla vehicle status through an authorized AI connection.",
 };
 
 export default function RootLayout({

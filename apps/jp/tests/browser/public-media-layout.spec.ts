@@ -237,7 +237,12 @@ for (const { title, ratio, shape } of [
         .getByRole('checkbox')
         .check();
       await page.getByRole('combobox', { name: 'card angle' }).click();
-      await page.getByRole('option', { name: angle, exact: true }).click();
+      await page
+        .getByRole('option', {
+          name: angle === 'no skew' ? 'straight' : angle,
+          exact: true,
+        })
+        .click();
       await expect(
         page.getByRole('button', { name: 'EXPORT PNG' }),
       ).toBeEnabled();

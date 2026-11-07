@@ -101,14 +101,13 @@ function DesktopDraftGuidance() {
     <main className="relative z-10 hidden flex-1 place-items-center bg-background p-8 text-primary lg:grid">
       <div className="w-[min(100%,34rem)] text-center">
         <p className="mb-4 text-[0.68rem] font-bold tracking-[0.1em]">
-          Draft stays on this device
+          Draft saved on your original phone
         </p>
         <h1 className="text-[clamp(2.8rem,6vw,5.5rem)] leading-[0.9] font-[650] tracking-[-0.07em]">
           Continue on your original phone
         </h1>
         <p className="mx-auto mt-6 max-w-[29rem] text-sm leading-[1.6]">
-          This draft can&apos;t be transferred to another device yet. Reopen it on
-          the phone where you started.
+          Reopen this draft in the browser on the phone where you started.
         </p>
       </div>
     </main>

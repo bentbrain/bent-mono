@@ -1,7 +1,7 @@
 {
   "name": "tesla-bridge",
   "version": "0.3.0+codex.20260710105242",
-  "description": "Securely inspect an authorized Tesla through the Bent Drive Copilot MCP service.",
+  "description": "Read authorized Tesla vehicle information through the Bent Drive Copilot MCP service.",
   "author": {
     "name": "Bent Build",
     "url": "https://bent.build"
@@ -18,8 +18,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Tesla Bridge",
-    "shortDescription": "A private, read-only AI copilot for your Tesla.",
-    "longDescription": "Connect through Tesla OAuth, then inspect battery, range, charging, locks, climate and Sentry state without enabling vehicle commands.",
+    "shortDescription": "Read-only Tesla vehicle status in your AI tools.",
+    "longDescription": "Connect through Tesla OAuth for read-only access to battery, range, charging, locks, climate and Sentry state.",
     "developerName": "Bent Build",
     "category": "Productivity",
     "capabilities": [

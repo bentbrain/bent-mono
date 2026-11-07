@@ -25,7 +25,7 @@ The matching Worker verifies these same successful transaction timestamps.
   {% assign bent_manage_url = 'https://shop.bent.build/manage-order#' | append: bent_capability_fragment %}
   <p>You can correct your Australian delivery address or cancel the whole order for a full refund until <strong>{{ bent_deadline | date: '%-d %b %Y at %-I:%M %P AEST' }}</strong>.</p>
   <p><a href="{{ bent_manage_url | escape }}">Manage order</a></p>
-  <p>Keep this private link to yourself. Address corrections do not extend the one-hour hold.</p>
+  <p>Keep this private link to yourself. The original one-hour hold still applies after an address correction.</p>
 {% else %}
   <p>For help with your delivery address or cancellation, contact <a href="mailto:support@bent.build">support@bent.build</a> with your order number.</p>
 {% endif %}

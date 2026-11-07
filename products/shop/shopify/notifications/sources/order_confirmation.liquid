@@ -23,7 +23,7 @@
 {% capture email_body %}
   {% if has_pending_payment %}
     {% if buyer_action_required %}
-      You�ll get a confirmation email after completing your payment.
+      You'll get a confirmation email after completing your payment.
     {% else %}
       Your payment is being processed. You'll get an email when your order is confirmed.
     {% endif %}
@@ -34,7 +34,7 @@
       {% if has_split_cart %}
         {% case split_cart_delivery_method %}
           {% when 'pick-up' %}
-            You�ll receive an email when your order is ready for pickup.
+            You'll receive an email when your order is ready for pickup.
           {% when 'local' %}
             Hi {{ customer.first_name }}, we're getting your order ready for delivery.
           {% when 'shipping' %}
@@ -45,7 +45,7 @@
       {% else %}
         {% case delivery_method %}
           {% when 'pick-up' %}
-            You�ll receive an email when your order is ready for pickup.
+            You'll receive an email when your order is ready for pickup.
           {% when 'local' %}
             Hi {{ customer.first_name }}, we're getting your order ready for delivery.
           {% else %}
@@ -80,7 +80,7 @@
   {% if found_gift_card_with_recipient_email %}
     <p>Your gift card recipient will receive an email with their gift card code.</p>
   {% elsif gift_card_line_items.first %}
-    <p>You�ll receive separate emails for any gift cards.</p>
+    <p>You'll receive separate emails for any gift cards.</p>
   {% endif %}
 {% endcapture %}
 
@@ -192,7 +192,7 @@ The matching Worker verifies these same successful transaction timestamps.
   {% assign bent_manage_url = 'https://shop.bent.build/manage-order#' | append: bent_capability_fragment %}
   <p>You can correct your Australian delivery address or cancel the whole order for a full refund until <strong>{{ bent_deadline | date: '%-d %b %Y at %-I:%M %P AEST' }}</strong>.</p>
   <p><a href="{{ bent_manage_url | escape }}">Manage order</a></p>
-  <p>Keep this private link to yourself. Address corrections do not extend the one-hour hold.</p>
+  <p>Keep this private link to yourself. The original one-hour hold still applies after an address correction.</p>
 {% else %}
   <p>For help with your delivery address or cancellation, contact <a href="mailto:support@bent.build">support@bent.build</a> with your order number.</p>
 {% endif %}
@@ -1040,7 +1040,7 @@ The matching Worker verifies these same successful transaction timestamps.
           </p>
         {% endif %}
         <p class="order-list__estimated-delivery">
-          You�ll receive an email when your order is ready for pickup.
+          You'll receive an email when your order is ready for pickup.
         </p>
       {% elsif delivery_agreement.delivery_method_type == 'shipping'
         or delivery_agreement.delivery_method_type == 'local'

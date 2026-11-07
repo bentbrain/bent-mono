@@ -2,9 +2,11 @@
 
 Use Bun for dependency management and scripts. Keep one root bun.lock. Existing products retain their runtime and internal package boundaries.
 
-Only applications deployed to bent.build or its subdomains belong here. Do not import emoji applications or unrelated projects.
+Keep application imports scoped to deployments on bent.build and its subdomains.
 
 This repository is public. Never commit credentials, private content, household or vehicle information, source photos, operational exports, local state, or private deployment records. Use synthetic fixtures and protected configuration. Imported private repositories must use audited source snapshots, never their Git histories.
+
+Write public documentation, interface text, metadata and PR copy around current features, behavior and required actions. Keep internal scope decisions and migration commentary in private task notes. Use plain, affirmative descriptions while preserving precise error guidance, legal meaning and authorization requirements. Apply the unslop writing guidance before publishing.
 
 Shared design tokens live in packages/design-tokens and shared React controls in packages/ui. Product authentication, storage, routing and business logic remain with their applications. Preserve app-specific instructions and authorization boundaries.
 

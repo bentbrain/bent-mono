@@ -1,9 +1,9 @@
 # Isolated renderer comparison
 
-These experiments never deploy the production Worker, change product jobs, or
-replace existing videos. The benchmark Worker uses a separate Durable Object
+Run these experiments on the benchmark Worker, using its separate Durable Object
 namespace, one `standard-3` instance, and unique keys under `benchmarks/` in the
-development R2 bucket. Every completed or failed batch destroys its container.
+development R2 bucket. Keep production Workers, product jobs and existing videos
+unchanged. Every completed or failed batch destroys its container.
 Cache reads do not wake it.
 
 ## Build without local Docker
@@ -74,7 +74,7 @@ It checks 240 frames, eight seconds, 1080 by 1920, H.264, yuv420p and 30 fps.
 It records full-video SSIM, minimum per-frame SSIM, and zoom-only SSIM. The
 automated gate requires mean SSIM at least 0.995 and no frame below 0.96, followed
 by manual inspection of timeline sheets and full-resolution cursor-on/off frames.
-SSIM is a guard against rendering drift, not a substitute for visual review.
+Use SSIM to detect rendering drift, then complete the required visual review.
 
 The inspection workflow retains private artifacts for seven days. Remove its
 temporary `STORY_BENCHMARK_TOKEN` GitHub secret after inspection.

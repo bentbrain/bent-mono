@@ -3,7 +3,7 @@
 For the manual 4K featured-cutout export, see
 [Custom featured video export](../../docs/custom-featured-video.md).
 
-This is the Cloudflare Container workload for issue 60. It reproduces the
+This Cloudflare Container workload reproduces the
 browser composition with a server-side Canvas, pipes 91 unique RGBA frames into
 FFmpeg, holds the final frame for five seconds, and returns a fast-start H.264
 MP4. The Worker stores the result in a dedicated private R2 bucket. The API
@@ -36,8 +36,8 @@ existing post-image-processing warmup is unaffected when this flag is absent.
 
 Use the `profile` input of the deployed latency workflow for stage timings and
 `cold` to require stopped containers before a development family. Compare
-first/all-four readiness and output hashes, not renderer time alone. See
-`docs/spikes/story-video-pipeline-latency-2026-08-28.md` for the investigation.
+first/all-four readiness, output hashes and renderer time. See
+`docs/spikes/story-video-pipeline-latency-2026-08-28.md` for timing details.
 
 Cloudflare Workers Containers require the Workers Paid plan. Local rendering
 and Docker benchmarking do not require the account upgrade.

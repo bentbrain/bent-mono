@@ -1,10 +1,10 @@
 # Release feedback loop
 
-Run cheap checks before dispatching a release. Keep iterative PRs in draft. Once the final push has settled, mark the PR ready so the required `check` runs. Fix deterministic failures in the checkout; a failed native mutation needs its recorded-pair recovery procedure, not another attempt at the same mutation.
+Run local checks before dispatching a release. Keep iterative PRs in draft. Once the final push has settled, mark the PR ready so the required `check` runs. Fix deterministic failures in the checkout. Recover a failed native mutation through its recorded-pair procedure before any further mutation.
 
-Ordinary application fixes use a focused local regression and relevant package checks before the final push. The complete required hosted suites still run before merge; the final eligible release candidate remains fresh and cache-free. Workflow, release-tooling, policy, dependency, infrastructure, migration and unknown changes still run both complete local suites before pushing. This avoids spending the same broad validation budget twice on an ordinary fix.
+Ordinary application fixes use a focused local regression and relevant package checks before the final push. The complete required hosted suites still run before merge; the final eligible release candidate remains fresh and cache-free. Workflow, release-tooling, policy, dependency, infrastructure, migration and unknown changes still run both complete local suites before pushing.
 
-Validation workflows pin `ubuntu-24.04`, matching the admitted `ubuntu24` runtime. A moving `ubuntu-latest` label would otherwise disable receipt reuse after an OS migration. Exact Node and hosted image versions remain part of validation evidence, so runtime drift still requires fresh checks.
+Validation workflows pin `ubuntu-24.04`, matching the admitted `ubuntu24` runtime for receipt reuse. Exact Node and hosted image versions remain part of validation evidence, so runtime drift still requires fresh checks.
 
 ## Monorepo admission
 
@@ -47,7 +47,7 @@ The optional `--worker` flag verifies the target environment's Worker capability
 
 The optional `--aws` flag calls only the existing personal runner's exact Lambda concurrency read. It requires the project's private personal configuration and current SSO login. It does not use another profile, read work credentials, provision resources, or execute cloud-only qualification locally. An absent setup or expired session is a blocker, not a reason to fall back.
 
-The GitHub commands use an explicit `GH_TOKEN` if provided, otherwise `gh auth token --user bentbrain`. They never change the CLI's global account selection. Status is a single snapshot, not a polling daemon or deployment admission decision.
+The GitHub commands use an explicit `GH_TOKEN` if provided, otherwise `gh auth token --user bentbrain`. They never change the CLI's global account selection. Status returns one snapshot. Actions performs deployment admission checks separately.
 
 ## Actions budget
 
@@ -79,15 +79,14 @@ it cannot refund already consumed Actions minutes.
 
 Judge this change on the next ten varied ready PRs and three routine release
 batches. Compare total rounded runner minutes and preserved task-cache evidence,
-then check the monthly projection against 2,500 minutes. A passing warm-cache
-check or merged optimisation does not demonstrate that the budget target is met.
+then check the monthly projection against 2,500 minutes. Use measured runner minutes to determine whether the budget target is met.
 Use ordinary work for this sample rather than dispatching benchmark releases.
 
 ## Earlier checks in Actions
 
 Native Development checks the operation, branch and supplied qualification/rollback ID before dependencies. Production checks the qualification receipt, promotion manifest and qualified Worker/dependency source before cloud preparation. Failures are aggregated so one missing prerequisite does not conceal the next.
 
-The PR workflow runs repository checks and two fixture browser shards in parallel. Each shard collects half of the fixture suite; the first shard also runs the separate PostHog suite. Hosted fixture checks stop at the first failure and cancel the other browser shard; successful runs still execute every test. Local runs collect all failures by default. The required `check` job succeeds only after the repository job and both browser jobs succeed. The shared check action retains its combined suite for main release validation, caches the browser, and saves failure screenshots/traces. This is part of the existing required check, not a new workflow. `bun run test:e2e:ci` lets Turbo reuse a successful fixture-backed browser result from the checkout's local task cache. Its inputs cover the entire web package, shared packages, patches, dependency manifests/lockfile, the browser/runtime wrappers, the shared check action and its calling workflows, and lifestyle image fixtures. Changes to unrelated release scripts do not invalidate it. Print-executor changes invalidate the API checks that consume them rather than every workspace task. Node version, platform, architecture, hosted image version, fixture settings and browser environment changes invalidate the result. Backend implementation or documentation alone does not invalidate this browser task; API tests and the other repository checks still run through their existing gates. Optional production-mode fixture checks always execute because they consume a separately prepared build. `bun run test:e2e:local` remains a direct, uncached run. The complete local run is required before the final push for broad changes; ordinary fixes run the focused local regression and retain the complete hosted gate.
+The PR workflow runs repository checks and two fixture browser shards in parallel. Each shard collects half of the fixture suite; the first shard also runs the separate PostHog suite. Hosted fixture checks stop at the first failure and cancel the other browser shard; successful runs still execute every test. Local runs collect all failures by default. The required `check` job succeeds only after the repository job and both browser jobs succeed. The shared check action retains its combined suite for main release validation, caches the browser, and saves failure screenshots/traces. `bun run test:e2e:ci` lets Turbo reuse a successful fixture-backed browser result from the checkout's local task cache. Its inputs cover the entire web package, shared packages, patches, dependency manifests/lockfile, the browser/runtime wrappers, the shared check action and its calling workflows, and lifestyle image fixtures. Changes to unrelated release scripts do not invalidate it. Print-executor changes invalidate the API checks that consume them rather than every workspace task. Node version, platform, architecture, hosted image version, fixture settings and browser environment changes invalidate the result. Backend implementation or documentation alone does not invalidate this browser task; API tests and the other repository checks still run through their existing gates. Optional production-mode fixture checks always execute because they consume a separately prepared build. `bun run test:e2e:local` remains a direct, uncached run. The complete local run is required before the final push for broad changes; ordinary fixes run the focused local regression and retain the complete hosted gate.
 
 PRs can save their task/Next snapshots in GitHub's isolated pull-request merge-ref cache scope. GitHub does not expose those snapshots to main or other PRs. First-attempt personal main dispatches may also read and write the existing remote browser cache. PR workflows still receive no remote-cache credentials. Browser and other task keys include the exact Node version, platform, architecture and hosted image version. Failure screenshots/traces are not cached as successful results.
 
@@ -128,9 +127,9 @@ come from the same immutable pull-request event. Changing a label after a cached
 run cannot turn that run into trusted evidence. Set the label before the final
 ready event to avoid an extra check.
 
-This mechanism is prospective. The PR introducing the recorder has no recorder
-on its protected base, so its own full check remains required and cannot support
-reuse after merge. Validate the first eligible ordinary PR/release pair using
+Recorder introduction requires a full check because the protected base must
+already contain the recorder before its evidence can support reuse.
+Validate the first eligible ordinary PR/release pair using
 its real provenance; do not dispatch a benchmark release. Production admission,
 live camera/purchase checks, cloud qualification, drains and rollback checks are
 unchanged, including full qualification for release-tooling changes.
@@ -194,13 +193,13 @@ Production still verifies the original successful first-attempt runs, repository
 
 The local browser suite checks the cold home-to-create transition, desktop phone handoff, empty-cart layout, shirt/tote option state and mobile consent. It uses a base-product catalogue fixture, an empty saved-design list, Shopify fixtures and a real Next development server. External browser requests outside the explicit fixture list fail the test; server requests have no live-service fallback. It cannot certify production-mode caching, a configured product purchase, camera upload processing, saved-design deletion, Cloudflare bindings, Shopify checkout or Lambda rendering. The existing deployed browser suite and real Worker/D1/R2 integration tests retain those responsibilities.
 
-Root package/lockfile changes still conservatively require fresh Worker qualification, even when motivated by tooling. The coordinator reduces manual dispatch and observation work. The API lane avoids provisioning an unchanged image, while retaining the existing cloud qualification and recovery protocol.
+Root package/lockfile changes still conservatively require fresh Worker qualification, even when motivated by tooling. Use the coordinator for dispatch and observation. The API lane reuses an unchanged image through the existing cloud qualification and recovery protocol.
 
-The dormant guarded recovery/bootstrap workflows remain manual. Removing their files would not save the minutes spent in active releases and would remove useful recovery procedures.
+Keep the guarded recovery/bootstrap workflows available for manual recovery.
 
 ## Component selection
 
-`bun run release:coordinate --target preview` now defaults to `--mode auto`. It reads authenticated environment deployments and compares each component with its own last successful first-attempt main release. The printed `selection` includes the baseline runs, changed paths, selected workflows and qualification policy. New plans return `estimatedMinutes: null` until comparable observations support an estimate; there is no hardcoded 14/20/6-minute promise.
+`bun run release:coordinate --target preview` now defaults to `--mode auto`. It reads authenticated environment deployments and compares each component with its own last successful first-attempt main release. The printed `selection` includes the baseline runs, changed paths, selected workflows and qualification policy. New plans return `estimatedMinutes: null` until comparable observations support an estimate; use observed timings to estimate duration.
 
 Shipping/backend changes omit an unchanged storefront. Storefront changes omit an unchanged native release. Shopify notification files do not force image preparation and template-only changes dispatch no application workflow. Publish and verify those templates through the notification workflow and Shopify. Missing or divergent history, unknown deployment operations, release policy, unknown shared packages and dependency changes select the full path.
 Reviewed application-contract source changes select web/API and may reuse the
@@ -391,7 +390,6 @@ Shipping reuse independently recomputes the complete renderer manifest and
 checks live configuration. No user-supplied `low-risk` flag can skip these checks.
 Production and preflight now reject any native-relevant path change after the
 qualified source, including migrations, infrastructure and release scripts.
-The previous narrower Worker-source comparison did not include all those paths.
 
 A camera repair in the shared Worker entrypoint is conservatively a full-suite
 change for Production even when its renderer image is unchanged. It can reach
@@ -512,9 +510,7 @@ application deployment baseline.
 Policy-3 automatic plans target ten minutes from the final source's Preview batch
 start through verified Production. `release:measurements` reports that entire
 journey, including qualification, review gaps and queue time, with `withinTarget`
-false for an overrun and unknown for incomplete or ambiguous lineage. This is a
-target to verify with normal releases, not a measured guarantee before samples
-exist. Never cancel a mutation or bypass a failed gate to meet the target.
+false for an overrun and unknown for incomplete or ambiguous lineage. Verify this target with normal releases before claiming it as a measured duration. Never cancel a mutation or bypass a failed gate to meet the target.
 
 Routine Printify identity fixes compare the two pure provider identity modules
 with a full renderer baseline. The new commerce boundary keeps the shipping

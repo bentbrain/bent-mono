@@ -101,7 +101,7 @@
               
             <h2>{{ email_title }}</h2>
             {% if requires_shipping and has_pickup_delivery %}
-              <p>You�ll receive an email when your order is ready for pickup.</p>
+              <p>You'll receive an email when your order is ready for pickup.</p>
               {% if estimated_pickup_date != blank %}
                 <p>Estimated pickup <b>{{ estimated_pickup_date }}</b></p>
               {% endif %}
@@ -799,7 +799,7 @@
           </p>
         {% endif %}
         <p class="order-list__estimated-delivery">
-          You�ll receive an email when your order is ready for pickup.
+          You'll receive an email when your order is ready for pickup.
         </p>
       {% elsif delivery_agreement.delivery_method_type == 'shipping'
         or delivery_agreement.delivery_method_type == 'local'
@@ -3029,7 +3029,7 @@
           </p>
         {% endif %}
         <p class="order-list__estimated-delivery">
-          You�ll receive an email when your order is ready for pickup.
+          You'll receive an email when your order is ready for pickup.
         </p>
       {% elsif delivery_agreement.delivery_method_type == 'shipping'
         or delivery_agreement.delivery_method_type == 'local'

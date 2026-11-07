@@ -194,7 +194,7 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   } finally { await handle.close(); }
 }
 
-async function vercelApi(path, method = "GET", body) {
+export async function vercelApi(path, method = "GET", body) {
   const token = process.env.VERCEL_TOKEN;
   const team = process.env.VERCEL_ORG_ID;
   if (!token || !id(team, "team") || !path.startsWith("/v")) fail("Scoped Vercel credentials are required.");
@@ -203,7 +203,9 @@ async function vercelApi(path, method = "GET", body) {
     ...(body ? { body: JSON.stringify(body) } : {}), redirect: "error", signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) fail(`Vercel request failed with HTTP ${response.status}; inspect any recorded release intent before retrying.`);
-  return response.status === 204 ? {} : response.json();
+  if (response.status === 204) return {};
+  const text = await response.text();
+  return text.trim() ? JSON.parse(text) : {};
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

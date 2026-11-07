@@ -113,24 +113,24 @@ function JoyrideWrapper({
       {
         target: "#category-select",
         title: "Choose categories",
-        content: "Choose stickers from different categories 🦋🙈",
+        content: "Choose a category to browse its stickers.",
         disableBeacon: true,
       },
       {
         target: '[data-joyride="draggable-image"]',
-        title: "Adding stickers",
+        title: "Add stickers",
         content:
-          "Click or drag an image onto the canvas to add it to your collage 🖼️",
+          "Click or drag an image onto the canvas to add it to your collage.",
       },
       {
         target: '[data-joyride="background-picker"]',
         title: "Background",
-        content: "Change background 🤷🏼‍♂️",
+        content: "Choose a background colour, gradient or image.",
       },
       {
         target: '[data-joyride="save-button"]',
         title: "Save",
-        content: "Don't forget to save when you're done 🫶🏼",
+        content: "Save your collage when you finish editing.",
       },
     ],
   };
@@ -144,7 +144,7 @@ function JoyrideWrapper({
       stepIndex={startTutorial.stepIndex}
       beaconComponent={BeaconComponent}
       locale={{
-        last: "Done!",
+        last: "Done",
       }}
       onEvent={handleStateChange}
     />
