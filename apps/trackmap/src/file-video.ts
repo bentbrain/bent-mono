@@ -4,6 +4,7 @@ import type { CanvasSink, Input, WrappedCanvas } from "mediabunny";
 // Keep only the current frame and a small decoder canvas pool in memory.
 export class FileVideo {
   private version = 0;
+  private playback = Promise.resolve();
   private position = 0;
   private wake: (() => void) | undefined;
 
@@ -50,9 +51,19 @@ export class FileVideo {
     }
   }
 
-  async play() {
+  play() {
     this.pause();
     const version = this.version;
+    // A stale iterator can still be decoding after pause. It must finish and
+    // return its canvas before another iterator reuses the same pool.
+    const playback = this.playback
+      .catch(() => {})
+      .then(() => this.run(version));
+    this.playback = playback;
+    return playback;
+  }
+
+  private async run(version: number) {
     let offset = this.position;
     while (version === this.version) {
       const started = performance.now();
