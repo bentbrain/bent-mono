@@ -5,7 +5,73 @@ import { runBrowserContracts } from './integration-browser-contracts';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
+import { JSDOM } from 'jsdom';
 import { assertStatus, serverSignals } from './integration-diagnostics';
+
+function assertPublicSignups(html: string, path: string) {
+  const { document, Node } = new JSDOM(html).window;
+  const signups = document.querySelectorAll(
+    '[data-feedback-id="newsletter-signup"]',
+  );
+  const homepage = path === '/' || path.startsWith('/?');
+  assert.equal(signups.length, homepage ? 2 : 1, `Signup count on ${path}`);
+  const ids: string[] = [];
+  for (const signup of signups) {
+    assert.equal(signup.getAttribute('aria-label'), 'newsletter');
+    assert.equal(signup.querySelector('h2'), null);
+    const form = signup.querySelector('form');
+    assert.ok(form?.hasAttribute('data-feedback-private'));
+    assert.ok(form?.hasAttribute('data-feedback-redact'));
+    for (const name of ['email', 'website']) {
+      const input = signup.querySelector(`input[name="${name}"]`);
+      assert.ok(input?.id, `Missing ${name} ID on ${path}`);
+      ids.push(input.id);
+      assert.equal(document.querySelectorAll(`[id="${input.id}"]`).length, 1);
+      const label = signup.querySelector(`label[for="${input.id}"]`);
+      assert.ok(label);
+      assert.equal(label.textContent.trim(), name);
+      if (name === 'email') assert.ok(label.classList.contains('sr-only'));
+    }
+    assert.equal(signup.querySelector('a'), null);
+  }
+  assert.equal(new Set(ids).size, ids.length);
+  const footer = document.querySelector('body > footer');
+  assert.ok(footer);
+  const footerSignup = footer.querySelector(
+    '[data-feedback-id="newsletter-signup"]',
+  );
+  assert.ok(footerSignup);
+  assert.equal(
+    footer.querySelectorAll('[data-feedback-id="newsletter-signup"]').length,
+    1,
+  );
+  const shop = footer.querySelector('[data-feedback-id="shop-ad"]');
+  if (shop)
+    assert.ok(
+      footerSignup.compareDocumentPosition(shop) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  const main = document.querySelector('main');
+  assert.ok(main);
+  assert.equal(
+    main.querySelectorAll('[data-feedback-id="newsletter-signup"]').length,
+    homepage ? 1 : 0,
+  );
+  if (homepage) {
+    const top = main.querySelector('[data-feedback-id="newsletter-signup"]');
+    const map = main.querySelector('.journal-map-card');
+    assert.ok(
+      top &&
+        map &&
+        top.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  }
+  assert.equal(
+    document.querySelectorAll('a[href="/newsletter/privacy"]').length,
+    1,
+  );
+  assert.ok(footer.querySelector('a[href="/newsletter/privacy"]'));
+}
 
 const reservation = createServer();
 reservation.listen(0, '127.0.0.1');
@@ -199,42 +265,31 @@ async function run() {
   assert.ok(!emptyGallery.includes('aria-label="Media categories"'));
   assert.ok(emptyGallery.includes('<footer'));
   assert.ok(!emptyGallery.includes('theme-toggle'));
-  for (const path of ['/', '/gallery', '/newsletter/privacy']) {
+  for (const path of [
+    '/',
+    '/?cursor=',
+    '/gallery',
+    '/newsletter/privacy',
+    '/404',
+  ]) {
     const html = await (await request(path, undefined, 'GET', false)).text();
-    const signup = html.match(
-      /<section data-feedback-id="newsletter-signup"[\s\S]*?<\/section>/,
-    )?.[0];
-    assert.ok(signup, `Missing public signup on ${path}`);
-    assert.equal(
-      (html.match(/data-feedback-id="newsletter-signup"/g) ?? []).length,
-      1,
-    );
-    const footerStart = html.indexOf('<footer');
-    const signupStart = html.indexOf('data-feedback-id="newsletter-signup"');
-    if (path === '/') {
-      assert.ok(signupStart < html.indexOf('journal-map-card'));
-      assert.ok(signupStart < footerStart);
-    } else {
-      assert.ok(signupStart > footerStart);
-    }
-    assert.ok(!signup.includes('<h2'), `Visible newsletter heading on ${path}`);
+    assertPublicSignups(html, path);
+  }
+  for (const path of [
+    '/newsletter/confirm',
+    '/categories',
+    '/owner',
+    '/owner/media',
+    '/owner/posts/new',
+    '/owner/newsletter',
+    '/owner/export',
+  ]) {
+    const response = await request(path);
+    assert.equal(response.status, 200);
     assert.ok(
-      !signup.includes('get new journal entries by email.'),
-      `Visible newsletter description on ${path}`,
+      !(await response.text()).includes('data-feedback-id="newsletter-signup"'),
+      `Private signup on ${path}`,
     );
-    assert.match(
-      signup,
-      /<label(?=[^>]*for="newsletter-email")(?=[^>]*class="[^"]*sr-only)[^>]*>/,
-    );
-    assert.ok(signup.includes('aria-label="newsletter"'));
-    assert.ok(signup.includes('data-feedback-redact="true"'));
-    assert.ok(signup.includes('data-feedback-private="true"'));
-    assert.match(
-      html,
-      /<footer\b[^>]*>[\s\S]*?href="\/newsletter\/privacy"[\s\S]*?<\/footer>/,
-    );
-    assert.ok(!signup.includes('href="/newsletter/privacy"'));
-    assert.equal((html.match(/href="\/newsletter\/privacy"/g) ?? []).length, 1);
   }
   // Import endpoint modules through safe reads before stateful requests, so
   // dependency optimization does not interrupt an upload or content save.
@@ -776,6 +831,7 @@ async function run() {
   const publicPhotoHtml = await (
     await request(`/media/${nativePhotoId}`, undefined, 'GET', false)
   ).text();
+  assertPublicSignups(publicPhotoHtml, `/media/${nativePhotoId}`);
   assert.ok(publicPhotoHtml.includes('Native photo'));
   assert.ok(!publicPhotoHtml.includes('Synthetic unpublished media title'));
   const incompleteMedia = await request('/_emdash/api/content/media_items', {
@@ -905,6 +961,7 @@ async function run() {
     const detail = await (
       await request(`/posts/${fixture.slug}`, undefined, 'GET', false)
     ).text();
+    assertPublicSignups(detail, `/posts/${fixture.slug}`);
     assert.ok(detail.includes(`<h1>${fixture.expected}</h1>`));
     const editor = z
       .object({ data: z.object({ title: z.string() }) })
@@ -982,6 +1039,7 @@ async function run() {
     'Native owner draft preview is broken',
   );
   const previewHtml = await ownerPreview.text();
+  assert.ok(!previewHtml.includes('data-feedback-id="newsletter-signup"'));
   assert.ok(previewHtml.includes('Full post body verification'));
   assert.ok(previewHtml.includes('class="post-mosaic"'));
   assert.ok(!previewHtml.includes('post-carousel'));
