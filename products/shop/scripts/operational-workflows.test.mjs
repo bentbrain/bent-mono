@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { operationalSchemas, sealOperationalInput, validateOperationalDispatch } from "./operational-dispatch-inputs.mjs";
@@ -251,11 +251,18 @@ test("the actual featured render command keeps its fixed manifest private and pr
     const first = spawnSync(process.execPath, args, {cwd:directory,env,encoding:"utf8",timeout:30000});
     assert.equal(first.status, 0, first.stderr);
     assert.doesNotMatch(first.stdout + first.stderr + await readFile(env.GITHUB_STEP_SUMMARY, "utf8"), /11111111|synthetic-service/);
-    const manifestPath = join(directory, "featured-video-output/manifest.json"), bytes = await readFile(manifestPath);
+    const manifestPath = join(directory, "featured-video-output/manifest.json");
+    const readManifest = async () => {
+      const handle = await open(manifestPath, "r");
+      try {
+        assert.equal((await handle.stat()).mode & 0o777, 0o600);
+        return await handle.readFile();
+      } finally { await handle.close(); }
+    };
+    const bytes = await readManifest();
     assert.equal(JSON.parse(bytes).finalProductId, id);
-    assert.equal((await stat(manifestPath)).mode & 0o777, 0o600);
     assert.equal(spawnSync(process.execPath, args, {cwd:directory,env,encoding:"utf8",timeout:30000}).status, 1);
-    assert.deepEqual(await readFile(manifestPath), bytes);
+    assert.deepEqual(await readManifest(), bytes);
     await sealOperationalArtifacts("featured-video.yml", env, directory);
     const restored = join(directory, "render-evidence.tar");
     await openReleaseArchive(join(directory, "sealed-operational-evidence/operational-evidence.tar.enc"), restored,
