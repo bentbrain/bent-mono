@@ -12,6 +12,7 @@ Public Bun monorepo for the applications deployed to bent.build and its subdomai
 | Collage | maya-collage.bent.build, maya-collages.bent.build | apps/collage |
 | Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
 | Home | home.bent.build | apps/home |
+| Trackmap | trackmap.bent.build | apps/trackmap |
 
 `deployments.json` records the application boundaries. The shop and drive products retain their existing internal packages and services under `products/` so the migration preserves their release and runtime boundaries.
 
@@ -34,11 +35,19 @@ The root `bun.lock` manages the workspace dependencies. The isolated AWS Lambda 
 
 CI runs the existing application checks and full CodeQL analysis. The blog retains its zero-finding requirement. Shop's intentional network/file transfers and fixed-origin requests require individually documented, source-pinned dispositions; unknown findings and stale records fail. Raw analysis remains available. Dispositions require independent review of the exact head and current base before any native false-positive dismissal or merge; they never authorize a production release.
 
+## Trackmap
+
+`bun run dev --filter=@bent/trackmap` starts the local activity card editor. Import GPX, TCX, FIT or GeoJSON files exported from Strava or another GPS recorder. Activity and optional background-photo processing stay in the browser. The sample route is synthetic.
+
+The editor projects recorded coordinates and elevation into a rotating 3D route, with camera, colour, title, units and end-trimming controls. Export a finished, silent H.264 Story MP4 at 1080 px wide over a local photo or video, a transparent or styled PNG at 1080 px wide, or a looping GIF at 540 px wide. MP4 combines the animation and background for uploading to Instagram; GIF and PNG remain available as layers for an editor. Movable animated stickers inside Instagram require GIPHY publishing and moderation, which this application does not perform. There is no Strava account connection or server-side activity storage.
+
+Trackmap uses the ordinary guarded Vercel release route. Its application root is `apps/trackmap`, Node is 24, and the source-owned Vercel config uses the shared pinned Bun bootstrap. Provision the project with workspace access and require the exact-head `Release qualification` production Deployment Check before assigning `trackmap.bent.build`. Do not treat an app build or merged PR as production qualification.
+
 ## Shared design system
 
 `packages/design-tokens` defines the bent font, cobalt accents, backgrounds, border width and square corners. Import `@bent/design-tokens/tokens.css` and map the tokens to application styles without importing another application's global reset.
 
-`packages/ui` owns shared React control behavior. Application wrappers retain their existing variants while adopting common primitives. Keep routing, authentication and product-specific behavior in their applications. Validate all consumers when changing shared packages.
+`packages/ui` owns shared React control behavior. Application wrappers retain their existing variants while adopting common primitives. Shared buttons offer optional `primary`, `outline` and `ghost` appearances through the `appearance` prop, without changing application wrapper variants. Import `@bent/ui/field` for labelled fields, inputs and selects, and `@bent/ui/controls.css` for token-based control styles. Keep routing, authentication and product-specific behavior in their applications. Validate all consumers when changing shared packages.
 
 ## Public source and private data
 

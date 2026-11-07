@@ -1,0 +1,42 @@
+{
+  "name": "@bent/trackmap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests e2e *.ts",
+    "test": "bun test tests",
+    "knip": "knip",
+    "test:browser": "playwright test",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@bent/design-tokens": "workspace:*",
+    "@bent/ui": "workspace:*",
+    "gifenc": "1.0.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "fit-file-parser": "6.2.7",
+    "mediabunny": "1.65.2",
+    "saxes": "6.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/bun": "1.3.14",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "eslint": "9.39.5",
+    "knip": "6.44.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.1.6",
+    "@playwright/test": "1.64.1"
+  }
+}

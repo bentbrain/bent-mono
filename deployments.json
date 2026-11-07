@@ -74,6 +74,15 @@
       "directory": "apps/home",
       "platform": "cloudflare",
       "project": "home-bent-build"
+    },
+    {
+      "name": "trackmap",
+      "domains": [
+        "trackmap.bent.build"
+      ],
+      "directory": "apps/trackmap",
+      "platform": "vercel",
+      "project": "trackmap"
     }
   ]
 }

@@ -137,6 +137,7 @@ test("all ordinary Vercel apps use the shared bootstrap and Node 24 without chan
     "apps/www",
     "apps/stay",
     "apps/collage",
+    "apps/trackmap",
     "products/drive/apps/web",
   ]) {
     const configUrl = new URL(`../${directory}/vercel.json`, import.meta.url);

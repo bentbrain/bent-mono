@@ -34,6 +34,8 @@ function application(directory, script, overrides) {
 }
 
 if (task === "browser") {
+  application("apps/trackmap", "build");
+  application("apps/trackmap", "test:browser");
   application("apps/jp", "test:e2e:coverage");
   application("apps/jp", "test:e2e");
   application("apps/toolbar", "build");

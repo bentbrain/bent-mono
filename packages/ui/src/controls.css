@@ -1,0 +1,76 @@
+.bent-control,
+.bent-button {
+  border: var(--bent-border-width) solid currentColor;
+  border-radius: var(--bent-radius);
+  background: var(
+    --bent-control-background,
+    var(--bent-color-background-light)
+  );
+  color: inherit;
+  font: inherit;
+}
+.bent-control {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+.bent-control[type="range"] {
+  padding: 0;
+  border: 0;
+  accent-color: var(--bent-control-accent, var(--bent-color-accent-light));
+}
+.bent-control[type="checkbox"] {
+  min-height: auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: var(--bent-control-accent, var(--bent-color-accent-light));
+}
+.bent-control[type="color"] {
+  padding: 3px;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+}
+.bent-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.bent-field > label {
+  font-size: 12px;
+}
+.bent-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.bent-button--primary {
+  background: var(--bent-control-accent, var(--bent-color-accent-light));
+  border-color: var(--bent-control-accent, var(--bent-color-accent-light));
+  color: var(--bent-control-background, var(--bent-color-background-light));
+}
+.bent-button--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.bent-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.bent-control:focus-visible,
+.bent-button:focus-visible {
+  outline: 2px solid var(--bent-control-accent, var(--bent-color-accent-light));
+  outline-offset: 3px;
+}
+.bent-control:disabled,
+.bent-button:disabled,
+.bent-button[data-disabled] {
+  opacity: 0.45;
+  cursor: default;
+}

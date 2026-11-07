@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("every inventoried bent.build application has source and a shared design dependency", () => {
   const { applications } = JSON.parse(readFileSync("deployments.json", "utf8"));
-  assert.equal(applications.length, 8);
+  assert.equal(applications.length, 9);
   const domains = new Set();
   for (const application of applications) {
     assert.ok(existsSync(`${application.directory}/package.json`), application.name);

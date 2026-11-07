@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 
 const group = process.argv[2];
 const applications = group === "shop" ? ["products/shop/apps/web"]
-  : group === "browser" ? ["apps/jp", "apps/toolbar"] : null;
+  : group === "browser" ? ["apps/jp", "apps/toolbar", "apps/trackmap"] : null;
 if (!applications) throw new Error("Select browser or shop.");
 for (const application of applications) {
   // Each test runner must install its own matching browser revision.
