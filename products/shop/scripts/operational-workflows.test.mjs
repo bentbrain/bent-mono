@@ -8,7 +8,7 @@ import { operationalSchemas, sealOperationalInput, validateOperationalDispatch }
 import { activateShopWorkflows, operationalWorkflowNames } from "./activate-workflows.mjs";
 import { sealOperationalArtifacts } from "./seal-operational-artifacts.mjs";
 import { openReleaseArchive, openReleaseEvidence, sealReleaseEvidence } from "./release-evidence.mjs";
-import { PRODUCT_ROOT, REPOSITORY_ROOT } from "./monorepo-source.mjs";
+import { PRODUCT_ROOT } from "./monorepo-source.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 
 const source = "a".repeat(40), id = "11111111-1111-4111-8111-111111111111";
@@ -214,4 +214,52 @@ test("the extracted lifecycle transition invalidates the storefront with an opti
       assert.equal((await stat(join(directory, "product-lifecycle-request.json"))).mode & 0o777, 0o600);
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
+});
+
+
+test("the actual featured render command keeps its fixed manifest private and protects it from overwrite", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "shop-featured-manifest-"));
+  try {
+    const f = fixture("featured-video.yml"), eventPath = join(directory, "event.json"), mock = join(directory, "mock.mjs");
+    await writeFile(eventPath, JSON.stringify(f.event));
+    // Exercise the real input validation and manifest writer. Only the expensive
+    // video renderer and HTTP transport use synthetic implementations.
+    await writeFile(mock, `import { registerHooks } from "node:module";
+      import { createHash } from "node:crypto";
+      import { pathToFileURL } from "node:url";
+      import assert from "node:assert/strict";
+      const renderer = pathToFileURL(${JSON.stringify(join(PRODUCT_ROOT, "workers/video-renderer/custom/renderer.mjs"))}).href;
+      registerHooks({ load(url, context, next) {
+        if (url !== renderer) return next(url, context);
+        return { format: "module", shortCircuit: true, source: 'import { mkdir, writeFile } from "node:fs/promises"; import { join } from "node:path"; export async function renderFeaturedVideo({outputDirectory}) { await mkdir(outputDirectory, {recursive:true}); const mp4=join(outputDirectory,"featured.mp4"); await writeFile(mp4,"synthetic video"); return {mp4, quality:{passed:true}, frameCount:1}; }' };
+      }});
+      const id = ${JSON.stringify(id)}, artwork = Buffer.from("synthetic artwork"), hash = createHash("sha256").update(artwork).digest("hex");
+      globalThis.fetch = async (url, options) => {
+        assert.equal(url.origin, "https://forever-tee-api-development.socialqueue.workers.dev");
+        assert.equal(options.redirect, "error");
+        assert.equal(options.headers["x-forever-tee-service-secret"], "synthetic-service");
+        if (url.pathname === "/v2/internal/featured-products") return Response.json({products:[{slot:1,productId:id}]});
+        if (url.pathname.endsWith("/artwork")) return new Response(artwork);
+        if (url.pathname.startsWith("/v1/designs/")) return Response.json({id,status:"ready",artworkRevision:hash,settings:{cropX:0.5,cropY:0.5,cropZoom:1}});
+        return Response.json({configuredProductId:id,designId:id,designRevisionId:id,baseProductSlug:"staple-tee",artworkSha256:hash,contentType:"image/png",byteSize:artwork.length,artworkUrl:"/v2/internal/design-revisions/"+id+"/artwork",placement:{x:0.2,y:0.3,width:0.4,depth:2}});
+      };`);
+    const env = { ...f.env, RUNNER_TEMP: directory, GITHUB_EVENT_PATH: eventPath, NODE_OPTIONS: `--import=${mock}`,
+      WORKER_URL: "https://forever-tee-api-development.socialqueue.workers.dev", FOREVER_TEE_API_SHARED_SECRET: "synthetic-service",
+      RENDER_COLOR: "default", GITHUB_STEP_SUMMARY: join(directory, "summary.md") };
+    // Match the workflow imports while using a disposable cwd for its fixed output.
+    const args = ["--import", join(PRODUCT_ROOT, "scripts/public-release-logging.mjs"), "--import", join(PRODUCT_ROOT, "scripts/decode-operational-dispatch.mjs"), join(PRODUCT_ROOT, "workers/video-renderer/custom/render.mjs")];
+    const first = spawnSync(process.execPath, args, {cwd:directory,env,encoding:"utf8",timeout:30000});
+    assert.equal(first.status, 0, first.stderr);
+    assert.doesNotMatch(first.stdout + first.stderr + await readFile(env.GITHUB_STEP_SUMMARY, "utf8"), /11111111|synthetic-service/);
+    const manifestPath = join(directory, "featured-video-output/manifest.json"), bytes = await readFile(manifestPath);
+    assert.equal(JSON.parse(bytes).finalProductId, id);
+    assert.equal((await stat(manifestPath)).mode & 0o777, 0o600);
+    assert.equal(spawnSync(process.execPath, args, {cwd:directory,env,encoding:"utf8",timeout:30000}).status, 1);
+    assert.deepEqual(await readFile(manifestPath), bytes);
+    await sealOperationalArtifacts("featured-video.yml", env, directory);
+    const restored = join(directory, "render-evidence.tar");
+    await openReleaseArchive(join(directory, "sealed-operational-evidence/operational-evidence.tar.enc"), restored,
+      { sourceCommit: source, runId: "12345", filename: "featured-video-evidence.json" }, keys);
+    assert.deepEqual(execFileSync("tar", ["-xOf", restored, "featured-video-output/manifest.json"]), bytes);
+  } finally { await rm(directory, {recursive:true,force:true}); }
 });

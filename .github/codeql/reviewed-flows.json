@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "0af733f2a030c4e018314cf6ccae63cff4c6c15175a92080bdabf86903c8fada",
+  "sourceManifestSha256": "3405349b887b5c20d9f974b87f95c768dc04257bab825b424879acc98f706ff3",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -125,7 +125,7 @@
         "primaryLocationLineHash": "c7f2060f814df15c:1",
         "primaryLocationStartColumnFingerprint": "43"
       },
-      "canonicalFlowSha256": "9cec5caae8ceaa5e07082b973200bf897a2aa976a084d0f84fc5745d24f39442",
+      "canonicalFlowSha256": "5b44f96da0fc2143d2f4a06ddeefee01031727b5b0a4f1fc3c2eed4ca7ad19e0",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The repository composition manifest supplies validated product/source/job IDs to fixed-account Cloudflare query/object paths and publication bodies. compositionContext requires the owner, exact first-attempt protected main workflow/account and fixed Worker origin; compositionRecords checks distinct UUIDs, bounded source hashes/placement and supported products/jobs. API calls deny redirects; immutable writes use conditional create and readback equality. Context, invalid-manifest and rollback/recovery tests exercise these boundaries. This is the intended reviewed content publication path, not an arbitrary-host upload.",
       "guardPaths": [
@@ -150,7 +150,7 @@
         "primaryLocationLineHash": "4a968f12f972b30f:1",
         "primaryLocationStartColumnFingerprint": "29"
       },
-      "canonicalFlowSha256": "44ca396704f1f1bc8b205e05c7d8cce3a70d6b92b931bcbebb0b7760e27542f1",
+      "canonicalFlowSha256": "4737810e28eb9871756b9335357b5b24a2f2a3a7fae643d63ba1660f68235dee",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "A product UUID from the reviewed manifest is used only in the print-assets-refresh query of the exact protected Worker origin checked by compositionContext. compositionRecords validates those distinct product identities before this loop; the POST uses an operations secret, redirect:error, a deadline and success check. Context tests reject another origin/account/actor and record tests reject malformed identities. The transfer intentionally requests assets for newly created reviewed products; it does not transmit arbitrary local file bytes or credentials to a manifest-selected host.",
       "guardPaths": [
@@ -404,7 +404,7 @@
         "primaryLocationLineHash": "214a6470fdb6e6c1:1",
         "primaryLocationStartColumnFingerprint": "54"
       },
-      "canonicalFlowSha256": "405b03bc30627ebdc368d2bf59d8bc5eb66f6355fdde6ca5644297020fbc0db6",
+      "canonicalFlowSha256": "6e53ff2b1fb3ac775a8b92da4af9dee160130bcc9ee370a712a44dbcbca7454a",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Authenticated R2 bytes for the original backup intent are deliberately retained as fixed original-intent.json. assertBackupRecovery first binds original source/run, exact environment/resources, immutable image/bundle and live completed deployment/native baseline; Git ancestry and unchanged runtime inputs are checked. Owner/protected-main/account guards and fixed Cloudflare origin deny general remote inputs. Recovery tests reject changed identities/images/keys/baselines. The file is diagnostic JSON for the same operation, not executable downloaded code or a remote-chosen pathname.",
       "guardPaths": [
@@ -429,7 +429,7 @@
         "primaryLocationLineHash": "4a48f8ca840fb071:1",
         "primaryLocationStartColumnFingerprint": "45"
       },
-      "canonicalFlowSha256": "935fd0029baa58443749f53642117fc46dfbbfec01e0a10544c219b116ec0797",
+      "canonicalFlowSha256": "86780c13cff75eee6f4dbb0b2c187389b46a0f0731c8c92d67dd5322661cd35c",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Fixed intent.json preserves the prepared backup source, immutable image/bundle/config hashes and validated native/backup baseline observations before mutation. backupContext restricts owner/protected first-attempt workflow/account; assertInactiveBackup and inspect require the existing unpaused native pair and one ready backup. Conditional durable preservation and baseline recheck guard release sequencing. Tests cover context, incompatible receipts and recovery drift. Network-derived metadata is intentionally JSON evidence at a fixed output path; it is not directly executed or accepted without release validation.",
       "guardPaths": [
@@ -454,7 +454,7 @@
         "primaryLocationLineHash": "9eaf8b254ec9a867:1",
         "primaryLocationStartColumnFingerprint": "52"
       },
-      "canonicalFlowSha256": "c6f8f4140839a20d231a7249fdccbc41111476bf72504083d80c63124f400835",
+      "canonicalFlowSha256": "6be2d3389e86dddbbe2e575d4c79cd80190c23341fee493ff93f14edc68ad2a5",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "An authenticated, random-token, run-specific temporary probe returns render-event JSON, which readRenderEvents redacts before fixed render-events.json persistence. Readiness must identify the exact run, and renderEditorialProbe checks x-editorial-operation and refuses ambiguous replay. Ready-key/cache/complete-count/no-error checks follow before qualification. Tests reject wrong identity/secret, uncertain responses and repeated handled renders, and verify token redaction. Saving diagnostic events is intentional; this file is not executable or a release approval by itself.",
       "guardPaths": [
@@ -481,7 +481,7 @@
         "primaryLocationLineHash": "68783b308bea14a2:1",
         "primaryLocationStartColumnFingerprint": "43"
       },
-      "canonicalFlowSha256": "b9cd25a2ba56507aecfb5a7968619ad14a328b2c400bf395fe4be4dc84af7d06",
+      "canonicalFlowSha256": "5e642441f2de65107c3041ce23599d59ef5fca3b4647f4dcdeed2c66ce8511ca",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The fixed cloud.mp4 file is the explicit output of the authenticated temporary synthetic backup renderer. The URL uses a numeric run-derived probe name on the fixed workers.dev suffix; redirects are denied, HTTP success/video/mp4 and0<size<32MB are checked. compareBackupVideo then decodes and compares against the known synthetic fixture before a receipt is qualified. Probe tests cover identity and no ambiguous retries, while policy tests require valid decoded-frame evidence. The download is necessary media qualification, not arbitrary executable upload; live codec integration is not claimed by unit tests.",
       "guardPaths": [
@@ -508,7 +508,7 @@
         "primaryLocationLineHash": "89ee463d779628ae:1",
         "primaryLocationStartColumnFingerprint": "46"
       },
-      "canonicalFlowSha256": "5bad09da46417b0d3ac2c0db1bb502b24c7256a775a40a0247a659994d3ed581",
+      "canonicalFlowSha256": "bead68419463a0d4749002041f0c4366490b61c945cf4c7d6d384b283682f0a0",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Fixed receipt.json is written only after exact deployed backup bundle hash/version/image binding, successful synthetic render/frame comparison, temporary probe/output cleanup and unchanged native/backup baseline. Owner/protected-workflow/account context and immutable durable receipt preservation remain enforced. Tests reject unqualified/uncleaned receipts, wrong image host/source/frame evidence and recovery baseline drift. Its remote version/container fields are intentionally retained provenance metadata, not dynamic local filenames or downloaded executable source.",
       "guardPaths": [
@@ -535,7 +535,7 @@
         "primaryLocationLineHash": "3b99463e41ae10d0:1",
         "primaryLocationStartColumnFingerprint": "55"
       },
-      "canonicalFlowSha256": "3f023eb597ac9281548d45c087adbc938f09d8f42b05ca9e92fdaa595a544ec8",
+      "canonicalFlowSha256": "72608ac6a4acb3295d6f875d677313cc7a1596afcaac3ff3d393937e2cd558e1",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Catalogue rows read from the authenticated fixed-account D1 API are converted into fixed print-resolution.json only after verifyCompositionPrintResolution requires every current geometry to meet the application print-source PPI limit. The rows are bounded in number and must stay equal to the saved intent before creation. Exact owner/workflow/account/release context and composition identity guards apply. Tests demonstrate the approved portrait passes all geometries and an enlarged crop fails the largest. This is intended preflight evidence; JSON metadata is not executable.",
       "guardPaths": [
@@ -560,7 +560,7 @@
         "primaryLocationLineHash": "5a4bbd804f79ca85:1",
         "primaryLocationStartColumnFingerprint": "45"
       },
-      "canonicalFlowSha256": "158492ecde39e37ccca52ee80be405954f794ee5ec4545af3a24eb7b38e841ff",
+      "canonicalFlowSha256": "6ea8d82d5c0ccd7bd7c971d3a6af21b0c3ce7e137129f2b26f5ff1a6b68751fd",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Fixed intent.json retains the authenticated previous operation intent or a fresh reviewed manifest plus source/baseline/geometries. Production must equal the protected approved manifest; compositionRecords validates identities/bounds and recovery geometry equality is required, with synthetic-only cleanup verification when applicable. Protected owner/account/workflow context and conditional immutable R2 preservation are enforced. Tests cover malformed manifests, same-ID recovery, release drift and unsafe cleanup. Network data is deliberately retained as evidence rather than interpreted as arbitrary local code/path.",
       "guardPaths": [
@@ -585,7 +585,7 @@
         "primaryLocationLineHash": "7dca4c94c7680346:1",
         "primaryLocationStartColumnFingerprint": "23"
       },
-      "canonicalFlowSha256": "93c2a7d6ad54d784d128ed848cb1d849f55a2f0eec9cb5bd7497028e7def9a7a",
+      "canonicalFlowSha256": "c6095222474061534689802fc17182dfc1c552da591d9d9e24753828718d3cfe",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The network-derived previous manifest is not downloaded JavaScript: compositionRecords validates its UUIDs, source bounds and exact products/jobs, Production additionally requires equality to the approved manifest, and cleanup is synthetic-only. The module at a fixed mkdtemp worker.mjs imports only the trusted repository compositionOperation; all variable manifest/release/environment/intent/run data is inserted with JSON.stringify as literals. Context/record tests reject malformed identities and stale release/partial records. The generated module is an intentional sealed operation payload; no arbitrary source text is evaluated.",
       "guardPaths": [
@@ -610,7 +610,7 @@
         "primaryLocationLineHash": "962d3c8811afc455:1",
         "primaryLocationStartColumnFingerprint": "50"
       },
-      "canonicalFlowSha256": "3bffd6ec0977fdb82afe8068b6591926e85f1720c9f45257c2ea44c73bf0b422",
+      "canonicalFlowSha256": "387d98eb5134de8daa7481bc294ba7d698688c9a4ac36c6fe04255758c5d8597",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "During authorized synthetic cleanup, the token-authenticated temporary Worker GET snapshot is persisted to fixed media-state.json before DELETE and cleanup acknowledgement. The owner/protected-main/account context, exact run readiness and unchanged release baseline precede the request; cleanup intent binds original source/environment/resources and excludes customer artwork. Tests reject wrong run readiness, changed cleanup baselines and Production/customer cleanup. This is intentionally retained diagnostic JSON, not a trusted release receipt or remote-chosen file path.",
       "guardPaths": [
@@ -637,7 +637,7 @@
         "primaryLocationLineHash": "b0aa6427ef1c45a2:1",
         "primaryLocationStartColumnFingerprint": "47"
       },
-      "canonicalFlowSha256": "132b7bc7bc9f44864250bd831873a2366a146f4b390b47c61d6a25d067d93010",
+      "canonicalFlowSha256": "30a87fc0a4a98443c779c03ba4cb4e86a1742bc7e1e6b3373b9401ee0ae91480",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "An authorized temporary composition Worker POST must report committed:true before fixed creation.json records the response. The Worker code is the trusted repository transaction with sealed reviewed manifest and random operation token; release baseline is rechecked immediately before the transaction. Record tests cover exact immutable records, paused/changed release preconditions, batch rollback and resumable same-ID recovery. The saved response is intentional transaction evidence, not executable content; later media/cleanup checks are still required for qualification.",
       "guardPaths": [
@@ -662,7 +662,7 @@
         "primaryLocationLineHash": "ecc2fe563952b9d5:1",
         "primaryLocationStartColumnFingerprint": "50"
       },
-      "canonicalFlowSha256": "bdf9af2c96658e92f049dd49c5e5e3bd2efa056581c8bef9058d13872dbb4f43",
+      "canonicalFlowSha256": "9ec85f31804aa39cd265625402a554c40a8bfede7f6cae3e9706e02c19d4f589",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The polling GET result from the authenticated run-specific temporary Worker is intentionally saved as fixed media-state.json, including incomplete states useful for recovery. The loop has an 8minute deadline and bounded terminal-attempt failure; verifyCompositionMedia, exact geometry presence and hashes must pass after readiness before any qualified receipt. Context and media tests reject wrong release/readiness/object metadata/attempts. The diagnostic snapshot itself does not establish acceptance and cannot select a local filename or executable source.",
       "guardPaths": [
@@ -687,7 +687,7 @@
         "primaryLocationLineHash": "8d128ded4349d8b5:1",
         "primaryLocationStartColumnFingerprint": "40"
       },
-      "canonicalFlowSha256": "7374a72aaa924a2140f06053fbb09dbf61243d6250123920c7c7decf39c62211",
+      "canonicalFlowSha256": "ac526a584891dbf9c4b48595946144b8e34c0db4d596871d4ef4437094776124",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "A video object fetched from the fixed protected R2 bucket is written for visual verification only after verifyCompositionMedia binds each job/product/colour/source/composition/renderer/attempt and object size to the reviewed manifest, then SHA256 matches the object metadata. The output name uses an already-matched product UUID and supported colour; ffmpeg decoding is required. Media tests reject mismatched sizes/composition/attempts and record tests bound identities. This is intended media evidence, with actual codec/cloud integration left to protected qualification.",
       "guardPaths": [
@@ -712,7 +712,7 @@
         "primaryLocationLineHash": "5cdeee436f2456e4:1",
         "primaryLocationStartColumnFingerprint": "43"
       },
-      "canonicalFlowSha256": "31527c05b7ce916886244a6b5c2d430181bb0652e990bdb222c6ae870e18755e",
+      "canonicalFlowSha256": "91b055bf5c9db8f7817c35b74c3d75ccaa4a3996a9da998609396a06c109b81c",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The same reviewed-job/source/renderer/attempt/object-size checks and R2 body SHA256 comparison protect the White video copied to the constant cloud.mp4 comparison input. Only a manifest-supported White job reaches this write; the image/video comparison must finish before a qualified Development receipt. Tests exercise malformed media/readiness, exact identity contracts and safe transactional records. The file is intentionally a synthetic qualification artifact rather than an arbitrary remote executable or pathname; unit tests do not substitute for live visual qualification.",
       "guardPaths": [
@@ -737,7 +737,7 @@
         "primaryLocationLineHash": "5691c6474523794c:1",
         "primaryLocationStartColumnFingerprint": "73"
       },
-      "canonicalFlowSha256": "a1e540c0f7cf2a76589c7f417757ff3de6cdb81bd668a79397b41340584aa0f8",
+      "canonicalFlowSha256": "f3e8c43590ff349df832155723bce349de26c32cc81611bbd7c9051d4ff25476",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "Ready print-object bytes are fetched from the fixed account/bucket, SHA256 checked and PNG dimensions matched before this write. compositionPrintFilename additionally requires membership in the validated manifest and safe decoration-method/geometry syntax with exact positive dimensions<=12000, preventing remote product/geometry path traversal. Its regression test rejects unrelated IDs, traversals and dimension mismatch; media tests require ready hashed assets. Downloaded PNG evidence is intentional and its filename is constrained rather than taken directly from the network.",
       "guardPaths": [
@@ -762,7 +762,7 @@
         "primaryLocationLineHash": "c85b83d57913c10c:1",
         "primaryLocationStartColumnFingerprint": "54"
       },
-      "canonicalFlowSha256": "21fbddc3056512be4f5cb556850e099db683be36d2a1f287e54d538ae3f422e2",
+      "canonicalFlowSha256": "f89732f156a700283bfe5f8605d25e48391f5ba1a9f923aae2700ed32ecb23a5",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "After synthetic-only cleanup and temporary Worker removal confirmation, the script constructs a fixed-field cleanup receipt bound to exact original intent hash/source/run/command and current release/environment. It is conditionally preserved with byte-for-byte readback, then written to fixed cleanup-receipt.json. Tests reject Production cleanup, changed source/resources/baseline and customer-artwork manifests. Remote baseline and previous-intent metadata are intentionally retained provenance, not executable content or an unvalidated release-approval shortcut.",
       "guardPaths": [
@@ -787,7 +787,7 @@
         "primaryLocationLineHash": "89ee463d779628ae:1",
         "primaryLocationStartColumnFingerprint": "46"
       },
-      "canonicalFlowSha256": "62c9661bf719b2e031be5591083c773d4b0edc83beaa4d6839e971e90893c62f",
+      "canonicalFlowSha256": "2c120c00b207cd1357e5906018e64e4d238b4581c2e23d9bf3c84e6bc1ae5817",
       "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
       "rationale": "The final fixed receipt.json is constructed only after required media/source/hash/geometry/readiness checks, comparisons for Development, unchanged release baseline and temporary operation cleanup; it records qualified/cleaned state and immutable source/run/command/product/version identities. Conditional R2 creation/readback prevents replacing a different receipt. Policy and record tests reject unsafe release/media/cleanup and transactional drift. The network-to-file trace is intended release evidence, and the receipt is subject to independent original-run qualification rather than raw JSON trust.",
       "guardPaths": [
@@ -1290,29 +1290,6 @@
       }
     },
     {
-      "id": "shop-runtime-featured-render-actions-summary",
-      "disposition": "intentional-safe-flow",
-      "ruleId": "js/http-to-file-access",
-      "fingerprint": {
-        "primaryLocationLineHash": "72d8322bc7b89077:1",
-        "primaryLocationStartColumnFingerprint": "0"
-      },
-      "canonicalFlowSha256": "cc42f957e2e855aca2f169102a44fa35e44cb3a6d34a799c34b527e380e1dd5a",
-      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
-      "rationale": "Validated product metadata is intentionally appended as render-summary text/JSON to the Actions-provided GITHUB_STEP_SUMMARY file. The remote API cannot choose that path. Input preparation pins the selected environment API, uses service authentication with redirects rejected, validates product/revision UUIDs, base-product allowlists, placement and artwork metadata, verifies artwork size/hash and rechecks the featured selection. Tests reject origin substitution, external artwork URLs, changed selection and corrupt artwork.",
-      "guardPaths": [
-        "products/shop/workers/video-renderer/custom/render.mjs",
-        "products/shop/workers/video-renderer/custom/inputs.mjs"
-      ],
-      "testPaths": [
-        "products/shop/workers/video-renderer/custom/inputs.test.mjs"
-      ],
-      "reviewReference": {
-        "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
-      }
-    },
-    {
       "id": "shop-runtime-latency-readiness-report",
       "disposition": "intentional-safe-flow",
       "ruleId": "js/http-to-file-access",
@@ -1494,6 +1471,34 @@
       "reviewReference": {
         "requiredStatus": "Independent review",
         "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-runtime-featured-render-private-manifest",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "39cb0688ce6b7f8c:1",
+        "primaryLocationStartColumnFingerprint": "59"
+      },
+      "canonicalFlowSha256": "3491ea62ea0037add622322e2b4247cc386e992b1ac49b7b6f85d9d68c6957e5",
+      "analysisSha256": "8553ea16641502b7a5e391367318a45e963cd61f55b9d70281cb4fecc3bbd49c",
+      "rationale": "The renderer reads bounded authenticated metadata from the fixed environment API with redirects rejected. Featured slots and UUIDs, immutable artwork paths, placement, size and hashes are validated before rendering. Metadata is serialized as JSON to the constant featured-video-output/manifest.json path, opened with wx and mode 0600, so network values select neither a path nor executable content and an existing manifest is preserved. The protected workflow captures subprocess diagnostics, publishes a constant summary and uploads only authenticated encrypted artifacts. The actual command regression verifies input validation, exclusive manifest creation, private permissions, constant public output and exact-byte encrypted recovery.",
+      "guardPaths": [
+        "products/shop/workers/video-renderer/custom/render.mjs",
+        "products/shop/workers/video-renderer/custom/inputs.mjs",
+        "products/shop/scripts/decode-operational-dispatch.mjs",
+        "products/shop/scripts/operational-dispatch-inputs.mjs",
+        "products/shop/scripts/seal-operational-artifacts.mjs",
+        "products/shop/.github/workflows/featured-video.yml"
+      ],
+      "testPaths": [
+        "products/shop/workers/video-renderer/custom/inputs.test.mjs",
+        "products/shop/scripts/operational-workflows.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/18 final-head/current-base review venue; this reference grants no approval."
       }
     }
   ]
