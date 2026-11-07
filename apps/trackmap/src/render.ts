@@ -1,4 +1,4 @@
-import type { CardMedia } from "./media";
+import type { CardFrame } from "./video-frames";
 import type { TrackPoint } from "./activity";
 import { statistics } from "./activity";
 
@@ -113,7 +113,7 @@ export function drawCard(
   stats: ReturnType<typeof cardStats>,
   options: CardOptions,
   angle = options.angle,
-  photo?: CardMedia,
+  photo?: CardFrame,
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
@@ -121,11 +121,17 @@ export function drawCard(
   const dark = options.background !== "paper";
   if (photo) {
     const sourceWidth =
-      photo instanceof HTMLVideoElement ? photo.videoWidth : photo.naturalWidth;
+      photo instanceof HTMLVideoElement
+        ? photo.videoWidth
+        : photo instanceof HTMLImageElement
+          ? photo.naturalWidth
+          : photo.width;
     const sourceHeight =
       photo instanceof HTMLVideoElement
         ? photo.videoHeight
-        : photo.naturalHeight;
+        : photo instanceof HTMLImageElement
+          ? photo.naturalHeight
+          : photo.height;
     const scale = Math.max(width / sourceWidth, height / sourceHeight);
     ctx.drawImage(
       photo,

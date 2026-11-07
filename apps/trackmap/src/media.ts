@@ -1,5 +1,19 @@
 export type CardMedia = HTMLImageElement | HTMLVideoElement;
 
+export const videoFiles = new WeakMap<HTMLVideoElement, Blob>();
+
+export async function loadVideoFile(file: Blob) {
+  const url = URL.createObjectURL(file);
+  try {
+    const video = await loadVideo(url);
+    videoFiles.set(video, file);
+    return video;
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
 export function releaseMedia(media: CardMedia | undefined) {
   if (media instanceof HTMLVideoElement) {
     const url = media.src;

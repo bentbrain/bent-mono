@@ -9,7 +9,7 @@ import { cardStats, drawCard, prepareRoute } from "./render";
 import { download, exportGif, exportPng, exportVideo } from "./export";
 
 import type { CardMedia } from "./media";
-import { loadVideo, releaseMedia } from "./media";
+import { loadVideoFile, releaseMedia } from "./media";
 
 const initialOptions: CardOptions = {
   title: "Sample activity",
@@ -175,17 +175,15 @@ export default function App() {
       return;
     }
     setMediaLoading(true);
-    const url = URL.createObjectURL(file);
     if (isVideo) {
       try {
-        const video = await loadVideo(url);
+        const video = await loadVideoFile(file);
         if (version !== photoVersion.current) {
           releaseMedia(video);
           return;
         }
         setPhoto(video);
       } catch (cause) {
-        URL.revokeObjectURL(url);
         if (version === photoVersion.current)
           setError(
             cause instanceof Error
@@ -197,6 +195,7 @@ export default function App() {
       }
       return;
     }
+    const url = URL.createObjectURL(file);
     try {
       const image = new Image();
       image.src = url;

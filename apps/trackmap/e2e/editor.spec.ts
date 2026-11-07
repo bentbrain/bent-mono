@@ -353,7 +353,36 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible({ timeout: 20_000 });
   await page.getByLabel("Rotation speed").selectOption("4");
-  const second = page.waitForEvent("download");
+  // A failed playback seek must not break offline frame extraction when the
+  // browser has a file decoder. This reproduces the failing native seek seam.
+  await page.evaluate(() => {
+    if (typeof VideoDecoder === "undefined") return;
+    const currentTime = Object.getOwnPropertyDescriptor(
+      HTMLMediaElement.prototype,
+      "currentTime",
+    );
+    if (!currentTime?.get || !currentTime.set)
+      throw new Error("Missing native media time descriptor");
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+      configurable: true,
+      get: currentTime.get,
+      set() {
+        throw new Error("Native playback seeking is unavailable");
+      },
+    });
+  });
+  function downloadOrError() {
+    return Promise.race([
+      page.waitForEvent("download"),
+      page
+        .getByRole("alert")
+        .waitFor({ state: "visible" })
+        .then(async () => {
+          throw new Error(await page.getByRole("alert").innerText());
+        }),
+    ]);
+  }
+  const second = downloadOrError();
   await page.getByRole("button", { name: "Export Story video" }).click();
   const secondDownload = await second;
   const secondPath = await secondDownload.path();
@@ -397,12 +426,24 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   expect(metadata[0].duration).toBeLessThan(30.05);
   expect(metadata[1].duration).toBeGreaterThan(3.95);
   expect(metadata[1].duration).toBeLessThan(4.05);
-  const gifDownload = page.waitForEvent("download");
+  // A shorter source must wrap during a longer export without dropping frames.
+  await page
+    .getByLabel("Background photo or video", { exact: true })
+    .setInputFiles({
+      name: "synthetic-composite.mp4",
+      mimeType: "video/mp4",
+      buffer: composite,
+    });
+  await expect(
+    page.getByRole("button", { name: "Remove", exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel("Rotation speed").selectOption("6");
+  const gifDownload = downloadOrError();
   await page.getByRole("button", { name: "Export animated GIF" }).click();
   const gifPath = await (await gifDownload).path();
   if (!gifPath) throw new Error("Missing GIF with video background");
   const frames = gifFrames(await readFile(gifPath));
-  expect(frames).toHaveLength(48);
+  expect(frames).toHaveLength(72);
   expect(frames.every((frame) => !frame.transparent)).toBe(true);
   await page.getByRole("button", { name: "Export Story video" }).click();
   await page.getByRole("button", { name: "Cancel export" }).click();
