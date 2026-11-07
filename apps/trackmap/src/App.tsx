@@ -23,7 +23,7 @@ const initialOptions: CardOptions = {
   tilt: 38,
   exaggeration: 3,
   angle: 25,
-  duration: 6,
+  duration: 30,
 };
 const colors = [
   designTokens.accentLight,
@@ -305,7 +305,7 @@ export default function App() {
               >
                 {playing ? "Pause" : "Play"}
               </Button>
-              <span>{options.duration}s loop</span>
+              <span>{options.duration}s per turn</span>
               <Button
                 appearance="ghost"
                 onClick={() => {
@@ -563,6 +563,22 @@ export default function App() {
                     }}
                   />
                 </Field>
+                <Field label="Rotation speed" htmlFor="duration">
+                  <Select
+                    id="duration"
+                    value={options.duration}
+                    onChange={(event) =>
+                      update("duration", Number(event.target.value))
+                    }
+                  >
+                    <option value="4">4 seconds per turn</option>
+                    <option value="6">6 seconds per turn</option>
+                    <option value="8">8 seconds per turn</option>
+                    <option value="15">15 seconds per turn</option>
+                    <option value="30">30 seconds per turn</option>
+                    <option value="60">60 seconds per turn</option>
+                  </Select>
+                </Field>
                 <div className="toggles">
                   <label>
                     <Input
@@ -612,37 +628,22 @@ export default function App() {
             <fieldset disabled={exporting}>
               <legend>Export</legend>
               <div className="fields">
-                <div className="two-columns">
-                  <Field label="Frame" htmlFor="format">
-                    <Select
-                      id="format"
-                      value={options.format}
-                      onChange={(event) => {
-                        if (
-                          event.target.value === "story" ||
-                          event.target.value === "square"
-                        )
-                          update("format", event.target.value);
-                      }}
-                    >
-                      <option value="story">Story · 9:16</option>
-                      <option value="square">Square · 1:1</option>
-                    </Select>
-                  </Field>
-                  <Field label="Loop length" htmlFor="duration">
-                    <Select
-                      id="duration"
-                      value={options.duration}
-                      onChange={(event) =>
-                        update("duration", Number(event.target.value))
-                      }
-                    >
-                      <option value="4">4 seconds</option>
-                      <option value="6">6 seconds</option>
-                      <option value="8">8 seconds</option>
-                    </Select>
-                  </Field>
-                </div>
+                <Field label="Frame" htmlFor="format">
+                  <Select
+                    id="format"
+                    value={options.format}
+                    onChange={(event) => {
+                      if (
+                        event.target.value === "story" ||
+                        event.target.value === "square"
+                      )
+                        update("format", event.target.value);
+                    }}
+                  >
+                    <option value="story">Story · 9:16</option>
+                    <option value="square">Square · 1:1</option>
+                  </Select>
+                </Field>
                 <Button
                   appearance="primary"
                   disabled={!exportable || loading || mediaLoading}

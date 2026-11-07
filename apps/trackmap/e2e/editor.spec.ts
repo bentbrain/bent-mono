@@ -65,6 +65,8 @@ test("imports, customizes and exports genuinely transparent PNGs and animated GI
     path: info.outputPath("editor.png"),
     fullPage: true,
   });
+  await expect(page.getByLabel("Rotation speed")).toHaveValue("30");
+  await expect(page.getByText("30s per turn", { exact: true })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -88,7 +90,7 @@ test("imports, customizes and exports genuinely transparent PNGs and animated GI
     .getByLabel("Activity title", { exact: true })
     .fill("That was worth it");
   await page.getByRole("button", { name: "Clear", exact: true }).click();
-  await page.getByLabel("Loop length").selectOption("4");
+  await page.getByLabel("Rotation speed").selectOption("4");
   const pngDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save PNG" }).click();
   const pngPath = await (await pngDownload).path();
@@ -327,7 +329,6 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
 }, info) => {
   test.slow();
   await page.goto("/");
-  await page.getByLabel("Loop length").selectOption("4");
   const first = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Story video" }).click();
   const firstDownload = await first;
@@ -349,39 +350,51 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible();
+  await page.getByLabel("Rotation speed").selectOption("4");
   const second = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Story video" }).click();
   const secondDownload = await second;
   const secondPath = await secondDownload.path();
   if (!secondPath) throw new Error("Missing composited Story download");
   const composite = await readFile(secondPath);
-  const metadata = await page.evaluate(async (data) => {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    video.src = URL.createObjectURL(
-      new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
-        type: "video/mp4",
-      }),
-    );
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("MP4 could not decode"));
-    });
-    const result = {
-      width: video.videoWidth,
-      height: video.videoHeight,
-      duration: video.duration,
-    };
-    URL.revokeObjectURL(video.src);
-    video.removeAttribute("src");
-    video.load();
-    return result;
-  }, composite.toString("base64"));
-  expect(metadata.width).toBe(1080);
-  expect(metadata.height).toBe(1920);
-  expect(metadata.duration).toBeGreaterThan(3.95);
-  expect(metadata.duration).toBeLessThan(4.05);
+  const metadata = await page.evaluate(
+    async (clips) => {
+      const results = [];
+      for (const data of clips) {
+        const video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.src = URL.createObjectURL(
+          new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
+            type: "video/mp4",
+          }),
+        );
+        await new Promise<void>((resolve, reject) => {
+          video.onloadedmetadata = () => resolve();
+          video.onerror = () => reject(new Error("MP4 could not decode"));
+        });
+        const result = {
+          width: video.videoWidth,
+          height: video.videoHeight,
+          duration: video.duration,
+        };
+        URL.revokeObjectURL(video.src);
+        video.removeAttribute("src");
+        video.load();
+        results.push(result);
+      }
+      return results;
+    },
+    [mp4.toString("base64"), composite.toString("base64")],
+  );
+  for (const clip of metadata) {
+    expect(clip.width).toBe(1080);
+    expect(clip.height).toBe(1920);
+  }
+  expect(metadata[0].duration).toBeGreaterThan(29.95);
+  expect(metadata[0].duration).toBeLessThan(30.05);
+  expect(metadata[1].duration).toBeGreaterThan(3.95);
+  expect(metadata[1].duration).toBeLessThan(4.05);
   const gifDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export animated GIF" }).click();
   const gifPath = await (await gifDownload).path();

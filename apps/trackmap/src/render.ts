@@ -176,10 +176,10 @@ export function drawCard(
   const orbit = (angle * Math.PI) / 180;
   const cos = Math.cos(orbit),
     sin = Math.sin(orbit);
-  const project = (p: Vertex, floor = false) => {
+  const project = (p: Vertex) => {
     const x = p.x * cos - p.y * sin;
     const y = p.x * sin + p.y * cos;
-    const z = floor ? 0 : p.z * options.exaggeration;
+    const z = p.z * options.exaggeration;
     return {
       x,
       y: -y * Math.sin(tilt) - z * Math.cos(tilt),
@@ -230,21 +230,6 @@ export function drawCard(
   }
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  // Elevation stems describe the real profile without inventing terrain.
-  ctx.strokeStyle = options.color + "35";
-  ctx.lineWidth = Math.max(1, width * 0.0015);
-  for (
-    let i = 0;
-    i < route.length;
-    i += Math.max(1, Math.floor(route.length / 65))
-  ) {
-    const top = screen(projected[i]);
-    const bottom = screen(project(route[i], true));
-    ctx.beginPath();
-    ctx.moveTo(bottom.x, bottom.y);
-    ctx.lineTo(top.x, top.y);
-    ctx.stroke();
-  }
   const edges = projected
     .slice(1)
     .map((p, i) => ({ a: projected[i], b: p }))
