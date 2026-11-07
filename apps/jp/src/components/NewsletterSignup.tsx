@@ -4,7 +4,9 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Field, FieldLabel } from './ui/field';
 
-export function NewsletterSignup() {
+export function NewsletterSignup({ instance }: { instance: 'top' | 'footer' }) {
+  const emailId = `newsletter-${instance}-email`;
+  const websiteId = `newsletter-${instance}-website`;
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -45,11 +47,11 @@ export function NewsletterSignup() {
           className="flex w-full items-end gap-2"
         >
           <Field className="min-w-0 flex-1">
-            <FieldLabel htmlFor="newsletter-email" className="sr-only">
+            <FieldLabel htmlFor={emailId} className="sr-only">
               email
             </FieldLabel>
             <Input
-              id="newsletter-email"
+              id={emailId}
               name="email"
               type="email"
               autoComplete="email"
@@ -61,9 +63,9 @@ export function NewsletterSignup() {
             />
           </Field>
           <div hidden aria-hidden="true">
-            <label htmlFor="newsletter-website">website</label>
+            <label htmlFor={websiteId}>website</label>
             <input
-              id="newsletter-website"
+              id={websiteId}
               name="website"
               type="text"
               tabIndex={-1}

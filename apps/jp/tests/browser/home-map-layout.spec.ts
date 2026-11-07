@@ -82,9 +82,16 @@ for (const scheme of ['light', 'dark'] satisfies ('light' | 'dark')[]) {
     );
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
     await page.goto('/');
-    await expect(
-      page.getByRole('button', { name: 'SUBSCRIBE', exact: true }),
-    ).toBeEnabled();
+    for (const landmark of [
+      page.getByRole('main'),
+      page.getByRole('contentinfo'),
+    ]) {
+      await expect(
+        landmark
+          .getByRole('region', { name: 'newsletter' })
+          .getByRole('button', { name: 'SUBSCRIBE', exact: true }),
+      ).toBeEnabled();
+    }
     const grid = page.locator('.journal-grid');
     const map = grid.locator('.journal-map-card');
     const articles = grid.locator(':scope > article');

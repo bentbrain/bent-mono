@@ -113,7 +113,7 @@ const feedback = feedbackConfiguration(
     >
       {!privateContent && newsletterAtTop && (
         <div class="mb-4">
-          <NewsletterSignup client:load />
+          <NewsletterSignup instance="top" client:load />
         </div>
       )}
       <slot />
@@ -122,7 +122,7 @@ const feedback = feedbackConfiguration(
     {!privateContent && (
       <footer>
         <div class="mx-auto w-full max-w-[1400px] px-4 pb-4 min-[601px]:px-6 min-[601px]:pb-6">
-          {!newsletterAtTop && <NewsletterSignup client:load />}
+          <NewsletterSignup instance="footer" client:load />
           <slot name="after-newsletter" />
         </div>
         <div class="border-t text-xs">
