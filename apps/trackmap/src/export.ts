@@ -1,5 +1,5 @@
 import type { CardMedia } from "./media";
-import { loadVideo, seekVideo } from "./media";
+import { backgroundFrames } from "./video-frames";
 import type { TrackPoint } from "./activity";
 import type { CardOptions } from "./render";
 import { cardStats, drawCard, prepareRoute } from "./render";
@@ -59,56 +59,45 @@ export async function exportGif(
   const stats = cardStats(points, options.units);
   const frames = Math.round(options.duration * 12);
   const indexed = new Uint8Array(canvas.width * canvas.height);
-  const video =
-    photo instanceof HTMLVideoElement
-      ? await loadVideo(photo.src, signal)
-      : undefined;
-  try {
-    for (let frame = 0; frame < frames; frame++) {
-      if (signal.aborted)
-        throw new DOMException("Export cancelled", "AbortError");
-      if (video) await seekVideo(video, (frame / 12) % video.duration, signal);
-      drawCard(
-        ctx,
-        canvas.width,
-        canvas.height,
-        route,
-        stats,
-        options,
-        options.angle + (frame / frames) * 360,
-        video ?? photo,
-      );
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-      for (let i = 0; i < indexed.length; i++) {
-        const offset = i * 4;
-        indexed[i] =
-          data[offset + 3] < 128
-            ? 0
-            : 1 +
-              Math.round(data[offset] / 51) * 36 +
-              Math.round(data[offset + 1] / 51) * 6 +
-              Math.round(data[offset + 2] / 51);
-      }
-      gif.writeFrame(indexed, canvas.width, canvas.height, {
-        palette,
-        delay: 80 + (frame % 3 === 2 ? 10 : 0),
-        transparent: options.background === "transparent" && !photo,
-        transparentIndex: 0,
-        dispose: 2,
-        repeat: 0,
-      });
-      onProgress(Math.round(((frame + 1) / frames) * 100));
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  let frame = 0;
+  for await (const source of backgroundFrames(photo, frames, 12, signal)) {
+    if (signal.aborted)
+      throw new DOMException("Export cancelled", "AbortError");
+    drawCard(
+      ctx,
+      canvas.width,
+      canvas.height,
+      route,
+      stats,
+      options,
+      options.angle + (frame / frames) * 360,
+      source,
+    );
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 0; i < indexed.length; i++) {
+      const offset = i * 4;
+      indexed[i] =
+        data[offset + 3] < 128
+          ? 0
+          : 1 +
+            Math.round(data[offset] / 51) * 36 +
+            Math.round(data[offset + 1] / 51) * 6 +
+            Math.round(data[offset + 2] / 51);
     }
-    gif.finish();
-    return new Blob([gif.bytes()], { type: "image/gif" });
-  } finally {
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
+    gif.writeFrame(indexed, canvas.width, canvas.height, {
+      palette,
+      delay: 80 + (frame % 3 === 2 ? 10 : 0),
+      transparent: options.background === "transparent" && !photo,
+      transparentIndex: 0,
+      dispose: 2,
+      repeat: 0,
+    });
+    onProgress(Math.round(((frame + 1) / frames) * 100));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    frame++;
   }
+  gif.finish();
+  return new Blob([gif.bytes()], { type: "image/gif" });
 }
 
 export function download(blob: Blob, name: string) {
@@ -154,11 +143,6 @@ export async function exportVideo(
   if (!ctx) throw new Error("Your browser could not create the video canvas.");
   const route = prepareRoute(points);
   const stats = cardStats(points, options.units);
-  const video =
-    media instanceof HTMLVideoElement
-      ? await loadVideo(media.src, signal)
-      : undefined;
-  const source = video ?? media;
   const snapshot = {
     ...options,
     background:
@@ -179,11 +163,11 @@ export async function exportVideo(
   try {
     await output.start();
     const count = options.duration * 30;
-    for (let frame = 0; frame < count; frame++) {
+    let frame = 0;
+    for await (const source of backgroundFrames(media, count, 30, signal)) {
       if (signal.aborted)
         throw new DOMException("Export cancelled", "AbortError");
       const time = frame / 30;
-      if (video) await seekVideo(video, time % video.duration, signal);
       drawCard(
         ctx,
         width,
@@ -200,6 +184,7 @@ export async function exportVideo(
       onProgress(Math.floor(((frame + 1) / count) * 100));
       if (frame % 3 === 0)
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      frame++;
     }
     await output.finalize();
     finalized = true;
@@ -208,10 +193,5 @@ export async function exportVideo(
     return new Blob([target.buffer], { type: "video/mp4" });
   } finally {
     if (!finalized) await output.cancel();
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
   }
 }

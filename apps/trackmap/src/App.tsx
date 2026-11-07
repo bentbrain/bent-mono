@@ -8,8 +8,9 @@ import type { CardOptions } from "./render";
 import { cardStats, drawCard, prepareRoute } from "./render";
 import { download, exportGif, exportPng, exportVideo } from "./export";
 
+import { FileVideo } from "./file-video";
 import type { CardMedia } from "./media";
-import { loadVideo, releaseMedia } from "./media";
+import { loadVideoFile, releaseMedia } from "./media";
 
 const initialOptions: CardOptions = {
   title: "Sample activity",
@@ -23,7 +24,7 @@ const initialOptions: CardOptions = {
   tilt: 38,
   exaggeration: 3,
   angle: 25,
-  duration: 6,
+  duration: 30,
 };
 const colors = [
   designTokens.accentLight,
@@ -78,11 +79,12 @@ export default function App() {
     const element = canvas.current;
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
-    if (photo instanceof HTMLVideoElement) {
+    let active = true;
+    if (photo instanceof HTMLVideoElement || photo instanceof FileVideo) {
       if (playing)
-        void photo
-          .play()
-          .catch(() => setError("The background video could not play."));
+        void photo.play().catch(() => {
+          if (active) setError("The background video could not play.");
+        });
       else photo.pause();
     }
     let animation = 0;
@@ -108,7 +110,12 @@ export default function App() {
       if (playing) animation = requestAnimationFrame(frame);
     }
     animation = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(animation);
+    return () => {
+      active = false;
+      cancelAnimationFrame(animation);
+      if (photo instanceof HTMLVideoElement || photo instanceof FileVideo)
+        photo.pause();
+    };
   }, [route, stats, options, playing, photo]);
 
   useEffect(
@@ -175,17 +182,15 @@ export default function App() {
       return;
     }
     setMediaLoading(true);
-    const url = URL.createObjectURL(file);
     if (isVideo) {
       try {
-        const video = await loadVideo(url);
+        const video = await loadVideoFile(file);
         if (version !== photoVersion.current) {
           releaseMedia(video);
           return;
         }
         setPhoto(video);
       } catch (cause) {
-        URL.revokeObjectURL(url);
         if (version === photoVersion.current)
           setError(
             cause instanceof Error
@@ -197,6 +202,7 @@ export default function App() {
       }
       return;
     }
+    const url = URL.createObjectURL(file);
     try {
       const image = new Image();
       image.src = url;
@@ -305,7 +311,7 @@ export default function App() {
               >
                 {playing ? "Pause" : "Play"}
               </Button>
-              <span>{options.duration}s loop</span>
+              <span>{options.duration}s per turn</span>
               <Button
                 appearance="ghost"
                 onClick={() => {
@@ -563,6 +569,22 @@ export default function App() {
                     }}
                   />
                 </Field>
+                <Field label="Rotation speed" htmlFor="duration">
+                  <Select
+                    id="duration"
+                    value={options.duration}
+                    onChange={(event) =>
+                      update("duration", Number(event.target.value))
+                    }
+                  >
+                    <option value="4">4 seconds per turn</option>
+                    <option value="6">6 seconds per turn</option>
+                    <option value="8">8 seconds per turn</option>
+                    <option value="15">15 seconds per turn</option>
+                    <option value="30">30 seconds per turn</option>
+                    <option value="60">60 seconds per turn</option>
+                  </Select>
+                </Field>
                 <div className="toggles">
                   <label>
                     <Input
@@ -612,37 +634,22 @@ export default function App() {
             <fieldset disabled={exporting}>
               <legend>Export</legend>
               <div className="fields">
-                <div className="two-columns">
-                  <Field label="Frame" htmlFor="format">
-                    <Select
-                      id="format"
-                      value={options.format}
-                      onChange={(event) => {
-                        if (
-                          event.target.value === "story" ||
-                          event.target.value === "square"
-                        )
-                          update("format", event.target.value);
-                      }}
-                    >
-                      <option value="story">Story · 9:16</option>
-                      <option value="square">Square · 1:1</option>
-                    </Select>
-                  </Field>
-                  <Field label="Loop length" htmlFor="duration">
-                    <Select
-                      id="duration"
-                      value={options.duration}
-                      onChange={(event) =>
-                        update("duration", Number(event.target.value))
-                      }
-                    >
-                      <option value="4">4 seconds</option>
-                      <option value="6">6 seconds</option>
-                      <option value="8">8 seconds</option>
-                    </Select>
-                  </Field>
-                </div>
+                <Field label="Frame" htmlFor="format">
+                  <Select
+                    id="format"
+                    value={options.format}
+                    onChange={(event) => {
+                      if (
+                        event.target.value === "story" ||
+                        event.target.value === "square"
+                      )
+                        update("format", event.target.value);
+                    }}
+                  >
+                    <option value="story">Story · 9:16</option>
+                    <option value="square">Square · 1:1</option>
+                  </Select>
+                </Field>
                 <Button
                   appearance="primary"
                   disabled={!exportable || loading || mediaLoading}
