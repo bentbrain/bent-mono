@@ -1,5 +1,4 @@
 name: Configure Printify Production webhooks
-
 on:
   workflow_dispatch:
     inputs:
@@ -8,19 +7,21 @@ on:
         type: choice
         required: true
         default: plan
-        options: [plan, apply]
-
+        options:
+          - plan
+          - apply
+      expected_source:
+        description: Exact reviewed current main commit
+        type: string
+        required: true
 permissions:
   contents: read
-
 concurrency:
   group: deploy-production
   cancel-in-progress: false
-
 defaults:
   run:
     working-directory: products/shop
-
 jobs:
   configure:
     if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
@@ -28,14 +29,23 @@ jobs:
     timeout-minutes: 15
     environment: Production
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.18.0
           package-manager-cache: false
-      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Validate authenticated operational dispatch
+        run: node scripts/operational-dispatch-guard.mjs
+      - name: Require authoritative exact-main monorepo quality
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
@@ -48,4 +58,39 @@ jobs:
           PRINTIFY_SHOP_ID: ${{ secrets.PRINTIFY_SHOP_ID }}
           PRINTIFY_WEBHOOK_SECRET: ${{ secrets.PRINTIFY_WEBHOOK_SECRET }}
           PRINTIFY_WEBHOOK_OPERATION: ${{ inputs.operation }}
-        run: node workers/api/scripts/configure-printify-webhooks.mjs
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          node --import ./scripts/public-release-logging.mjs --import ./scripts/decode-operational-dispatch.mjs workers/api/scripts/configure-printify-webhooks.mjs
+          SHOP_PROTECTED_SHELL
+      - name: Seal private operational receipts and media
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-operational-artifacts.mjs
+      - name: Preserve encrypted operational artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: configure-printify-webhooks-${{ github.run_id }}
+          path: ${{ runner.temp }}/sealed-operational-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Preserve encrypted operational diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      SHOP_OPERATION_ENVIRONMENT: Production
+run-name: Configure Printify Production webhooks · ${{ github.sha }}

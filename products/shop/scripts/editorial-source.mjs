@@ -1,3 +1,4 @@
+import { releasePath } from "./monorepo-source.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -30,6 +31,8 @@ export async function verifyEditorialSource(sourceCommit, toolingCommit, run = e
   check(await git(["rev-parse", "HEAD"]) === toolingCommit, "current tooling checkout differs.");
   await git(["merge-base", "--is-ancestor", sourceCommit, toolingCommit]);
   const paths = (await git(["diff", "--name-only", sourceCommit, toolingCommit, "--"])).split("\n").filter(Boolean);
-  check(paths.every(path => toolingPaths.has(path)), "qualified application, artwork or release inputs changed.");
+  const editorialPath = path => [".github/workflows/backup-renderer.yml", ".github/workflows/featured-composition.yml"].includes(path)
+    ? path : releasePath(path);
+  check(paths.every(path => toolingPaths.has(editorialPath(path))), "qualified application, artwork or release inputs changed.");
   return { sourceCommit, toolingCommit, changedToolingPaths: paths };
 }

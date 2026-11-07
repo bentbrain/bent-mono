@@ -5,37 +5,25 @@ on:
       environment:
         description: Environment
         type: choice
-        options: [development, production]
+        options:
+          - development
+          - production
         required: true
       operation:
         description: Inspect current slots or replace the complete selection
         type: choice
-        options: [inspect, replace]
+        options:
+          - inspect
+          - replace
         required: true
-      expected_revision:
-        description: Revision from inspection, required for replace
+      expected_source:
+        description: Exact reviewed current main commit
         type: string
-      command_id:
-        description: Recovery only, exact UUID from the saved request
+        required: true
+      private_input:
+        description: Authenticated ciphertext from release:seal-input for this workflow, environment, operation and source
         type: string
-      slot_1:
-        description: Die face 1 configured product UUID, leave empty to omit
-        type: string
-      slot_2:
-        description: Die face 2 configured product UUID, leave empty to omit
-        type: string
-      slot_3:
-        description: Die face 3 configured product UUID, leave empty to omit
-        type: string
-      slot_4:
-        description: Die face 4 configured product UUID, leave empty to omit
-        type: string
-      slot_5:
-        description: Die face 5 configured product UUID, leave empty to omit
-        type: string
-      slot_6:
-        description: Die face 6 configured product UUID, leave empty to omit
-        type: string
+        required: true
 permissions:
   contents: read
   id-token: write
@@ -45,35 +33,68 @@ concurrency:
 defaults:
   run:
     working-directory: products/shop
-
 jobs:
   operate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
     env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      SHOP_OPERATION_ENVIRONMENT: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
       OPERATIONS_ENVIRONMENT: ${{ inputs.environment }}
       OPERATION: ${{ inputs.operation }}
-      EXPECTED_REVISION: ${{ inputs.expected_revision }}
-      COMMAND_ID: ${{ inputs.command_id }}
       WORKER_URL: ${{ vars.WORKER_URL }}
       BENT_SHIRT_OPERATIONS_SECRET: ${{ secrets.BENT_SHIRT_OPERATIONS_SECRET }}
-      SLOT_1: ${{ inputs.slot_1 }}
-      SLOT_2: ${{ inputs.slot_2 }}
-      SLOT_3: ${{ inputs.slot_3 }}
-      SLOT_4: ${{ inputs.slot_4 }}
-      SLOT_5: ${{ inputs.slot_5 }}
-      SLOT_6: ${{ inputs.slot_6 }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.18.0
+          package-manager-cache: false
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Validate authenticated operational dispatch
+        run: node scripts/operational-dispatch-guard.mjs
+      - name: Require authoritative exact-main monorepo quality
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Inspect or replace featured designs
-        run: node workers/api/scripts/featured-products.mjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          node --import ./scripts/public-release-logging.mjs --import ./scripts/decode-operational-dispatch.mjs workers/api/scripts/featured-products.mjs
+          SHOP_PROTECTED_SHELL
+      - name: Seal private operational receipts and media
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-operational-artifacts.mjs
+      - name: Preserve encrypted operational artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: featured-products-${{ github.run_id }}
-          path: featured-products-*.json
+          path: ${{ runner.temp }}/sealed-operational-evidence
           if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve encrypted operational diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+      id-token: write
+run-name: Featured designs · ${{ inputs.environment || 'production' }} · ${{ github.sha }}
