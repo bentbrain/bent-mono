@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { prepareRoute, routePulseStops } from "../src/render";
+import { depthLayers } from "../src/route-depth";
 
 describe("directional route pulse", () => {
   test("follows travelled distance and excludes unrecorded connectors", () => {
@@ -37,4 +38,29 @@ describe("directional route pulse", () => {
       expect(left).toBeCloseTo(right ?? -1, 6);
     }
   });
+});
+
+test("sparse edges split across marker depth while preserving direction and GPS gaps", () => {
+  const layers = depthLayers([
+    { x: 0, y: 0, depth: 0, progress: 0, segment: 0 },
+    { x: -1, y: -1, depth: 8, progress: 0.2, segment: 1 },
+    { x: 1, y: 1, depth: -2, progress: 0.8, segment: 1 },
+    { x: 0, y: 0, depth: -4, progress: 1, segment: 2 },
+  ]);
+  expect(layers.map((layer) => layer.kind)).toEqual([
+    "edge",
+    "marker",
+    "edge",
+    "marker",
+  ]);
+  const edges = layers.filter((layer) => layer.kind === "edge");
+  expect(edges).toHaveLength(2);
+  expect(edges[0].b.depth).toBe(0);
+  expect(edges[1].a.depth).toBe(0);
+  expect(edges[0].b.progress).toBeCloseTo(0.68);
+  expect(edges[1].a.progress).toBeCloseTo(0.68);
+  expect(edges[1].b.progress).toBe(0.8);
+  expect(
+    edges.every((edge) => edge.a.segment === 1 && edge.b.segment === 1),
+  ).toBe(true);
 });
