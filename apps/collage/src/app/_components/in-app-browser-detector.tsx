@@ -57,14 +57,14 @@ export function InAppBrowserDetector({
   return (
     <Card className="mx-auto max-w-md border-red-600 bg-white text-red-600">
       <CardHeader>
-        <CardTitle>Welcome 🫶🏼</CardTitle>
+        <CardTitle>Open in your browser</CardTitle>
       </CardHeader>
       <CardContent>
         <div>
           <p className="text-sm">
-            In-app browsers are not supported. You&apos;re using the{" "}
-            {browserType} in-app browser, which may cause issues with login and
-            other features. Pls try using a different browser.
+            Open this page in your device&apos;s browser to use the collage editor.
+            The {browserType} in-app browser is unsupported and may have trouble
+            with sign-in and other features.
           </p>
         </div>
       </CardContent>

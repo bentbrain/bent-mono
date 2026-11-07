@@ -20,4 +20,4 @@ bun run --cwd apps/www knip
 bun run --cwd apps/www build
 ```
 
-The existing deployment should use `apps/www` as its project root and install dependencies from the monorepo root. Preserve its current domain mapping and deployment controls.
+Configure the deployment project root as `apps/www` and install dependencies from the monorepo root. Preserve its current domain mapping and deployment controls.

@@ -36,16 +36,15 @@ Resources are fixed to account `{{SHOP:awsAccountId}}`, Sydney `ap-southeast-2`,
 - No function URL, public invoke policy, event source, scheduled warming, paid
   provisioned concurrency or changes to existing functions.
 
-Eight reserved executions are a **cap and capacity reservation**, not eight warm
-processes. AWS requires 100 unreserved units. The account initially had only 10,
+Eight reserved executions cap concurrency and reserve capacity. Processes start
+on demand. AWS requires 100 unreserved units. The account initially had only 10,
 so a separate sequential smoke mode was added. The applied quota is now 1,000,
-with eight reserved for this benchmark. This does not provision 1,000 processes
-or warm eight processes. The concurrent driver requires at least 108 account
-capacity and its exact eight-slot reservation.
+with eight reserved for this benchmark. The concurrent driver requires at least
+108 account capacity and its exact eight-slot reservation.
 
-Local unit tests never encode video or contact AWS. Build and rendering are deliberately
-cloud-only to avoid loading the owner's Mac. The cloud scripts use only their
-scoped execution roles; they are not alternative local credential entry points.
+Local unit tests use simulated rendering and AWS calls. Run builds and rendering
+in the cloud to keep that work off the owner's Mac. Cloud scripts require their
+scoped execution roles; local AWS access must use the guarded personal runner.
 
 ## Local checks
 
@@ -60,8 +59,8 @@ node --check workers/video-renderer/aws-lambda/runtime-smoke.mjs
 The tests cover all four products, exact approved motion, input checksums,
 storage acknowledgement, failed/cancelled reads, output isolation, independent
 dispatch, capacity guards, private infrastructure, and source-bundle contents.
-The two-customer unit test uses simulated invocations: it proves dispatch logic,
-not real-world speed or AWS scaling.
+The two-customer unit test checks dispatch logic with simulated invocations.
+Measure speed and AWS scaling with the cloud benchmark.
 
 ## Cloud build, independent of the quota request
 
@@ -145,8 +144,7 @@ ID, memory, active state and successful update before invoking anything.
 
 ### Sequential smoke checks before quota approval
 
-The concurrency increase is not inherently required to render a video. To test
-under the current quota, explicitly deploy `CapacityMode=sequential-smoke` with
+For sequential testing within the available quota, explicitly deploy `CapacityMode=sequential-smoke` with
 the verified image/build digest and memory setting. This omits the reservation,
 using the shared unreserved pool. It does not change any existing function.
 The default remains `reserved-eight`; the concurrent runner will still refuse
@@ -179,7 +177,7 @@ revision and settings, and retrieve its actual background-removed PNG before
 running. On 2026-08-28 the original revision was read from development D1 and
 its PNG recovered from R2, with matching checksum
 `{{SHOP:resource_73e91e639e8e}}`.
-Do not substitute a synthetic face, screenshot, or final product mockup.
+Use that original background-removed artwork for the comparison.
 
 Create a private JSON file matching the example, with the exact local artwork
 path. Preparation copies and hashes the artwork plus the four approved cutouts
@@ -213,9 +211,8 @@ a frozen runtime cannot reuse an idle write socket.
 
 Results and downloaded MP4s go into a new ignored `.data/aws-lambda/benchmark-*`
 directory. Downloads happen **after** readiness timing stops and are checksum-
-verified. There is no automatic local playback, video decoding, or comparison
-render. Each attempt has a new output namespace; duplicate writes fail rather
-than overwriting a video. Production caching/deduplication is a later integration.
+verified. Review the downloaded videos separately from this command. Each attempt
+has a new output namespace; duplicate writes fail rather than overwriting a video.
 
 Read the evidence as follows:
 
@@ -254,17 +251,15 @@ Small cohorts are exploratory evidence, not meaningful p95/p99 estimates. A
 4. Integrate dispatch, immutable production keys, R2 delivery and per-video
    availability notifications behind a reversible provider switch, retaining the
    current Cloudflare path for rollback. Existing storefront orchestration uses
-   Effect; this isolated Node adapter does not add an Effect runtime or bypass
-   that orchestration. None of this production wiring is included here.
+   Effect. Preserve that orchestration when integrating this isolated Node adapter.
 5. Measure the actual save-design → first playable/all-four playable path on
    mobile. **Private S3 benchmark timing is not production R2/CDN/browser timing.**
 
-Lambda gives each concurrent invocation separate compute; it does not guarantee
-flat latency at arbitrary demand. Account/function quotas, burst ramp-up, cold
+Lambda gives each concurrent invocation separate compute. Measure latency at the
+expected demand. Account/function quotas, burst ramp-up, cold
 starts, downstream storage and dispatch limits still apply. Eight simultaneous
-invocations establish only the first isolation experiment, not capacity for
-10,000 simultaneous customers. Agree a measurable latency target and provision/
-load-test the corresponding demand before claiming that scale.
+invocations test isolation at that cohort size. Agree a measurable latency target,
+then provision and load-test the expected demand before setting production capacity.
 
 References: [Lambda container images](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-image.html),
 [AWS Node Runtime Interface Client](https://github.com/aws/aws-lambda-nodejs-runtime-interface-client),

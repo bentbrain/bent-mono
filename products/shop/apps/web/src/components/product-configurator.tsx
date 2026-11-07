@@ -623,8 +623,8 @@ function ProductDetails({
             ) : null}
             {purchaseError ? (
               <p className="text-[0.68rem]" role="alert">
-                Your design is safe here, but it must finish saving before it can
-                be added to the cart.
+                Your design is still here. Finish saving the print-ready artwork
+                before adding it to the cart.
               </p>
             ) : null}
           </div>

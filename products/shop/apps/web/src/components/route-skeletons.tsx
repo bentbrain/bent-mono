@@ -84,7 +84,7 @@ function ProductCommerceSkeleton() {
         <SkeletonBlock className="h-3 w-28" />
         <SkeletonBlock className="size-6" />
       </div>
-      <span className="sr-only">Loading price, variants and availability…</span>
+      <span className="sr-only">Loading price, options and availability…</span>
     </div>
   );
 }

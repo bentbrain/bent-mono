@@ -463,7 +463,7 @@ export function StoryExporter({ media }: { media: Media[] }) {
               disabled={rendering}
               items={[
                 { value: 'angled', label: 'right edge up' },
-                { value: 'straight', label: 'no skew' },
+                { value: 'straight', label: 'straight' },
               ]}
               onValueChange={(value) => {
                 const next = perspectiveSchema.safeParse(value);
@@ -478,7 +478,7 @@ export function StoryExporter({ media }: { media: Media[] }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="angled">right edge up</SelectItem>
-                <SelectItem value="straight">no skew</SelectItem>
+                <SelectItem value="straight">straight</SelectItem>
               </SelectContent>
             </Select>
           </Field>

@@ -44,7 +44,7 @@ describe("CameraLanding", () => {
     ).toEqual([
       "Open the camera or upload an image",
       "Wear a blank t-shirt in your photo",
-      "Try to get just your head and torso in the shot",
+      "Frame your head and torso in the photo",
     ]);
     const form = container.querySelector("form");
     if (!form) throw new Error("Expected the camera form.");

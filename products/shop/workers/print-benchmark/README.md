@@ -1,6 +1,6 @@
 # Isolated print Lambda benchmark
 
-This manual Development experiment compares the current Cloudflare print outputs with a private Node.js 24 Lambda using Sharp 0.35.4. It does not change the storefront, queue, print provider, production functions or checkout readiness.
+This manual Development experiment compares the current Cloudflare print outputs with a private Node.js 24 Lambda using Sharp 0.35.4. It uses isolated benchmark resources while the application continues through its existing storefront, queue and print provider.
 
 The workflow accepts only an exact reviewed main commit, first attempt, protected Preview identity and the personal Sydney account. Its separate CI role can create and remove only `forever-tee-print-benchmark-development`. The runtime role can read/write only `source/print-benchmark/*` in the existing private Development bucket and write its own logs. Both roles have matching permission boundaries. No public function URL, event source, scheduled invocation or provisioned concurrency is created.
 
@@ -23,7 +23,7 @@ Native dependencies are installed on the Linux Actions runner for Lambda's x86_6
 
 ## Native renderer follow-up
 
-The candidate renderer decodes prepared, unprofiled 8-bit sRGB PNG artwork once per print geometry and reuses its pixels across recursive layers. Those layers use raw pixel buffers, so only the final print is PNG encoded. Other formats retain the original decoding and intermediate PNG path. Resize, trim, composition order, straight-alpha handling and final PNG encoding remain unchanged. The handler interface is still `renderPrint(source, plan)` and still runs three geometries together. No workflow, IAM or active provider change is needed to package this renderer in the existing isolated benchmark.
+The candidate renderer decodes prepared, unprofiled 8-bit sRGB PNG artwork once per print geometry and reuses its pixels across recursive layers. Those layers use raw pixel buffers, so only the final print is PNG encoded. Other formats retain the original decoding and intermediate PNG path. Resize, trim, composition order, straight-alpha handling and final PNG encoding remain unchanged. The handler interface is still `renderPrint(source, plan)` and still runs three geometries together. Package this renderer through the existing isolated benchmark workflow and IAM permissions.
 
 `runtime/testing/png-layer-reference.mjs` freezes the previous native renderer. Tests compare every output RGBA byte against it for overlapping cropped layers, source channels 1–4, JPEG, profiled PNG and 16-bit PNG. The local benchmark also compares all six existing camera/cropped fixture prints at full resolution before measuring four alternating samples per implementation, with the same three-geometries-at-once execution used by the Lambda handler.
 
@@ -41,7 +41,7 @@ Sharp documents raw overlay dimensions and alpha handling in its [compositing AP
 
 The existing benchmark identities can create, directly invoke, set reserved concurrency for and remove only the exact temporary print function. They can access only private objects under the benchmark S3 prefix and the function's logs. The consumed IAM bootstrap cannot be replayed to extend that scope.
 
-Without expanding IAM, a reviewed bounded Actions revision can test the improved renderer, both product families, larger but explicitly capped invocation cohorts, and Lambda asynchronous invocation with a private S3 completion manifest. Asynchronous testing first needs idempotent publication and recovery after partial writes. The current handler returns results synchronously and treats an existing output as a conflict, so changing `InvocationType` alone is not a durable architecture. Any reserved-concurrency increase must be explicit in the experiment contract and reported with its invocation count and cleanup evidence.
+Within the existing IAM permissions, a reviewed bounded Actions revision can test the improved renderer, both product families, larger but explicitly capped invocation cohorts, and Lambda asynchronous invocation with a private S3 completion manifest. Asynchronous testing first needs idempotent publication and recovery after partial writes. The current handler returns results synchronously and treats an existing output as a conflict, so changing `InvocationType` alone is not a durable architecture. Any reserved-concurrency increase must be explicit in the experiment contract and reported with its invocation count and cleanup evidence.
 
 A real application candidate needs a separately reviewed Development integration. Keep the application's immutable revision, job lease and completion fencing authoritative. Dispatch an exact job identity plus pinned source and geometry manifest, acknowledge only durable acceptance, and publish completion only after every required object is present with verified dimensions, byte count and checksum. Duplicate execution must return the same committed result; partial execution must recover without replacing another attempt's output. A completion callback needs authentication and lease fencing, and a stalled callback needs reconciliation from the durable result.
 

@@ -24,10 +24,9 @@ write IAM or deploy applications. Its journal is consumed. See the
 [Production foundation record](../../docs/native-lambda-production-foundation-2026-08-29.md).
 The Development-only status and command history below predate that addition.
 
-Current status: the original creation, CI activation, Development release policy
-and narrowly scoped startup-probe permission updates have all applied. Their one-shot journals forbid replay. The
-role is active with the exact checked-in `development-release-policy.json`, not
-just its original inspection permissions. Workload state is now remote; this
+The original creation, CI activation, Development release policy
+and narrowly scoped startup-probe permission updates have applied. Their one-shot journals forbid replay. The
+role uses the exact checked-in `development-release-policy.json`. Workload state is now remote; this
 bootstrap's own state is now remote in the separate `story-video/bootstrap/terraform.tfstate`
 key, encrypted with KMS, versioned and configured for S3 locking. Development CI
 cannot access that key. The original local state/backups remain private and
@@ -202,8 +201,7 @@ node scripts/aws-personal.mjs terraform bootstrap repository-trust development s
 node scripts/aws-personal.mjs terraform bootstrap repository-trust development apply --review=development-ABC123 --plan-sha256=<saved-hash>
 ```
 
-These examples describe a future reviewed operation. Source preparation does not
-execute or approve it. `ABC123` is synthetic. Every AWS request still passes
+Review and authorize this operation separately before execution. `ABC123` is synthetic. Every AWS request still passes
 through the existing exact personal SSO/account/region guard. Authentication or
 missing private tools/configuration stops the operation. Do not create substitute
 credential files or use a different Terraform/AWS runner.
@@ -371,8 +369,8 @@ journal and private binary copy. Any response loss or failed postcheck leaves
 that journal in place and stops. Never delete it, blindly reapply, replay an
 historical operation, push an old state, or reverse a subject ad hoc. Use guarded
 `discover` plus fixed IAM reads to establish current evidence. Any completion or
-reverse change requires a separate reviewed, source/state/evidence-bound recovery
-route; this implementation deliberately exposes no recovery mutation command.
+reverse change requires a separate reviewed recovery
+route bound to its source, state and evidence.
 
 Confirmed apply requires preserved lineage/inventory/IDs/permissions, advanced
 serial, exact selected trust, unchanged other role, and a full refreshed no-op

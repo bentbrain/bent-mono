@@ -3,7 +3,7 @@
 This private Worker owns the `PrintAssetExecution` Durable Object namespace.
 It imports the same D1 claims and print renderer as the API. Its default fetch
 handler returns 404; customers cannot submit work over a public route. The
-unnamed environment has local resources only. There is no Production target.
+unnamed environment has local resources only. Deploy this configuration to Development only.
 The existing API toolchain bundles this Worker without another dependency set:
 
 ```sh
@@ -20,7 +20,7 @@ class lifecycle change, including the legacy `migrations` array. Creating the
 print class in the API Worker would invalidate its previous version as a rollback
 target. A completed job drain does not remove this restriction.
 
-The API instead binds the existing namespace using
+The API binds the existing namespace using
 `script_name: forever-tee-print-executor-development`. Namespace creation and
 subsequent lifecycle changes belong to this executor Worker. No new class export
 or class migration belongs in the API Worker. Binding to an existing external
@@ -35,8 +35,8 @@ Sources:
 
 ## Required guarded release lifecycle
 
-The following is the release design; this directory does not implement or bypass
-the application's release admission, evidence or rollback tooling.
+Follow this release design through the application's guarded release admission,
+evidence and rollback tooling.
 
 1. **Prepare a source-bound executor artifact in protected Preview.** Pin the
    exact Worker name, Cloudflare account, D1 database and R2 bucket. Build the

@@ -1,13 +1,14 @@
-# bent.shop Pilot operations
+# bent.shop pilot operations
 
-This runbook is for the sole owner. Purchasing is locked. The owner must
-explicitly authorize reopening it; a successful deployment is not that decision.
-The owner chose manual cash-cost review on 5 September 2026. There is no
-automatic AUD 500 cutoff, loss ledger or threshold notification.
+This runbook is for the sole owner. Purchasing stays locked until the owner
+explicitly authorizes reopening it, separately from deployment.
+The owner chose manual cash-cost review on 5 September 2026. Monitor cash costs
+manually; purchasing has no automatic AUD 500 cutoff, loss ledger or threshold
+notification.
 
 ## First response and authority
 
-The sole owner owns each alert, Exception Review and customer support case.
+The sole owner handles each alert, Exception Review and customer support case.
 Review launch alerts immediately while attended. Pause new sales if an incident
 cannot be understood promptly, if source financial records are incomplete, or
 if the owner cannot monitor the first public orders. Public browsing and

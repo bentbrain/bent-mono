@@ -413,9 +413,9 @@ test('exports require owner auth and PNG has story dimensions', async ({
   await page.waitForURL('**/owner/export');
   await expect(page.locator('#story-preview canvas')).toBeVisible();
   await page.getByRole('combobox', { name: 'card angle' }).click();
-  await page.getByRole('option', { name: 'no skew' }).click();
+  await page.getByRole('option', { name: 'straight' }).click();
   await expect(page.getByRole('combobox', { name: 'card angle' })).toHaveText(
-    /no skew/,
+    /straight/,
   );
   await expect(page.locator('#story-preview canvas')).toBeVisible();
   const download = page.waitForEvent('download');

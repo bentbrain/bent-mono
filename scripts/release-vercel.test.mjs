@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, readFile, rm, writeFile, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configurationHash, protectedJson, releaseVercel, validateRuntime } from "./release-vercel.mjs";
+import { configurationHash, protectedJson, releaseVercel, validateRuntime, vercelApi } from "./release-vercel.mjs";
 
 const sha = "a".repeat(40);
 const app = { name: "stay", directory: "apps/stay", project: "synthetic-guide", platform: "vercel" };
@@ -70,6 +70,74 @@ test("manual staged promotion uses genuine source qualification without manufact
     await assert.rejects(releaseVercel(options, f), /EEXIST/);
     assert.equal(f.state.posts.length, 1);
   });
+});
+test("empty successful HTTP promotion acknowledgements preserve the accepted journal without a retry", async t => {
+  const previous = { token: process.env.VERCEL_TOKEN, team: process.env.VERCEL_ORG_ID };
+  process.env.VERCEL_TOKEN = "synthetic-token";
+  process.env.VERCEL_ORG_ID = config.teamId;
+  try {
+    for (const [status, body, expected = {}] of [[202, null], [200, ""], [202, " \n"], [204, null], [202, '{"accepted":true}', { accepted: true }]]) {
+      await trial("promote", () => {}, async (f, options) => {
+        const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
+          const target = new URL(url);
+          assert.equal(target.origin, "https://api.vercel.com");
+          assert.equal(target.searchParams.get("teamId"), config.teamId);
+          assert.equal(init.headers.Authorization, "Bearer synthetic-token");
+          target.searchParams.delete("teamId");
+          const value = await f.vercel(target.pathname + target.search, init.method,
+            init.body ? JSON.parse(init.body) : undefined);
+          return init.method === "POST" ? new Response(body, { status }) : Response.json(value);
+        });
+        try {
+          const result = await releaseVercel(options, { ...f, vercel: vercelApi });
+          assert.equal(result.status, "accepted-readback-required");
+          const entries = (await readFile(options.journalPath, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+          assert.deepEqual(entries.map(entry => entry.status), ["intent-recorded-no-retry", "accepted-readback-required"]);
+          assert.deepEqual(entries[1].result, expected);
+          await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), /EEXIST/);
+          assert.equal(f.state.posts.length, 1);
+        } finally { mock.mock.restore(); }
+      });
+    }
+  } finally {
+    if (previous.token === undefined) delete process.env.VERCEL_TOKEN;
+    else process.env.VERCEL_TOKEN = previous.token;
+    if (previous.team === undefined) delete process.env.VERCEL_ORG_ID;
+    else process.env.VERCEL_ORG_ID = previous.team;
+  }
+});
+test("HTTP failures and malformed acknowledgements remain failures without automatic mutation retries", async t => {
+  const previous = { token: process.env.VERCEL_TOKEN, team: process.env.VERCEL_ORG_ID };
+  process.env.VERCEL_TOKEN = "synthetic-token";
+  process.env.VERCEL_ORG_ID = config.teamId;
+  try {
+    for (const unauthorized of [true, false]) await trial("promote", () => {}, async (f, options) => {
+      const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
+        if (unauthorized) return new Response("denied", { status: 403 });
+        const target = new URL(url);
+        target.searchParams.delete("teamId");
+        const value = await f.vercel(target.pathname + target.search, init.method,
+          init.body ? JSON.parse(init.body) : undefined);
+        return init.method === "POST" ? new Response("{", { status: 202 }) : Response.json(value);
+      });
+      try {
+        await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), unauthorized ? /HTTP 403/ : SyntaxError);
+        if (unauthorized) {
+          assert.equal(f.state.posts.length, 0);
+          await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+        } else {
+          assert.match(await readFile(options.journalPath, "utf8"), /intent-recorded-no-retry/);
+          await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), /EEXIST/);
+          assert.equal(f.state.posts.length, 1);
+        }
+      } finally { mock.mock.restore(); }
+    });
+  } finally {
+    if (previous.token === undefined) delete process.env.VERCEL_TOKEN;
+    else process.env.VERCEL_TOKEN = previous.token;
+    if (previous.team === undefined) delete process.env.VERCEL_ORG_ID;
+    else process.env.VERCEL_ORG_ID = previous.team;
+  }
 });
 test("refreshes provider admission after final qualification before stage or promote", async () => {
   const drifts = [
