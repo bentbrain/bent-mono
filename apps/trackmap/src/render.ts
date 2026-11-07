@@ -1,3 +1,4 @@
+import type { CardMedia } from "./media";
 import type { TrackPoint } from "./activity";
 import { statistics } from "./activity";
 
@@ -112,23 +113,26 @@ export function drawCard(
   stats: ReturnType<typeof cardStats>,
   options: CardOptions,
   angle = options.angle,
-  photo?: HTMLImageElement,
+  photo?: CardMedia,
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
   const transparent = options.background === "transparent" && !photo;
   const dark = options.background !== "paper";
   if (photo) {
-    const scale = Math.max(
-      width / photo.naturalWidth,
-      height / photo.naturalHeight,
-    );
+    const sourceWidth =
+      photo instanceof HTMLVideoElement ? photo.videoWidth : photo.naturalWidth;
+    const sourceHeight =
+      photo instanceof HTMLVideoElement
+        ? photo.videoHeight
+        : photo.naturalHeight;
+    const scale = Math.max(width / sourceWidth, height / sourceHeight);
     ctx.drawImage(
       photo,
-      (width - photo.naturalWidth * scale) / 2,
-      (height - photo.naturalHeight * scale) / 2,
-      photo.naturalWidth * scale,
-      photo.naturalHeight * scale,
+      (width - sourceWidth * scale) / 2,
+      (height - sourceHeight * scale) / 2,
+      sourceWidth * scale,
+      sourceHeight * scale,
     );
     ctx.fillStyle = "#00000065";
     ctx.fillRect(0, 0, width, height);

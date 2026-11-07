@@ -11,7 +11,8 @@
     "allowImportingTsExtensions": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["vite/client", "bun"]
+    "types": ["vite/client", "bun"],
+    "resolveJsonModule": true
   },
   "include": ["src", "tests", "vite.config.ts", "e2e", "playwright.config.ts"]
 }

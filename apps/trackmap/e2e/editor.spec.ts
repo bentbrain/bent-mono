@@ -215,11 +215,13 @@ test("composites a local photo and removes it when Clear is selected", async ({
     ctx.fillRect(0, 0, 100, 100);
     return canvas.toDataURL("image/png").split(",")[1];
   });
-  await page.getByLabel("Background photo", { exact: true }).setInputFiles({
-    name: "synthetic.png",
-    mimeType: "image/png",
-    buffer: Buffer.from(photo, "base64"),
-  });
+  await page
+    .getByLabel("Background photo or video", { exact: true })
+    .setInputFiles({
+      name: "synthetic.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(photo, "base64"),
+    });
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible();
@@ -276,4 +278,76 @@ test("animates and restores the starting view after pausing", async ({
   await expect.poll(async () => (await image()) === initial).toBe(false);
   await page.getByRole("button", { name: "Reset view" }).click();
   await expect.poll(async () => (await image()) === initial).toBe(true);
+});
+
+test("exports an H.264 Story MP4 and can use that video as a local background", async ({
+  page,
+}, info) => {
+  test.slow();
+  await page.goto("/");
+  await page.getByLabel("Loop length").selectOption("4");
+  const first = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Story video" }).click();
+  const firstDownload = await first;
+  await firstDownload.saveAs(info.outputPath("story.mp4"));
+  const path = await firstDownload.path();
+  if (!path) throw new Error("Missing Story download");
+  const mp4 = await readFile(path);
+  expect(mp4.subarray(4, 8).toString()).toBe("ftyp");
+  expect(mp4.includes(Buffer.from("avc1"))).toBe(true);
+  expect(mp4.length).toBeGreaterThan(10_000);
+  await expect(page.getByRole("status")).toContainText("MP4 ready");
+  await page
+    .getByLabel("Background photo or video", { exact: true })
+    .setInputFiles({
+      name: "synthetic-story.mp4",
+      mimeType: "video/mp4",
+      buffer: mp4,
+    });
+  await expect(
+    page.getByRole("button", { name: "Remove", exact: true }),
+  ).toBeVisible();
+  const second = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Story video" }).click();
+  const secondDownload = await second;
+  const secondPath = await secondDownload.path();
+  if (!secondPath) throw new Error("Missing composited Story download");
+  const composite = await readFile(secondPath);
+  const metadata = await page.evaluate(async (data) => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.src = URL.createObjectURL(
+      new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], {
+        type: "video/mp4",
+      }),
+    );
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("MP4 could not decode"));
+    });
+    const result = {
+      width: video.videoWidth,
+      height: video.videoHeight,
+      duration: video.duration,
+    };
+    URL.revokeObjectURL(video.src);
+    video.removeAttribute("src");
+    video.load();
+    return result;
+  }, composite.toString("base64"));
+  expect(metadata.width).toBe(1080);
+  expect(metadata.height).toBe(1920);
+  expect(metadata.duration).toBeGreaterThan(3.95);
+  expect(metadata.duration).toBeLessThan(4.05);
+  const gifDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export animated GIF" }).click();
+  const gifPath = await (await gifDownload).path();
+  if (!gifPath) throw new Error("Missing GIF with video background");
+  const frames = gifFrames(await readFile(gifPath));
+  expect(frames).toHaveLength(48);
+  expect(frames.every((frame) => !frame.transparent)).toBe(true);
+  await page.getByRole("button", { name: "Export Story video" }).click();
+  await page.getByRole("button", { name: "Cancel export" }).click();
+  await expect(page.getByRole("button", { name: "Save PNG" })).toBeEnabled();
 });

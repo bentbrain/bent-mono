@@ -801,3 +801,8 @@ footer > a:last-child {
     transition: none !important;
   }
 }
+
+.video-export {
+  width: 100%;
+  margin-top: 20px;
+}

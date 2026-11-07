@@ -4,7 +4,10 @@ import type { Activity } from "./activity";
 import { demoActivity, MAX_FILE_BYTES, parseFile, trimRoute } from "./activity";
 import type { CardOptions } from "./render";
 import { cardStats, drawCard, prepareRoute } from "./render";
-import { download, exportGif, exportPng } from "./export";
+import { download, exportGif, exportPng, exportVideo } from "./export";
+
+import type { CardMedia } from "./media";
+import { loadVideo, releaseMedia } from "./media";
 
 const initialOptions: CardOptions = {
   title: "A little further",
@@ -58,10 +61,11 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mediaLoading, setMediaLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [photo, setPhoto] = useState<HTMLImageElement>();
+  const [photo, setPhoto] = useState<CardMedia>();
   const canvas = useRef<HTMLCanvasElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
@@ -92,6 +96,13 @@ export default function App() {
     const element = canvas.current;
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
+    if (photo instanceof HTMLVideoElement) {
+      if (playing)
+        void photo
+          .play()
+          .catch(() => setError("The background video could not play."));
+      else photo.pause();
+    }
     let animation = 0;
     let last = 0;
     function frame(now: number) {
@@ -156,19 +167,54 @@ export default function App() {
     }
   }
 
+  useEffect(() => () => releaseMedia(photo), [photo]);
+
   async function importPhoto(file: File | undefined) {
     if (!file) return;
     const version = ++photoVersion.current;
+    setMediaLoading(false);
     setError("");
-    if (file.size > MAX_FILE_BYTES) {
-      setError("Choose a photo smaller than 20 MB.");
+    const isVideo = file.type.startsWith("video/");
+    if (file.size > (isVideo ? 100 * 1024 * 1024 : MAX_FILE_BYTES)) {
+      setError(
+        isVideo
+          ? "Choose a video smaller than 100 MB."
+          : "Choose a photo smaller than 20 MB.",
+      );
       return;
     }
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-      setError("Choose a JPEG, PNG or WebP photo.");
+    if (
+      !/^image\/(jpeg|png|webp)$/.test(file.type) &&
+      !/^video\/(mp4|quicktime|webm)$/.test(file.type)
+    ) {
+      setError(
+        "Choose a JPEG, PNG or WebP photo, or an MP4, MOV or WebM video.",
+      );
       return;
     }
+    setMediaLoading(true);
     const url = URL.createObjectURL(file);
+    if (isVideo) {
+      try {
+        const video = await loadVideo(url);
+        if (version !== photoVersion.current) {
+          releaseMedia(video);
+          return;
+        }
+        setPhoto(video);
+      } catch (cause) {
+        URL.revokeObjectURL(url);
+        if (version === photoVersion.current)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "This video could not be opened.",
+          );
+      } finally {
+        if (version === photoVersion.current) setMediaLoading(false);
+      }
+      return;
+    }
     try {
       const image = new Image();
       image.src = url;
@@ -182,11 +228,12 @@ export default function App() {
         );
     } finally {
       URL.revokeObjectURL(url);
+      if (version === photoVersion.current) setMediaLoading(false);
     }
   }
 
-  async function save(kind: "png" | "gif") {
-    if (!exportable || exporting || loading) return;
+  async function save(kind: "png" | "gif" | "mp4") {
+    if (!exportable || exporting || loading || mediaLoading) return;
     const controller = new AbortController();
     abort.current = controller;
     setExporting(true);
@@ -196,19 +243,29 @@ export default function App() {
     const snapshot = { ...options, angle: angle.current };
     try {
       const blob =
-        kind === "png"
-          ? await exportPng(points, snapshot, photo)
-          : await exportGif(
+        kind === "mp4"
+          ? await exportVideo(
               points,
               snapshot,
               controller.signal,
               setProgress,
               photo,
-            );
+            )
+          : kind === "png"
+            ? await exportPng(points, snapshot, photo)
+            : await exportGif(
+                points,
+                snapshot,
+                controller.signal,
+                setProgress,
+                photo,
+              );
       if (!controller.signal.aborted) {
         download(blob, `trackmap-${snapshot.format}.${kind}`);
         setNotice(
-          `${kind.toUpperCase()} ready. ${kind === "gif" && options.background === "transparent" && !photo ? "Save it to Photos, copy it, then try pasting into your Instagram Story." : "Check your downloads to save or share it."}`,
+          kind === "mp4"
+            ? "MP4 ready. Save the video to Photos, then select it when creating your Instagram Story."
+            : `${kind.toUpperCase()} ready. Check your downloads to save it. GIF and PNG overlays can be layered in an editor.`,
         );
       }
     } catch (cause) {
@@ -484,6 +541,7 @@ export default function App() {
                     onClick={() => {
                       update("background", background);
                       photoVersion.current++;
+                      setMediaLoading(false);
                       setPhoto(undefined);
                     }}
                   >
@@ -500,13 +558,16 @@ export default function App() {
                   className="text-button"
                   onClick={() => photoInput.current?.click()}
                 >
-                  ＋ Add your own photo
+                  {mediaLoading
+                    ? "Opening background…"
+                    : "＋ Add a photo or video"}
                 </Button>
                 {photo && (
                   <Button
                     className="text-button"
                     onClick={() => {
                       photoVersion.current++;
+                      setMediaLoading(false);
                       setPhoto(undefined);
                     }}
                   >
@@ -516,8 +577,8 @@ export default function App() {
                 <input
                   ref={photoInput}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  aria-label="Background photo"
+                  accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+                  aria-label="Background photo or video"
                   hidden
                   onChange={(event) => {
                     void importPhoto(event.target.files?.[0]);
@@ -652,17 +713,24 @@ export default function App() {
                   </select>
                 </div>
               </div>
+              <Button
+                className="primary-button video-export"
+                disabled={!exportable || loading || mediaLoading}
+                onClick={() => void save("mp4")}
+              >
+                Export Story video · MP4 <span>↓</span>
+              </Button>
               <div className="export-buttons">
                 <Button
-                  className="primary-button"
-                  disabled={!exportable || loading}
+                  className="secondary-button"
+                  disabled={!exportable || loading || mediaLoading}
                   onClick={() => void save("gif")}
                 >
                   Export animated GIF <span>↓</span>
                 </Button>
                 <Button
                   className="secondary-button"
-                  disabled={!exportable || loading}
+                  disabled={!exportable || loading || mediaLoading}
                   onClick={() => void save("png")}
                 >
                   Save PNG <span>↗</span>
@@ -692,30 +760,31 @@ export default function App() {
               </p>
             )}
             <p className="export-note">
-              PNG · 1080 px wide. GIF · 540 px wide, 12 fps.
+              MP4 · 1080 px, silent. PNG · 1080 px. GIF · 540 px, 12 fps.
               <br />
               Choose Clear for a transparent overlay. The checkerboard is never
-              exported.
+              exported. Video combines the route with your background, using Ink
+              when Clear has no photo or video.
             </p>
             <details className="sharing-help">
               <summary>How to add it to your Instagram Story</summary>
               <p>
-                Export a GIF with the Clear canvas. On iPhone, save it to
-                Photos, copy it, open your Story and try pasting it as a
-                sticker. GIF pasting can vary by device and Instagram version.
+                Choose a photo or video background, then export a Story video.
+                Save the MP4 to Photos and select it in Instagram’s Story
+                editor. The animated route is already part of the video.
               </p>
               <p>
-                For a still overlay, export a transparent PNG. Use it in your
-                Story’s photo sticker or a photo/video editor. For animation,
-                you can also layer the GIF over your video in an editor, then
-                export that composition as a video for Instagram.
+                Transparent GIF and PNG files are layers for a photo/video
+                editor. Instagram does not provide a dependable GIF paste
+                workflow.
               </p>
               <p>
-                Instagram’s built-in GIF search uses{" "}
-                <a href="https://support.giphy.com/hc/en-us/articles/360020330271-How-To-Use-Stickers-in-Instagram-Stories">
-                  GIPHY stickers
+                For a movable animated sticker inside Instagram, use{" "}
+                <a href="https://support.giphy.com/hc/en-us/articles/360020235351-Get-Your-Stickers-and-GIFs-Into-Instagram-Stories">
+                  GIPHY’s sticker publishing route
                 </a>
-                . Downloading a GIF here does not add it to that library.
+                . It involves public publishing and moderation. Trackmap never
+                publishes your GPS data to GIPHY.
               </p>
             </details>
             <div className="privacy-note">
@@ -736,6 +805,7 @@ export default function App() {
             trackmap.
           </a>
           <span>GO SOMEWHERE. MAKE SOMETHING.</span>
+          <a href="/third-party-notices.txt">Third-party licenses</a>
           <a href="https://bent.build">A little experiment by bent ↗</a>
         </footer>
       </main>
