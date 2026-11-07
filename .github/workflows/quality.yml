@@ -78,6 +78,14 @@ jobs:
       - run: node scripts/ci-check.mjs browser
         env:
           E2E_TIER: ${{ github.event_name == 'schedule' && 'full' || 'critical' }}
+      - name: Upload synthetic Trackmap browser results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trackmap-browser-results
+          path: apps/trackmap/test-results/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload synthetic browser coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -347,9 +347,11 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
       mimeType: "video/mp4",
       buffer: mp4,
     });
+  // Video decoding has a 15-second application deadline. Slower CI media
+  // pipelines must reach that outcome before the test judges readiness.
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 20_000 });
   await page.getByLabel("Rotation speed").selectOption("4");
   const second = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Story video" }).click();
