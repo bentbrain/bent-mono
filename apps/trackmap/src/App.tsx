@@ -17,6 +17,7 @@ const initialOptions: CardOptions = {
   sport: "Run",
   color: designTokens.accentLight,
   background: "paper",
+  mediaOverlay: 20,
   format: "story",
   showStats: true,
   showTitle: true,
@@ -536,6 +537,23 @@ export default function App() {
                     }}
                   />
                 </div>
+                {photo && (
+                  <Field
+                    label={`Background overlay · ${options.mediaOverlay}%`}
+                    htmlFor="media-overlay"
+                  >
+                    <Input
+                      id="media-overlay"
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={options.mediaOverlay}
+                      onChange={(event) =>
+                        update("mediaOverlay", Number(event.target.value))
+                      }
+                    />
+                  </Field>
+                )}
                 <Field label={`Camera tilt · ${options.tilt}°`} htmlFor="tilt">
                   <Input
                     id="tilt"

@@ -3,12 +3,14 @@ import type { CardMedia } from "./media";
 import type { CardFrame } from "./video-frames";
 import type { TrackPoint } from "./activity";
 import { statistics } from "./activity";
+import { depthLayers } from "./route-depth";
 
 export interface CardOptions {
   title: string;
   sport: string;
   color: string;
   background: "transparent" | "ink" | "paper";
+  mediaOverlay: number;
   format: "story" | "square";
   showStats: boolean;
   showTitle: boolean;
@@ -236,7 +238,7 @@ export function drawCard(
       sourceWidth * scale,
       sourceHeight * scale,
     );
-    ctx.fillStyle = "#00000065";
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(100, Math.max(0, options.mediaOverlay)) / 100})`;
     ctx.fillRect(0, 0, width, height);
   } else if (!transparent) {
     ctx.fillStyle = dark ? "#000000" : "#ffffff";
@@ -334,16 +336,22 @@ export function drawCard(
   }
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  const edges = projected
-    .slice(1)
-    .map((p, i) => ({ a: projected[i], b: p }))
-    .filter((e) => e.a.segment === e.b.segment)
-    .sort((a, b) => b.a.depth + b.b.depth - a.a.depth - a.b.depth);
   ctx.shadowColor = options.color;
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = options.color;
-  ctx.lineWidth = width * 0.007;
-  for (const edge of edges) {
+  for (const edge of depthLayers(projected)) {
+    if (edge.kind === "marker") {
+      const s = screen(edge.point);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, width * 0.009, 0, Math.PI * 2);
+      ctx.fillStyle = edge.start ? "#ffffff" : options.color;
+      ctx.fill();
+      ctx.strokeStyle = "#101622";
+      ctx.lineWidth = width * 0.002;
+      ctx.stroke();
+      continue;
+    }
+    ctx.strokeStyle = options.color;
+    ctx.lineWidth = width * 0.007;
     const a = screen(edge.a),
       b = screen(edge.b);
     ctx.beginPath();
@@ -370,18 +378,6 @@ export function drawCard(
         ctx.strokeStyle = options.color;
       }
     }
-  }
-  ctx.shadowBlur = 0;
-  for (const [i, p] of [projected[0], projected.at(-1)].entries()) {
-    if (!p) continue;
-    const s = screen(p);
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, width * 0.009, 0, Math.PI * 2);
-    ctx.fillStyle = i === 0 ? "#ffffff" : options.color;
-    ctx.fill();
-    ctx.strokeStyle = "#101622";
-    ctx.lineWidth = width * 0.002;
-    ctx.stroke();
   }
   if (options.showStats) {
     const y = height * 0.8;

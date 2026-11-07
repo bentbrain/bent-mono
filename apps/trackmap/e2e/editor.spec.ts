@@ -310,7 +310,42 @@ test("composites a local photo and removes it when Clear is selected", async ({
       }),
     )
     .toBeGreaterThan(100);
+  const overlay = page.getByRole("slider", { name: /Background overlay/ });
+  const cornerRed = () =>
+    page.locator("canvas").evaluate((element) => {
+      if (!(element instanceof HTMLCanvasElement)) throw new Error("No canvas");
+      return element.getContext("2d")?.getImageData(0, 0, 1, 1).data[0];
+    });
+  await expect(overlay).toHaveValue("20");
+  await expect.poll(cornerRed).toBe(204);
+  await overlay.press("Home");
+  await expect(overlay).toHaveValue("0");
+  await expect.poll(cornerRed).toBe(255);
+  await overlay.press("End");
+  await expect(overlay).toHaveValue("100");
+  await expect.poll(cornerRed).toBe(0);
+  const pendingPng = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save PNG" }).click();
+  const pngPath = await (await pendingPng).path();
+  if (!pngPath) throw new Error("Missing overlay PNG");
+  const exportedRed = await page.evaluate(
+    async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Missing PNG canvas");
+      ctx.drawImage(image, 0, 0);
+      return ctx.getImageData(0, 0, 1, 1).data[0];
+    },
+    (await readFile(pngPath)).toString("base64"),
+  );
+  expect(exportedRed).toBe(0);
   await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(overlay).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toHaveCount(0);
@@ -407,6 +442,13 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByRole("slider", { name: /Background overlay/ }),
+  ).toHaveValue("20");
+  await page.getByRole("slider", { name: /Background overlay/ }).press("End");
+  await expect(
+    page.getByRole("slider", { name: /Background overlay/ }),
+  ).toHaveValue("100");
   await page.getByRole("button", { name: "Play rotation" }).click();
   await page.waitForTimeout(250);
   await page.getByRole("button", { name: "Pause rotation" }).click();
@@ -607,4 +649,93 @@ test("hides both headings, uses metric icons and retains controls in PNG exports
   await expect
     .poll(() => page.locator("html").getAttribute("data-canvas-text"))
     .toContain("Sample activity");
+});
+
+test("route crossings occlude both endpoints only when the line is nearer", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await page.getByLabel("Titles", { exact: true }).uncheck();
+  await page.getByLabel("Stats", { exact: true }).uncheck();
+  await page.getByLabel("Route pulse", { exact: true }).uncheck();
+  await page.getByLabel(/Starting angle/).focus();
+  await page.keyboard.press("Home");
+  await page.getByLabel(/Elevation ·/).focus();
+  await page.keyboard.press("Home");
+  const rise = 0.003 * 111195 * Math.tan((38 * Math.PI) / 180);
+  for (const marker of ["start", "finish"]) {
+    for (const nearer of [true, false]) {
+      const coordinates = [
+        [0, 0, nearer ? 0 : rise],
+        [-0.005, nearer ? -0.003 : 0.003, nearer ? rise : 0],
+        [0.005, nearer ? -0.003 : 0.003, nearer ? rise : 0],
+      ];
+      if (marker === "finish") coordinates.reverse();
+      await page.getByLabel("Activity file", { exact: true }).setInputFiles({
+        name: "crossing.geojson",
+        mimeType: "application/geo+json",
+        buffer: Buffer.from(
+          JSON.stringify({
+            type: "Feature",
+            properties: { name: "Crossing route" },
+            geometry: { type: "LineString", coordinates },
+          }),
+        ),
+      });
+      await expect(
+        page.getByLabel("Activity title", { exact: true }),
+      ).toHaveValue("Crossing route");
+      const download = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Save PNG", exact: true }).click();
+      const path = await (await download).path();
+      if (!path) throw new Error("Missing crossing PNG");
+      const pixels = await page.evaluate(
+        async ({ data, marker }) => {
+          const image = new Image();
+          image.src = `data:image/png;base64,${data}`;
+          await image.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Missing canvas context");
+          ctx.drawImage(image, 0, 0);
+          const x = canvas.width / 2;
+          const column = ctx.getImageData(x, 0, 1, canvas.height).data;
+          const visible = Array.from(
+            { length: canvas.height },
+            (_, y) => y,
+          ).filter((y) => column[y * 4 + 3] > 0);
+          const y = Math.round(
+            (Math.min(...visible) + Math.max(...visible)) / 2,
+          );
+          return Array.from(
+            ctx.getImageData(
+              x + (marker === "finish" ? Math.round(canvas.width * 0.009) : 0),
+              y,
+              1,
+              1,
+            ).data,
+          );
+        },
+        { data: (await readFile(path)).toString("base64"), marker },
+      );
+      if (nearer) {
+        expect(pixels[2], `${marker} behind the nearer route`).toBeGreaterThan(
+          220,
+        );
+        expect(
+          pixels[0],
+          `${marker} must not draw over the route`,
+        ).toBeLessThan(20);
+      } else if (marker === "start") {
+        expect(pixels.slice(0, 3)).toEqual([255, 255, 255]);
+      } else {
+        expect(pixels[2], "foreground finish retains its outline").toBeLessThan(
+          100,
+        );
+      }
+    }
+  }
 });
