@@ -80,7 +80,9 @@ export function loadVideo(
       cancel();
       return;
     }
-    video.src = url;
+    // Encode URL metacharacters at the DOM boundary. Valid object URLs keep
+    // their scheme, origin and identifier unchanged.
+    video.src = encodeURI(url);
     video.load();
   });
 }
