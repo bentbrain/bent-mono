@@ -143,10 +143,14 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   // GitHub admission performs several asynchronous reads. Refresh provider
   // admission afterwards, so changes during qualification cannot use an old
   // settings, check-policy or deployment snapshot to authorize mutation.
-  const [finalProject, finalDefinitions, inventory] = await Promise.all([
+  // Finish the potentially paginated history read before the final single-
+  // resource snapshots, rather than letting it age those snapshots in parallel.
+  const inventory = await deploymentInventory(vercel, config.projectId);
+  const [finalProject, finalDefinitions, finalDeployment, finalRuns] = await Promise.all([
     vercel(`/v9/projects/${config.projectId}`),
     vercel(`/v2/projects/${config.projectId}/checks`),
-    deploymentInventory(vercel, config.projectId),
+    action === "promote" ? vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`) : null,
+    action === "promote" ? vercel(`/v2/deployments/${deploymentId}/check-runs`) : null,
   ]);
   requiredPolicy(config, finalDefinitions.checks);
   if (inventory.some(item =>
@@ -157,9 +161,8 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
       finalProject.autoAssignCustomDomains !== false ||
       (finalProject.lastAliasRequest && finalProject.lastAliasRequest.jobStatus !== "success")) fail("Release settings or production changed during admission.");
   if (action === "promote") {
-    deployment = await vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`);
+    deployment = finalDeployment;
     validateTarget({ app, config, project: finalProject, deployment, deploymentId, sha });
-    const finalRuns = await vercel(`/v2/deployments/${deploymentId}/check-runs`);
     validateNativeChecks(config, finalDefinitions.checks, finalRuns.runs, deployment);
     validateRuntime(receipt, { app, deployment, sha, fingerprint });
   }

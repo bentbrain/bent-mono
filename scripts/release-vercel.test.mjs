@@ -31,7 +31,10 @@ function fixture(change = () => {}) {
     if (path.startsWith("/v13/")) return structuredClone(state.deployment);
     if (path.includes("check-runs")) return { runs: structuredClone(state.runs) };
     if (path.includes("/checks")) return { checks: structuredClone(state.definitions) };
-    if (path.includes("/v6/")) return { deployments: structuredClone(state.inventory), pagination: { next: null } };
+    if (path.includes("/v6/")) {
+      state.duringInventory?.(state);
+      return { deployments: structuredClone(state.inventory), pagination: { next: null } };
+    }
     throw new Error(`Unexpected API route ${path}`);
   };
   return { state, receipt, vercel, qualify: async () => {
@@ -89,6 +92,15 @@ test("promotion rechecks immutable deployment identity and readiness after quali
       await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
     });
   }
+});
+test("final project admission follows the potentially paginated inventory read", async () => {
+  for (const action of ["stage", "promote"]) await trial(action, s => {
+    s.duringInventory = state => { state.project.autoAssignCustomDomains = true; };
+  }, async (f, options) => {
+    await assert.rejects(releaseVercel(options, f));
+    assert.equal(f.state.posts.length, 0);
+    await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+  });
 });
 test("uncertain promotion retains its one-use intent and cannot be retried", async () => {
   await trial("promote", s => { s.uncertain = true; }, async (f, options) => {
