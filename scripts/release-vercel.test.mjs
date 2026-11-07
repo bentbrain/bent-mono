@@ -37,6 +37,7 @@ function fixture(change = () => {}) {
   return { state, receipt, vercel, qualify: async () => {
     state.qualifications++;
     if (state.rejectQuality) throw new Error("Quality not passed");
+    if (state.qualifications === 2) state.duringFinalQualification?.(state);
     if (state.mutateOnFinalQuality && state.qualifications === 2) state.runs.push(state.mutateOnFinalQuality);
     return { ...quality, qualityAttempt: state.changeAttempt && state.qualifications === 2 ? 2 : 1 };
   }, checkout: async () => { if (state.dirty) throw new Error("dirty checkout"); } };
@@ -61,6 +62,33 @@ test("manual staged promotion uses genuine source qualification without manufact
     await assert.rejects(releaseVercel(options, f), /EEXIST/);
     assert.equal(f.state.posts.length, 1);
   });
+});
+test("refreshes provider admission after final qualification before stage or promote", async () => {
+  const drifts = [
+    s => { s.project.targets.production.id = "dpl_otherRelease"; },
+    s => { s.project.autoAssignCustomDomains = true; },
+    s => { s.project.env = [{ key: "CHANGED_SETTING", value: "synthetic" }]; },
+    s => { s.inventory.push({ uid: "dpl_newer", created: 11, state: "BUILDING" }); },
+    s => { s.definitions[0].blocks = "none"; },
+    s => { s.project.lastAliasRequest = { jobStatus: "pending" }; },
+  ];
+  for (const action of ["stage", "promote"]) {
+    for (const drift of drifts) await trial(action, s => { s.duringFinalQualification = drift; }, async (f, options) => {
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
+      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+    });
+  }
+});
+test("promotion rechecks immutable deployment identity and readiness after qualification", async () => {
+  for (const drift of [s => { s.deployment.gitSource.sha = "b".repeat(40); },
+    s => { s.deployment.id = "dpl_other"; }, s => { s.deployment.readyState = "ERROR"; }]) {
+    await trial("promote", s => { s.duringFinalQualification = drift; }, async (f, options) => {
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
+      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+    });
+  }
 });
 test("uncertain promotion retains its one-use intent and cannot be retried", async () => {
   await trial("promote", s => { s.uncertain = true; }, async (f, options) => {

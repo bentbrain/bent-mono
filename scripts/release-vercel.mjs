@@ -19,14 +19,14 @@ export function configurationHash(project, checks) {
   return createHash("sha256").update(canonical({ project: Object.fromEntries(fields.map(key => [key, project[key] ?? null])), checks })).digest("hex");
 }
 
-export function validateTarget({ app, config, project, deployment, sha, inspection = false }) {
+export function validateTarget({ app, config, project, deployment, deploymentId, sha, inspection = false }) {
   if (!/^[a-f0-9]{40}$/.test(sha) || !id(config.teamId, "team") || !id(config.projectId, "prj") ||
       !id(config.expectedProductionId, "dpl") || !id(config.requiredCheckId, "chk")) fail("Invalid protected release configuration.");
   if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
       project.rootDirectory !== app.directory || project.nodeVersion !== "24.x" || project.sourceFilesOutsideRootDirectory !== true ||
       project.link?.type !== "github" || project.link.org !== "bentbrain" || project.link.repo !== "bent-mono" ||
       project.link.productionBranch !== "main") fail("Vercel project does not match the monorepo application.");
-  if (deployment.project?.id !== project.id || deployment.team?.id !== config.teamId || deployment.name !== project.name ||
+  if (deployment.id !== deploymentId || deployment.project?.id !== project.id || deployment.team?.id !== config.teamId || deployment.name !== project.name ||
       deployment.target !== "production" || deployment.readyState !== "READY" || deployment.nodeVersion !== "24.x" ||
       deployment.gitSource?.type !== "github" || deployment.gitSource.sha !== sha || deployment.gitSource.ref !== "main" ||
       deployment.gitSource.repoId !== project.link.repoId || deployment.meta?.githubCommitOrg !== "bentbrain" ||
@@ -128,7 +128,7 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   let nativeMirrorPresent;
   if (action !== "stage") {
     deployment = await vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`);
-    validateTarget({ app, config, project, deployment, sha, inspection: action === "inspect" });
+    validateTarget({ app, config, project, deployment, deploymentId, sha, inspection: action === "inspect" });
     const runs = await vercel(`/v2/deployments/${deploymentId}/check-runs`);
     validateNativeChecks(config, definitions.checks, runs.runs, deployment);
     nativeMirrorPresent = runs.runs.some(run => run.checkId === config.requiredCheckId);
@@ -137,24 +137,33 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   const report = { app: app.name, sha, deploymentId, configurationSha256: fingerprint, quality, nativeMirrorPresent,
     isCurrentProduction: project.targets?.production?.id === deploymentId };
   if (action === "inspect") return report;
-  const inventory = await deploymentInventory(vercel, config.projectId);
+  await checkout(sha);
+  const finalQuality = await qualify(sha);
+  if (canonical(finalQuality) !== canonical(quality)) fail("Quality qualification changed during admission.");
+  // GitHub admission performs several asynchronous reads. Refresh provider
+  // admission afterwards, so changes during qualification cannot use an old
+  // settings, check-policy or deployment snapshot to authorize mutation.
+  const [finalProject, finalDefinitions, inventory] = await Promise.all([
+    vercel(`/v9/projects/${config.projectId}`),
+    vercel(`/v2/projects/${config.projectId}/checks`),
+    deploymentInventory(vercel, config.projectId),
+  ]);
+  requiredPolicy(config, finalDefinitions.checks);
   if (inventory.some(item =>
     ["INITIALIZING", "QUEUED", "BUILDING"].includes(item.state) ||
     (action === "promote" && item.created > deployment.createdAt))) fail("Production has concurrent or newer deployment work, or an incomplete inventory.");
-  const finalProject = await vercel(`/v9/projects/${config.projectId}`);
-  const finalDefinitions = await vercel(`/v2/projects/${config.projectId}/checks`);
   if (configurationHash(finalProject, finalDefinitions.checks) !== fingerprint ||
       finalProject.targets?.production?.id !== config.expectedProductionId ||
       finalProject.autoAssignCustomDomains !== false ||
       (finalProject.lastAliasRequest && finalProject.lastAliasRequest.jobStatus !== "success")) fail("Release settings or production changed during admission.");
-  await checkout(sha);
-  const finalQuality = await qualify(sha);
-  if (canonical(finalQuality) !== canonical(quality)) fail("Quality qualification changed during admission.");
   if (action === "promote") {
+    deployment = await vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`);
+    validateTarget({ app, config, project: finalProject, deployment, deploymentId, sha });
     const finalRuns = await vercel(`/v2/deployments/${deploymentId}/check-runs`);
     validateNativeChecks(config, finalDefinitions.checks, finalRuns.runs, deployment);
     validateRuntime(receipt, { app, deployment, sha, fingerprint });
   }
+  await checkout(sha);
   const handle = await releaseJournal(journalPath);
   try {
     await handle.writeFile(JSON.stringify({ ...report, action, at: new Date().toISOString(), status: "intent-recorded-no-retry" }) + "\n");
@@ -163,7 +172,7 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
     // requires inspection, never an automatic retry or a force/alias fallback.
     const result = action === "stage"
       ? await vercel("/v13/deployments", "POST", { name: app.project, project: config.projectId, target: "production",
-        gitSource: { type: "github", repoId: project.link.repoId, ref: "main", sha } })
+        gitSource: { type: "github", repoId: finalProject.link.repoId, ref: "main", sha } })
       : await vercel(`/v10/projects/${config.projectId}/promote/${deploymentId}`, "POST", {});
     await handle.writeFile(JSON.stringify({ status: "accepted-readback-required", result }) + "\n");
     await handle.sync();
