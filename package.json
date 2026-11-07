@@ -28,7 +28,8 @@
     "check:source": "node scripts/check-public-source.mjs",
     "test:workspace": "node --test scripts/*.test.mjs",
     "knip": "turbo run knip",
-    "check:ci": "node scripts/ci-check.mjs"
+    "check:ci": "node scripts/ci-check.mjs",
+    "release:vercel": "node scripts/release-vercel.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
