@@ -33,7 +33,12 @@ function fixture(change = () => {}) {
     if (path.includes("/checks")) return { checks: structuredClone(state.definitions) };
     if (path.includes("/v6/")) {
       state.duringInventory?.(state);
-      return { deployments: structuredClone(state.inventory), pagination: { next: null } };
+      if (path.includes("&until=")) {
+        state.duringOlderInventory?.(state);
+        return { deployments: [{ uid: "dpl_older", created: 900, state: "READY" }], pagination: { next: null } };
+      }
+      return { deployments: structuredClone(state.inventory),
+        pagination: { next: state.paginated ? state.inventoryCursor ?? state.inventory.at(-1).created : null } };
     }
     throw new Error(`Unexpected API route ${path}`);
   };
@@ -100,6 +105,35 @@ test("final project admission follows the potentially paginated inventory read",
     await assert.rejects(releaseVercel(options, f));
     assert.equal(f.state.posts.length, 0);
     await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+  });
+});
+function paginatedInventory(state) {
+  state.paginated = true;
+  state.deployment.createdAt = 1000;
+  state.inventory = Array.from({ length: 100 }, (_, index) => ({
+    uid: index === 0 ? "dpl_candidate" : `dpl_ready${index}`, created: 1000 - index, state: "READY",
+  }));
+}
+test("newest-page drift during historical pagination stops stage and promote before intent", async () => {
+  for (const action of ["stage", "promote"]) for (const newState of ["BUILDING", "READY", "cursor-only"]) {
+    await trial(action, s => {
+      paginatedInventory(s);
+      s.duringOlderInventory = state => {
+        if (newState === "cursor-only") { state.inventoryCursor = 899; return; }
+        state.inventory.unshift({ uid: "dpl_concurrent", created: 1001, state: newState });
+        state.inventory.pop();
+      };
+    }, async (f, options) => {
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
+      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+    });
+  }
+});
+test("unchanged multi-page inventory still permits the single guarded mutation", async () => {
+  for (const action of ["stage", "promote"]) await trial(action, paginatedInventory, async (f, options) => {
+    await releaseVercel(options, f);
+    assert.equal(f.state.posts.length, 1);
   });
 });
 test("uncertain promotion retains its one-use intent and cannot be retried", async () => {

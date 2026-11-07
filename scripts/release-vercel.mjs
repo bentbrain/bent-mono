@@ -72,14 +72,23 @@ export function validateNativeChecks(config, definitions, runs, deployment) {
   }
 }
 
+function inventoryHead(result) {
+  if (!Array.isArray(result.deployments)) fail("Malformed production deployment inventory.");
+  const next = result.pagination?.next ?? null;
+  if (next !== null && (!Number.isSafeInteger(next) || next <= 0)) fail("Ambiguous production deployment pagination.");
+  return canonical({ deployments: result.deployments, next });
+}
+
 async function deploymentInventory(vercel, projectId) {
   const deployments = [];
+  let head;
   let until;
   for (let page = 0; page < 100; page++) {
     const result = await vercel(`/v6/deployments?projectId=${projectId}&target=production&limit=100${until ? `&until=${until}` : ""}`);
     if (!Array.isArray(result.deployments)) fail("Malformed production deployment inventory.");
+    if (page === 0) head = inventoryHead(result);
     deployments.push(...result.deployments);
-    if (!result.pagination?.next) return deployments;
+    if (!result.pagination?.next) return { deployments, head };
     if (!Number.isSafeInteger(result.pagination.next) || result.pagination.next <= 0 ||
         (until && result.pagination.next >= until)) fail("Ambiguous production deployment pagination.");
     until = result.pagination.next;
@@ -137,23 +146,25 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   const report = { app: app.name, sha, deploymentId, configurationSha256: fingerprint, quality, nativeMirrorPresent,
     isCurrentProduction: project.targets?.production?.id === deploymentId };
   if (action === "inspect") return report;
+  // Read potentially long history before final source admission. Its newest
+  // page is checked again below, so a build created while paging is not missed.
+  const inventory = await deploymentInventory(vercel, config.projectId);
   await checkout(sha);
   const finalQuality = await qualify(sha);
   if (canonical(finalQuality) !== canonical(quality)) fail("Quality qualification changed during admission.");
   // GitHub admission performs several asynchronous reads. Refresh provider
   // admission afterwards, so changes during qualification cannot use an old
   // settings, check-policy or deployment snapshot to authorize mutation.
-  // Finish the potentially paginated history read before the final single-
-  // resource snapshots, rather than letting it age those snapshots in parallel.
-  const inventory = await deploymentInventory(vercel, config.projectId);
-  const [finalProject, finalDefinitions, finalDeployment, finalRuns] = await Promise.all([
+  const [finalProject, finalDefinitions, finalDeployment, finalRuns, finalInventoryHead] = await Promise.all([
     vercel(`/v9/projects/${config.projectId}`),
     vercel(`/v2/projects/${config.projectId}/checks`),
     action === "promote" ? vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`) : null,
     action === "promote" ? vercel(`/v2/deployments/${deploymentId}/check-runs`) : null,
+    vercel(`/v6/deployments?projectId=${config.projectId}&target=production&limit=100`),
   ]);
   requiredPolicy(config, finalDefinitions.checks);
-  if (inventory.some(item =>
+  if (inventoryHead(finalInventoryHead) !== inventory.head) fail("Production deployment inventory changed during admission.");
+  if (inventory.deployments.some(item =>
     ["INITIALIZING", "QUEUED", "BUILDING"].includes(item.state) ||
     (action === "promote" && item.created > deployment.createdAt))) fail("Production has concurrent or newer deployment work, or an incomplete inventory.");
   if (configurationHash(finalProject, finalDefinitions.checks) !== fingerprint ||
