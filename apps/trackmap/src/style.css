@@ -256,6 +256,11 @@ details p,
 .error {
   color: #b62920;
 }
+@media (prefers-color-scheme: dark) {
+  .error {
+    color: #ff776b;
+  }
+}
 .export-progress {
   display: grid;
   gap: 12px;

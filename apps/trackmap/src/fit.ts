@@ -10,6 +10,7 @@ export async function decodeFit(
     strict: true,
     mode: "list",
     lengthUnit: "m",
+    includeRawMessages: [18, 20, 21],
   });
   let messages;
   try {
@@ -21,7 +22,35 @@ export async function decodeFit(
   }
   const points: TrackPoint[] = [];
   let segment = 0;
-  for (const point of messages.records ?? []) {
+  let paused = false;
+  // The retained message order disambiguates records and timer/session events
+  // sharing a timestamp, and preserves boundaries even without record times.
+  for (const message of messages.raw_messages ?? []) {
+    if (message.global_message_number === 18) {
+      segment++;
+      paused = false;
+      continue;
+    }
+    if (message.global_message_number === 21) {
+      const event = messages.events?.[message.message_index];
+      if (event?.event !== "timer") continue;
+      if (event.event_type === "start") {
+        segment++;
+        paused = false;
+      } else if (
+        ["stop", "stop_all", "stop_disable", "stop_disable_all"].includes(
+          String(event.event_type),
+        )
+      ) {
+        segment++;
+        paused = true;
+      }
+      continue;
+    }
+    const point = messages.records?.[message.message_index];
+    if (message.global_message_number !== 20 || !point || paused) continue;
+    const time =
+      point.timestamp instanceof Date ? point.timestamp.getTime() : undefined;
     const lat = point.position_lat;
     const lon = point.position_long;
     if (
@@ -44,8 +73,7 @@ export async function decodeFit(
         elevation !== undefined && Number.isFinite(elevation)
           ? elevation
           : undefined,
-      time:
-        point.timestamp instanceof Date ? point.timestamp.getTime() : undefined,
+      time,
     });
   }
   const sport = messages.sessions?.[0]?.sport;

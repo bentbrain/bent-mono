@@ -197,6 +197,42 @@ test("imports TCX, GeoJSON and FIT; malformed input keeps the previous activity"
   await expect(page.getByRole("button", { name: "Save PNG" })).toBeDisabled();
 });
 
+test("dark-mode errors meet normal-text contrast", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  await page.getByLabel("Activity file", { exact: true }).setInputFiles({
+    name: "bad.gpx",
+    mimeType: "text/xml",
+    buffer: Buffer.from("<gpx><trk>"),
+  });
+  const error = page.getByRole("alert");
+  await expect(error).toBeVisible();
+  await error.screenshot({ path: testInfo.outputPath("dark-error.png") });
+  const contrast = await error.evaluate((element) => {
+    function luminance(color: string) {
+      const channels = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const linear = channels.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045
+          ? value / 12.92
+          : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+    }
+    const foreground = luminance(getComputedStyle(element).color);
+    const background = luminance(
+      getComputedStyle(document.documentElement).backgroundColor,
+    );
+    return (
+      (Math.max(foreground, background) + 0.05) /
+      (Math.min(foreground, background) + 0.05)
+    );
+  });
+  expect(contrast).toBeGreaterThanOrEqual(4.5);
+});
+
 test("can cancel an export and make another", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Export animated GIF" }).click();

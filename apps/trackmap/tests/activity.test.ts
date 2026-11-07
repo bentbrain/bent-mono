@@ -15,6 +15,74 @@ import { prepareRoute } from "../src/render";
 const gpx =
   '<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Synthetic run</name><type>Running</type><trkseg><trkpt lat="0" lon="0"><ele>10</ele><time>2026-01-01T00:00:00Z</time></trkpt><trkpt lat="0.01" lon="0.01"><ele>30</ele><time>2026-01-01T00:10:00Z</time></trkpt></trkseg></trk></gpx>';
 
+function fitWithBreak(
+  stopType: number | undefined,
+  sessions = false,
+  resumeAt = 120,
+) {
+  const encoder = new FitEncoder();
+  const timestamp = (seconds: number) =>
+    FitEncoder.toFitTimestamp(new Date(Date.UTC(2026, 0, 1) + seconds * 1000));
+  function record(seconds: number, longitude: number) {
+    encoder.writeMessage(20, [
+      { number: 0, size: 4, baseType: FitBaseType.Sint32, value: 0 },
+      {
+        number: 1,
+        size: 4,
+        baseType: FitBaseType.Sint32,
+        value: Math.round((longitude * 2147483648) / 180),
+      },
+      {
+        number: 253,
+        size: 4,
+        baseType: FitBaseType.Uint32,
+        value: timestamp(seconds),
+      },
+    ]);
+  }
+  function event(seconds: number, type: number) {
+    encoder.writeMessage(21, [
+      { number: 0, size: 1, baseType: FitBaseType.Enum, value: 0 },
+      { number: 1, size: 1, baseType: FitBaseType.Enum, value: type },
+      {
+        number: 253,
+        size: 4,
+        baseType: FitBaseType.Uint32,
+        value: timestamp(seconds),
+      },
+    ]);
+  }
+  function session(start: number, end: number) {
+    encoder.writeMessage(18, [
+      {
+        number: 2,
+        size: 4,
+        baseType: FitBaseType.Uint32,
+        value: timestamp(start),
+      },
+      {
+        number: 253,
+        size: 4,
+        baseType: FitBaseType.Uint32,
+        value: timestamp(end),
+      },
+    ]);
+  }
+  if (stopType !== undefined) event(0, 0);
+  record(0, 0);
+  record(10, 0.001);
+  if (stopType !== undefined) {
+    event(10, stopType);
+    if (resumeAt > 10) record(60, 0.05); // Paused GPS samples must not create a route.
+    event(resumeAt, 0);
+  }
+  if (sessions) session(0, 10);
+  record(resumeAt, 0.101);
+  record(130, 0.102);
+  if (sessions) session(resumeAt, 130);
+  return Uint8Array.from(encoder.close()).buffer;
+}
+
 describe("activity import", () => {
   test("reads namespaced Strava GPX including zero coordinates, elevation and time", () => {
     const activity = parseXml(gpx, "activity.gpx");
@@ -135,6 +203,44 @@ describe("activity import", () => {
     await expect(parseFile(new File(["hello"], "notes.txt"))).rejects.toThrow(
       "Choose a GPX",
     );
+  });
+  test("FIT timer pauses preserve separate legs and elapsed time", async () => {
+    for (const stopType of [1, 4, 8, 9]) {
+      const activity = await decodeFit(fitWithBreak(stopType), "Paused FIT");
+      expect(activity.points).toHaveLength(4);
+      expect(activity.points[0].segment).toBe(activity.points[1].segment);
+      expect(activity.points[1].segment).not.toBe(activity.points[2].segment);
+      expect(activity.points[2].segment).toBe(activity.points[3].segment);
+      expect(statistics(activity.points).metres).toBeCloseTo(222.4, 0);
+      expect(statistics(activity.points).seconds).toBe(130);
+      expect(
+        new Set(prepareRoute(activity.points).map((point) => point.segment))
+          .size,
+      ).toBe(2);
+      expect(trimRoute(activity.points, 150).length).toBeLessThan(2);
+    }
+  });
+  test("FIT sessions break geometry even without timer events", async () => {
+    const activity = await decodeFit(
+      fitWithBreak(undefined, true),
+      "Multisport FIT",
+    );
+    expect(activity.points).toHaveLength(4);
+    expect(activity.points[1].segment).not.toBe(activity.points[2].segment);
+    expect(statistics(activity.points).metres).toBeCloseTo(222.4, 0);
+    expect(statistics(activity.points).seconds).toBe(130);
+  });
+  test("FIT boundaries retain file order when timestamps coincide", async () => {
+    for (const buffer of [
+      fitWithBreak(4, false, 10),
+      fitWithBreak(undefined, true, 10),
+    ]) {
+      const activity = await decodeFit(buffer, "Adjacent FIT legs");
+      expect(activity.points).toHaveLength(4);
+      expect(activity.points[1].time).toBe(activity.points[2].time);
+      expect(activity.points[1].segment).not.toBe(activity.points[2].segment);
+      expect(statistics(activity.points).metres).toBeCloseTo(222.4, 0);
+    }
   });
 });
 
