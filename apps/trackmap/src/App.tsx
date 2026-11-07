@@ -8,6 +8,7 @@ import type { CardOptions } from "./render";
 import { cardStats, drawCard, prepareRoute } from "./render";
 import { download, exportGif, exportPng, exportVideo } from "./export";
 
+import { FileVideo } from "./file-video";
 import type { CardMedia } from "./media";
 import { loadVideoFile, releaseMedia } from "./media";
 
@@ -78,11 +79,12 @@ export default function App() {
     const element = canvas.current;
     const ctx = element?.getContext("2d");
     if (!element || !ctx) return;
-    if (photo instanceof HTMLVideoElement) {
+    let active = true;
+    if (photo instanceof HTMLVideoElement || photo instanceof FileVideo) {
       if (playing)
-        void photo
-          .play()
-          .catch(() => setError("The background video could not play."));
+        void photo.play().catch(() => {
+          if (active) setError("The background video could not play.");
+        });
       else photo.pause();
     }
     let animation = 0;
@@ -108,7 +110,12 @@ export default function App() {
       if (playing) animation = requestAnimationFrame(frame);
     }
     animation = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(animation);
+    return () => {
+      active = false;
+      cancelAnimationFrame(animation);
+      if (photo instanceof HTMLVideoElement || photo instanceof FileVideo)
+        photo.pause();
+    };
   }, [route, stats, options, playing, photo]);
 
   useEffect(

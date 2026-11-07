@@ -340,6 +340,14 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   expect(mp4.includes(Buffer.from("avc1"))).toBe(true);
   expect(mp4.length).toBeGreaterThan(10_000);
   await expect(page.getByRole("status")).toContainText("MP4 ready");
+  // Native playback may reject a valid file before loadeddata, as Linux
+  // WebKit did in CI. File-backed preview loading must still succeed.
+  await page.evaluate(() => {
+    if (typeof VideoDecoder === "undefined") return;
+    HTMLMediaElement.prototype.load = function () {
+      this.dispatchEvent(new Event("error"));
+    };
+  });
   await page
     .getByLabel("Background photo or video", { exact: true })
     .setInputFiles({
@@ -352,6 +360,10 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Play rotation" }).click();
+  await page.waitForTimeout(250);
+  await page.getByRole("button", { name: "Pause rotation" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByLabel("Rotation speed").selectOption("4");
   // A failed playback seek must not break offline frame extraction when the
   // browser has a file decoder. This reproduces the failing native seek seam.
@@ -437,6 +449,10 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByRole("button", { name: "Add photo or video", exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByLabel("Rotation speed").selectOption("6");
   const gifDownload = downloadOrError();
   await page.getByRole("button", { name: "Export animated GIF" }).click();

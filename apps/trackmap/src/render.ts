@@ -1,3 +1,5 @@
+import { FileVideo } from "./file-video";
+import type { CardMedia } from "./media";
 import type { CardFrame } from "./video-frames";
 import type { TrackPoint } from "./activity";
 import { statistics } from "./activity";
@@ -113,8 +115,9 @@ export function drawCard(
   stats: ReturnType<typeof cardStats>,
   options: CardOptions,
   angle = options.angle,
-  photo?: CardFrame,
+  media?: CardFrame | CardMedia,
 ) {
+  const photo = media instanceof FileVideo ? media.canvas : media;
   ctx.save();
   ctx.clearRect(0, 0, width, height);
   const transparent = options.background === "transparent" && !photo;

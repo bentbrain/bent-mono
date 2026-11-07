@@ -1,12 +1,15 @@
-export type CardMedia = HTMLImageElement | HTMLVideoElement;
+import { FileVideo } from "./file-video";
 
-export const videoFiles = new WeakMap<HTMLVideoElement, Blob>();
+export type CardMedia = HTMLImageElement | HTMLVideoElement | FileVideo;
 
 export async function loadVideoFile(file: Blob) {
+  // Native playback remains the fallback for browser-supported formats or
+  // codecs that cannot be decoded through WebCodecs.
+  const decoded = await FileVideo.open(file).catch(() => undefined);
+  if (decoded) return decoded;
   const url = URL.createObjectURL(file);
   try {
     const video = await loadVideo(url);
-    videoFiles.set(video, file);
     return video;
   } catch (error) {
     URL.revokeObjectURL(url);
@@ -15,6 +18,7 @@ export async function loadVideoFile(file: Blob) {
 }
 
 export function releaseMedia(media: CardMedia | undefined) {
+  if (media instanceof FileVideo) media.release();
   if (media instanceof HTMLVideoElement) {
     const url = media.src;
     media.pause();
