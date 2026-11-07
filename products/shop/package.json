@@ -33,7 +33,9 @@
     "shop:check": "bun run knip && bun run test:pipeline && node scripts/task-runtime.mjs run test lint typecheck types:check build --summarize",
     "shop:dev": "node scripts/task-runtime.mjs run dev --filter=@forever-tee/web",
     "shop:lint": "node scripts/task-runtime.mjs run lint",
-    "shop:typecheck": "node scripts/task-runtime.mjs run typecheck"
+    "shop:typecheck": "node scripts/task-runtime.mjs run typecheck",
+    "test:core": "node scripts/check-core.mjs",
+    "test:smoke": "bun run --filter @forever-tee/web test:e2e:smoke"
   },
   "devDependencies": {
     "eslint": "^9",

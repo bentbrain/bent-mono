@@ -14,7 +14,8 @@
     "typecheck": "next typegen && tsc --noEmit && bun run check:graphql",
     "verify:worker-release": "node scripts/verify-worker-release.mjs",
     "test:e2e:local": "node scripts/local-browser.mjs",
-    "test:e2e:storefront:production": "node scripts/check-production-storefront.mjs"
+    "test:e2e:storefront:production": "node scripts/check-production-storefront.mjs",
+    "test:e2e:smoke": "playwright test --config=playwright.smoke.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
