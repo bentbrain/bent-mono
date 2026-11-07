@@ -15,6 +15,15 @@ export function loadVideo(
   signal?: AbortSignal,
 ): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
+    // Only our own file-backed object URLs can reach the media element.
+    if (
+      !url.startsWith("blob:") ||
+      !/^blob:https?:\/\/[^/]+\/[0-9a-f-]{36}$/i.test(url) ||
+      new URL(url).origin !== window.location.origin
+    ) {
+      reject(new Error("Background media must use a local file URL."));
+      return;
+    }
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;

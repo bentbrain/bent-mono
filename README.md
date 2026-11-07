@@ -47,7 +47,7 @@ Trackmap uses the ordinary guarded Vercel release route. Its application root is
 
 `packages/design-tokens` defines the bent font, cobalt accents, backgrounds, border width and square corners. Import `@bent/design-tokens/tokens.css` and map the tokens to application styles without importing another application's global reset.
 
-`packages/ui` owns shared React control behavior. Application wrappers retain their existing variants while adopting common primitives. Keep routing, authentication and product-specific behavior in their applications. Validate all consumers when changing shared packages.
+`packages/ui` owns shared React control behavior. Application wrappers retain their existing variants while adopting common primitives. Shared buttons offer optional `primary`, `outline` and `ghost` appearances through the `appearance` prop, without changing application wrapper variants. Import `@bent/ui/field` for labelled fields, inputs and selects, and `@bent/ui/controls.css` for token-based control styles. Keep routing, authentication and product-specific behavior in their applications. Validate all consumers when changing shared packages.
 
 ## Public source and private data
 

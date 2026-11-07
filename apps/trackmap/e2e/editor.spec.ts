@@ -55,7 +55,7 @@ test("imports, customizes and exports genuinely transparent PNGs and animated GI
   });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Your effort. Another dimension." }),
+    page.getByRole("heading", { name: "Trackmap", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Play rotation" }),
@@ -70,6 +70,12 @@ test("imports, customizes and exports genuinely transparent PNGs and animated GI
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.screenshot({
+    path: info.outputPath("editor-dark.png"),
+    fullPage: true,
+  });
+  await page.emulateMedia({ colorScheme: "light" });
   await page.getByLabel("Activity file", { exact: true }).setInputFiles({
     name: "run.gpx",
     mimeType: "application/gpx+xml",
@@ -81,7 +87,7 @@ test("imports, customizes and exports genuinely transparent PNGs and animated GI
   await page
     .getByLabel("Activity title", { exact: true })
     .fill("That was worth it");
-  await page.getByRole("button", { name: "▧ Clear", exact: true }).click();
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
   await page.getByLabel("Loop length").selectOption("4");
   const pngDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save PNG" }).click();
@@ -234,7 +240,7 @@ test("composites a local photo and removes it when Clear is selected", async ({
       }),
     )
     .toBeGreaterThan(100);
-  await page.getByRole("button", { name: "▧ Clear", exact: true }).click();
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Remove", exact: true }),
   ).toHaveCount(0);

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { DOMParser } from "@xmldom/xmldom";
 import { FitEncoder, FitBaseType } from "fit-file-parser/encoder";
 import {
   demoActivity,
@@ -13,14 +12,12 @@ import {
 import { decodeFit } from "../src/fit";
 import { prepareRoute } from "../src/render";
 
-const xml = (value: string) =>
-  new DOMParser().parseFromString(value, "application/xml");
 const gpx =
   '<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Synthetic run</name><type>Running</type><trkseg><trkpt lat="0" lon="0"><ele>10</ele><time>2026-01-01T00:00:00Z</time></trkpt><trkpt lat="0.01" lon="0.01"><ele>30</ele><time>2026-01-01T00:10:00Z</time></trkpt></trkseg></trk></gpx>';
 
 describe("activity import", () => {
   test("reads namespaced Strava GPX including zero coordinates, elevation and time", () => {
-    const activity = parseXml(gpx, "activity.gpx", xml);
+    const activity = parseXml(gpx, "activity.gpx");
     expect(activity.name).toBe("Synthetic run");
     expect(activity.points[0].lat).toBe(0);
     expect(statistics(activity.points)).toMatchObject({
@@ -33,13 +30,11 @@ describe("activity import", () => {
     const route = parseXml(
       '<gpx><rte><rtept lat="0" lon="0"/><rtept lat="0" lon="0.01"/></rte></gpx>',
       "rte.gpx",
-      xml,
     );
     expect(route.points).toHaveLength(2);
     const activity = parseXml(
       '<gpx><trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="0" lon=".01"/></trkseg><trkseg><trkpt lat="20" lon="20"/><trkpt lat="20" lon="20.01"/></trkseg></trk></gpx>',
       "segments.gpx",
-      xml,
     );
     expect(statistics(activity.points).metres).toBeLessThan(2300);
     expect(activity.points[1].segment).not.toBe(activity.points[2].segment);
@@ -48,7 +43,6 @@ describe("activity import", () => {
     const activity = parseXml(
       '<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"><Activities><Activity Sport="Biking"><Lap><Track><Trackpoint><Position><LatitudeDegrees>0</LatitudeDegrees><LongitudeDegrees>0</LongitudeDegrees></Position><AltitudeMeters>10</AltitudeMeters></Trackpoint><Trackpoint/><Trackpoint><Position><LatitudeDegrees>20</LatitudeDegrees><LongitudeDegrees>20</LongitudeDegrees></Position></Trackpoint></Track></Lap></Activity></Activities></TrainingCenterDatabase>',
       "ride.tcx",
-      xml,
     );
     expect(activity.sport).toBe("Biking");
     expect(activity.points).toHaveLength(2);
@@ -56,18 +50,16 @@ describe("activity import", () => {
     expect(activity.points[0].segment).not.toBe(activity.points[1].segment);
   });
   test("rejects invalid coordinates, entities and GPS-free activities", () => {
+    expect(() => parseXml(gpx.replace('lat="0"', 'lat=""'), "bad.gpx")).toThrow(
+      "invalid coordinates",
+    );
     expect(() =>
-      parseXml(gpx.replace('lat="0"', 'lat=""'), "bad.gpx", xml),
+      parseXml(gpx.replace('lat="0"', 'lat="91"'), "bad.gpx"),
     ).toThrow("invalid coordinates");
-    expect(() =>
-      parseXml(gpx.replace('lat="0"', 'lat="91"'), "bad.gpx", xml),
-    ).toThrow("invalid coordinates");
-    expect(() => parseXml("<!DOCTYPE gpx><gpx/>", "bad.gpx", xml)).toThrow(
+    expect(() => parseXml("<!DOCTYPE gpx><gpx/>", "bad.gpx")).toThrow(
       "document types",
     );
-    expect(() => parseXml("<gpx/>", "indoor.gpx", xml)).toThrow(
-      "two GPS points",
-    );
+    expect(() => parseXml("<gpx/>", "indoor.gpx")).toThrow("two GPS points");
   });
   test("imports GeoJSON collections with disconnected lines", () => {
     const activity = parseGeoJson(

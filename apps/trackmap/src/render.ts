@@ -137,35 +137,19 @@ export function drawCard(
     ctx.fillStyle = "#00000065";
     ctx.fillRect(0, 0, width, height);
   } else if (!transparent) {
-    ctx.fillStyle = dark ? "#101622" : "#f3f1e9";
-    ctx.fillRect(0, 0, width, height);
-    const gradient = ctx.createRadialGradient(
-      width * 0.5,
-      height * 0.4,
-      0,
-      width * 0.5,
-      height * 0.4,
-      width * 0.8,
-    );
-    gradient.addColorStop(0, dark ? "#1b2c43" : "#ffffff");
-    gradient.addColorStop(1, dark ? "#101622" : "#e9e5db");
-    ctx.fillStyle = gradient;
+    ctx.fillStyle = dark ? "#000000" : "#ffffff";
     ctx.fillRect(0, 0, width, height);
   }
-  const foreground = dark || photo ? "#ffffff" : "#142039";
-  const muted = dark || photo ? "#bcc7d8" : "#52617a";
+  const foreground = dark || photo ? "#ffffff" : "#111111";
+  const muted = dark || photo ? "#bcc7d8" : "#555555";
   const pad = width * 0.085;
   ctx.textAlign = "left";
   ctx.fillStyle = options.color;
   ctx.font = `600 ${width * 0.022}px ui-monospace, monospace`;
-  ctx.fillText(
-    "TRACKMAP / " + options.sport.toUpperCase().slice(0, 30),
-    pad,
-    height * 0.1,
-  );
+  ctx.fillText(options.sport.slice(0, 30), pad, height * 0.1);
   if (options.showTitle) {
     ctx.fillStyle = foreground;
-    ctx.font = `600 ${width * 0.061}px system-ui, sans-serif`;
+    ctx.font = `600 ${width * 0.061}px ui-monospace, monospace`;
     const title = options.title.trim() || "My activity";
     const words = title.split(/\s+/);
     const lines: string[] = [];
@@ -267,7 +251,7 @@ export function drawCard(
     .filter((e) => e.a.segment === e.b.segment)
     .sort((a, b) => b.a.depth + b.b.depth - a.a.depth - a.b.depth);
   ctx.shadowColor = options.color;
-  ctx.shadowBlur = transparent ? 0 : width * 0.005;
+  ctx.shadowBlur = 0;
   ctx.strokeStyle = options.color;
   ctx.lineWidth = width * 0.007;
   for (const edge of edges) {
@@ -304,7 +288,7 @@ export function drawCard(
       ctx.font = `500 ${width * 0.023}px ui-monospace, monospace`;
       ctx.fillText(stat.label, x, y);
       ctx.fillStyle = foreground;
-      ctx.font = `600 ${width * 0.045}px system-ui, sans-serif`;
+      ctx.font = `600 ${width * 0.045}px ui-monospace, monospace`;
       ctx.fillText(stat.value, x, y + width * 0.06);
       ctx.fillStyle = muted;
       ctx.font = `${width * 0.022}px ui-monospace, monospace`;
@@ -313,6 +297,5 @@ export function drawCard(
   }
   ctx.fillStyle = muted;
   ctx.font = `${width * 0.023}px ui-monospace, monospace`;
-  ctx.fillText("MADE OF MILES. MADE BY YOU.", pad, height * 0.945);
   ctx.restore();
 }

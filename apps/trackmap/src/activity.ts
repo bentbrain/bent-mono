@@ -1,3 +1,6 @@
+import { parseActivityXml, xmlNodes as nodes } from "./xml";
+import type { XmlNode } from "./xml";
+
 export interface TrackPoint {
   lat: number;
   lon: number;
@@ -16,19 +19,8 @@ export interface Activity {
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_POINTS = 150_000;
 
-interface XmlRoot {
-  getElementsByTagNameNS(namespace: string, name: string): ArrayLike<XmlNode>;
-}
-interface XmlNode extends XmlRoot {
-  textContent: string | null;
-  getAttribute(name: string): string | null;
-}
-
-function nodes(root: XmlRoot, name: string) {
-  return Array.from(root.getElementsByTagNameNS("*", name));
-}
-function content(root: XmlRoot, name: string) {
-  return nodes(root, name)[0]?.textContent?.trim() || undefined;
+function content(root: XmlNode, name: string) {
+  return nodes(root, name)[0]?.text.trim() || undefined;
 }
 function number(value: string | null | undefined) {
   if (value == null || value.trim() === "") return undefined;
@@ -52,17 +44,8 @@ function validPoint(
   );
 }
 
-export function parseXml(
-  text: string,
-  filename: string,
-  parse = (value: string): XmlRoot =>
-    new DOMParser().parseFromString(value, "application/xml"),
-): Activity {
-  if (/<!DOCTYPE|<!ENTITY/i.test(text))
-    throw new Error("Activity XML cannot contain document types or entities.");
-  const doc = parse(text);
-  if (nodes(doc, "parsererror").length)
-    throw new Error("This XML file is damaged. Export the activity again.");
+export function parseXml(text: string, filename: string): Activity {
+  const doc = parseActivityXml(text);
   const gpx = nodes(doc, "gpx").length > 0;
   const tcx = nodes(doc, "TrainingCenterDatabase").length > 0;
   if (!gpx && !tcx) throw new Error("This is not a GPX or TCX activity.");
@@ -78,10 +61,10 @@ export function parseXml(
       : nodes(group, "Trackpoint");
     for (const entry of entries) {
       const lat = number(
-        gpx ? entry.getAttribute("lat") : content(entry, "LatitudeDegrees"),
+        gpx ? entry.attributes.lat : content(entry, "LatitudeDegrees"),
       );
       const lon = number(
-        gpx ? entry.getAttribute("lon") : content(entry, "LongitudeDegrees"),
+        gpx ? entry.attributes.lon : content(entry, "LongitudeDegrees"),
       );
       // A missing position is a track break, never a line through unknown space.
       if (!validPoint(lat, lon) || lon === undefined) {
@@ -107,7 +90,7 @@ export function parseXml(
     name: content(doc, "name") || content(doc, "Name") || cleanName(filename),
     sport: gpx
       ? content(doc, "type") || "Activity"
-      : nodes(doc, "Activity")[0]?.getAttribute("Sport") || "Activity",
+      : nodes(doc, "Activity")[0]?.attributes.Sport || "Activity",
     points,
   });
 }
@@ -271,5 +254,5 @@ export function demoActivity(): Activity {
       segment: 0,
     };
   });
-  return { name: "A little further", sport: "Trail run", points, demo: true };
+  return { name: "Sample activity", sport: "Run", points, demo: true };
 }

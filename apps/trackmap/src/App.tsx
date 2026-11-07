@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@bent/ui/button";
+import { Field, Input, Select } from "@bent/ui/field";
+import { designTokens } from "@bent/design-tokens";
 import type { Activity } from "./activity";
 import { demoActivity, MAX_FILE_BYTES, parseFile, trimRoute } from "./activity";
 import type { CardOptions } from "./render";
@@ -10,10 +12,10 @@ import type { CardMedia } from "./media";
 import { loadVideo, releaseMedia } from "./media";
 
 const initialOptions: CardOptions = {
-  title: "A little further",
-  sport: "Trail run",
-  color: "#c4f56e",
-  background: "ink",
+  title: "Sample activity",
+  sport: "Run",
+  color: designTokens.accentLight,
+  background: "paper",
   format: "story",
   showStats: true,
   showTitle: true,
@@ -24,32 +26,12 @@ const initialOptions: CardOptions = {
   duration: 6,
 };
 const colors = [
-  "#c4f56e",
-  "#ff865e",
-  "#64d8ff",
-  "#c4a1ff",
+  designTokens.accentLight,
   "#ffffff",
-  "#0647ff",
+  "#111111",
+  "#ff6633",
+  "#53b89c",
 ];
-
-function Mark() {
-  return (
-    <svg
-      width="31"
-      height="31"
-      viewBox="0 0 32 32"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M3 25 11 7l7 15L29 6l-8 22Z"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 export default function App() {
   const [activity, setActivity] = useState<Activity>(demoActivity);
@@ -284,41 +266,18 @@ export default function App() {
   return (
     <>
       <header className="site-header">
-        <a className="wordmark" href="/" aria-label="Trackmap home">
-          <Mark />
-          trackmap<span className="brand-dot">.</span>
+        <a href="/" aria-label="Trackmap home">
+          trackmap.bent.build
         </a>
-        <div className="header-note">A NEW WAY TO LOOK BACK.</div>
-        <a className="bent-link" href="https://bent.build">
-          by bent ↗
-        </a>
+        <a href="https://bent.build">bent.build ↗</a>
       </header>
       <main>
-        <section className="intro" aria-labelledby="page-title">
-          <div>
-            <p className="eyebrow">
-              <span className="status-dot" /> THE ROUTE WAS ONLY THE BEGINNING
-            </p>
-            <h1 id="page-title">
-              Your effort.
-              <br />
-              <span>Another dimension.</span>
-            </h1>
-          </div>
-          <p className="intro-copy">
-            A morning run. A long way home.
-            <br />
-            Turn your activity into a moving piece
-            <br className="desktop-break" /> of art, ready for your next story.
-          </p>
-        </section>
+        <h1>Trackmap</h1>
         <div className="workspace">
           <section className="preview-panel" aria-label="Activity card preview">
-            <div className="panel-top">
-              <span>
-                <span className="status-dot" /> LIVE PREVIEW
-              </span>
-              <span>{activity.demo ? "SYNTHETIC DEMO" : "YOUR ACTIVITY"}</span>
+            <div className="panel-heading">
+              <h2>Preview</h2>
+              <span>{activity.demo ? "Sample activity" : activity.name}</span>
             </div>
             <div
               className={`preview-stage ${options.background === "transparent" && !photo ? "checkerboard" : ""}`}
@@ -329,64 +288,49 @@ export default function App() {
                   width={720}
                   height={options.format === "story" ? 1280 : 720}
                   role="img"
-                  aria-label={`Rotating 3D route for ${options.title}. ${points.length} GPS points. Elevation is exaggerated ${options.exaggeration} times.`}
+                  aria-label={`3D route for ${options.title}. ${points.length} GPS points. Elevation ${options.exaggeration} times.`}
                 />
               </div>
               {!exportable && (
-                <div className="preview-warning">
-                  The privacy trim hides this entire route. Reduce it to export.
-                </div>
+                <p className="preview-warning">
+                  The trim hides this route. Reduce it to export.
+                </p>
               )}
             </div>
             <div className="preview-toolbar">
               <Button
-                className="play-button"
+                appearance="outline"
                 onClick={() => setPlaying(!playing)}
                 aria-label={playing ? "Pause rotation" : "Play rotation"}
               >
-                {playing ? "Ⅱ" : "▷"}
-                <span>{playing ? "Pause orbit" : "Play orbit"}</span>
+                {playing ? "Pause" : "Play"}
               </Button>
-              <span>
-                360° ORBIT <span className="toolbar-divider">/</span>{" "}
-                {options.duration}S LOOP
-              </span>
+              <span>{options.duration}s loop</span>
               <Button
-                className="text-button"
+                appearance="ghost"
                 onClick={() => {
                   angle.current = 25;
                   update("angle", 25);
                   update("tilt", 38);
                 }}
               >
-                Reset view ↺
+                Reset view
               </Button>
             </div>
-            <div className="activity-summary" aria-label="Activity statistics">
+            <dl className="activity-summary" aria-label="Activity statistics">
               {stats.map((stat) => (
                 <div key={stat.label}>
-                  <span>{stat.label}</span>
-                  <strong>
+                  <dt>{stat.label}</dt>
+                  <dd>
                     {stat.value} <small>{stat.unit}</small>
-                  </strong>
+                  </dd>
                 </div>
               ))}
-            </div>
-            <p className="preview-footnote">
-              {activity.demo
-                ? "An invented trail, for a little inspiration. Upload yours to make it personal."
-                : "GPS geometry + recorded elevation. No map tiles or invented terrain."}
-            </p>
+            </dl>
           </section>
           <section className="editor" aria-label="Card editor">
-            <div className="editor-heading">
-              <h2>Make it yours</h2>
-              <span>01—03</span>
-            </div>
             <fieldset disabled={exporting}>
-              <legend className="step">
-                <span>01</span> Bring your adventure
-              </legend>
+              <legend>Activity</legend>
               <div
                 className={`upload-zone ${dragging ? "is-dragging" : ""}`}
                 onDragOver={(event) => {
@@ -400,19 +344,16 @@ export default function App() {
                   void importActivity(event.dataTransfer.files[0]);
                 }}
               >
-                <span className="upload-symbol" aria-hidden="true">
-                  ↥
-                </span>
                 <Button
-                  className="upload-button"
+                  appearance="outline"
                   disabled={loading}
                   onClick={() => fileInput.current?.click()}
                 >
-                  {loading ? "Reading activity…" : "Choose an activity"}
+                  {loading ? "Reading…" : "Upload activity"}
                 </Button>
-                <p>or drop it here</p>
-                <small>GPX, TCX, FIT, GEOJSON · UP TO 20 MB</small>
-                <input
+                <span>or drop a file</span>
+                <small>GPX / TCX / FIT / GeoJSON · 20 MB max</small>
+                <Input
                   ref={fileInput}
                   type="file"
                   accept=".gpx,.tcx,.fit,.geojson,.json"
@@ -424,325 +365,315 @@ export default function App() {
                   }}
                 />
               </div>
-              <details className="help">
-                <summary>Coming from Strava?</summary>
+              <details>
+                <summary>Export from Strava</summary>
                 <p>
-                  On Strava’s website, open your activity, choose the three-dot
-                  menu, then Export GPX or Export Original. Upload that file
-                  here. Garmin, Wahoo and other GPS exports work too. No
-                  connection to your Strava account is needed.
+                  On Strava’s website, open the activity’s menu and select
+                  Export GPX or Export Original.
                 </p>
               </details>
-              <div className="step">
-                <span>02</span> Set the scene
-              </div>
-              <label className="field-label" htmlFor="title">
-                Activity title
-              </label>
-              <input
-                id="title"
-                className="text-input"
-                maxLength={80}
-                value={options.title}
-                onChange={(event) => update("title", event.target.value)}
-              />
-              <div className="two-columns">
-                <div>
-                  <label className="field-label" htmlFor="sport">
-                    Activity
-                  </label>
-                  <input
-                    id="sport"
-                    className="text-input"
-                    maxLength={30}
-                    value={options.sport}
-                    onChange={(event) => update("sport", event.target.value)}
+              <div className="fields">
+                <Field label="Activity title" htmlFor="title">
+                  <Input
+                    id="title"
+                    maxLength={80}
+                    value={options.title}
+                    onChange={(event) => update("title", event.target.value)}
                   />
+                </Field>
+                <div className="two-columns">
+                  <Field label="Activity" htmlFor="sport">
+                    <Input
+                      id="sport"
+                      maxLength={30}
+                      value={options.sport}
+                      onChange={(event) => update("sport", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Units" htmlFor="units">
+                    <Select
+                      id="units"
+                      value={options.units}
+                      onChange={(event) => {
+                        if (
+                          event.target.value === "km" ||
+                          event.target.value === "mi"
+                        )
+                          update("units", event.target.value);
+                      }}
+                    >
+                      <option value="km">Kilometres</option>
+                      <option value="mi">Miles</option>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset disabled={exporting}>
+              <legend>Appearance</legend>
+              <div className="fields">
+                <div>
+                  <span className="field-label" id="color-label">
+                    Route colour
+                  </span>
+                  <div
+                    className="swatches"
+                    role="group"
+                    aria-labelledby="color-label"
+                  >
+                    {colors.map((color) => (
+                      <Button
+                        appearance="outline"
+                        key={color}
+                        className="swatch"
+                        style={{ backgroundColor: color }}
+                        aria-label={`Route colour ${color}`}
+                        aria-pressed={options.color === color}
+                        onClick={() => update("color", color)}
+                      >
+                        <span
+                          style={{
+                            color: color === "#ffffff" ? "#111111" : "#ffffff",
+                          }}
+                        >
+                          {options.color === color ? "✓" : ""}
+                        </span>
+                      </Button>
+                    ))}
+                    <Input
+                      type="color"
+                      aria-label="Custom route colour"
+                      value={options.color}
+                      onChange={(event) => update("color", event.target.value)}
+                    />
+                  </div>
                 </div>
                 <div>
-                  <label className="field-label" htmlFor="units">
-                    Units
-                  </label>
-                  <select
-                    id="units"
-                    value={options.units}
-                    onChange={(event) => {
-                      if (
-                        event.target.value === "km" ||
-                        event.target.value === "mi"
-                      )
-                        update("units", event.target.value);
-                    }}
+                  <span className="field-label" id="background-label">
+                    Background
+                  </span>
+                  <div
+                    className="segments"
+                    role="group"
+                    aria-labelledby="background-label"
                   >
-                    <option value="km">Kilometres</option>
-                    <option value="mi">Miles</option>
-                  </select>
-                </div>
-              </div>
-              <div className="field-label" id="color-label">
-                Route colour
-              </div>
-              <div
-                className="swatches"
-                role="group"
-                aria-labelledby="color-label"
-              >
-                {colors.map((color) => (
-                  <Button
-                    key={color}
-                    className={`swatch ${options.color === color ? "selected" : ""}`}
-                    style={{ backgroundColor: color }}
-                    aria-label={`Route colour ${color}`}
-                    aria-pressed={options.color === color}
-                    onClick={() => update("color", color)}
-                  >
-                    {options.color === color ? (
-                      <span
-                        style={{
-                          color: color === "#0647ff" ? "white" : "#142039",
+                    {(
+                      [
+                        "paper",
+                        "ink",
+                        "transparent",
+                      ] satisfies CardOptions["background"][]
+                    ).map((background) => (
+                      <Button
+                        appearance="outline"
+                        key={background}
+                        aria-pressed={
+                          options.background === background && !photo
+                        }
+                        onClick={() => {
+                          update("background", background);
+                          photoVersion.current++;
+                          setMediaLoading(false);
+                          setPhoto(undefined);
                         }}
                       >
-                        ✓
-                      </span>
-                    ) : null}
-                  </Button>
-                ))}
-                <label className="custom-color" title="Custom route colour">
-                  <span>＋</span>
-                  <input
-                    type="color"
-                    aria-label="Custom route colour"
-                    value={options.color}
-                    onChange={(event) => update("color", event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="field-label" id="background-label">
-                Canvas
-              </div>
-              <div
-                className="segments"
-                role="group"
-                aria-labelledby="background-label"
-              >
-                {(
-                  [
-                    "ink",
-                    "paper",
-                    "transparent",
-                  ] satisfies CardOptions["background"][]
-                ).map((background) => (
+                        {background === "paper"
+                          ? "White"
+                          : background === "ink"
+                            ? "Black"
+                            : "Clear"}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="media-controls">
                   <Button
-                    key={background}
-                    className={
-                      options.background === background ? "active" : ""
-                    }
-                    aria-pressed={options.background === background}
-                    onClick={() => {
-                      update("background", background);
-                      photoVersion.current++;
-                      setMediaLoading(false);
-                      setPhoto(undefined);
-                    }}
+                    appearance="outline"
+                    onClick={() => photoInput.current?.click()}
                   >
-                    {background === "ink"
-                      ? "● Ink"
-                      : background === "paper"
-                        ? "○ Paper"
-                        : "▧ Clear"}
+                    {mediaLoading
+                      ? "Opening background…"
+                      : "Add photo or video"}
                   </Button>
-                ))}
-              </div>
-              <div className="photo-row">
-                <Button
-                  className="text-button"
-                  onClick={() => photoInput.current?.click()}
-                >
-                  {mediaLoading
-                    ? "Opening background…"
-                    : "＋ Add a photo or video"}
-                </Button>
-                {photo && (
-                  <Button
-                    className="text-button"
-                    onClick={() => {
-                      photoVersion.current++;
-                      setMediaLoading(false);
-                      setPhoto(undefined);
-                    }}
-                  >
-                    Remove
-                  </Button>
-                )}
-                <input
-                  ref={photoInput}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
-                  aria-label="Background photo or video"
-                  hidden
-                  onChange={(event) => {
-                    void importPhoto(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-              <label className="range-label" htmlFor="tilt">
-                Camera tilt <span>{options.tilt}°</span>
-              </label>
-              <input
-                id="tilt"
-                type="range"
-                min="15"
-                max="80"
-                value={options.tilt}
-                onChange={(event) => update("tilt", Number(event.target.value))}
-              />
-              <label className="range-label" htmlFor="elevation">
-                Elevation lift <span>{options.exaggeration}×</span>
-              </label>
-              <input
-                id="elevation"
-                type="range"
-                min="1"
-                max="8"
-                step="0.5"
-                value={options.exaggeration}
-                onChange={(event) =>
-                  update("exaggeration", Number(event.target.value))
-                }
-              />
-              <label className="range-label" htmlFor="rotation">
-                Starting angle <span>{options.angle}°</span>
-              </label>
-              <input
-                id="rotation"
-                type="range"
-                min="0"
-                max="359"
-                value={options.angle}
-                onChange={(event) => {
-                  setPlaying(false);
-                  update("angle", Number(event.target.value));
-                }}
-              />
-              <div className="toggle-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={options.showTitle}
-                    onChange={(event) =>
-                      update("showTitle", event.target.checked)
-                    }
-                  />{" "}
-                  Title
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={options.showStats}
-                    onChange={(event) =>
-                      update("showStats", event.target.checked)
-                    }
-                  />{" "}
-                  Stats
-                </label>
-              </div>
-              <details className="privacy-settings">
-                <summary>Privacy & route details</summary>
-                <label className="range-label" htmlFor="trim">
-                  Hide each end <span>{trim} m</span>
-                </label>
-                <input
-                  id="trim"
-                  type="range"
-                  min="0"
-                  max="2000"
-                  step="100"
-                  value={trim}
-                  onChange={(event) => setTrim(Number(event.target.value))}
-                />
-                <p>
-                  Removes at least this distance from each end. Preview and
-                  exports use only the remaining route and its stats. Check for
-                  other sensitive locations before sharing. Repeated visits to
-                  your start location can still be visible.
-                </p>
-                <p>
-                  Elevation gain is the sum of recorded uphill changes, without
-                  smoothing. Time is elapsed, including stops. Missing data
-                  appears as —.
-                </p>
-              </details>
-              <div className="step">
-                <span>03</span> Take it with you
-              </div>
-              <div className="two-columns">
-                <div>
-                  <label className="field-label" htmlFor="format">
-                    Frame
-                  </label>
-                  <select
-                    id="format"
-                    value={options.format}
+                  {photo && (
+                    <Button
+                      appearance="ghost"
+                      onClick={() => {
+                        photoVersion.current++;
+                        setMediaLoading(false);
+                        setPhoto(undefined);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                  <Input
+                    ref={photoInput}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
+                    aria-label="Background photo or video"
+                    hidden
                     onChange={(event) => {
-                      if (
-                        event.target.value === "story" ||
-                        event.target.value === "square"
-                      )
-                        update("format", event.target.value);
+                      void importPhoto(event.target.files?.[0]);
+                      event.target.value = "";
                     }}
-                  >
-                    <option value="story">Story · 9:16</option>
-                    <option value="square">Square · 1:1</option>
-                  </select>
+                  />
                 </div>
-                <div>
-                  <label className="field-label" htmlFor="duration">
-                    Loop length
-                  </label>
-                  <select
-                    id="duration"
-                    value={options.duration}
+                <Field label={`Camera tilt · ${options.tilt}°`} htmlFor="tilt">
+                  <Input
+                    id="tilt"
+                    type="range"
+                    min="15"
+                    max="80"
+                    value={options.tilt}
                     onChange={(event) =>
-                      update("duration", Number(event.target.value))
+                      update("tilt", Number(event.target.value))
                     }
-                  >
-                    <option value="4">4 seconds</option>
-                    <option value="6">6 seconds</option>
-                    <option value="8">8 seconds</option>
-                  </select>
+                  />
+                </Field>
+                <Field
+                  label={`Elevation · ${options.exaggeration}×`}
+                  htmlFor="elevation"
+                >
+                  <Input
+                    id="elevation"
+                    type="range"
+                    min="1"
+                    max="8"
+                    step="0.5"
+                    value={options.exaggeration}
+                    onChange={(event) =>
+                      update("exaggeration", Number(event.target.value))
+                    }
+                  />
+                </Field>
+                <Field
+                  label={`Starting angle · ${options.angle}°`}
+                  htmlFor="rotation"
+                >
+                  <Input
+                    id="rotation"
+                    type="range"
+                    min="0"
+                    max="359"
+                    value={options.angle}
+                    onChange={(event) => {
+                      setPlaying(false);
+                      update("angle", Number(event.target.value));
+                    }}
+                  />
+                </Field>
+                <div className="toggles">
+                  <label>
+                    <Input
+                      type="checkbox"
+                      checked={options.showTitle}
+                      onChange={(event) =>
+                        update("showTitle", event.target.checked)
+                      }
+                    />
+                    Title
+                  </label>
+                  <label>
+                    <Input
+                      type="checkbox"
+                      checked={options.showStats}
+                      onChange={(event) =>
+                        update("showStats", event.target.checked)
+                      }
+                    />
+                    Stats
+                  </label>
                 </div>
+                <details>
+                  <summary>Privacy & route details</summary>
+                  <Field label={`Hide each end · ${trim} m`} htmlFor="trim">
+                    <Input
+                      id="trim"
+                      type="range"
+                      min="0"
+                      max="2000"
+                      step="100"
+                      value={trim}
+                      onChange={(event) => setTrim(Number(event.target.value))}
+                    />
+                  </Field>
+                  <p>
+                    Trimmed points are excluded from previews, exports and
+                    stats. Other visits to the same location may remain.
+                  </p>
+                  <p>
+                    Elevation gain uses recorded uphill changes. Elapsed time
+                    includes stops. Missing data appears as —.
+                  </p>
+                </details>
               </div>
-              <Button
-                className="primary-button video-export"
-                disabled={!exportable || loading || mediaLoading}
-                onClick={() => void save("mp4")}
-              >
-                Export Story video · MP4 <span>↓</span>
-              </Button>
-              <div className="export-buttons">
+            </fieldset>
+            <fieldset disabled={exporting}>
+              <legend>Export</legend>
+              <div className="fields">
+                <div className="two-columns">
+                  <Field label="Frame" htmlFor="format">
+                    <Select
+                      id="format"
+                      value={options.format}
+                      onChange={(event) => {
+                        if (
+                          event.target.value === "story" ||
+                          event.target.value === "square"
+                        )
+                          update("format", event.target.value);
+                      }}
+                    >
+                      <option value="story">Story · 9:16</option>
+                      <option value="square">Square · 1:1</option>
+                    </Select>
+                  </Field>
+                  <Field label="Loop length" htmlFor="duration">
+                    <Select
+                      id="duration"
+                      value={options.duration}
+                      onChange={(event) =>
+                        update("duration", Number(event.target.value))
+                      }
+                    >
+                      <option value="4">4 seconds</option>
+                      <option value="6">6 seconds</option>
+                      <option value="8">8 seconds</option>
+                    </Select>
+                  </Field>
+                </div>
                 <Button
-                  className="secondary-button"
+                  appearance="primary"
                   disabled={!exportable || loading || mediaLoading}
-                  onClick={() => void save("gif")}
+                  onClick={() => void save("mp4")}
                 >
-                  Export animated GIF <span>↓</span>
+                  Export Story video · MP4
                 </Button>
-                <Button
-                  className="secondary-button"
-                  disabled={!exportable || loading || mediaLoading}
-                  onClick={() => void save("png")}
-                >
-                  Save PNG <span>↗</span>
-                </Button>
+                <div className="two-columns">
+                  <Button
+                    appearance="outline"
+                    disabled={!exportable || loading || mediaLoading}
+                    onClick={() => void save("gif")}
+                  >
+                    Export animated GIF
+                  </Button>
+                  <Button
+                    appearance="outline"
+                    disabled={!exportable || loading || mediaLoading}
+                    onClick={() => void save("png")}
+                  >
+                    Save PNG
+                  </Button>
+                </div>
               </div>
             </fieldset>
             {exporting && (
               <div className="export-progress" role="status">
-                <span>Making your export… {progress}%</span>
+                <span>Exporting · {progress}%</span>
                 <progress value={progress} max="100" />
                 <Button
-                  className="text-button"
+                  appearance="ghost"
                   onClick={() => abort.current?.abort()}
                 >
                   Cancel export
@@ -759,54 +690,31 @@ export default function App() {
                 {notice}
               </p>
             )}
-            <p className="export-note">
-              MP4 · 1080 px, silent. PNG · 1080 px. GIF · 540 px, 12 fps.
-              <br />
-              Choose Clear for a transparent overlay. The checkerboard is never
-              exported. Video combines the route with your background, using Ink
-              when Clear has no photo or video.
+            <p className="file-note">
+              MP4: 1080px, silent. PNG: 1080px. GIF: 540px, 12fps. Clear
+              preserves transparency in PNG/GIF. MP4 uses a solid background.
             </p>
-            <details className="sharing-help">
-              <summary>How to add it to your Instagram Story</summary>
+            <details>
+              <summary>Share to Instagram</summary>
               <p>
-                Choose a photo or video background, then export a Story video.
                 Save the MP4 to Photos and select it in Instagram’s Story
-                editor. The animated route is already part of the video.
+                editor. Your route and background are combined in the video.
               </p>
               <p>
-                Transparent GIF and PNG files are layers for a photo/video
-                editor. Instagram does not provide a dependable GIF paste
-                workflow.
-              </p>
-              <p>
-                For a movable animated sticker inside Instagram, use{" "}
+                Transparent GIF/PNG files can be layered in an editor. Movable
+                stickers inside Instagram use{" "}
                 <a href="https://support.giphy.com/hc/en-us/articles/360020235351-Get-Your-Stickers-and-GIFs-Into-Instagram-Stories">
-                  GIPHY’s sticker publishing route
+                  GIPHY publishing
                 </a>
-                . It involves public publishing and moderation. Trackmap never
-                publishes your GPS data to GIPHY.
+                .
               </p>
             </details>
-            <div className="privacy-note">
-              <span aria-hidden="true">⌁</span>
-              <p>
-                Your miles are yours.
-                <br />
-                <span>
-                  Files are processed here, on your device. Nothing is uploaded
-                  or saved to a server.
-                </span>
-              </p>
-            </div>
+            <p className="file-note">Files stay on your device.</p>
           </section>
         </div>
         <footer>
-          <a className="wordmark" href="/">
-            trackmap.
-          </a>
-          <span>GO SOMEWHERE. MAKE SOMETHING.</span>
-          <a href="/third-party-notices.txt">Third-party licenses</a>
-          <a href="https://bent.build">A little experiment by bent ↗</a>
+          <a href="https://bent.build">bent.build</a>
+          <a href="/third-party-notices.txt">Licenses</a>
         </footer>
       </main>
     </>

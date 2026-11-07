@@ -320,6 +320,7 @@
         "mediabunny": "1.65.2",
         "react": "19.3.1",
         "react-dom": "19.3.1",
+        "saxes": "6.0.0",
       },
       "devDependencies": {
         "@eslint/js": "9.39.5",
@@ -328,7 +329,6 @@
         "@types/react": "19.3.0",
         "@types/react-dom": "19.3.0",
         "@vitejs/plugin-react": "6.0.2",
-        "@xmldom/xmldom": "0.9.12",
         "eslint": "9.39.5",
         "knip": "6.44.1",
         "typescript": "6.0.3",
@@ -2614,8 +2614,6 @@
     "@wordpress/block-serialization-default-parser": ["@wordpress/block-serialization-default-parser@5.57.0", "", {}, "sha512-gxqS1TIMiWcIIsPTPdvztOZNEl7+TkVJ5WHk8BWOe2+WsaEcjL44heSceDl873+WZQ1RIAOBdHDyds8h4FjiaQ=="],
 
     "@workflow/serde": ["@workflow/serde@4.1.0", "", {}, "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="],
-
-    "@xmldom/xmldom": ["@xmldom/xmldom@0.9.12", "", {}, "sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A=="],
 
     "@xtuc/ieee754": ["@xtuc/ieee754@1.2.0", "", {}, "sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA=="],
 
