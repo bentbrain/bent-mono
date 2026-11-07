@@ -72,6 +72,7 @@ export async function exportGif(
       options,
       options.angle + (frame / frames) * 360,
       source,
+      options.motionTime + frame / 12,
     );
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     for (let i = 0; i < indexed.length; i++) {
@@ -177,6 +178,7 @@ export async function exportVideo(
         snapshot,
         options.angle + (frame / count) * 360,
         source,
+        options.motionTime + time,
       );
       // Explicit presentation times preserve every frame and the complete loop,
       // independent of display refresh, encoder startup and background playback.
