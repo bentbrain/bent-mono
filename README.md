@@ -12,6 +12,7 @@ Public Bun monorepo for the applications deployed to bent.build and its subdomai
 | Collage | maya-collage.bent.build, maya-collages.bent.build | apps/collage |
 | Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
 | Home | home.bent.build | apps/home |
+| Trackmap | trackmap.bent.build | apps/trackmap |
 
 `deployments.json` records the application boundaries. The shop and drive products retain their existing internal packages and services under `products/` so the migration preserves their release and runtime boundaries.
 
@@ -33,6 +34,14 @@ Run application commands from their directories, or use Bun workspace filters. C
 The root `bun.lock` manages the workspace dependencies. The isolated AWS Lambda renderer image retains its existing frozen npm lock as a production image input; changing that image's dependency installer requires separate renderer qualification. Development and application workspace commands use Bun.
 
 CI runs the existing application checks and full CodeQL analysis. The blog retains its zero-finding requirement. Shop's intentional network/file transfers and fixed-origin requests require individually documented, source-pinned dispositions; unknown findings and stale records fail. Raw analysis remains available. Dispositions require independent review of the exact head and current base before any native false-positive dismissal or merge; they never authorize a production release.
+
+## Trackmap
+
+`bun run dev --filter=@bent/trackmap` starts the local activity card editor. Import GPX, TCX, FIT or GeoJSON files exported from Strava or another GPS recorder. Activity and optional background-photo processing stay in the browser. The sample route is synthetic.
+
+The editor projects recorded coordinates and elevation into a rotating 3D route, with camera, colour, title, units and end-trimming controls. Export a transparent or styled PNG at 1080 px wide, or a looping GIF at 540 px wide. GIF copy-and-paste into Instagram Stories varies by device and app version; the editor includes sharing instructions and a PNG alternative. There is no Strava account connection or server-side activity storage.
+
+Trackmap uses the ordinary guarded Vercel release route. Its application root is `apps/trackmap`, Node is 24, and the source-owned Vercel config uses the shared pinned Bun bootstrap. Provision the project with workspace access and require the exact-head `Release qualification` production Deployment Check before assigning `trackmap.bent.build`. Do not treat an app build or merged PR as production qualification.
 
 ## Shared design system
 
