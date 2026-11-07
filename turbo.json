@@ -531,7 +531,6 @@
     "NODE_OPTIONS"
   ],
   "globalDependencies": [
-    "bun.lock",
     "package.json",
     "products/shop/patches/**",
     "apps/jp/patches/**",

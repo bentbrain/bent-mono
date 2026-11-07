@@ -33,7 +33,9 @@ Run application commands from their directories, or use Bun workspace filters. C
 
 The root `bun.lock` manages the workspace dependencies. The isolated AWS Lambda renderer image retains its existing frozen npm lock as a production image input; changing that image's dependency installer requires separate renderer qualification. Development and application workspace commands use Bun.
 
-CI runs the existing application checks and full CodeQL analysis. The blog retains its zero-finding requirement. Shop's intentional network/file transfers and fixed-origin requests require individually documented, source-pinned dispositions; unknown findings and stale records fail. Raw analysis remains available. Dispositions require independent review of the exact head and current base before any native false-positive dismissal or merge; they never authorize a production release.
+Routine CI checks affected workspaces and their transitive consumers, including dependency changes resolved from the root lockfile. Lint, typecheck, build and security checks remain required. Shop runs its web unit tests, core cart/readiness/contract and renderer tests, and one fixture-only mobile upload-to-cart browser smoke test. Weekly and manually dispatched Quality runs retain the full regression suite; protected release qualification is unchanged. Unknown comparison history or root automation changes widen validation to all workspaces.
+
+CI always runs full CodeQL analysis. The blog retains its zero-finding requirement. Shop's intentional network/file transfers and fixed-origin requests require individually documented, source-pinned dispositions; unknown findings and stale records fail. Raw analysis remains available. Dispositions require independent review of the exact head and current base before any native false-positive dismissal or merge; they never authorize a production release.
 
 ## Trackmap
 

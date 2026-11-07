@@ -1,11 +1,12 @@
 name: Quality
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
   merge_group:
   schedule:
-    - cron: '0 5 * * 1'
+    - cron: "0 5 * * 1"
 permissions:
   contents: read
 concurrency:
@@ -38,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [lint, typecheck, test, knip, build, 'test:integration']
+        check: [lint, typecheck, test, knip, build, "test:integration"]
     services:
       postgres:
         image: postgres:16
@@ -46,7 +47,7 @@ jobs:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: payload_migration_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 10s
           --health-timeout 5s --health-retries 5
@@ -72,14 +73,17 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - id: scope
+        run: node scripts/ci-scope.mjs
       - run: node scripts/install-browsers.mjs browser
       - run: node scripts/ci-check.mjs browser
         env:
-          E2E_TIER: ${{ github.event_name == 'schedule' && 'full' || 'critical' }}
+          E2E_TIER: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'full' || 'critical' }}
       - name: Upload synthetic Trackmap browser results
-        if: always()
+        if: always() && steps.scope.outputs.trackmap == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: trackmap-browser-results
@@ -87,7 +91,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload synthetic browser coverage
-        if: always()
+        if: always() && steps.scope.outputs.jp == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: blog-browser-coverage-and-timing
@@ -104,7 +108,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - id: scope
+        run: node scripts/ci-scope.mjs
       - name: Install pinned Terraform for backend schema regression
+        if: steps.scope.outputs.full == 'true'
         run: |
           archive="$RUNNER_TEMP/terraform_1.12.2_linux_amd64.zip"
           curl --fail --silent --show-error --location --output "$archive" https://releases.hashicorp.com/terraform/1.12.2/terraform_1.12.2_linux_amd64.zip
