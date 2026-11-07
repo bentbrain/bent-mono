@@ -11,10 +11,10 @@ function Page() {
     <div className="grid size-full place-items-center">
       <Card className="container mx-auto max-w-sm">
         <CardHeader>
-          <CardTitle>🤔 Couldn&apos;t find that one</CardTitle>
+          <CardTitle>Page not found</CardTitle>
         </CardHeader>
         <CardContent>
-          <p>The page you are looking for does not exist.</p>
+          <p>Check the address or return to the home page.</p>
         </CardContent>
       </Card>
     </div>

@@ -385,7 +385,7 @@ export default function App() {
               <details>
                 <summary>Export from Strava</summary>
                 <p>
-                  On Strava’s website, open the activity’s menu and select
+                  On Strava's website, open the activity's menu and select
                   Export GPX or Export Original.
                 </p>
               </details>
@@ -725,7 +725,7 @@ export default function App() {
             <details>
               <summary>Share to Instagram</summary>
               <p>
-                Save the MP4 to Photos and select it in Instagram’s Story
+                Save the MP4 to Photos and select it in Instagram's Story
                 editor. Your route and background are combined in the video.
               </p>
               <p>

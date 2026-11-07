@@ -15,9 +15,9 @@ export default function Page() {
         <InAppBrowserDetector>
           <Card className="max-w-lg bg-white p-0">
             <CardHeader>
-              <CardTitle>Welcome 🫶🏼</CardTitle>
+              <CardTitle>Sign in</CardTitle>
               <CardDescription>
-                Create an account to start making collages.
+                Sign in or create an account to make collages.
               </CardDescription>
             </CardHeader>
             <CardFooter>

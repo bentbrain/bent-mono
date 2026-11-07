@@ -293,11 +293,10 @@ function SaveButton({
       <Dialog open={publicPromptOpen} onOpenChange={handleOpenChange}>
         <DialogContent className="text-left text-black">
           <DialogHeader>
-            <DialogTitle>Your collage has been saved!</DialogTitle>
+            <DialogTitle>Collage saved</DialogTitle>
           </DialogHeader>
           <DialogDescription>
-            Click the &quot;public&quot; button below to share it on the home
-            page.
+            Choose &quot;Public&quot; to share it on the home page.
           </DialogDescription>
           <DialogFooter className="flex gap-3 sm:justify-end">
             <Button
@@ -309,7 +308,7 @@ function SaveButton({
               }}
               variant={"outline"}
             >
-              No thanks
+              Keep private
             </Button>
             <PublicButton
               isPublic={false}

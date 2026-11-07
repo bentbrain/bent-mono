@@ -81,7 +81,7 @@ export function CameraLanding() {
         <ol className="grid list-decimal gap-3 pl-6 text-[clamp(0.85rem,2vw,1rem)] leading-[1.6]">
           <li>Open the camera or upload an image</li>
           <li>Wear a blank t-shirt in your photo</li>
-          <li>Try to get just your head and torso in the shot</li>
+          <li>Frame your head and torso in the photo</li>
         </ol>
         <form
           ref={formRef}

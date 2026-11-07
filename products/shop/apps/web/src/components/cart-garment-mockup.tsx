@@ -32,7 +32,7 @@ export function CartGarmentMockup({
     <div
       className="relative aspect-square w-full overflow-hidden border border-primary bg-white"
       role="img"
-      aria-label={`${color} ${title} with your final repeating design`}
+      aria-label={`${color} ${title} with your design`}
     >
       {preparationRevision && readyPath !== canonicalPath ? <BrowserProductPreview
         productId={productId} revision={preparationRevision} color={color} onReady={previewReady}

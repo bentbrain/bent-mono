@@ -1,13 +1,13 @@
 # App video rendering on Lambda
 
-Continuation status: this module now uses the verified KMS-encrypted, versioned
+This module uses the verified KMS-encrypted, versioned
 S3 backend with native locking. The original local state and backup remain
-unchanged and private. The guarded runner no longer permits historical local
-application `terraform apply`; deployment must use the paired Actions pipeline.
+unchanged and private. Deploy through the paired Actions pipeline. The guarded runner blocks historical
+local application `terraform apply`.
 `ci_execution=true` selects the verified temporary CI credentials without reading
 shared profiles; local execution defaults to the exact personal SSO profile.
-Neither mode changes the explicit account/region guard. The dedicated native
-Development workflow now builds and verifies immutable candidates and performs
+Neither mode changes the explicit account/region guard. The native
+Development workflow builds and verifies immutable candidates and performs
 paired release/rollback, startup checks and cloud qualification. The repaired
 pair passed the initial eight-video and exhaustion tests. Remaining fault/load,
 mobile and Production gates are recorded in
@@ -100,7 +100,7 @@ runner's `s3 cp`. Start CodeBuild project `forever-tee-video-development` with
 that S3 source location and plaintext `SOURCE_DIGEST` equal to the returned
 manifest hash. CodeBuild verifies every file, builds Linux x86, runs contract and
 real-runtime boot tests, then pushes an immutable `source-<hash>` ECR tag.
-There is no local Docker build or local video encoding.
+Build and encode video in the cloud.
 
 After CodeBuild succeeds, read the image digest using the guarded runner, then:
 
@@ -195,10 +195,9 @@ refresh the preview deployment. Never rotate production as part of this check.
 See [the implementation results](../../docs/aws-lambda-app-integration-2026-08-28.md)
 for the deployed image, concurrent render evidence and remaining release gates.
 
-The development limit is not the production capacity target. Before production,
+Before production,
 load-test concurrent customers, set queue concurrency and reserved Lambda
 capacity together, check regional account headroom, and alarm on queue delay,
-Lambda throttles, errors and first/all-ready latency. Lambda quotas and burst
-scaling still bound throughput; this implementation does not promise unchanged
-latency for 10,000 simultaneous new designs. Tests must distinguish queue wait,
+Lambda throttles, errors and first/all-ready latency. Measure throughput and latency within Lambda quotas and burst
+scaling limits before setting production capacity. Tests must distinguish queue wait,
 asset read, cold start, encode, upload and client notification time.

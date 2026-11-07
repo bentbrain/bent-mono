@@ -37,7 +37,7 @@ export function createHostedMcpServer(config: AppConfig): McpServer {
     { name: "bent-drive-copilot", version: "0.3.0" },
     {
       instructions:
-        "Use these tools only for the Tesla account linked through OAuth. Read vehicle state freely after authentication. Vehicle-changing commands are not exposed in this read-only release.",
+        "Use these read-only tools only for the Tesla account linked through OAuth. Read vehicle state freely after authentication. These tools cannot send vehicle commands.",
     }
   );
 

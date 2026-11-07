@@ -50,7 +50,7 @@ function DeleteButton({ collageId, userId, ...props }: Props) {
       </DialogTrigger>
       <DialogContent className="text-black">
         <DialogHeader>
-          <DialogTitle>Are you absolutely sure?</DialogTitle>
+          <DialogTitle>Delete this collage?</DialogTitle>
           <DialogDescription>
             Your collage cannot be recovered once deleted.
           </DialogDescription>

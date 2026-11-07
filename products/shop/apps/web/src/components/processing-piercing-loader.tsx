@@ -9,7 +9,7 @@ interface ProcessingPiercingLoaderProps {
 }
 
 export function ProcessingPiercingLoader({
-  ariaLabel = "Processing captured portrait",
+  ariaLabel = "Processing photo",
   imageUrl,
   noiseOpacity = 0.5,
 }: ProcessingPiercingLoaderProps) {

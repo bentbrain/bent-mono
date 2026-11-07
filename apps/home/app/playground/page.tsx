@@ -3,7 +3,7 @@ import {Playground} from './Playground';
 
 export const metadata:Metadata={
  title:'Layout playground',
- description:'Try apartment floor-plan and furniture layouts in a browser-only workspace.',
+ description:'Arrange furniture and save apartment layouts in your browser.',
 };
 
 export default function PlaygroundPage(){return <Playground/>;}
