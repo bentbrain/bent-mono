@@ -20,6 +20,8 @@ const initialOptions: CardOptions = {
   format: "story",
   showStats: true,
   showTitle: true,
+  pulse: true,
+  motionTime: 0,
   units: "km",
   tilt: 38,
   exaggeration: 3,
@@ -56,6 +58,7 @@ export default function App() {
   const importVersion = useRef(0);
   const photoVersion = useRef(0);
   const angle = useRef(options.angle);
+  const motionTime = useRef(options.motionTime);
   const points = useMemo(
     () => trimRoute(activity.points, trim),
     [activity.points, trim],
@@ -91,11 +94,13 @@ export default function App() {
     let last = 0;
     function frame(now: number) {
       if (!element || !ctx) return;
-      if (playing && last)
+      if (playing && last) {
+        motionTime.current += Math.min(now - last, 100) / 1000;
         angle.current =
           (angle.current +
             (Math.min(now - last, 100) / (options.duration * 1000)) * 360) %
           360;
+      }
       last = now;
       drawCard(
         ctx,
@@ -106,6 +111,7 @@ export default function App() {
         options,
         angle.current,
         photo,
+        motionTime.current,
       );
       if (playing) animation = requestAnimationFrame(frame);
     }
@@ -228,7 +234,11 @@ export default function App() {
     setProgress(0);
     setError("");
     setNotice("");
-    const snapshot = { ...options, angle: angle.current };
+    const snapshot = {
+      ...options,
+      angle: angle.current,
+      motionTime: motionTime.current,
+    };
     try {
       const blob =
         kind === "mp4"
@@ -294,7 +304,7 @@ export default function App() {
                   width={720}
                   height={options.format === "story" ? 1280 : 720}
                   role="img"
-                  aria-label={`3D route for ${options.title}. ${points.length} GPS points. Elevation ${options.exaggeration} times.`}
+                  aria-label={`3D route${options.showTitle ? ` for ${options.title}` : ""}. ${points.length} GPS points. Elevation ${options.exaggeration} times.${options.showStats ? ` ${stats.map((stat) => `${stat.label}: ${stat.value} ${stat.unit}`).join(". ")}.` : ""}`}
                 />
               </div>
               {!exportable && (
@@ -316,6 +326,7 @@ export default function App() {
                 appearance="ghost"
                 onClick={() => {
                   angle.current = 25;
+                  motionTime.current = 0;
                   update("angle", 25);
                   update("tilt", 38);
                 }}
@@ -589,12 +600,22 @@ export default function App() {
                   <label>
                     <Input
                       type="checkbox"
+                      checked={options.pulse}
+                      onChange={(event) =>
+                        update("pulse", event.target.checked)
+                      }
+                    />
+                    Route pulse
+                  </label>
+                  <label>
+                    <Input
+                      type="checkbox"
                       checked={options.showTitle}
                       onChange={(event) =>
                         update("showTitle", event.target.checked)
                       }
                     />
-                    Title
+                    Titles
                   </label>
                   <label>
                     <Input

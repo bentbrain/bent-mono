@@ -494,3 +494,117 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   await page.getByRole("button", { name: "Cancel export" }).click();
   await expect(page.getByRole("button", { name: "Save PNG" })).toBeEnabled();
 });
+
+test("hides both headings, uses metric icons and retains controls in PNG exports", async ({
+  page,
+}, info) => {
+  await page.addInitScript(() => {
+    const fillText = CanvasRenderingContext2D.prototype.fillText;
+    const clearRect = CanvasRenderingContext2D.prototype.clearRect;
+    let text: string[] = [];
+    CanvasRenderingContext2D.prototype.clearRect = function (
+      x,
+      y,
+      width,
+      height,
+    ) {
+      text = [];
+      clearRect.call(this, x, y, width, height);
+    };
+    CanvasRenderingContext2D.prototype.fillText = function (
+      value,
+      x,
+      y,
+      maxWidth,
+    ) {
+      text.push(value);
+      document.documentElement.dataset["canvasText"] = JSON.stringify(text);
+      if (maxWidth === undefined) fillText.call(this, value, x, y);
+      else fillText.call(this, value, x, y, maxWidth);
+    };
+  });
+  await page.goto("/");
+  await expect(page.getByLabel("Titles", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("Route pulse", { exact: true })).toBeChecked();
+  await expect
+    .poll(() => page.locator("html").getAttribute("data-canvas-text"))
+    .toContain("Sample activity");
+  const painted = await page.locator("html").getAttribute("data-canvas-text");
+  for (const label of ["DISTANCE", "ELEVATION GAIN", "ELAPSED TIME"])
+    expect(painted).not.toContain(label);
+  await expect(page.locator("canvas")).toHaveAccessibleName(
+    /DISTANCE:.*ELEVATION GAIN:.*ELAPSED TIME:/,
+  );
+  await page.screenshot({
+    path: info.outputPath("card-icons.png"),
+    fullPage: true,
+  });
+  await page.getByLabel("Titles", { exact: true }).uncheck();
+  await expect
+    .poll(() => page.locator("html").getAttribute("data-canvas-text"))
+    .not.toContain("Sample activity");
+  expect(
+    await page.locator("html").getAttribute("data-canvas-text"),
+  ).not.toContain('"Run"');
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  const pending = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save PNG" }).click();
+  const path = await (await pending).path();
+  if (!path) throw new Error("Missing PNG export");
+  const bytes = await readFile(path);
+  const topPixels = await page.evaluate(async (data) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${data}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Missing PNG context");
+    ctx.drawImage(image, 0, 0);
+    const pixels = ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      Math.floor(canvas.height * 0.22),
+    ).data;
+    return pixels.some((value, index) => index % 4 === 3 && value > 0);
+  }, bytes.toString("base64"));
+  expect(topPixels).toBe(false);
+  const before = await page
+    .locator("canvas")
+    .evaluate((canvas) =>
+      canvas instanceof HTMLCanvasElement ? canvas.toDataURL() : "",
+    );
+  await page.getByLabel("Route pulse", { exact: true }).uncheck();
+  await expect
+    .poll(() =>
+      page
+        .locator("canvas")
+        .evaluate((canvas) =>
+          canvas instanceof HTMLCanvasElement ? canvas.toDataURL() : "",
+        ),
+    )
+    .not.toBe(before);
+  const paused = await page
+    .locator("canvas")
+    .evaluate((canvas) =>
+      canvas instanceof HTMLCanvasElement ? canvas.toDataURL() : "",
+    );
+  await page.waitForTimeout(150);
+  expect(
+    await page
+      .locator("canvas")
+      .evaluate((canvas) =>
+        canvas instanceof HTMLCanvasElement ? canvas.toDataURL() : "",
+      ),
+  ).toBe(paused);
+  await page.screenshot({
+    path: info.outputPath("card-titles-hidden.png"),
+    fullPage: true,
+  });
+  await page.getByLabel("Titles", { exact: true }).check();
+  await expect
+    .poll(() => page.locator("html").getAttribute("data-canvas-text"))
+    .toContain("Sample activity");
+});

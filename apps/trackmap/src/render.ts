@@ -12,6 +12,8 @@ export interface CardOptions {
   format: "story" | "square";
   showStats: boolean;
   showTitle: boolean;
+  pulse: boolean;
+  motionTime: number;
   units: "km" | "mi";
   tilt: number;
   exaggeration: number;
@@ -23,6 +25,7 @@ export interface Vertex {
   y: number;
   z: number;
   segment: number;
+  progress: number;
 }
 type Context = CanvasRenderingContext2D;
 
@@ -33,6 +36,7 @@ export function prepareRoute(points: TrackPoint[]): Vertex[] {
   const raw: Vertex[] = [];
   let longitude = origin.lon;
   let previous = origin.lon;
+  let travelled = 0;
   let elevation = points.find((p) => p.elevation !== undefined)?.elevation ?? 0;
   for (const point of points) {
     let delta = point.lon - previous;
@@ -41,11 +45,17 @@ export function prepareRoute(points: TrackPoint[]): Vertex[] {
     longitude += delta;
     previous = point.lon;
     elevation = point.elevation ?? elevation;
+    const x = (longitude - origin.lon) * 111_195 * cosLat;
+    const y = (point.lat - origin.lat) * 111_195;
+    const last = raw.at(-1);
+    if (last && last.segment === point.segment)
+      travelled += Math.hypot(x - last.x, y - last.y, elevation - last.z);
     raw.push({
-      x: (longitude - origin.lon) * 111_195 * cosLat,
-      y: (point.lat - origin.lat) * 111_195,
+      x,
+      y,
       z: elevation,
       segment: point.segment,
+      progress: travelled,
     });
   }
   let minX = Infinity,
@@ -76,6 +86,7 @@ export function prepareRoute(points: TrackPoint[]): Vertex[] {
       y: (p.y - (minY + maxY) / 2) / scale,
       z: (p.z - minZ) / scale,
       segment: p.segment,
+      progress: travelled ? p.progress / travelled : 0,
     }));
 }
 
@@ -107,6 +118,87 @@ export function cardStats(points: TrackPoint[], units: CardOptions["units"]) {
   ];
 }
 
+// Whole pulse cycles per orbit make GIF/MP4 loops seamless at every speed.
+// Offsets use travelled distance before projection and depth sorting, so camera
+// rotation and missing GPS segments cannot reverse the start-to-finish motion.
+export function routePulseStops(
+  start: number,
+  end: number,
+  seconds: number,
+  duration: number,
+) {
+  const phase =
+    ((seconds * Math.max(1, Math.round(duration / 6))) / duration) % 1;
+  const radius = 0.09;
+  const knots = [start, end];
+  for (const wrap of [-1, 0, 1])
+    for (const step of [-1, -0.5, 0, 0.5, 1]) {
+      const progress = phase + wrap + step * radius;
+      if (progress > start && progress < end) knots.push(progress);
+    }
+  return knots
+    .sort((a, b) => a - b)
+    .map((progress) => {
+      const delta = Math.abs(progress - phase);
+      const distance = Math.min(delta, 1 - delta);
+      return {
+        offset: (progress - start) / (end - start),
+        alpha:
+          distance < radius
+            ? (0.4 * (1 + Math.cos((Math.PI * distance) / radius))) / 2
+            : 0,
+      };
+    });
+}
+
+function drawStatIcon(
+  ctx: Context,
+  kind: number,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 24, size / 24);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  if (kind === 0) {
+    // Ruler with alternating measurement ticks.
+    ctx.translate(12, 12);
+    ctx.rotate(-Math.PI / 4);
+    ctx.rect(-11, -4, 22, 8);
+    for (let tick = 4; tick < 22; tick += 4) {
+      ctx.moveTo(tick - 11, -4);
+      ctx.lineTo(tick - 11, tick % 8 === 0 ? 1 : -1);
+    }
+  } else if (kind === 1) {
+    ctx.moveTo(12, 22);
+    ctx.lineTo(12, 3);
+    ctx.moveTo(5, 10);
+    ctx.lineTo(12, 3);
+    ctx.lineTo(19, 10);
+  } else {
+    ctx.moveTo(9, 1);
+    ctx.lineTo(15, 1);
+    ctx.moveTo(12, 1);
+    ctx.lineTo(12, 4);
+    ctx.moveTo(18, 5);
+    ctx.lineTo(20, 3);
+    ctx.moveTo(21, 13);
+    ctx.arc(12, 13, 9, 0, Math.PI * 2);
+    ctx.moveTo(12, 8);
+    ctx.lineTo(12, 13);
+    ctx.lineTo(15, 15);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function drawCard(
   ctx: Context,
   width: number,
@@ -116,6 +208,7 @@ export function drawCard(
   options: CardOptions,
   angle = options.angle,
   media?: CardFrame | CardMedia,
+  motionTime = options.motionTime,
 ) {
   const photo = media instanceof FileVideo ? media.canvas : media;
   ctx.save();
@@ -155,8 +248,8 @@ export function drawCard(
   ctx.textAlign = "left";
   ctx.fillStyle = options.color;
   ctx.font = `600 ${width * 0.022}px ui-monospace, monospace`;
-  ctx.fillText(options.sport.slice(0, 30), pad, height * 0.1);
   if (options.showTitle) {
+    ctx.fillText(options.sport.slice(0, 30), pad, height * 0.1);
     ctx.fillStyle = foreground;
     ctx.font = `600 ${width * 0.061}px ui-monospace, monospace`;
     const title = options.title.trim() || "My activity";
@@ -185,7 +278,7 @@ export function drawCard(
   const orbit = (angle * Math.PI) / 180;
   const cos = Math.cos(orbit),
     sin = Math.sin(orbit);
-  const project = (p: Vertex) => {
+  const project = (p: Pick<Vertex, "x" | "y" | "z">) => {
     const x = p.x * cos - p.y * sin;
     const y = p.x * sin + p.y * cos;
     const z = p.z * options.exaggeration;
@@ -195,7 +288,11 @@ export function drawCard(
       depth: y * Math.cos(tilt) - z * Math.sin(tilt),
     };
   };
-  const projected = route.map((p) => ({ ...project(p), segment: p.segment }));
+  const projected = route.map((p) => ({
+    ...project(p),
+    segment: p.segment,
+    progress: p.progress,
+  }));
   let extent = 0.75;
   // Fixed bounds across every orbit angle prevents breathing and clipping.
   for (const p of route)
@@ -220,13 +317,11 @@ export function drawCard(
           x: axis ? -0.65 : i * 0.13,
           y: axis ? i * 0.13 : -0.65,
           z: 0,
-          segment: 0,
         });
         const b = project({
           x: axis ? 0.65 : i * 0.13,
           y: axis ? i * 0.13 : 0.65,
           z: 0,
-          segment: 0,
         });
         const sa = screen(a),
           sb = screen(b);
@@ -255,6 +350,26 @@ export function drawCard(
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
+    if (
+      options.pulse &&
+      edge.b.progress > edge.a.progress &&
+      (a.x !== b.x || a.y !== b.y)
+    ) {
+      const stops = routePulseStops(
+        edge.a.progress,
+        edge.b.progress,
+        motionTime,
+        options.duration,
+      );
+      if (stops.some((stop) => stop.alpha > 0)) {
+        const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        for (const stop of stops)
+          gradient.addColorStop(stop.offset, `rgba(255,255,255,${stop.alpha})`);
+        ctx.strokeStyle = gradient;
+        ctx.stroke();
+        ctx.strokeStyle = options.color;
+      }
+    }
   }
   ctx.shadowBlur = 0;
   for (const [i, p] of [projected[0], projected.at(-1)].entries()) {
@@ -280,7 +395,7 @@ export function drawCard(
       const x = pad + (i * (width - pad * 2)) / 3;
       ctx.fillStyle = muted;
       ctx.font = `500 ${width * 0.023}px ui-monospace, monospace`;
-      ctx.fillText(stat.label, x, y);
+      drawStatIcon(ctx, i, x, y - width * 0.024, width * 0.032, muted);
       ctx.fillStyle = foreground;
       ctx.font = `600 ${width * 0.045}px ui-monospace, monospace`;
       ctx.fillText(stat.value, x, y + width * 0.06);
