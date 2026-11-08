@@ -186,8 +186,19 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 24.18.0
+      - name: Download verified CodeQL bundle
+        timeout-minutes: 6
+        run: |
+          # CodeQL v2.27.4, JavaScript Linux x64 release asset.
+          archive="$RUNNER_TEMP/codeql-bundle-javascript-linux64.tar.zst"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 3 --retry-max-time 180 --connect-timeout 10 --max-time 120 \
+            --header 'Accept: application/octet-stream' --output "$archive" \
+            https://api.github.com/repos/github/codeql-action/releases/assets/692239234
+          printf '%s  %s\n' '082e798c97831283a2a5f69e9198c51270e5767013d5333daeeab6520af9ce72' "$archive" | sha256sum --check
       - uses: github/codeql-action/init@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:
+          tools: ${{ runner.temp }}/codeql-bundle-javascript-linux64.tar.zst
           languages: javascript-typescript
           build-mode: none
           queries: security-extended,security-and-quality
