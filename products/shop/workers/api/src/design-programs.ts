@@ -6,14 +6,6 @@ import {
 } from "./design-repository";
 import type { AllowedSafetyScreeningDecision } from "./openai-safety-screening";
 
-export const createDesign = () =>
-  Effect.gen(function*() {
-    const repository = yield* DesignRepository;
-    return yield* repository.create();
-  }).pipe(
-    Effect.withSpan("design.create"),
-  );
-
 export const uploadDesignArtwork = (
   id: string,
   artwork: Uint8Array,
@@ -55,12 +47,3 @@ export const getDesignArtworkPreview = (id: string) =>
     const repository = yield* DesignRepository;
     return yield* repository.artworkPreview(id);
   }).pipe(Effect.withSpan("design.artworkPreview", { attributes: { id } }));
-
-export const updateDesignSettings = (
-  id: string,
-  settings: EditorSettingsDto,
-) =>
-  Effect.gen(function*() {
-    const repository = yield* DesignRepository;
-    return yield* repository.updateSettings(id, settings);
-  }).pipe(Effect.withSpan("design.updateSettings", { attributes: { id } }));

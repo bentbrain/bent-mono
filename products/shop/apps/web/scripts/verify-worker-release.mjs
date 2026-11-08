@@ -1,9 +1,11 @@
+import { ARTWORK_MEDIA_CAPABILITY } from "../../../scripts/artwork-media-compatibility.mjs";
 import { pathToFileURL } from "node:url";
 
 export const EXPECTED_RELEASE = "bent-shirt-pilot-m2-v1";
 export const REQUIRED_CAPABILITIES = [
   "cart-product-context-v1",
   "anonymous-drafts-v2",
+  ARTWORK_MEDIA_CAPABILITY,
   "saved-designs-v1",
   "saved-design-pages-v1",
   "order-management-v1",

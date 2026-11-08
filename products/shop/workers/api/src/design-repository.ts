@@ -17,7 +17,7 @@ import {
 } from "./design-errors";
 import { attachRevisionToNullProducts } from "./design-revision-repository";
 import type { AllowedSafetyScreeningDecision } from "./openai-safety-screening";
-import { artworkPreviewKey, generateArtworkPreview, storeArtworkPreview } from "./artwork-preview";
+import { readDesignMedia } from "./design-media";
 
 export { artworkPreviewKey } from "./artwork-preview";
 
@@ -248,68 +248,12 @@ export const makeDesignRepository = (
       );
       return rowToDesign(row);
     }),
-  artwork: (id) =>
-    Effect.gen(function*() {
-      const design = yield* makeDesignRepository(env).find(id);
-      if (design.status !== "ready") {
-        return yield* Effect.fail(new DesignNotFound({ id: design.id }));
-      }
-      const db = drizzle(env.DB);
-      const row = yield* Effect.tryPromise({
-        try: () => db.select({ artworkKey: designs.artworkKey }).from(designs).where(eq(designs.id, design.id)).get(),
-        catch: (cause) => new DatabaseFailure({ operation: "read artwork key", cause }),
-      });
-      if (!row) return yield* Effect.fail(new DesignNotFound({ id: design.id }));
-      const object = yield* Effect.tryPromise({
-        try: () => env.DESIGN_ARTWORK.get(row.artworkKey),
-        catch: (cause) => new ArtworkStorageFailure({ operation: "get", cause }),
-      });
-      if (!object) return yield* Effect.fail(new DesignNotFound({ id: design.id }));
-      const buffer = yield* Effect.tryPromise({
-        try: () => object.arrayBuffer(),
-        catch: (cause) => new ArtworkStorageFailure({ operation: "read", cause }),
-      });
-      return { bytes: new Uint8Array(buffer), contentType: design.contentType };
-    }),
-  artworkPreview: (rawId) =>
-    Effect.gen(function*() {
-      const id = yield* parseId(rawId);
-      const design = yield* makeDesignRepository(env).find(id);
-      if (design.status !== "ready") {
-        return yield* Effect.fail(new DesignNotFound({ id: design.id }));
-      }
-      const db = drizzle(env.DB);
-      const row = yield* Effect.tryPromise({
-        try: () => db.select({ sha256: designs.sha256 })
-          .from(designs)
-          .where(eq(designs.id, design.id))
-          .get(),
-        catch: (cause) => new DatabaseFailure({
-          operation: "read artwork preview revision",
-          cause,
-        }),
-      });
-      if (!row?.sha256) {
-        return yield* Effect.fail(new DesignNotFound({ id: design.id }));
-      }
-      const previewKey = artworkPreviewKey(id, row.sha256);
-      const cached = yield* Effect.tryPromise({
-        try: () => env.DESIGN_ARTWORK.get(previewKey),
-        catch: (cause) => new ArtworkStorageFailure({ operation: "get preview", cause }),
-      });
-      if (cached) {
-        const buffer = yield* Effect.tryPromise({
-          try: () => cached.arrayBuffer(),
-          catch: (cause) => new ArtworkStorageFailure({ operation: "read preview", cause }),
-        });
-        return { bytes: new Uint8Array(buffer), contentType: "image/webp" };
-      }
-
-      const original = yield* makeDesignRepository(env).artwork(design.id);
-      const bytes = yield* generateArtworkPreview(env.IMAGES, original.bytes);
-      yield* storeArtworkPreview(env.DESIGN_ARTWORK, id, row.sha256, bytes);
-      return { bytes, contentType: "image/webp" };
-    }),
+  artwork: (rawId) => parseId(rawId).pipe(
+    Effect.flatMap(id => readDesignMedia(env, id, { kind: "public" })),
+  ),
+  artworkPreview: (rawId) => parseId(rawId).pipe(
+    Effect.flatMap(id => readDesignMedia(env, id, { kind: "public" }, true)),
+  ),
   updateSettings: (rawId, settings) =>
     Effect.gen(function*() {
       const id = yield* parseId(rawId);

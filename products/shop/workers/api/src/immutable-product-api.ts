@@ -31,6 +31,7 @@ const WORKER_RELEASE = "bent-shirt-pilot-m2-v1";
 const WORKER_CAPABILITIES = [
   "cart-product-context-v1",
   "anonymous-drafts-v2",
+  "owner-artwork-media-v1",
   "saved-designs-v1",
   "saved-design-pages-v1",
   "order-management-v1",

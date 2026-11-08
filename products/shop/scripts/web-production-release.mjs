@@ -1,3 +1,4 @@
+import { ARTWORK_MEDIA_CAPABILITY, assertArtworkMediaWeb } from "./artwork-media-compatibility.mjs";
 import { REPOSITORY_ROOT, storefrontSourceManifest } from "./monorepo-source.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
@@ -45,10 +46,11 @@ export function verifyWebOnlyStagedDeployment(value, commit, runId) {
         value.source === "cli" &&
         value.meta?.githubCommitSha === commit &&
         value.meta?.webOnlyProductionSource === commit &&
+        value.meta?.shopArtworkMedia === ARTWORK_MEDIA_CAPABILITY &&
         value.meta?.githubActionsRunId === runId &&
         /^forever-tee-[a-z0-9]+-bentbrains-projects\.vercel\.app$/.test(value.url) &&
         !value.alias?.includes("shop.bent.build"), "ready, unpromoted deployment from the exact Actions run and source.");
-    return { id: value.id, sourceCommit: commit, url: `https://${value.url}` };
+    return { id: value.id, sourceCommit: commit, url: `https://${value.url}`, artworkMediaCapability: ARTWORK_MEDIA_CAPABILITY };
 }
 export async function smokeStorefront(origin, { bypass, includeImages, fetcher = fetch } = {}) {
     check(/^https:\/\/[a-z0-9.-]+$/.test(origin), "HTTPS storefront smoke origin.");
@@ -137,6 +139,7 @@ export async function smokeStorefront(origin, { bypass, includeImages, fetcher =
     };
 }
 export async function executeWebOnlyPromotion({ previous, save, verifyWorker, deploy, inspectStaged, domain, stagedSmoke, promote, publicSmoke, }) {
+    assertArtworkMediaWeb(previous);
     await save("storefront-before.json", previous);
     await verifyWorker();
     await save("storefront-build-intent.json", { previousDeploymentId: previous.id });
@@ -263,7 +266,7 @@ export async function releaseWebOnlyProduction(env = process.env) {
     const linked = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../../../.vercel/project.json", import.meta.url), "utf8")));
     check(linked.projectId === PROJECT && linked.orgId === TEAM, "CLI project linkage.");
     verifyProductionWebEnvironment(parseEnv(await readFile(new URL("../../../.vercel/.env.production.local", import.meta.url), "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
-    const previous = { id: previousId, sourceCommit: old.meta.githubCommitSha };
+    const previous = { id: previousId, sourceCommit: old.meta.githubCommitSha, artworkMediaCapability: old.meta.shopArtworkMedia };
     const result = await executeWebOnlyPromotion({
         previous,
         save,
@@ -279,6 +282,8 @@ export async function releaseWebOnlyProduction(env = process.env) {
                 `githubCommitSha=${commit}`,
                 "--meta",
                 `webOnlyProductionSource=${commit}`,
+                "--meta",
+                `shopArtworkMedia=${ARTWORK_MEDIA_CAPABILITY}`,
                 "--meta",
                 `githubActionsRunId=${env.GITHUB_RUN_ID}`,
             ]);
