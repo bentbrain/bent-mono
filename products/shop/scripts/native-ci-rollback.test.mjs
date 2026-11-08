@@ -33,11 +33,11 @@ async function fixture(failAt) {
     const runtime = { runtimeVerified: true, environment: "development", renderer: { imageDigest: `sha256:${"b".repeat(64)}`, sourceDigest: "c".repeat(64),
             imageUri: protectedConfig("awsAccountId") + ".dkr.ecr.ap-southeast-2.amazonaws.com/forever-tee-video-development@sha256:" + ("b".repeat(64)) },
         failure: { imageDigest: `sha256:${"b".repeat(64)}` } };
-    const worker = { workerVersion: version.id, content: await workerContentManifest(new Response("old code")), versionResourcesSha256: versionResourcesDigest(version) };
+    const worker = { workerVersion: version.id, content: await workerContentManifest(new Response('"owner-artwork-media-v1"; previous code')), versionResourcesSha256: versionResourcesDigest(version) };
     const prepared = { releaseId: "native-123", sourceCommit: "d".repeat(40), planSha256: "e".repeat(64), environment: "development",
         accountId: protectedConfig("awsAccountId"), region: "ap-southeast-2", previous: { runtime, worker, consumer }, candidate: { imageDigest: `sha256:${"f".repeat(64)}` },
         artifacts: { previousArtifact: { key: "previous-worker" } } };
-    const artifact = { body: Buffer.from("old code").toString("base64"), contentType: "application/javascript", entrypoint: "index.js", before: worker, consumer };
+    const artifact = { body: Buffer.from('"owner-artwork-media-v1"; previous code').toString("base64"), contentType: "application/javascript", entrypoint: "index.js", before: worker, consumer };
     const objects = new Map([["prepared", Buffer.from(JSON.stringify(prepared))], ["previous-worker", Buffer.from(JSON.stringify(artifact))]]);
     const store = { save: async (key, bytes) => { objects.set(key, bytes); return { key }; }, read: async (ref) => objects.get(ref.key) };
     await installPauseSchema(cf);
@@ -260,4 +260,17 @@ test('recovery fails closed for substituted original evidence, incomplete restor
             f.db.close();
         }
     }
+});
+
+
+test("rollback rejects a historical Worker without owner media before pause or deployment", async () => {
+    const { db, calls, input, objects } = await fixture();
+    try {
+        const artifact = JSON.parse(objects.get("previous-worker"));
+        artifact.body = Buffer.from("historical public private-media reads").toString("base64");
+        objects.set("previous-worker", Buffer.from(JSON.stringify(artifact)));
+        await assert.rejects(executeDevelopmentRollback(input), /Worker rollback requires/);
+        assert.deepEqual(calls, []);
+        assert.equal(db.prepare("SELECT release_id FROM native_video_release_control").get().release_id, "native-123");
+    } finally { db.close(); }
 });

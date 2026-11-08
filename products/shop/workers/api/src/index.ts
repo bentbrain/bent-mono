@@ -551,6 +551,13 @@ async function routeRequest(request: Request, env: ApiEnv, context?: Pick<Execut
         }), origin, allowedOrigins);
       }
     }
+    if (isLegacyDraftMutation(request)) {
+      return withLegacyCors(Response.json({ error: {
+        code: "LEGACY_WRITE_RETIRED", message: "Use the current design upload flow.",
+      } }, { status: 410, headers: {
+        "Cache-Control": "no-store", Deprecation: "true", Link: "</v2/design-drafts>; rel=successor-version",
+      } }), origin, env);
+    }
     const legacyPaidProcessing = isLegacyPaidProcessingPath(requestPath, request.method);
     const legacyMutation = isRetainedLegacyMutationPath(requestPath, request.method);
     const clientDigest = legacyPaidProcessing || legacyMutation
@@ -588,10 +595,7 @@ async function routeRequest(request: Request, env: ApiEnv, context?: Pick<Execut
       legacyCorsHeaders(origin, env.WEB_ORIGIN ?? "http://localhost:3000").forEach((value, key) => {
         headers.set(key, value);
       });
-      if (
-        response.ok &&
-        isVersionedArtworkPreview(new URL(request.url))
-      ) {
+      if (requestPath.startsWith("/v1/designs/")) {
         headers.set("Cache-Control", "no-store");
       }
       if (isLegacyDraftMutation(request)) {
@@ -632,11 +636,6 @@ async function handleAnonymousDesignWithMedia(
   });
   if (response) scheduleStoryVideoWarmup(request, response, env, context);
   return response;
-}
-
-function isVersionedArtworkPreview(url: URL) {
-  return url.pathname.endsWith("/artwork/preview") &&
-    /^[0-9a-f]{64}$/.test(url.searchParams.get("revision") ?? "");
 }
 
 function corsHeaders(origin: string | null, allowedOrigins: ReadonlySet<string>) {
@@ -703,10 +702,12 @@ function withCors(
 }
 
 function isLegacyDraftMutation(request: Request) {
-  const path = new URL(request.url).pathname;
+  let path = new URL(request.url).pathname;
+  try { path = decodeURIComponent(path); } catch { /* Reject malformed targets through the router. */ }
+  path = path.replace(/\/+$/, "");
   return request.method !== "GET" && request.method !== "HEAD" &&
     (path === "/v1/background-removal" || path === "/v1/designs" || path === "/v1/products" ||
-      /^\/v1\/designs\/[0-9a-f-]{36}(?:\/artwork(?:\/background-removal)?)?$/.test(path));
+      path.startsWith("/v1/designs/"));
 }
 
 function isLegacyPaidProcessingPath(path: string, method: string) {

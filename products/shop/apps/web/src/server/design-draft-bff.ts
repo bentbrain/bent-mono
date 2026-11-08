@@ -93,6 +93,7 @@ async function capabilityBff(
   const requestId = crypto.randomUUID();
   const startedAt = performance.now();
   const requestInit: RequestInit = {
+    cache: "no-store",
     method: request.method,
     headers: workerHeaders(
       request,

@@ -811,18 +811,13 @@ describe("anonymous draft ownership", () => {
         expect(allowed.status).toBe(200);
         expect(allowed.headers.get("content-type")).toBe("image/png");
     });
-    it("rate limits the compatible public v1 paid endpoint by client address", async () => {
-        imageRateAllowed = false;
-        const response = await rawRequest("/v1/background-removal", {
-            method: "POST",
-            headers: {
-                "cf-connecting-ip": "192.0.2.20",
-                "content-type": "image/jpeg",
-            },
-            body: JPEG_BYTES,
-        });
-        expect(response.status).toBe(429);
-        expect(response.headers.get("Retry-After")).toBe("60");
+    it.each(["/v1/background-removal", "/v1/background-removal/", "/v1/%62ackground-removal", "/v1/designs", "/v1/products"])("retires obsolete writes before admission or body decode: %s", async path => {
+        const decode = vi.spyOn(Request.prototype, "arrayBuffer");
+        const incoming = new Request(`https://api.example.com${path}`, { method: "POST", body: JPEG_BYTES });
+        const response = await handleRequest(incoming, workerEnv());
+        expect(decode).not.toHaveBeenCalled();
+        expect(response.status).toBe(410);
+        expect(response.headers.get("Deprecation")).toBe("true");
         expect(imageTransformCount).toBe(0);
     });
     it("allows more than fifty unfinished designs without a rolling daily cap", async () => {
@@ -850,29 +845,24 @@ describe("anonymous draft ownership", () => {
         const count = await testPlatform().env.DB.prepare("SELECT COUNT(*) AS count FROM designs WHERE owner_id = ?").bind(OWNER_A).first();
         expect(count?.["count"]).toBe(0);
     });
-    it("bounds and independently rate limits retained v1 mutations", async () => {
-        legacyMutationAllowed = false;
-        expect((await rawRequest("/v1/designs", {
-            method: "POST",
-            headers: { "cf-connecting-ip": "192.0.2.21" },
-        })).status).toBe(429);
-        legacyMutationAllowed = true;
-        const path = `/v1/designs/${crypto.randomUUID()}/artwork`;
-        expect((await rawRequest(path, {
-            method: "PUT",
-            headers: { "content-type": "image/jpeg" },
-            body: JPEG_BYTES,
-        })).status).toBe(411);
-        expect((await rawRequest(path, {
-            method: "PUT",
-            headers: { "content-length": "4", "content-type": "image/jpeg" },
-            body: new Uint8Array([1, 2, 3, 4]),
-        })).status).toBe(415);
-        expect((await rawRequest(path, {
-            method: "PUT",
-            headers: { "content-length": "3", "content-type": "image/jpeg" },
-            body: JPEG_BYTES,
-        })).status).toBe(400);
+    it.each(["artwork", "artwork/background-removal"])("rejects legacy %s before processing for owned, unowned and missing targets", async suffix => {
+        const owned = await createDraft();
+        const unowned = await createDraft();
+        await testPlatform().env.DB.prepare("UPDATE designs SET owner_id = NULL WHERE id = ?").bind(unowned).run();
+        for (const id of [owned, unowned, crypto.randomUUID(), "%31" + "1111111-1111-4111-8111-111111111111"]) {
+            const decode = vi.spyOn(Request.prototype, "arrayBuffer");
+            const incoming = new Request(`https://api.example.com/v1/designs/${id}/${suffix}`, {
+                method: "PUT", headers: { "content-type": "image/jpeg", "content-length": String(JPEG_BYTES.length) }, body: JPEG_BYTES,
+            });
+            const screen = vi.spyOn(fakeSafetyScreening, "screen");
+            const info = vi.spyOn(fakeImages, "info");
+            const response = await handleRequest(incoming, workerEnv());
+            expect(decode).not.toHaveBeenCalled();
+            expect(response.status).toBe(410);
+            expect(imageTransformCount).toBe(0);
+            expect(screen).not.toHaveBeenCalled();
+            expect(info).not.toHaveBeenCalled();
+        }
     });
     it("returns a retry hint when owner mutation rate limiting rejects a request", async () => {
         ownerRateAllowed = false;
@@ -880,60 +870,20 @@ describe("anonymous draft ownership", () => {
         expect(response.status).toBe(429);
         expect(response.headers.get("Retry-After")).toBe("60");
     });
-    it("keeps deprecated v1 creation available during the Worker-first cutover", async () => {
-        const response = await rawRequest("/v1/designs", { method: "POST" });
-        expect(response.status).toBe(201);
-        expect(response.headers.get("Deprecation")).toBe("true");
-        expect(response.headers.get("Link")).toContain("/v2/design-drafts");
-        const payload: unknown = await response.json();
-        if (typeof payload !== "object" || payload === null || !("id" in payload) || typeof payload.id !== "string") {
-            throw new Error("Legacy draft response did not include an id.");
-        }
-        const row = await testPlatform().env.DB.prepare("SELECT legacy_claim_expires_at FROM designs WHERE id = ?").bind(payload.id).first();
-        expect(typeof row?.["legacy_claim_expires_at"]).toBe("number");
-    });
-    it("screens retained v1 artwork writes before storage", async () => {
-        const created = await rawRequest("/v1/designs", { method: "POST" });
-        const payload: unknown = await created.json();
-        if (typeof payload !== "object" || payload === null ||
-            !("id" in payload) || typeof payload.id !== "string") {
-            throw new Error("Legacy draft response did not include an id.");
-        }
-        safetyScreeningResult = Effect.succeed({
-            decision: "flagged",
-            model: "omni-moderation-2024-09-26",
+    it("keeps authenticated v2 screening before artwork storage", async () => {
+        const id = await createDraft();
+        const grant = await request(`/v2/design-drafts/${id}/upload-grants`, { method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ expectedVersion: 0, contentType: "image/jpeg", maxBytes: JPEG_BYTES.byteLength }),
         });
-        const response = await rawRequest(`/v1/designs/${payload.id}/artwork`, {
-            method: "PUT",
-            headers: {
-                "content-length": String(JPEG_BYTES.byteLength),
-                "content-type": "image/jpeg",
-                "x-design-settings": JSON.stringify({
-                    cropX: 0.5,
-                    cropY: 0.5,
-                    cropZoom: 1,
-                    depth: 5,
-                    placementWidth: 0.22,
-                    placementX: 0.39,
-                    placementY: 0.43,
-                }),
-            },
-            body: JPEG_BYTES,
+        const payload: unknown = await grant.json();
+        if (!isRecord(payload) || typeof payload["uploadUrl"] !== "string") throw new Error("Missing upload grant");
+        safetyScreeningResult = Effect.succeed({ decision: "flagged", model: "omni-moderation-2024-09-26" });
+        const response = await rawRequest(uploadRequestPath(payload["uploadUrl"]), { method: "PUT",
+            headers: { "content-type": "image/jpeg", "content-length": String(JPEG_BYTES.byteLength) }, body: JPEG_BYTES,
         });
-        expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toMatchObject({
-            message: "That photo can't be used. Please choose another.",
-        });
-        expect((await testPlatform().env.DESIGN_ARTWORK.list({
-            prefix: `designs/${payload.id}/`,
-        })).objects).toHaveLength(0);
-        expect(await testPlatform().env.DB.prepare(`
-      SELECT safety_screening_decision, safety_screening_model
-      FROM designs WHERE id = ?
-    `).bind(payload.id).first()).toEqual({
-            safety_screening_decision: null,
-            safety_screening_model: null,
-        });
+        expect(response.status).toBe(422);
+        expect((await testPlatform().env.DESIGN_ARTWORK.list({ prefix: `designs/${id}/` })).objects).toHaveLength(0);
     });
     it("creates an owned draft and hides it from another owner", async () => {
         const id = await createDraft();
@@ -959,8 +909,8 @@ describe("anonymous draft ownership", () => {
             },
             body: JPEG_BYTES,
         });
-        expect(patchResponse.status).toBe(404);
-        expect(putResponse.status).toBe(404);
+        expect(patchResponse.status).toBe(410);
+        expect(putResponse.status).toBe(410);
         expect((await request(`/v2/design-drafts/${id}`)).status).toBe(200);
     });
     it("uses expectedVersion and denies finalized mutations", async () => {
@@ -3382,7 +3332,7 @@ describe("owner-aware product configuration", () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ baseProductId: BASE_PRODUCT_ID, designId: id }),
-        })).status).toBe(404);
+        })).status).toBe(410);
     });
     it("reuses a finalized revision once for each base product", async () => {
         const id = await createDraft();
@@ -3533,5 +3483,149 @@ describe("owner-aware product configuration", () => {
     `).bind(productId, BASE_PRODUCT_ID, id, now).run();
         expect((await rawRequest(`/v1/products/${productId}`)).status).toBe(200);
         expect((await rawRequest(`/v1/designs/${id}`)).status).toBe(200);
+    });
+});
+
+
+describe("artwork authorization at the router and storage boundary", () => {
+    async function mediaDesign() {
+        const id = await createDraft();
+        await makeDraftReady(id);
+        const row = await testPlatform().env.DB.prepare("SELECT sha256, artwork_key FROM designs WHERE id = ?")
+            .bind(id).first<{ sha256: string; artwork_key: string }>();
+        if (!row) throw new Error("Missing media fixture");
+        await testPlatform().env.DESIGN_ARTWORK.put(artworkPreviewKey(id, row.sha256), new Uint8Array([8, 9]));
+        return { id, ...row };
+    }
+    async function publish(id: string, revision = false) {
+        const db = testPlatform().env.DB;
+        const productId = crypto.randomUUID(), revisionId = crypto.randomUUID();
+        if (revision) await db.prepare(`INSERT INTO design_revisions (
+            id, design_id, fingerprint, artwork_key, content_type, byte_size, sha256,
+            crop_x, crop_y, crop_zoom, placement_x, placement_y, placement_width, depth, created_at
+        ) SELECT ?, id, ?, artwork_key, content_type, byte_size, sha256,
+            crop_x, crop_y, crop_zoom, placement_x, placement_y, placement_width, depth, created_at
+            FROM designs WHERE id = ?`).bind(revisionId, revisionId, id).run();
+        await db.prepare(`INSERT INTO products(id, base_product_id, design_id, design_revision_id, shopify_handle, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'active', ?)`).bind(productId, BASE_PRODUCT_ID, id, revision ? revisionId : null, productId, Date.now()).run();
+        return { productId, revisionId };
+    }
+    it.each(["artwork", "artwork/preview"])("denies private and guessed %s before storage", async suffix => {
+        const { id } = await mediaDesign();
+        const get = vi.spyOn(testPlatform().env.DESIGN_ARTWORK, "get");
+        for (const target of [id, crypto.randomUUID()]) {
+            const response = await rawRequest(`/v1/designs/${target}/${suffix}`);
+            expect(response.status).toBe(404);
+            expect(await response.text()).not.toContain(OWNER_A);
+        }
+        expect(get).not.toHaveBeenCalled();
+    });
+    it.each([false, true])("serves only active public references, including legacy null revisions: revision=%s", async revision => {
+        const { id, sha256 } = await mediaDesign();
+        const { productId, revisionId } = await publish(id, revision);
+        const encodedId = id.replace(/^./, character => `%${character.charCodeAt(0).toString(16)}`);
+        const paths = [id, encodedId].flatMap(target => [`/v1/designs/${target}/artwork`, `/v1/designs/${target}/artwork/preview?revision=${sha256}`]);
+        for (const path of paths) {
+            const response = await rawRequest(path);
+            expect(response.status).toBe(200);
+            expect(response.headers.get("cache-control")).toBe("no-store");
+        }
+        if (revision) {
+            await testPlatform().env.DB.prepare("UPDATE design_revisions SET sha256 = ? WHERE id = ?").bind("f".repeat(64), revisionId).run();
+            for (const path of paths) expect((await rawRequest(path)).status).toBe(404);
+            await testPlatform().env.DB.prepare("UPDATE design_revisions SET sha256 = ? WHERE id = ?").bind(sha256, revisionId).run();
+        }
+        await testPlatform().env.DB.prepare("UPDATE products SET deleted_at = ? WHERE id = ?").bind(Date.now(), productId).run();
+        for (const path of paths) expect((await rawRequest(path)).status).toBe(404);
+        await testPlatform().env.DB.prepare("UPDATE products SET deleted_at = NULL, status = 'unpublished' WHERE id = ?").bind(productId).run();
+        await testPlatform().env.DB.prepare("UPDATE designs SET finalized_at = ? WHERE id = ?").bind(Date.now(), id).run();
+        for (const path of paths) expect((await rawRequest(path)).status).toBe(404);
+        await testPlatform().env.DB.prepare("UPDATE products SET status = 'active' WHERE id = ?").bind(productId).run();
+        await testPlatform().env.DB.prepare("UPDATE designs SET status = 'deleted', deleted_at = ? WHERE id = ?").bind(Date.now(), id).run();
+        for (const path of paths) expect((await rawRequest(path)).status).toBe(404);
+    });
+    it("supports finalized owner artwork and display previews without source rows, preserving source restrictions", async () => {
+        const { id, sha256, artwork_key } = await mediaDesign();
+        for (const finalized of [false, true]) {
+            await testPlatform().env.DB.prepare("UPDATE designs SET finalized_at = ? WHERE id = ?").bind(finalized ? Date.now() : null, id).run();
+            for (const suffix of ["artwork", "artwork/preview"]) {
+                const path = `/v2/design-drafts/${id}/${suffix}`;
+                expect((await rawRequest(path)).status).toBe(401);
+                expect((await request(path, {}, OWNER_B)).status).toBe(404);
+                const response = await request(path);
+                expect(response.status).toBe(200);
+                expect(response.headers.get("cache-control")).toBe("private, no-store");
+            }
+            expect((await request(`/v2/design-drafts/${id}/artwork-sources/cutout`)).status).toBe(404);
+        }
+        await testPlatform().env.DB.prepare(`INSERT INTO design_artwork_sources(design_id, kind, artwork_key, sha256, byte_size, width, height)
+            VALUES (?, 'cutout', ?, ?, 4, 3000, 4000)`).bind(id, artwork_key, sha256).run();
+        expect((await request(`/v2/design-drafts/${id}/artwork-sources/cutout`)).status).toBe(404);
+        await testPlatform().env.DB.prepare("UPDATE designs SET finalized_at = NULL WHERE id = ?").bind(id).run();
+        expect((await request(`/v2/design-drafts/${id}/artwork-sources/cutout`)).status).toBe(200);
+    });
+    it.each([
+        { suffix: "artwork", phase: "get" }, { suffix: "artwork/preview", phase: "get" },
+        { suffix: "artwork", phase: "read" }, { suffix: "artwork/preview", phase: "read" },
+    ])("rechecks publication after asynchronous $suffix $phase", async ({ suffix, phase }) => {
+        const { id } = await mediaDesign();
+        const { productId } = await publish(id);
+        const env = workerEnv();
+        let reads = 0;
+        const revoke = () => env.DB.prepare("UPDATE products SET status = 'unpublished' WHERE id = ?").bind(productId).run();
+        const bucket = new Proxy(env.DESIGN_ARTWORK, { get(target, property) {
+            if (property === "get") return async (key: string) => {
+                const object = await target.get(key);
+                if (phase === "get") await revoke();
+                if (!object) return null;
+                return new Proxy(object, { get(stored, member) {
+                    if (member === "arrayBuffer") return async () => {
+                        reads++;
+                        const bytes = await stored.arrayBuffer();
+                        if (phase === "read") await revoke();
+                        return bytes;
+                    };
+                    const reflected: unknown = Reflect.get(stored, member);
+                    return reflected;
+                } });
+            };
+            const reflected: unknown = Reflect.get(target, property);
+            return reflected;
+        } });
+        const response = await handleRequest(new Request(`https://api.example.com/v1/designs/${id}/${suffix}`), { ...env, DESIGN_ARTWORK: bucket });
+        expect(response.status).toBe(404);
+        expect(reads).toBe(phase === "get" ? 0 : 1);
+    });
+    it("rechecks publication after storing a generated preview", async () => {
+        const { id, sha256 } = await mediaDesign();
+        const { productId } = await publish(id);
+        const env = workerEnv();
+        await env.DESIGN_ARTWORK.delete(artworkPreviewKey(id, sha256));
+        const bucket = new Proxy(env.DESIGN_ARTWORK, { get(target, property) {
+            if (property === "put") return async (...args: Parameters<R2Bucket["put"]>) => {
+                const result = await target.put(...args);
+                await env.DB.prepare("UPDATE products SET status = 'unpublished' WHERE id = ?").bind(productId).run();
+                return result;
+            };
+            const reflected: unknown = Reflect.get(target, property);
+            return reflected;
+        } });
+        const response = await handleRequest(new Request(`https://api.example.com/v1/designs/${id}/artwork/preview`), { ...env, DESIGN_ARTWORK: bucket });
+        expect(response.status).toBe(404);
+        expect(await env.DESIGN_ARTWORK.head(artworkPreviewKey(id, sha256))).not.toBeNull();
+        expect((await rawRequest(`/v1/designs/${id}/artwork/preview`)).status).toBe(404);
+    });
+    it.each(["unpublish", "delete", "owner-delete"])("denies revocation during preview generation: %s", async action => {
+        const { id, sha256 } = await mediaDesign();
+        const { productId } = await publish(id);
+        await testPlatform().env.DESIGN_ARTWORK.delete(artworkPreviewKey(id, sha256));
+        const started = delayImageOutput();
+        const completion = action === "owner-delete" ? request(`/v2/design-drafts/${id}/artwork/preview`)
+            : rawRequest(`/v1/designs/${id}/artwork/preview`);
+        await started;
+        if (action === "unpublish") await testPlatform().env.DB.prepare("UPDATE products SET status = 'unpublished' WHERE id = ?").bind(productId).run();
+        else await testPlatform().env.DB.prepare("UPDATE designs SET status = 'deleted', deleted_at = ? WHERE id = ?").bind(Date.now(), id).run();
+        releaseImageOutput?.();
+        expect((await completion).status).toBe(404);
     });
 });

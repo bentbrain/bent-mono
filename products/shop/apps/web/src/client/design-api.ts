@@ -36,7 +36,7 @@ export async function deleteDesign(id: string) {
 }
 
 export async function getArtworkPreview(id: string, revision?: string) {
-  const response = await fetch(artworkPreviewUrl(id, revision));
+  const response = await fetch(artworkPreviewUrl(id, revision), { cache: "no-store" });
   if (!response.ok) {
     throw new Error("The artwork preview is unavailable.");
   }

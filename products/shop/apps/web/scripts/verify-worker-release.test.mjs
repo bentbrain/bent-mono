@@ -59,10 +59,10 @@ describe("Worker-first release gate", () => {
     );
   });
 
-  it("fails an enabled production gate when a capability is missing", async () => {
+  it.each(["sales-pause-v1", "owner-artwork-media-v1"])("fails an enabled production gate when %s is missing", async missing => {
     const fetcher = vi.fn(() => Promise.resolve(Response.json({
       capabilities: REQUIRED_CAPABILITIES.filter(
-        (capability) => capability !== "sales-pause-v1",
+        (capability) => capability !== missing,
       ),
       release: EXPECTED_RELEASE,
     })));

@@ -1,3 +1,4 @@
+import { readDesignMedia } from "./design-media";
 import { safeErrorDetails } from "@forever-tee/contracts/diagnostics";
 import { pendingProductPreparation } from "./pending-product-families";
 import { DESIGN_SOURCE_CONTENT_TYPES, MAX_PREPARED_ARTWORK_BYTES } from "@forever-tee/contracts/limits";
@@ -211,6 +212,20 @@ export async function handleAnonymousDesignRequest(
     if (retried.meta.changes !== 1) return conflict("DRAFT_NOT_READY", "The photo changed or expired. Please take or upload it again.");
     await deliverArtworkPreparation(env, current.artwork_job_id);
     return Response.json({ id }, { status: 202 });
+  }
+
+  const mediaMatch = /^\/v2\/design-drafts\/([0-9a-f-]{36})\/artwork(\/preview)?$/.exec(url.pathname);
+  if (mediaMatch && request.method === "GET") {
+    const id = mediaMatch[1];
+    if (!id) return notFound();
+    const result = await Effect.runPromise(Effect.either(
+      readDesignMedia(env, id, { kind: "owner", ownerId }, mediaMatch[2] !== undefined),
+    ));
+    if (result._tag === "Left") return result.left._tag === "DesignNotFound"
+      ? notFound() : apiError(503, "DEPENDENCY_UNAVAILABLE", "The artwork is temporarily unavailable.");
+    return new Response(result.right.bytes, { headers: {
+      "Content-Type": result.right.contentType, "Cache-Control": "private, no-store",
+    } });
   }
 
   const sourceMatch = /^\/v2\/design-drafts\/([0-9a-f-]{36})\/artwork-sources\/(original|cutout)$/.exec(url.pathname);

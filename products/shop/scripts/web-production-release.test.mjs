@@ -44,6 +44,7 @@ test("staged deployment pins the project, run and unpromoted source", () => {
             githubActionsRunId: runId,
             githubCommitSha: commit,
             webOnlyProductionSource: commit,
+            shopArtworkMedia: "owner-artwork-media-v1",
         },
         projectId: project,
         readyState: "READY",
@@ -169,7 +170,7 @@ function promotionFixture() {
     const events = [];
     let current = "dpl_previous";
     const args = {
-        previous: { id: current },
+        previous: { id: current, artworkMediaCapability: "owner-artwork-media-v1" },
         save: async (name) => events.push(name),
         verifyWorker: async () => events.push("worker"),
         deploy: async () => {
@@ -238,4 +239,14 @@ test("an uncertain promotion response is inspected and never repeated", async ()
     const result = await executeWebOnlyPromotion(fixture.args);
     assert.equal(result.productionStorefrontReleased, true);
     assert.equal(promotions, 1);
+});
+
+
+test("failed public smoke cannot roll back to a web artifact using private v1 media", async () => {
+    const fixture = promotionFixture();
+    delete fixture.args.previous.artworkMediaCapability;
+    fixture.args.publicSmoke = async () => { throw new Error("bad image"); };
+    await assert.rejects(executeWebOnlyPromotion(fixture.args), /Storefront rollback requires/);
+    assert.equal(fixture.events.includes("promote:dpl_previous"), false);
+    assert.equal(fixture.events.includes("storefront-rolled-back.json"), false);
 });

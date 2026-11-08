@@ -121,7 +121,7 @@ api.intercept({ path: `/v1/designs/${performanceDesignId}` }).reply(200, {
     createdAt: "2026-09-06T00:00:00Z", updatedAt: "2026-09-06T00:00:00Z", artworkUrl: "/fixture/artwork",
     settings: { cropX: 0.5, cropY: 0.5, cropZoom: 1, placementX: 0.39, placementY: 0.43, placementWidth: 0.22, depth: 5 },
 }, { headers }).persist();
-api.intercept({ path: new RegExp(`^/v1/designs/${performanceDesignId}/artwork/preview\\?`) }).reply(200, readFileSync(new URL("./artwork.png", import.meta.url)), { headers: { "content-type": "image/png" } }).persist();
+api.intercept({ path: new RegExp(`^/v2/design-drafts/${performanceDesignId}/artwork/preview\\?`) }).reply(200, readFileSync(new URL("./artwork.png", import.meta.url)), { headers: { "content-type": "image/png" } }).persist();
 // Source preparation is deliberately unfinished throughout the shopping journey.
 const pendingDesignId = protectedConfig("resource_83abf907850d");
 const pendingFamily = performanceFamily.map((record, index) => ({ ...record,

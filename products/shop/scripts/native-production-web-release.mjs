@@ -1,3 +1,5 @@
+import { ARTWORK_MEDIA_CAPABILITY } from "./artwork-media-compatibility.mjs";
+import { enforceWorkerRelease } from "../apps/web/scripts/verify-worker-release.mjs";
 import { REPOSITORY_ROOT, storefrontSourceManifest } from "./monorepo-source.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
@@ -34,9 +36,9 @@ export function existingWebAutomationCredential(project) {
 }
 export function verifyStagedWebDeployment(value, commit) {
     check(/^dpl_[A-Za-z0-9]+$/.test(value.id) && value.projectId === PROJECT && value.team?.id === TEAM && value.target === "production" &&
-        value.readyState === "READY" && value.meta?.githubCommitSha === commit && value.meta?.nativeProductionSource === commit &&
+        value.readyState === "READY" && value.meta?.githubCommitSha === commit && value.meta?.nativeProductionSource === commit && value.meta?.shopArtworkMedia === ARTWORK_MEDIA_CAPABILITY &&
         value.source === "cli" && deploymentURL(`https://${value.url}`) && !value.alias?.includes("shop.bent.build"), "ready, unpromoted cloud build from exact source.");
-    return { id: value.id, url: `https://${value.url}`, sourceCommit: commit };
+    return { id: value.id, url: `https://${value.url}`, sourceCommit: commit, artworkMediaCapability: ARTWORK_MEDIA_CAPABILITY };
 }
 export function verifyProductionWebEnvironmentMetadata(value) {
     check(Array.isArray(value?.envs), "Production environment metadata.");
@@ -111,7 +113,10 @@ export async function releaseProductionStorefront(env) {
     const verified = JSON.parse(rows.find(row => row.stage === "verified").payload), canaryRecord = JSON.parse(rows.find(row => row.stage === "canary-verified").payload);
     const canaryEvidence = JSON.parse(await store.read(canaryRecord.evidence));
     check(canaryEvidence.productionCanaryPassed && canaryEvidence.releaseId === releaseId && canaryEvidence.sourceCommit === verified.sourceCommit && canaryEvidence.videos === 4, "immutable direct canary evidence.");
-    const verifyPair = () => verifyProductionPairStatus(env, releaseId, verified.sourceCommit, false);
+    const verifyPair = async () => {
+        await verifyProductionPairStatus(env, releaseId, verified.sourceCommit, false);
+        await enforceWorkerRelease({ enforcement: "1", apiUrl: API_ORIGIN, sharedSecret: env.FOREVER_TEE_API_SHARED_SECRET });
+    };
     // The CLI only receives its own scoped token, never AWS or Cloudflare keys.
     const cliEnv = { PATH: env.PATH, HOME: env.HOME, CI: "1", VERCEL_ORG_ID: TEAM, VERCEL_PROJECT_ID: PROJECT };
     const cli = async (args) => {
@@ -133,10 +138,10 @@ export async function releaseProductionStorefront(env) {
     check(linked.projectId === PROJECT && linked.orgId === TEAM, "CLI project linkage.");
     verifyProductionWebEnvironment(parseEnv(await readFile(new URL("../../../.vercel/.env.production.local", import.meta.url), "utf8")), env.FOREVER_TEE_API_SHARED_SECRET);
     return executeStorefrontPromotion({
-        previous: { id: previousId, sourceCommit: old.meta.githubCommitSha },
+        previous: { id: previousId, sourceCommit: old.meta.githubCommitSha, artworkMediaCapability: old.meta.shopArtworkMedia },
         save: (name, value) => store.save(name, Buffer.from(JSON.stringify(value))), verifyPair, domain,
         deploy: async () => {
-            const output = await cli(["deploy", "--prod", "--skip-domain", "--yes", "--meta", `githubCommitSha=${commit}`, "--meta", `nativeProductionSource=${commit}`]);
+            const output = await cli(["deploy", "--prod", "--skip-domain", "--yes", "--meta", `githubCommitSha=${commit}`, "--meta", `nativeProductionSource=${commit}`, "--meta", `shopArtworkMedia=${ARTWORK_MEDIA_CAPABILITY}`]);
             check(deploymentURL(output), "single staged deployment URL; inspect intent if response differs.");
             return output;
         },

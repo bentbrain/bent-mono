@@ -172,3 +172,27 @@ describe("same-owner artwork challenge recovery", () => {
         expect(mocks.fetch).not.toHaveBeenCalled();
     });
 });
+
+
+it.each(["artwork", "artwork/preview"])("proxies private owner %s with trusted credentials and no cache", async suffix => {
+    mocks.cookies.set(ANONYMOUS_SESSION_COOKIE, "a".repeat(43));
+    mocks.fetch.mockResolvedValue(new Response(new Uint8Array([8, 9]), { headers: {
+        "content-type": "image/webp", "cache-control": "public, max-age=31536000",
+        "x-forever-tee-owner-id": "private", "x-forever-tee-service-secret": "private",
+    } }));
+    const path = `/api/design-drafts/11111111-1111-4111-8111-111111111111/${suffix}?revision=abc`;
+    const response = await GET(new Request(`${origin}${path}`, { headers: {
+        "x-forever-tee-owner-id": "forged", "x-forever-tee-service-secret": "forged",
+    } }));
+    expect(response.status).toBe(200);
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([8, 9]);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-forever-tee-owner-id")).toBeNull();
+    expect(response.headers.get("x-forever-tee-service-secret")).toBeNull();
+    const call = mocks.fetch.mock.calls[0];
+    expect(call?.[0]).toEqual(new URL(`https://worker.example${path.replace("/api/design-drafts", "/v2/design-drafts")}`));
+    expect(call?.[1]?.cache).toBe("no-store");
+    const headers = new Headers(call?.[1]?.headers);
+    expect(headers.get("x-forever-tee-service-secret")).toBe("test-service-secret");
+    expect(headers.get("x-forever-tee-owner-id")).toBe(await anonymousOwnerId("a".repeat(43)));
+});

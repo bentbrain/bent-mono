@@ -1,3 +1,4 @@
+import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { assertReleasePaused, recordReleaseEvent, inspectDevelopmentDrain, resumeVerifiedRelease, verifyPauseSchema } from "./native-release-pause.mjs";
@@ -54,6 +55,8 @@ export async function executeDevelopmentRollback({ cf, store, prepared, target, 
     check(!prepared.worker?.printExecutor || typeof restorePrintExecutor === "function", "executor rollback verifier required before any mutation.");
     check(/^native-\d+$/.test(releaseId) && releaseId !== prepared.releaseId && /^[a-f0-9]{40}$/.test(sourceCommit) &&
         image.review.imageDigest === target.imageDigest && image.review.sourceDigest === target.sourceDigest, "rollback preparation.");
+    const artifact = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
+    assertArtworkMediaBundle(Buffer.from(artifact.body, "base64"));
     await verifyPauseSchema(cf);
     const evidence = { releaseId, sourceCommit, fromReleaseId: prepared.releaseId, target, previous: prepared.previous, plan: image.review };
     await store.save("rollback.json", Buffer.from(JSON.stringify(evidence)));

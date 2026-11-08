@@ -94,7 +94,7 @@ export async function installCameraPreviewFixture(page: Page, processUpload: (up
                 preview: { contentType: "image/webp", base64: preview.toString("base64") },
             } });
     });
-    await page.route(`**/v1/designs/${id}/artwork/preview?**`, route => route.fulfill({
+    await page.route(`**/api/design-drafts/${id}/artwork/preview?**`, route => route.fulfill({
         contentType: "image/webp", body: settings.removeBackground === false ? original : preview,
     }));
     await page.route("**/api/configured-product-families", route => {

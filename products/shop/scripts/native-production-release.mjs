@@ -1,3 +1,4 @@
+import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { measureReleaseStage } from "./release-stage-timing.mjs";
 import { prepareApiImage } from "./native-api-image.mjs";
@@ -182,6 +183,7 @@ export async function rollbackProductionPair(env) {
     const original = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
     check(equal(original.before, prepared.previous.worker), "original Worker preservation.");
     const bytes = await store.read(prepared.artifacts.candidateArtifact);
+    assertArtworkMediaBundle(bytes);
     const content = await workerContentManifest(new Response(bytes));
     check(equal(content, fallback.content) && hash(bytes) === prepared.worker.bundleSha256 &&
         versionResourcesDigest(await cf.version(fallback.workerVersion)) === fallback.versionResourcesSha256, "fallback code/resources unavailable or changed.");
