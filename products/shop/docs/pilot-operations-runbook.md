@@ -113,6 +113,8 @@ rerun the failed workflow, clear other exceptions, or create a replacement order
 
 ## Read-only tools and guarded operations
 
+Before an operational dispatch, follow the private input preparation in the [product README](../README.md). Pin `expected_source` to reviewed current main, seal record fields for the matching workflow and protected environment, and retain the encrypted receipts for recovery.
+
 - Start with `bun run release:status --run RUN_ID` for a release failure. Use the
   recorded journal to resume coordination; never create another journal to
   repeat an uncertain mutation.

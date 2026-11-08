@@ -1,3 +1,4 @@
+import { wranglerCli } from "./deployment-config.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { verifyEditorialSource } from "./editorial-source.mjs";
 import { readBackupContainer } from "./backup-renderer-rollout.mjs";
@@ -63,7 +64,7 @@ async function baseline() {
     const version = await api(`/workers/scripts/${context.worker}/versions/${await activeVersion(context.worker)}`);
     const backup = JSON.parse(await readObject(context.bucket, `editorial/backup/${baselineContext.sourceCommit}/${context.environment}.json`));
     const backupVersion = await activeVersion(context.backup);
-    const container = await readBackupContainer(async (args) => (await execute(process.execPath, [resolve("workers/video-renderer/node_modules/wrangler/bin/wrangler.js"), ...args], { env: child, encoding: "utf8", timeout: 60000 })).stdout, backup.container?.id, BACKUP_ACCOUNT);
+    const container = await readBackupContainer(async (args) => (await execute(process.execPath, [wranglerCli(), ...args], { env: child, encoding: "utf8", timeout: 60000 })).stdout, backup.container?.id, BACKUP_ACCOUNT);
     check(container?.image === backup.image && container.version === backup.container.version && container.state === "ready", "qualified backup container changed.");
     let verified, fallback;
     if (context.environment === "production") {
@@ -150,7 +151,7 @@ await writeFile(config, JSON.stringify({ name, main: entry, account_id: BACKUP_A
 await writeFile(secrets, JSON.stringify({ OPERATION_SECRET: token }), { flag: "wx", mode: 0o600 });
 check((await send(`/workers/scripts/${name}/settings`)).status === 404, "temporary operation identity exists.");
 try {
-    await execute(process.execPath, [resolve("workers/api/node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", config, "--secrets-file", secrets], { env: child, timeout: 180000, maxBuffer: 4 * 1024 * 1024 });
+    await execute(process.execPath, [wranglerCli(), "deploy", "--config", config, "--secrets-file", secrets], { env: child, timeout: 180000, maxBuffer: 4 * 1024 * 1024 });
 }
 catch (error) {
     const diagnostic = [error.stdout, error.stderr].filter(v => typeof v === "string").join("\n").replaceAll(env.CLOUDFLARE_API_TOKEN, "<REDACTED>").replaceAll(token, "<REDACTED>");

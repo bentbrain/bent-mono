@@ -5,6 +5,9 @@
     ".": {
       "entry": [
         "scripts/aws-personal.mjs",
+        "scripts/backup-renderer-release.mjs",
+        "scripts/featured-composition-release.mjs",
+        "scripts/decode-operational-dispatch.mjs",
         "scripts/artwork-preview-benchmark/player.mjs",
         "scripts/*.test.mjs"
       ],
@@ -25,10 +28,12 @@
     },
     "packages/product-image-renderer": {"ignoreBinaries": ["rustc"]},
     "workers/api": {
-      // The operations entry is discovered from the explicit Node workflow commands.
+      // Protected workflow commands load these consumers through a shell block.
+      "entry": ["scripts/product-lifecycle.mjs"]
     },
     "workers/video-renderer": {
       "entry": [
+        "custom/render.mjs",
         "aws-lambda/app-entry.mjs",
         "aws-lambda/benchmark.mjs",
         "aws-lambda/configure-app-secrets.mjs",

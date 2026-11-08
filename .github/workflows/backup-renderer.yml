@@ -1,0 +1,106 @@
+name: Qualify compatible backup renderer
+run-name: Qualify compatible backup renderer · ${{ inputs.environment || 'production' }} · ${{ github.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Bootstrap compatible backup before publishing any composed products
+        type: choice
+        options:
+          - development
+          - production
+        required: true
+      operation:
+        description: Deploy a new backup or qualify an inspected completed deployment
+        type: choice
+        options:
+          - deploy
+          - recover
+        default: deploy
+      expected_source:
+        description: Exact reviewed current main commit
+        type: string
+        required: true
+      private_input:
+        description: Authenticated ciphertext from release:seal-input for this workflow, environment, operation and source
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+defaults:
+  run:
+    working-directory: products/shop
+jobs:
+  release:
+    if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1 && github.actor_id == vars.SHOP_OWNER_ID
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+    env:
+      SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
+      SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
+      SHOP_EVIDENCE_KEY_VERSION: ${{ vars.SHOP_EVIDENCE_KEY_VERSION }}
+      SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ${{ secrets.SHOP_EVIDENCE_PREVIOUS_KEYS_JSON }}
+      SHOP_OPERATION_ENVIRONMENT: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
+      BACKUP_ENVIRONMENT: ${{ inputs.environment }}
+      BACKUP_OPERATION: ${{ inputs.operation }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
+      - name: Validate authenticated operational dispatch
+        run: node scripts/operational-dispatch-guard.mjs
+      - name: Require authoritative exact-main monorepo quality
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile --ignore-scripts
+        working-directory: .
+      - run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Verify bootstrap boundaries
+        run: node --import ./scripts/test-protected-config.mjs --test scripts/backup-renderer-policy.test.mjs scripts/backup-renderer-context.test.mjs scripts/backup-renderer-rollout.test.mjs scripts/editorial-worker-probe.test.mjs scripts/editorial-source.test.mjs
+      - name: Prepare, deploy and qualify the inactive backup
+        run: |
+          node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
+          node --import ./scripts/public-release-logging.mjs --import ./scripts/decode-operational-dispatch.mjs scripts/backup-renderer-release.mjs
+          SHOP_PROTECTED_SHELL
+      - name: Seal private operational receipts and media
+        if: always()
+        run: node --import ./scripts/public-release-logging.mjs scripts/seal-operational-artifacts.mjs
+      - name: Preserve encrypted operational artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: backup-renderer-${{ github.run_id }}
+          path: ${{ runner.temp }}/sealed-operational-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Preserve encrypted operational diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shop-private-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: ${{ runner.temp }}/shop-encrypted-diagnostics/${{ github.job }}/${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 90
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read

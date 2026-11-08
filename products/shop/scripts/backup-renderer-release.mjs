@@ -1,3 +1,4 @@
+import { wranglerCli } from "./deployment-config.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { verifyEditorialSource } from "./editorial-source.mjs";
 import { execFile } from "node:child_process";
@@ -33,7 +34,7 @@ async function run(command, args, cwd = root) {
         throw Error("Backup command failed or its response is uncertain. Intent is retained; do not repeat the deployment.");
     }
 }
-const wrangler = args => run(process.execPath, [join(root, "node_modules/wrangler/bin/wrangler.js"), ...args]);
+const wrangler = args => run(process.execPath, [wranglerCli(), ...args]);
 const cfRoot = `https://api.cloudflare.com/client/v4/accounts/${BACKUP_ACCOUNT}`;
 async function send(path, options = {}) {
     return fetch(cfRoot + path, { ...options, redirect: "error", signal: AbortSignal.timeout(30000),

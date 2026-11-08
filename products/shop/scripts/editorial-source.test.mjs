@@ -24,13 +24,17 @@ test("source pinning permits editorial-only ancestry but rejects changes to qual
     await git(["add", path]); await git(["commit", "-qm", "change fixture"]);
     return git(["rev-parse", "HEAD"]);
   };
-  const tooling = await save("scripts/web-production-release.mjs");
+  const tooling = await save("products/shop/scripts/web-production-release.mjs");
   const evidence = await verifyEditorialSource(source, tooling, run);
-  assert.deepEqual(evidence.changedToolingPaths, ["scripts/web-production-release.mjs"]);
+  assert.deepEqual(evidence.changedToolingPaths, ["products/shop/scripts/web-production-release.mjs"]);
   await assert.rejects(verifyEditorialSource(source, source, run), /checkout differs/);
   await assert.rejects(verifyEditorialSource(tooling, source, run));
-  for (const path of ["workers/api/src/index.ts", "workers/video-renderer/src/renderer.mjs", "apps/web/src/app/page.tsx",
-    "bun.lock", "scripts/fixtures/content/featured-398-approved.json", "scripts/featured-composition-records.mjs", "scripts/native-production-release.mjs"]) {
+  const operational = await save(".github/workflows/backup-renderer.yml");
+  await verifyEditorialSource(source, operational, run);
+  await git(["reset", "--hard", tooling]);
+  for (const path of ["scripts/web-production-release.mjs", ".github/workflows/quality.yml", "packages/ui/src/button.tsx",
+    "products/shop/workers/api/src/index.ts", "products/shop/workers/video-renderer/src/renderer.mjs", "products/shop/apps/web/src/app/page.tsx",
+    "bun.lock", "products/shop/scripts/fixtures/content/featured-398-approved.json", "products/shop/scripts/featured-composition-records.mjs", "products/shop/scripts/native-production-release.mjs"]) {
     const changed = await save(path);
     await assert.rejects(verifyEditorialSource(source, changed, run), /qualified application, artwork or release inputs changed/);
     await git(["reset", "--hard", tooling]);

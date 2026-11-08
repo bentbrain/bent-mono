@@ -1,4 +1,4 @@
-import { appendFile, readFile, stat } from "node:fs/promises";
+import { appendFile, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadFeaturedRenderInputs, sha256 } from "./inputs.mjs";
 import { renderFeaturedVideo } from "./renderer.mjs";
@@ -20,9 +20,6 @@ const manifest = {
   layersOuterToInner: input.layers.map(({ artwork, ...metadata }) => ({ ...metadata, artworkBytes: artwork.length })),
   quality: result.quality, frameCount: result.frameCount, outputs,
 };
+await writeFile(resolve(outputDirectory, "manifest.json"), JSON.stringify(manifest), { flag: "wx", mode: 0o600 });
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY,
-  `Rendered ${input.layers.length} current featured cutouts at 2160 × 3840, 60 fps.\n\n` +
-  `Final product: \`${input.finalProductId}\`, ${input.baseProductSlug}, ${input.color}.\n\n` +
-  "Download the artifact below for featured.mp4.\n\n" +
-  "<details><summary>Render details</summary>\n\n```json\n" +
-  `${JSON.stringify(manifest, null, 2)}\n` + "```\n</details>\n");
+  "Featured video rendered. Recover the encrypted operational artifact in private storage.\n");

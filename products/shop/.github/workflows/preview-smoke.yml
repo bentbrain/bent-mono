@@ -68,7 +68,7 @@ jobs:
           FOREVER_TEE_API_URL: ${{ vars.WORKER_URL }}
           FOREVER_TEE_ENFORCE_WORKER_RELEASE: '1'
         run: node apps/web/scripts/verify-worker-release.mjs
-      - uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
