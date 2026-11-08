@@ -33,6 +33,8 @@ export const TRUST_INVENTORY = ["aws_iam_policy.ci_boundary", "aws_iam_role.ci",
     "aws_s3_bucket_server_side_encryption_configuration.state", "aws_s3_bucket_versioning.state", "aws_iam_policy.production_ci_boundary", "aws_iam_role.production_ci", "aws_iam_role_policy.production_ci",
     "aws_iam_policy.production_runtime_boundary", "aws_iam_policy.production_failures_boundary", "aws_iam_policy.production_invoker_boundary", "aws_iam_role.production_runtime", "aws_iam_role.production_failures",
     "aws_iam_role_policy.production_runtime", "aws_iam_role_policy.production_failures", "aws_iam_user.production_invoker", "aws_iam_user_policy.production_invoker", "data.aws_iam_openid_connect_provider.github"].sort();
+const OIDC_DATA = "data.aws_iam_openid_connect_provider.github";
+const MANAGED_INVENTORY = TRUST_INVENTORY.filter(name => name !== OIDC_DATA);
 const address = item => `${item.mode === "data" ? "data." : ""}${item.type}.${item.name}`;
 const values = state => new Map(state.resources.map(item => [address(item), item.instances[0].attributes]));
 const read = path => readRegularFile(path, { privateOnly: true, maxBytes: 64 * 1024 * 1024, minBytes: 1 });
@@ -63,12 +65,12 @@ function inspectTrustState(state, baseline) {
         typeof state.lineage === "string" && /^[a-f0-9-]{36}$/.test(state.lineage) && Number.isSafeInteger(state.serial) && state.serial >= 0 && baseline.original.accountId === PERSONAL_ACCOUNT && baseline.original.region === "ap-southeast-2" && baseline.original.backendKey === "story-video/bootstrap/terraform.tfstate", "approved original lineage and fresh serial required.");
     check(same(state.resources?.map(address).sort(), TRUST_INVENTORY), "complete fixed bootstrap inventory.");
     for (const item of state.resources) {
-        check(!item.module && !item.each && item.provider === PROVIDER && item.instances?.length === 1 &&
+        check(["managed", "data"].includes(item.mode) && !item.module && !item.each && item.provider === PROVIDER && item.instances?.length === 1 &&
             !item.instances[0].status && !item.instances[0].deposed && item.instances[0].index_key === undefined &&
             typeof item.instances[0].attributes?.id === "string" && item.instances[0].attributes.id.length > 0, "existing single untainted resource identity/provider required.");
     }
     const data = values(state).get("data.aws_iam_openid_connect_provider.github");
-    check(data.arn === OIDC && data.url === "token.actions.githubusercontent.com" && Array.isArray(data.client_id_list) &&
+    check(data.id === OIDC && data.arn === OIDC && data.url === "token.actions.githubusercontent.com" && Array.isArray(data.client_id_list) &&
         data.client_id_list.some(audience => audience === "sts.amazonaws.com"), "existing read-only OIDC data ownership.");
     for (const spec of Object.values(trustEnvironments)) {
         const role = values(state).get(spec.role);
@@ -92,11 +94,43 @@ function observedBefore(state, baseline) {
     }
     return result;
 }
+// Terraform 1.12.2 saves refreshed read-only data in prior_state. It omits
+// that lookup from both resource_changes and planned_values. Bind the full
+// refreshed inventory and its source/provider before inspecting managed actions.
+function inspectPlanBindings(plan, baseline, beforeValues) {
+    const prior = plan.prior_state;
+    check(prior?.format_version === "1.0" && prior.terraform_version === "1.12.2", "pinned prior-state JSON format required.");
+    const inspectValues = (module, inventory, expected) => {
+        check(module && !module.child_modules?.length && same(module.resources?.map(item => item.address).sort(), inventory), "exact root-module value inventory required.");
+        for (const item of module.resources) {
+            const raw = baseline.state.resources.find(resource => address(resource) === item.address);
+            check(item.mode === raw.mode && item.type === raw.type && item.name === raw.name && item.provider_name === AWS &&
+                item.schema_version === raw.instances[0].schema_version && item.index === undefined && !item.deposed &&
+                same(item.values, expected.get(item.address)), "saved values must match exact refreshed/planned resource identity and content.");
+        }
+    };
+    inspectValues(prior.values?.root_module, TRUST_INVENTORY, beforeValues);
+    inspectValues(plan.planned_values?.root_module, MANAGED_INVENTORY, new Map(plan.resource_changes.map(item => [item.address, item.change.after])));
+    const outputs = Object.fromEntries(Object.entries(baseline.state.outputs).map(([name, item]) => [name, { sensitive: false, ...item }]));
+    check(same(prior.values.outputs, outputs) && same(plan.planned_values.outputs, outputs), "complete unchanged prior and planned outputs required.");
+    const config = plan.configuration, module = config?.root_module, provider = config?.provider_config?.aws;
+    check(same(Object.keys(config?.provider_config ?? {}), ["aws"]) && provider.name === "aws" && provider.full_name === AWS &&
+        provider.version_constraint === "6.62.0" && !provider.alias && !provider.module_address &&
+        module && !Object.keys(module.module_calls ?? {}).length && same(module.resources?.map(item => item.address).sort(), TRUST_INVENTORY), "exact root source inventory and locked AWS provider required.");
+    for (const item of module.resources) {
+        const raw = baseline.state.resources.find(resource => address(resource) === item.address);
+        check(item.mode === raw.mode && item.type === raw.type && item.name === raw.name && item.provider_config_key === "aws" &&
+            item.schema_version === raw.instances[0].schema_version && !item.count_expression && !item.for_each_expression, "single fixed source resource/provider binding required.");
+        if (item.address === OIDC_DATA)
+            check(same(item.expressions, { arn: { constant_value: OIDC } }), "read-only lookup must use the exact constant OIDC provider identity.");
+    }
+}
 export function inspectRepositoryTrustPlan(plan, baseline, stage, noOp = false) {
     inspectTrustState(baseline.state, baseline);
-    check(plan.terraform_version === "1.12.2" && plan.complete === true && plan.errored === false && plan.applyable === !noOp &&
-        !plan.deferred_changes?.length && same(plan.resource_changes?.map(item => item.address).sort(), TRUST_INVENTORY), "complete refreshed saved plan and exact inventory required.");
+    check(plan.format_version === "1.2" && plan.terraform_version === "1.12.2" && plan.complete === true && plan.errored === false && plan.applyable === !noOp &&
+        (plan.deferred_changes === undefined || same(plan.deferred_changes, [])) && same(plan.resource_changes?.map(item => item.address).sort(), MANAGED_INVENTORY), "complete refreshed saved plan and exact inventory required.");
     const beforeValues = noOp ? values(baseline.state) : observedBefore(baseline.state, baseline);
+    inspectPlanBindings(plan, baseline, beforeValues);
     const drifts = plan.resource_drift ?? [];
     check(drifts.length === (noOp ? 0 : baseline.parentObservations.length), "unknown resource drift rejected.");
     for (const drift of drifts) {
@@ -107,8 +141,9 @@ export function inspectRepositoryTrustPlan(plan, baseline, stage, noOp = false) 
     }
     for (const item of plan.resource_changes) {
         const { before, after, actions, after_unknown: unknown } = item.change;
-        check(item.provider_name === AWS && item.mode === (item.address.startsWith("data.") ? "data" : "managed") && !item.previous_address &&
-            !item.change.importing && !item.deposed && !hasUnknown(unknown) && same(before, beforeValues.get(item.address)), "resolved current values, no import/move/provider/identity changes.");
+        const raw = baseline.state.resources.find(resource => address(resource) === item.address);
+        check(item.provider_name === AWS && item.mode === "managed" && item.type === raw.type && item.name === raw.name && item.index === undefined && !item.previous_address &&
+            !item.change.importing && !item.deposed && same(item.change.before_identity, item.change.after_identity) && !hasUnknown(unknown) && same(before, beforeValues.get(item.address)), "resolved current values, no import/move/provider/identity changes.");
         if (!noOp && item.address === trustEnvironments[stage].role) {
             const spec = trustEnvironments[stage];
             const oldTrust = exactTrust(before.assume_role_policy, `${baseline.original.subjectPrefix}:environment:${spec.environment}`);
@@ -117,7 +152,7 @@ export function inspectRepositoryTrustPlan(plan, baseline, stage, noOp = false) 
             exactTrust(after.assume_role_policy, `${targetPrefix()}:environment:${spec.environment}`);
             check(same(actions, ["update"]) && same(policy(after.assume_role_policy), next) &&
                 same({ ...after, assume_role_policy: before.assume_role_policy }, before), "only selected role's one subject scalar may change.");
-        } else check(same(actions, ["no-op"]) && same(before, after), "all other resources including unselected CI trust must be no-op.");
+        } else check(same(actions, ["no-op"]) && same(before, after), "all other managed resources including unselected CI trust must be no-op.");
     }
     const outputs = baseline.state.outputs;
     check(same(Object.keys(plan.output_changes ?? {}).sort(), Object.keys(outputs).sort()), "complete unchanged output inventory.");
