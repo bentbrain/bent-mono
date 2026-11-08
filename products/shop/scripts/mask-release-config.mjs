@@ -1,4 +1,4 @@
-// Register each protected leaf before any tooling runs. A JSON secret alone
+// Register each protected leaf before operational inspections. A JSON secret alone
 // does not mask individual identities or embedded evidence fields in errors.
 const values = new Set();
 function collect(value, publicIdentityRoot = false) {
