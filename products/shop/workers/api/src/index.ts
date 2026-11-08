@@ -5,17 +5,21 @@ import { completePendingProductFamilies } from "./pending-product-families";
 import { executeArtworkPreparation, isArtworkPreparationMessage, recoverArtworkPreparation } from "./artwork-preparation-jobs";
 import { productPreviewResponse, ensureProductImages, legacyProductImageResponse, productImageResponse, productImageTransfer, reconcileProductImages } from "./product-images";
 import {
+  HttpApi,
   HttpApiBuilder,
+  HttpApiGroup,
+  HttpRouter,
   HttpServer,
+  HttpServerResponse,
 } from "@effect/platform";
 import {
   DependencyUnavailable,
   DesignNotFound as PublicDesignNotFound,
   ForeverTeeApi,
+  DesignsGroup,
+  ProductsGroup,
   InvalidRequest,
   ProductNotFound as PublicProductNotFound,
-  RateLimitExceeded,
-  type BackgroundRemovalQuality,
 } from "@forever-tee/contracts";
 import { Cause, Effect, Layer } from "effect";
 
@@ -26,7 +30,6 @@ import {
   handleCatalogueRequest,
   runScheduledCatalogueRefresh,
 } from "./catalogue-api";
-import { rateLimitAllows } from "./abuse-controls";
 import { enqueuePrintAssetJobs, consumePrintAssetQueue, recoverPrintAssetJobs, type PrintAssetJobEnv } from "./print-asset-jobs";
 import { cleanupPrintStaging } from "./print-asset-staging";
 import {
@@ -34,26 +37,12 @@ import {
 } from "./anonymous-design-api";
 import { makeDesignRepositoryLayer } from "./design-repository";
 import { handleImmutableProductRequest } from "./immutable-product-api";
-import {
-  JPEG_CONTENT_TYPE,
-  hasJpegMagic,
-  MAX_SOURCE_BYTES,
-  processJpeg,
-} from "./image-processing";
-import {
-  makeOpenAiSafetyScreeningClient,
-  type SafetyScreeningClient,
-} from "./openai-safety-screening";
-import { processPortraitForStorage } from "./portrait-processing";
-import { takeProviderToken } from "./provider-admission";
+import type { SafetyScreeningClient } from "./openai-safety-screening";
 import type { IntegrationEnv } from "./integration-config";
 import {
-  createDesign,
   getDesign,
   getDesignArtwork,
   getDesignArtworkPreview,
-  uploadDesignArtwork,
-  updateDesignSettings,
 } from "./design-programs";
 import type { ProductDomainError } from "./product-errors";
 import { makeProductRepositoryLayer } from "./product-repository";
@@ -67,7 +56,6 @@ import {
   runScheduledVariantMappingRefresh,
 } from "./variant-mapping-api";
 import {
-  createConfiguredProduct,
   getProduct,
   getProductFamily,
 } from "./product-programs";
@@ -149,230 +137,90 @@ const observeFailure = (operation: string, requestId: string, designId?: string)
       ),
     );
 
-const removeBackground = (
-  env: ApiEnv,
-  bytes: Uint8Array,
-  contentType: string,
-  quality: BackgroundRemovalQuality,
-  quotaKey: string,
-) =>
-  Effect.gen(function*() {
-    if (contentType !== JPEG_CONTENT_TYPE) {
-      return yield* Effect.fail(new InvalidRequest({ message: "Upload a JPEG image." }));
-    }
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_SOURCE_BYTES) {
-      return yield* Effect.fail(
-        new InvalidRequest({ message: "Images must be between 1 byte and 20 MB." }),
-      );
-    }
-    const result = yield* Effect.tryPromise({
-      try: () => processJpeg(env.IMAGES, bytes, quality, async () =>
-        await rateLimitAllows(env.LEGACY_IMAGE_PROCESS_RATE_LIMIT, quotaKey) &&
-        (await takeProviderToken(env.DB, "portrait")).allowed
-      ),
-      catch: () =>
-        new DependencyUnavailable({ message: "Image processing is unavailable." }),
-    });
-    if (result.ok) return result.bytes;
-    if (result.reason === "quota") {
-      return yield* Effect.fail(new RateLimitExceeded({ message: "Too many images. Try again shortly." }));
-    }
-    if (result.reason === "invalid" || result.reason === "output-too-large") {
-      return yield* Effect.fail(new InvalidRequest({ message: "Upload a supported JPEG image." }));
-    }
-    return yield* Effect.fail(
-      new DependencyUnavailable({ message: "Image processing is unavailable." }),
-    );
-  }).pipe(Effect.withSpan("portrait.removeBackground"));
+function legacyEndpoint<Endpoint extends { readonly name: string }, Name extends Endpoint["name"]>(
+  endpoints: readonly Endpoint[], name: Name,
+) {
+  const endpoint = endpoints.find((candidate): candidate is Extract<Endpoint, { readonly name: Name }> => candidate.name === name);
+  if (!endpoint) throw new Error(`Legacy endpoint is unavailable: ${name}`);
+  return endpoint;
+}
 
-const screenPortraitForStorage = (
-  env: ApiEnv,
-  bytes: Uint8Array,
-  contentType: string,
-  quotaKey: string,
-) =>
-  Effect.gen(function*() {
-    if (contentType !== JPEG_CONTENT_TYPE) {
-      return yield* Effect.fail(new InvalidRequest({ message: "Upload a JPEG image." }));
-    }
-    let screeningClient: SafetyScreeningClient;
-    try {
-      screeningClient = env.SAFETY_SCREENING ??
-        makeOpenAiSafetyScreeningClient(env);
-    } catch {
-      return yield* Effect.fail(new DependencyUnavailable({
-        message: "Photo screening is temporarily unavailable. Please try again.",
-      }));
-    }
-    const result = yield* Effect.tryPromise({
-      try: () => processPortraitForStorage(
-        env.IMAGES,
-        bytes,
-        async () => await rateLimitAllows(env.LEGACY_IMAGE_PROCESS_RATE_LIMIT, quotaKey) &&
-          (await takeProviderToken(env.DB, "portrait")).allowed,
-        screeningClient,
-      ),
-      catch: () => new DependencyUnavailable({
-        message: "Image processing is temporarily unavailable. Please try again.",
-      }),
-    });
-    if (result.ok) return result;
-    if (result.reason === "quota") {
-      return yield* Effect.fail(new RateLimitExceeded({
-        message: "Too many images. Try again shortly.",
-      }));
-    }
-    if (result.reason === "invalid" || result.reason === "output-too-large") {
-      return yield* Effect.fail(new InvalidRequest({
-        message: "Upload a supported JPEG image.",
-      }));
-    }
-    if (result.reason === "blocked") {
-      return yield* Effect.fail(new InvalidRequest({
-        message: "That photo can't be used. Please choose another.",
-      }));
-    }
-    return yield* Effect.fail(new DependencyUnavailable({
-      message: result.reason === "screening-dependency"
-        ? "Photo screening is temporarily unavailable. Please try again."
-        : "Image processing is temporarily unavailable. Please try again.",
-    }));
-  }).pipe(Effect.withSpan("portrait.screenForStorage"));
+const legacyDesigns = Object.values(ForeverTeeApi.groups).find(
+  (group): group is typeof DesignsGroup => group.identifier === DesignsGroup.identifier,
+);
+const legacyProducts = Object.values(ForeverTeeApi.groups).find(
+  (group): group is typeof ProductsGroup => group.identifier === ProductsGroup.identifier,
+);
+if (!legacyDesigns || !legacyProducts) throw new Error("Legacy API groups are unavailable.");
+const designEndpoints = Object.values(legacyDesigns.endpoints);
+const productEndpoints = Object.values(legacyProducts.endpoints);
 
-const makeDesignApiLayer = (env: ApiEnv, requestId: string, quotaKey: string) =>
-  HttpApiBuilder.group(ForeverTeeApi, "designs", (handlers) =>
-    handlers
-      .handle("removeBackground", ({ headers, payload }) =>
-        removeBackground(
-          env,
-          payload,
-          headers["content-type"],
-          headers["x-background-removal-quality"] ?? "print",
-          quotaKey,
-        ).pipe(
-          observeFailure("removeBackground", requestId),
-        ),
-      )
-      .handle("createDesign", () =>
-        createDesign().pipe(
-          Effect.map((design) => ({ id: design.id })),
-          Effect.mapError(mapDesignError),
-          observeFailure("createDesign", requestId),
-        ),
-      )
-      .handle("uploadDesignArtwork", ({ path, headers, payload }) =>
-        screenPortraitForStorage(
-          env,
-          payload,
-          headers["content-type"],
-          quotaKey,
-        ).pipe(
-          Effect.flatMap((processed) =>
-            uploadDesignArtwork(
-              path.id,
-              processed.bytes,
-              "image/png",
-              headers["x-design-settings"],
-              processed.screening,
-            ).pipe(Effect.mapError(mapDesignError))
-          ),
-          Effect.map((design) => ({
-            id: design.id,
-            artworkUrl: design.artworkUrl,
-            updatedAt: design.updatedAt,
-          })),
-          observeFailure("uploadDesignArtwork", requestId, path.id),
-        ),
-      )
-      .handle("processDesignArtwork", ({ path, headers, payload }) =>
-        screenPortraitForStorage(
-          env,
-          payload,
-          headers["content-type"],
-          quotaKey,
-        ).pipe(
-          Effect.flatMap((processed) =>
-            uploadDesignArtwork(
-              path.id,
-              processed.bytes,
-              "image/png",
-              undefined,
-              processed.screening,
-            ).pipe(
-              Effect.mapError(mapDesignError),
-            )
-          ),
-          Effect.map((design) => ({
-            id: design.id,
-            artworkUrl: design.artworkUrl,
-            updatedAt: design.updatedAt,
-          })),
-          observeFailure("processDesignArtwork", requestId, path.id),
-        ),
-      )
-      .handle("getDesign", ({ path }) =>
-        getDesign(path.id).pipe(
-          Effect.mapError(mapDesignError),
-          observeFailure("getDesign", requestId, path.id),
-        ),
-      )
-      .handle("updateDesign", ({ path, payload }) =>
-        updateDesignSettings(path.id, payload).pipe(
-          Effect.map((design) => ({
-            id: design.id,
-            updatedAt: design.updatedAt,
-          })),
-          Effect.mapError(mapDesignError),
-          observeFailure("updateDesign", requestId, path.id),
-        ),
-      )
-      .handle("getArtwork", ({ path }) =>
-        getDesignArtwork(path.id).pipe(
-          Effect.map(({ bytes }) => bytes),
-          Effect.mapError(mapDesignError),
-          observeFailure("getArtwork", requestId, path.id),
-        ),
-      )
-      .handle("getArtworkPreview", ({ path }) =>
-        getDesignArtworkPreview(path.id).pipe(
-          Effect.map(({ bytes }) => bytes),
-          Effect.mapError(mapDesignError),
-          observeFailure("getArtworkPreview", requestId, path.id),
-        ),
-      ),
-  );
+// Keep successful legacy reads on their existing schemas. Retired writes use
+// the same router's endpoint paths, with no payload or header decoding.
+const LegacyReadApi = HttpApi.make(ForeverTeeApi.identifier)
+  .add(HttpApiGroup.make("designs")
+    .add(legacyEndpoint(designEndpoints, "getDesign"))
+    .add(legacyEndpoint(designEndpoints, "getArtwork"))
+    .add(legacyEndpoint(designEndpoints, "getArtworkPreview"))
+    .addError(legacyDesigns.errorSchema))
+  .add(HttpApiGroup.make("products")
+    .add(legacyEndpoint(productEndpoints, "getProduct"))
+    .add(legacyEndpoint(productEndpoints, "getProductFamily"))
+    .addError(legacyProducts.errorSchema))
+  .addError(ForeverTeeApi.errorSchema);
+
+const retiredLegacyEndpoints = [
+  legacyEndpoint(designEndpoints, "removeBackground"),
+  legacyEndpoint(designEndpoints, "createDesign"),
+  legacyEndpoint(designEndpoints, "uploadDesignArtwork"),
+  legacyEndpoint(designEndpoints, "processDesignArtwork"),
+  legacyEndpoint(designEndpoints, "updateDesign"),
+  legacyEndpoint(productEndpoints, "createConfiguredProduct"),
+];
+
+const retiredLegacyRoutes = HttpApiBuilder.Router.use(router => Effect.forEach(
+  retiredLegacyEndpoints,
+  endpoint => router.addRoute(HttpRouter.makeRoute(endpoint.method, endpoint.path,
+    Effect.sync(() => HttpServerResponse.unsafeJson({ error: {
+      code: "LEGACY_WRITE_RETIRED", message: "Use the current design upload flow.",
+    } }, { status: 410, headers: {
+      "Cache-Control": "no-store", Deprecation: "true", Link: "</v2/design-drafts>; rel=successor-version",
+    } })))),
+  { discard: true },
+));
+
+const makeDesignApiLayer = (requestId: string) =>
+  HttpApiBuilder.group(LegacyReadApi, "designs", handlers => handlers
+    .handle("getDesign", ({ path }) => getDesign(path.id).pipe(
+      Effect.mapError(mapDesignError), observeFailure("getDesign", requestId, path.id),
+    ))
+    .handle("getArtwork", ({ path }) => getDesignArtwork(path.id).pipe(
+      Effect.map(({ bytes }) => bytes), Effect.mapError(mapDesignError),
+      observeFailure("getArtwork", requestId, path.id),
+    ))
+    .handle("getArtworkPreview", ({ path }) => getDesignArtworkPreview(path.id).pipe(
+      Effect.map(({ bytes }) => bytes), Effect.mapError(mapDesignError),
+      observeFailure("getArtworkPreview", requestId, path.id),
+    )));
 
 const makeProductApiLayer = (requestId: string) =>
-  HttpApiBuilder.group(ForeverTeeApi, "products", (handlers) =>
-    handlers
-      .handle("getProduct", ({ path }) =>
-        getProduct(path.id).pipe(
-          Effect.mapError(mapProductError),
-          observeFailure("getProduct", requestId, path.id),
-        ),
-      )
-      .handle("getProductFamily", ({ path }) =>
-        getProductFamily(path.id).pipe(
-          Effect.mapError(mapProductError),
-          observeFailure("getProductFamily", requestId, path.id),
-        ),
-      )
-      .handle("createConfiguredProduct", ({ payload }) =>
-        createConfiguredProduct(payload.baseProductId, payload.designId).pipe(
-          Effect.mapError(mapProductError),
-          observeFailure("createConfiguredProduct", requestId, payload.designId),
-        ),
-      ),
-  );
+  HttpApiBuilder.group(LegacyReadApi, "products", handlers => handlers
+    .handle("getProduct", ({ path }) => getProduct(path.id).pipe(
+      Effect.mapError(mapProductError), observeFailure("getProduct", requestId, path.id),
+    ))
+    .handle("getProductFamily", ({ path }) => getProductFamily(path.id).pipe(
+      Effect.mapError(mapProductError), observeFailure("getProductFamily", requestId, path.id),
+    )));
 
-const makeHandler = (env: ApiEnv, requestId: string, quotaKey: string) =>
+const makeHandler = (env: ApiEnv, requestId: string) =>
   HttpApiBuilder.toWebHandler(
     Layer.merge(
-      HttpApiBuilder.api(ForeverTeeApi).pipe(
+      HttpApiBuilder.api(LegacyReadApi).pipe(
         Layer.provide(
-          Layer.merge(
-            makeDesignApiLayer(env, requestId, quotaKey),
+          Layer.mergeAll(
+            makeDesignApiLayer(requestId),
             makeProductApiLayer(requestId),
+            retiredLegacyRoutes,
           ).pipe(
             Layer.provide(
               Layer.merge(
@@ -551,67 +399,16 @@ async function routeRequest(request: Request, env: ApiEnv, context?: Pick<Execut
         }), origin, allowedOrigins);
       }
     }
-    if (isLegacyDraftMutation(request)) {
-      return withLegacyCors(Response.json({ error: {
-        code: "LEGACY_WRITE_RETIRED", message: "Use the current design upload flow.",
-      } }, { status: 410, headers: {
-        "Cache-Control": "no-store", Deprecation: "true", Link: "</v2/design-drafts>; rel=successor-version",
-      } }), origin, env);
-    }
-    const legacyPaidProcessing = isLegacyPaidProcessingPath(requestPath, request.method);
-    const legacyMutation = isRetainedLegacyMutationPath(requestPath, request.method);
-    const clientDigest = legacyPaidProcessing || legacyMutation
-      ? await clientAddressDigest(request)
-      : "not-applicable";
-    const quotaKey = legacyPaidProcessing || legacyMutation
-      ? `legacy:${clientDigest}`
-      : "legacy:not-applicable";
-    if (
-      legacyMutation &&
-      !await rateLimitAllows(
-        env.LEGACY_MUTATION_RATE_LIMIT,
-        `legacy-mutation:${clientDigest}`,
-      )
-    ) return withLegacyCors(rateLimited(), origin, env);
-    let effectiveRequest = request;
-    if (isLegacyArtworkWritePath(requestPath, request.method)) {
-      const validated = await validateLegacyArtworkRequest(request);
-      if (validated instanceof Response) {
-        return withLegacyCors(validated, origin, env);
-      }
-      effectiveRequest = new Request(request, { body: validated });
-    }
-    if (isLegacyDraftMutation(request)) {
-      console.warn("bent.shop deprecated v1 draft mutation called", {
-        method: request.method,
-        path: new URL(request.url).pathname,
-      });
-    }
-    const { dispose, handler } = makeHandler(env, requestId, quotaKey);
+    const { dispose, handler } = makeHandler(env, requestId);
     try {
-      const response = await handler(effectiveRequest);
+      const response = await handler(request);
       const headers = new Headers(response.headers);
       if (response.status === 429) headers.set("Retry-After", "60");
       legacyCorsHeaders(origin, env.WEB_ORIGIN ?? "http://localhost:3000").forEach((value, key) => {
         headers.set(key, value);
       });
-      if (legacyRequestPath(request).startsWith("/v1/designs/")) {
-        headers.set("Cache-Control", "no-store");
-      }
-      if (isLegacyDraftMutation(request)) {
-        headers.set("Deprecation", "true");
-        headers.set("Link", "</v2/design-drafts>; rel=successor-version");
-      }
-      if (response.status === 429 && !headers.has("Retry-After")) {
-        headers.set("Retry-After", "86400");
-      }
-      if (
-        response.status === 503 &&
-        isLegacyArtworkWritePath(requestPath, request.method) &&
-        !headers.has("Retry-After")
-      ) {
-        headers.set("Retry-After", "5");
-      }
+      // Every response from the legacy read/retirement router is revocable.
+      headers.set("Cache-Control", "no-store");
       return new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
@@ -700,106 +497,6 @@ function withCors(
     headers,
   });
 }
-
-function legacyRequestPath(request: Request) {
-  const path = new URL(request.url).pathname;
-  try { return decodeURIComponent(path); } catch { return path; }
-}
-
-function isLegacyDraftMutation(request: Request) {
-  const path = legacyRequestPath(request).replace(/\/+$/, "");
-  return request.method !== "GET" && request.method !== "HEAD" &&
-    (path === "/v1/background-removal" || path === "/v1/designs" || path === "/v1/products" ||
-      path.startsWith("/v1/designs/"));
-}
-
-function isLegacyPaidProcessingPath(path: string, method: string) {
-  return (method === "POST" && path === "/v1/background-removal") ||
-    (method === "PUT" && /^\/v1\/designs\/[0-9a-f-]{36}\/artwork\/background-removal$/.test(path));
-}
-
-function isRetainedLegacyMutationPath(path: string, method: string) {
-  return (method === "POST" && path === "/v1/designs") ||
-    isLegacyArtworkWritePath(path, method);
-}
-
-function isLegacyArtworkWritePath(path: string, method: string) {
-  return method === "PUT" &&
-    /^\/v1\/designs\/[0-9a-f-]{36}\/artwork(?:\/background-removal)?$/.test(path);
-}
-
-async function validateLegacyArtworkRequest(request: Request) {
-  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim();
-  if (contentType !== JPEG_CONTENT_TYPE) {
-    return legacyBoundaryError(415, "Upload a JPEG image.");
-  }
-  const declaredText = request.headers.get("content-length");
-  if (!declaredText || !/^\d+$/.test(declaredText)) {
-    return legacyBoundaryError(411, "A valid Content-Length is required.");
-  }
-  const declared = Number(declaredText);
-  if (!Number.isSafeInteger(declared) || declared <= 0 || declared > MAX_SOURCE_BYTES) {
-    return legacyBoundaryError(413, "The image must be no larger than 20 MB.");
-  }
-  const bytes = await readBoundedRequestBody(request, MAX_SOURCE_BYTES);
-  if (bytes?.byteLength !== declared) {
-    return legacyBoundaryError(400, "Content-Length does not match the image body.");
-  }
-  if (!hasJpegMagic(bytes)) {
-    return legacyBoundaryError(415, "Upload a valid JPEG image.");
-  }
-  return bytes;
-}
-
-async function readBoundedRequestBody(request: Request, maximum: number) {
-  if (!request.body) return undefined;
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  let next = await reader.read();
-  while (!next.done) {
-    length += next.value.byteLength;
-    if (length > maximum) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(next.value);
-    next = await reader.read();
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
-function legacyBoundaryError(status: number, message: string) {
-  return Response.json({ error: { code: "BAD_REQUEST", message } }, { status });
-}
-
-async function clientAddressDigest(request: Request) {
-  const address = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function rateLimited() {
-  return Response.json(
-    { error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } },
-    { headers: { "Retry-After": "60" }, status: 429 },
-  );
-}
-
-function withLegacyCors(response: Response, origin: string | null, env: ApiEnv) {
-  const headers = new Headers(response.headers);
-  legacyCorsHeaders(origin, env.WEB_ORIGIN ?? "http://localhost:3000").forEach(
-    (value, key) => { headers.set(key, value); },
-  );
-  return new Response(response.body, { headers, status: response.status });
-}
-
 
 export default worker;
 

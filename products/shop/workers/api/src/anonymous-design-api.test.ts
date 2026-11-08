@@ -820,6 +820,60 @@ describe("anonymous draft ownership", () => {
         expect(response.headers.get("Deprecation")).toBe("true");
         expect(imageTransformCount).toBe(0);
     });
+    it.each([
+        { method: "POST", path: "/V1/BACKGROUND-REMOVAL" },
+        { method: "POST", path: "/v1//background-removal" },
+        { method: "POST", path: "/v1/background-removal;ignored=yes" },
+        { method: "POST", path: "/%76%31/%62ackground-removal;ignored=%ZZ" },
+        { method: "POST", path: "/V1/DESIGNS" },
+        { method: "POST", path: "//v1//designs/" },
+        { method: "POST", path: "/v1/designs;ignored=yes" },
+        { method: "POST", path: "/V1/PRODUCTS" },
+        { method: "POST", path: "//v1//products/" },
+        { method: "POST", path: "/v1/products;ignored=yes" },
+        { method: "PUT", path: "/V1/DESIGNS/:id/artwork" },
+        { method: "PUT", path: "/v1//designs/:id/artwork" },
+        { method: "PUT", path: "/%76%31/%64esigns/:id/artwork;ignored=%ZZ" },
+        { method: "PUT", path: "/V1/DESIGNS/:id/ARTWORK/BACKGROUND-REMOVAL" },
+        { method: "PUT", path: "/v1//designs/:id/artwork/background-removal" },
+        { method: "PUT", path: "/v1/designs/:id/artwork/background-removal;ignored=yes" },
+        { method: "PATCH", path: "/V1/DESIGNS/:id" },
+        { method: "PATCH", path: "/v1//designs/:id" },
+        { method: "PATCH", path: "/%76%31/%64esigns/:id;ignored=%ZZ" },
+    ])("retires matched legacy route $method $path before request decoding", async ({ method, path }) => {
+        const id = await createDraft();
+        const env = workerEnv();
+        const decode = vi.spyOn(Request.prototype, "arrayBuffer");
+        const text = vi.spyOn(Request.prototype, "text");
+        const json = vi.spyOn(Request.prototype, "json");
+        const form = vi.spyOn(Request.prototype, "formData");
+        const blob = vi.spyOn(Request.prototype, "blob");
+        const screen = vi.spyOn(fakeSafetyScreening, "screen");
+        const info = vi.spyOn(fakeImages, "info");
+        const ownerLimit = vi.spyOn(env.OWNER_MUTATION_RATE_LIMIT, "limit");
+        const imageLimit = vi.spyOn(env.IMAGE_PROCESS_RATE_LIMIT, "limit");
+        const legacyLimit = vi.spyOn(env.LEGACY_IMAGE_PROCESS_RATE_LIMIT, "limit");
+        const mutationLimit = vi.spyOn(env.LEGACY_MUTATION_RATE_LIMIT, "limit");
+        for (const malformed of [false, true]) {
+            const headers = new Headers();
+            if (!malformed) {
+                headers.set("content-type", "image/jpeg");
+                headers.set("x-design-settings", JSON.stringify({ cropX: 0.5, cropY: 0.5, cropZoom: 1, placementX: 0.39, placementY: 0.43, placementWidth: 0.22, depth: 5 }));
+            }
+            const incoming = new Request(`https://api.example.com${path.replace(":id", id)}`, {
+                method, headers, body: malformed ? "invalid request body" : JPEG_BYTES,
+            });
+            const response = await handleRequest(incoming, env);
+            expect(response.status).toBe(410);
+            expect(response.headers.get("cache-control")).toBe("no-store");
+            expect(response.headers.get("deprecation")).toBe("true");
+        }
+        for (const reader of [decode, text, json, form, blob]) expect(reader).not.toHaveBeenCalled();
+        expect(screen).not.toHaveBeenCalled();
+        expect(info).not.toHaveBeenCalled();
+        expect(imageTransformCount).toBe(0);
+        for (const limit of [ownerLimit, imageLimit, legacyLimit, mutationLimit]) expect(limit).not.toHaveBeenCalled();
+    });
     it("allows more than fifty unfinished designs without a rolling daily cap", async () => {
         const db = testPlatform().env.DB;
         const now = Date.now();
@@ -3510,13 +3564,13 @@ describe("artwork authorization at the router and storage boundary", () => {
             VALUES (?, ?, ?, ?, ?, 'active', ?)`).bind(productId, BASE_PRODUCT_ID, id, revision ? revisionId : null, productId, Date.now()).run();
         return { productId, revisionId };
     }
-    it.each(["/v1/designs", "/%76%31/designs", "/v1/%64esigns", "/%76%31/%64esigns"])("enforces revocable media cache policy through admitted prefix %s", async prefix => {
+    it.each(["/v1/designs", "/%76%31/designs", "/v1/%64esigns", "/%76%31/%64esigns", "/V1/DESIGNS", "/v1//designs", "//v1/designs", "/v1/desiGns", "/%56%31/%44esigns"])("enforces revocable media cache policy through admitted prefix %s", async prefix => {
         const { id, sha256 } = await mediaDesign();
         const { productId } = await publish(id);
         const bucket = testPlatform().env.DESIGN_ARTWORK;
         for (const method of ["GET", "HEAD"]) {
             const paths = ["", "/artwork", "/artwork/preview"].flatMap(suffix =>
-                [`${prefix}/${id}${suffix}`, `${prefix}/${id}${suffix}/`]);
+                [`${prefix}/${id}${suffix}`, `${prefix}/${id}${suffix}/`, `${prefix}/${id}${suffix};ignored=%ZZ`]);
             for (const path of paths) {
                 const response = await rawRequest(path, { method });
                 expect(response.status, `${method} ${path}`).toBe(200);
