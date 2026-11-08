@@ -139,6 +139,7 @@ export async function smokeStorefront(origin, { bypass, includeImages, fetcher =
     };
 }
 export async function executeWebOnlyPromotion({ previous, save, verifyWorker, deploy, inspectStaged, domain, stagedSmoke, promote, publicSmoke, }) {
+    assertArtworkMediaWeb(previous);
     await save("storefront-before.json", previous);
     await verifyWorker();
     await save("storefront-build-intent.json", { previousDeploymentId: previous.id });
@@ -174,7 +175,6 @@ export async function executeWebOnlyPromotion({ previous, save, verifyWorker, de
     }
     catch (error) {
         await save("storefront-rollback-intent.json", { previous, staged });
-        assertArtworkMediaWeb(previous);
         try {
             await promote(previous.id);
         }

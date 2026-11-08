@@ -242,11 +242,9 @@ test("an uncertain promotion response is inspected and never repeated", async ()
 });
 
 
-test("failed public smoke cannot roll back to a web artifact using private v1 media", async () => {
+test("promotion requires a compatible rollback before build or domain mutation", async () => {
     const fixture = promotionFixture();
     delete fixture.args.previous.artworkMediaCapability;
-    fixture.args.publicSmoke = async () => { throw new Error("bad image"); };
     await assert.rejects(executeWebOnlyPromotion(fixture.args), /Storefront rollback requires/);
-    assert.equal(fixture.events.includes("promote:dpl_previous"), false);
-    assert.equal(fixture.events.includes("storefront-rolled-back.json"), false);
+    assert.deepEqual(fixture.events, []);
 });
