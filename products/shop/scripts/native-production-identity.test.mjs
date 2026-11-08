@@ -2,6 +2,9 @@ import { protectedConfig } from "./protected-config.mjs";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { inspectProductionIdentity, verifyProductionToken, PRODUCTION_SUBJECT } from "./native-production-identity.mjs";
 const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "bentbrain/bent-mono", GITHUB_REPOSITORY_ID: protectedConfig("githubRepositoryId"),
     GITHUB_REPOSITORY_OWNER_ID: protectedConfig("githubOwnerId"), GITHUB_REF: "refs/heads/main", GITHUB_SHA: "a".repeat(40), GITHUB_RUN_ID: "123",
@@ -35,4 +38,47 @@ test("Production identity rejects invalid signatures and local or foreign endpoi
     const noNetwork = () => assert.fail("No request permitted");
     await assert.rejects(inspectProductionIdentity({}, noNetwork));
     await assert.rejects(inspectProductionIdentity({ ...env, ACTIONS_ID_TOKEN_REQUEST_URL: "https://evil.test", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "secret" }, noNetwork));
+});
+
+test("Production workflow preserves the signed receipt and masks private inspections", () => {
+    const marker = "synthetic-inspection-marker";
+    const maskOutput = execFileSync(process.execPath, [fileURLToPath(new URL("./mask-release-config.mjs", import.meta.url))], {
+        encoding: "utf8",
+        env: { SHOP_PROTECTED_CONFIG_JSON: JSON.stringify({ githubRepositoryId: env.GITHUB_REPOSITORY_ID,
+            githubOwnerId: env.GITHUB_REPOSITORY_OWNER_ID, stage: "production", privateMarker: marker }) },
+    });
+    const masks = maskOutput.trim().split("\n").map(line => {
+        assert.ok(line.startsWith("::add-mask::"));
+        return line.slice("::add-mask::".length).replaceAll("%0A", "\n").replaceAll("%0D", "\r").replaceAll("%25", "%");
+    });
+    assert.ok(masks.includes("production") && masks.includes(marker));
+    const isMask = step => step.includes("run: node scripts/mask-release-config.mjs");
+    function exercise(steps) {
+        let masked = false, proofs = 0, inspections = 0;
+        const output = value => masked ? masks.reduce((text, mask) => text.replaceAll(mask, "***"), value) : value;
+        for (const step of steps) {
+            if (isMask(step)) { masked = true; continue; }
+            if (step.includes("run: node scripts/native-production-identity.mjs")) {
+                const receipt = JSON.parse(output(JSON.stringify(verifyProductionToken(token(), keys, env, 1100))));
+                assert.equal(receipt.workflowRef, env.GITHUB_WORKFLOW_REF, "signed receipt must retain its exact workflow reference");
+                proofs++;
+            } else if ((step.includes("scripts/native-production-inspection.mjs") || step.includes("scripts/native-production-storefront.mjs")) && !step.includes("--test")) {
+                assert.ok(masked, "private inspections require protected masking");
+                assert.equal(output(marker), "***");
+                inspections++;
+            } else if (!masked && step.includes("run:")) {
+                assert.ok(step.includes("node ../../scripts/require-release-checks.mjs") ||
+                    step.includes("run: node --import ./scripts/test-protected-config.mjs --test"), "only public admission and synthetic tests precede masking");
+            }
+        }
+        assert.equal(proofs, 1);
+        assert.equal(inspections, 2);
+    }
+    for (const path of ["../.github/workflows/native-production-identity.yml", "../../../.github/workflows/native-production-identity.yml"]) {
+        const steps = readFileSync(new URL(path, import.meta.url), "utf8").split(/^      - /m).slice(1);
+        exercise(steps);
+        const unmasked = steps.filter(step => !isMask(step));
+        assert.throws(() => exercise(unmasked), /private inspections require protected masking/);
+        assert.throws(() => exercise([steps.find(isMask), ...unmasked]), /signed receipt must retain its exact workflow reference/);
+    }
 });

@@ -39,8 +39,6 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - name: Mask protected configuration leaves
-        run: node scripts/mask-release-config.mjs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.18.0
@@ -56,6 +54,8 @@ jobs:
           SHOP_EVIDENCE_PREVIOUS_KEYS_JSON: ""
       - name: Verify signed Production identity without AWS access or deployment
         run: node scripts/native-production-identity.mjs
+      - name: Mask protected configuration leaves
+        run: node scripts/mask-release-config.mjs
       - name: Read the existing Production Worker, bindings, queue and migrations
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
