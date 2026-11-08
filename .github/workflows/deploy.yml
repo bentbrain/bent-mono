@@ -180,7 +180,7 @@ jobs:
             esac
           fi
       - name: Install Bun
-        uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - name: Mask protected configuration leaves
@@ -436,7 +436,7 @@ jobs:
       - name: Verify coordinated source before any release work
         run: node scripts/release-dispatch-guard.mjs
       - name: Install Bun
-        uses: oven-sh/setup-bun@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - name: Mask protected configuration leaves

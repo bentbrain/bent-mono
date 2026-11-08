@@ -5,10 +5,10 @@ import { access, mkdtemp, mkdir, open, readFile, rm, stat, symlink, writeFile } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { operationalSchemas, sealOperationalInput, validateOperationalDispatch } from "./operational-dispatch-inputs.mjs";
-import { activateShopWorkflows, operationalWorkflowNames } from "./activate-workflows.mjs";
+import { activateShopWorkflows, operationalWorkflowNames, releaseWorkflowNames } from "./activate-workflows.mjs";
 import { sealOperationalArtifacts } from "./seal-operational-artifacts.mjs";
 import { openReleaseArchive, openReleaseEvidence, sealReleaseEvidence } from "./release-evidence.mjs";
-import { PRODUCT_ROOT } from "./monorepo-source.mjs";
+import { PRODUCT_ROOT, REPOSITORY_ROOT } from "./monorepo-source.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 
 const source = "a".repeat(40), id = "11111111-1111-4111-8111-111111111111";
@@ -269,4 +269,20 @@ test("the actual featured render command keeps its fixed manifest private and pr
       { sourceCommit: source, runId: "12345", filename: "featured-video-evidence.json" }, keys);
     assert.deepEqual(execFileSync("tar", ["-xOf", restored, "featured-video-output/manifest.json"]), bytes);
   } finally { await rm(directory, {recursive:true,force:true}); }
+});
+
+
+test("Shop workflows use the workspace's pinned Bun setup action and version", async () => {
+  const workspaceSetup = await readFile(join(REPOSITORY_ROOT, ".github/actions/setup/action.yml"), "utf8");
+  const expected = workspaceSetup.match(/uses: (oven-sh\/setup-bun@[a-f0-9]{40})\s*\n\s+with:\n\s+bun-version: (1\.4\.4)/);
+  assert.ok(expected, "The workspace declares an immutable Bun action and runtime version");
+  const files = [...releaseWorkflowNames, ...operationalWorkflowNames].map(name => join(PRODUCT_ROOT, ".github/workflows", name));
+  files.push(join(PRODUCT_ROOT, ".github/actions/check/action.yml"));
+  for (const file of files) {
+    const source = await readFile(file, "utf8");
+    for (const pin of source.matchAll(/uses: (oven-sh\/setup-bun@[^\s#]+)/g)) {
+      assert.equal(pin[1], expected[1], file);
+      assert.match(source.slice(pin.index), /with:\n\s+bun-version: 1\.4\.4\b/);
+    }
+  }
 });
