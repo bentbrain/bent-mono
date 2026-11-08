@@ -144,10 +144,13 @@ jobs:
           persist-credentials: false
       - name: Install verified scanner
         timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Gitleaks v8.30.1, Linux x64 release asset.
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
             --retry 3 --retry-max-time 60 --connect-timeout 10 --max-time 30 \
+            --header "Authorization: Bearer ${GH_TOKEN:?GitHub token is required}" \
             --header 'Accept: application/octet-stream' --output /tmp/gitleaks.tar.gz \
             https://api.github.com/repos/gitleaks/gitleaks/releases/assets/378332058
           echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
@@ -188,11 +191,14 @@ jobs:
           node-version: 24.18.0
       - name: Download verified CodeQL bundle
         timeout-minutes: 6
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # CodeQL v2.27.4, JavaScript Linux x64 release asset.
           archive="$RUNNER_TEMP/codeql-bundle-javascript-linux64.tar.zst"
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
             --retry 3 --retry-max-time 180 --connect-timeout 10 --max-time 120 \
+            --header "Authorization: Bearer ${GH_TOKEN:?GitHub token is required}" \
             --header 'Accept: application/octet-stream' --output "$archive" \
             https://api.github.com/repos/github/codeql-action/releases/assets/692239234
           printf '%s  %s\n' '082e798c97831283a2a5f69e9198c51270e5767013d5333daeeab6520af9ce72' "$archive" | sha256sum --check
