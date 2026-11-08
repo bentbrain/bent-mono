@@ -15,6 +15,7 @@ import { activateShopWorkflows } from "./activate-workflows.mjs";
 
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 const account = protectedConfig("awsAccountId"), owner = protectedConfig("githubOwnerId"), repo = protectedConfig("githubRepositoryId");
+const DATA = "data.aws_iam_openid_connect_provider.github";
 const source = "a".repeat(40), AWS = "registry.terraform.io/hashicorp/aws";
 const policy = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "s3:GetObject", Resource: "arn:aws:s3:::synthetic-private/state" }] };
 const original = { repositoryId: 888001, subjectPrefix: `repo:bentbrain@${owner}/synthetic-previous@888001`,
@@ -59,9 +60,9 @@ function fixture(stage = "development") {
     return { baseline, value };
 }
 function planFor(baseline, stage = "development", noOp = false) {
-    const plan = { terraform_version: "1.12.2", complete: true, applyable: !noOp, errored: false, resource_drift: [],
+    const plan = { format_version: "1.2", terraform_version: "1.12.2", complete: true, applyable: !noOp, errored: false, resource_drift: [],
         output_changes: Object.fromEntries(Object.entries(baseline.state.outputs).map(([key, item]) => [key, { actions: ["no-op"], before: item.value, after: item.value }])),
-        resource_changes: baseline.state.resources.map(item => ({ address: `${item.mode === "data" ? "data." : ""}${item.type}.${item.name}`, mode: item.mode, provider_name: AWS,
+        resource_changes: baseline.state.resources.filter(item => item.mode === "managed").map(item => ({ type: item.type, name: item.name, address: `${item.mode === "data" ? "data." : ""}${item.type}.${item.name}`, mode: item.mode, provider_name: AWS,
             change: { actions: ["no-op"], before: structuredClone(item.instances[0].attributes), after: structuredClone(item.instances[0].attributes), after_unknown: {} } })) };
     if (!noOp) {
         const change = plan.resource_changes.find(item => item.address === trustEnvironments[stage].role).change;
@@ -70,6 +71,17 @@ function planFor(baseline, stage = "development", noOp = false) {
         next.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] = `${targetPrefix()}:environment:${trustEnvironments[stage].environment}`;
         change.after.assume_role_policy = JSON.stringify(next);
     }
+    const resourceValues = item => ({ address: `${item.mode === "data" ? "data." : ""}${item.type}.${item.name}`, mode: item.mode,
+        type: item.type, name: item.name, provider_name: AWS, schema_version: item.instances[0].schema_version,
+        values: structuredClone(item.instances[0].attributes), sensitive_values: {} });
+    const outputs = Object.fromEntries(Object.entries(baseline.state.outputs).map(([key, item]) => [key, { sensitive: false, ...structuredClone(item) }]));
+    plan.prior_state = { format_version: "1.0", terraform_version: "1.12.2", values: { outputs, root_module: { resources: baseline.state.resources.map(resourceValues) } } };
+    plan.planned_values = { outputs: structuredClone(outputs), root_module: { resources: plan.resource_changes.map(item => ({
+        ...resourceValues(baseline.state.resources.find(resource => resource.type === item.type && resource.name === item.name)), values: structuredClone(item.change.after) })) } };
+    plan.configuration = { provider_config: { aws: { name: "aws", full_name: AWS, version_constraint: "6.62.0" } }, root_module: {
+        resources: baseline.state.resources.map(item => ({ address: `${item.mode === "data" ? "data." : ""}${item.type}.${item.name}`, mode: item.mode,
+            type: item.type, name: item.name, provider_config_key: "aws", schema_version: item.instances[0].schema_version,
+            expressions: item.mode === "data" ? { arn: { constant_value: item.instances[0].attributes.arn } } : {} })) } };
     return plan;
 }
 function githubFor(baseline, failure) {
@@ -206,7 +218,10 @@ async function harness(t, { uncertain = false, drift = false, stage = "developme
             }
             if (args[0] === "apply") {
                 const plan = planFor(baseline, stage);
-                currentState.resources.forEach((resource, i) => resource.instances[0].attributes = plan.resource_changes[i].change.after);
+                for (const resource of currentState.resources) {
+                    const change = plan.resource_changes.find(item => item.address === `${resource.mode === "data" ? "data." : ""}${resource.type}.${resource.name}`);
+                    if (change) resource.instances[0].attributes = change.change.after;
+                }
                 currentState.serial++; object.VersionId = "synthetic-after-version"; object.ETag = '"synthetic-after-etag"';
                 permissions[stage].role.AssumeRolePolicyDocument = trust(trustEnvironments[stage], targetPrefix());
                 applied = true;
@@ -280,6 +295,97 @@ test("native Terraform 1.12.2 accepts the rendered S3 backend schema before conf
     assert.match(output.stderr, /synthetic_schema_stop/);
     assert.equal((output.stderr.match(/Error:/g) ?? []).length, 1, output.stderr);
     assert.doesNotMatch(output.stderr, /expected_bucket_owner|credential|network|provider registry/i);
+});
+// A native saved plan supplies the inventory and payloads. The built-in provider
+// carries synthetic AWS attributes as JSON strings, so this exercises serialization
+// without downloading an AWS provider or contacting a remote backend.
+test("native Terraform 1.12.2 serializes refreshed lookup omission in changing and no-op saved plans", { skip: !process.env.SHOP_TRUST_SCHEMA_TERRAFORM }, async t => {
+    const fixtureRoot = new URL("../.data/", import.meta.url);
+    await mkdir(fixtureRoot, { recursive: true });
+    const directory = await mkdtemp(join(fixtureRoot.pathname, "native-trust-plan-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const env = { PATH: "/usr/bin:/bin", HOME: directory, TMPDIR: directory, TF_DATA_DIR: join(directory, "providers"), TF_CLI_CONFIG_FILE: "/dev/null",
+        TF_IN_AUTOMATION: "1", CHECKPOINT_DISABLE: "1", AWS_EC2_METADATA_DISABLED: "true", AWS_CONFIG_FILE: "/dev/null", AWS_SHARED_CREDENTIALS_FILE: "/dev/null" };
+    const native = args => {
+        const result = spawnSync(process.env.SHOP_TRUST_SCHEMA_TERRAFORM, args, { cwd: directory, env, encoding: "utf8", timeout: 20000, maxBuffer: 8 * 1024 * 1024 });
+        assert.equal(result.status, 0, result.stderr || result.error?.message);
+        return result.stdout;
+    };
+    assert.equal(JSON.parse(native(["version", "-json"])).terraform_version, "1.12.2");
+    const { baseline } = fixture(), expected = planFor(baseline), managed = baseline.state.resources.filter(item => item.mode === "managed");
+    const lookup = baseline.state.resources.find(item => item.mode === "data"), lookupValue = lookup.instances[0].attributes;
+    const mapping = new Map(managed.map((item, index) => [`terraform_data.resource_${index}`, item]));
+    mapping.set("data.terraform_remote_state.lookup", lookup);
+    const remotePath = join(directory, "lookup.tfstate"), saved = join(directory, "saved.tfplan");
+    const localState = resources => ({ version: 4, terraform_version: "1.12.2", lineage: original.lineage, serial: 1,
+        outputs: baseline.state.outputs, resources });
+    const writeRemote = async value => write(remotePath, { ...localState([]), outputs: { provider: { value: JSON.stringify(value), type: "string" } } });
+    await writeRemote(lookupValue);
+    await write(join(directory, "main.tf"), `terraform { required_version = "= 1.12.2" }
+data "terraform_remote_state" "lookup" {
+  backend = "local"
+  config = { path = ${JSON.stringify(remotePath)} }
+}
+${managed.map((item, index) => `resource "terraform_data" "resource_${index}" { input = data.terraform_remote_state.lookup.outputs.provider != "" ? ${JSON.stringify(JSON.stringify(expected.resource_changes.find(change => change.address === `${item.type}.${item.name}`).change.after))} : "" }`).join("\n")}
+output "ci_assumption_enabled" { value = true }
+`);
+    const writeState = async noOp => {
+        const resources = managed.map((item, index) => {
+            const payload = JSON.stringify(noOp ? expected.resource_changes.find(change => change.address === `${item.type}.${item.name}`).change.after : item.instances[0].attributes);
+            return { mode: "managed", type: "terraform_data", name: `resource_${index}`, provider: 'provider["terraform.io/builtin/terraform"]', instances: [{ schema_version: 0,
+                attributes: { id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, input: { value: payload, type: "string" }, output: { value: payload, type: "string" }, triggers_replace: null } }] };
+        });
+        resources.push({ mode: "data", type: "terraform_remote_state", name: "lookup", provider: 'provider["terraform.io/builtin/terraform"]', instances: [{ schema_version: 0,
+            attributes: { backend: "local", config: { value: { path: remotePath }, type: ["object", { path: "string" }] }, defaults: null,
+                outputs: { value: { provider: JSON.stringify(lookupValue) }, type: ["object", { provider: "string" }] }, workspace: null } }] });
+        await write(join(directory, "terraform.tfstate"), localState(resources));
+    };
+    const identity = item => {
+        const raw = mapping.get(item.address);
+        assert.ok(raw, item.address);
+        assert.equal(item.mode, raw.mode);
+        assert.equal(item.provider_name ?? item.provider_config_key, item.provider_name ? "terraform.io/builtin/terraform" : "terraform");
+        return { address: `${raw.mode === "data" ? "data." : ""}${raw.type}.${raw.name}`, mode: raw.mode, type: raw.type, name: raw.name };
+    };
+    const value = item => ({ ...identity(item), provider_name: AWS, schema_version: item.schema_version,
+        values: JSON.parse(item.mode === "data" ? item.values.outputs.provider : item.values.input), sensitive_values: {} });
+    const project = wire => ({ ...wire,
+        prior_state: { ...wire.prior_state, values: { ...wire.prior_state.values, root_module: { resources: wire.prior_state.values.root_module.resources.map(value) } } },
+        planned_values: { ...wire.planned_values, root_module: { resources: wire.planned_values.root_module.resources.map(value) } },
+        resource_changes: wire.resource_changes.map(item => ({ ...identity(item), provider_name: AWS, change: { ...item.change,
+            before: JSON.parse(item.change.before.input), after: JSON.parse(item.change.after.input), after_unknown: {} } })),
+        configuration: { provider_config: expected.configuration.provider_config, root_module: { resources: wire.configuration.root_module.resources.map(item => ({ ...identity(item),
+            provider_config_key: "aws", schema_version: item.schema_version, expressions: item.mode === "data" ? expected.configuration.root_module.resources.find(resource => resource.address === DATA).expressions : {} })) } },
+    });
+    await writeState(false);
+    native(["init", "-input=false", "-no-color"]);
+    for (const noOp of [false, true]) {
+        await writeState(noOp);
+        native(["plan", "-refresh=true", "-input=false", "-no-color", `-out=${saved}`]);
+        const wire = JSON.parse(native(["show", "-json", saved]));
+        assert.equal(wire.format_version, "1.2"); assert.equal(wire.prior_state.format_version, "1.0");
+        assert.equal(wire.prior_state.values.root_module.resources.length, 24);
+        assert.equal(wire.resource_changes.length, 23); assert.equal(wire.planned_values.root_module.resources.length, 23);
+        assert.equal(wire.configuration.root_module.resources.length, 24);
+        assert.ok(wire.resource_changes.every(item => item.mode === "managed"));
+        assert.deepEqual(wire.configuration.root_module.resources.find(item => item.mode === "data").expressions,
+            { backend: { constant_value: "local" }, config: { constant_value: { path: remotePath } } });
+        assert.equal(wire.resource_changes.filter(item => item.change.actions[0] === "update").length, noOp ? 0 : 1);
+        for (const item of wire.resource_changes) assert.deepEqual(item.change.after_unknown, item.change.actions[0] === "update" ? { output: true } : {});
+        const current = structuredClone(baseline);
+        if (noOp) for (const item of current.state.resources) {
+            const change = expected.resource_changes.find(change => change.address === `${item.type}.${item.name}`);
+            if (change) item.instances[0].attributes = structuredClone(change.change.after);
+        }
+        assert.equal(inspectRepositoryTrustPlan(project(wire), current, "development", noOp).changedResource, noOp ? null : "aws_iam_role.ci");
+    }
+    // A read during refresh can change prior_state even with no data action.
+    await writeState(false);
+    await writeRemote({ ...lookupValue, arn: "arn:aws:iam::000000000000:oidc-provider/foreign.invalid" });
+    native(["plan", "-refresh=true", "-input=false", "-no-color", `-out=${saved}`]);
+    const changedRead = JSON.parse(native(["show", "-json", saved]));
+    assert.equal(changedRead.resource_changes.length, 23);
+    assert.throws(() => inspectRepositoryTrustPlan(project(changedRead), baseline, "development"), /saved values/);
 });
 test("guarded CLI route renders, plans, shows and applies one Development scalar; Production stays unchanged", async t => {
     const h = await harness(t), beforeProduction = structuredClone(h.permissions.production);
@@ -427,6 +533,17 @@ test("real planning rejects unknown drift; saved apply rejects changed binary, b
         assert.equal(h.commands.some(command => command[0] === "apply"), false, fault);
     }
 });
+test("native saved-plan shape retains all 24 prior resources and omits only the refreshed lookup from actions and planned values", () => {
+    for (const stage of ["development", "production"]) {
+        const { baseline } = fixture(stage), plan = planFor(baseline, stage);
+        assert.equal(plan.prior_state.values.root_module.resources.length, 24);
+        assert.equal(plan.resource_changes.length, 23);
+        assert.equal(plan.planned_values.root_module.resources.length, 23);
+        assert.equal(plan.configuration.root_module.resources.length, 24);
+        assert.equal(inspectRepositoryTrustPlan(plan, baseline, stage).changedResource, trustEnvironments[stage].role);
+        assert.equal(inspectRepositoryTrustPlan(planFor(baseline, stage, true), baseline, stage, true).changedResource, null);
+    }
+});
 test("plan inspection rejects permissions, boundary, role IDs, dual subjects, unknowns, moves and extra outputs", () => {
     for (const stage of ["development", "production"]) {
         const { baseline } = fixture(stage);
@@ -442,6 +559,81 @@ test("plan inspection rejects permissions, boundary, role IDs, dual subjects, un
             p => p.output_changes.extra = { actions: ["create"], after: true },
             p => p.resource_drift.push({ address: "aws_kms_key.state" }), p => p.resource_changes.pop(),
         ]) { const p = planFor(baseline, stage); mutate(p); assert.throws(() => inspectRepositoryTrustPlan(p, baseline, stage)); }
+    }
+});
+test("saved-plan bindings reject inventory, lookup, source, provider and format changes", () => {
+    const faults = [
+        ["missing managed action", p => p.resource_changes.pop()],
+        ["extra managed action", p => p.resource_changes.push({ ...p.resource_changes[0], address: "aws_iam_role.extra" })],
+        ["duplicate managed action", p => p.resource_changes[1] = structuredClone(p.resource_changes[0])],
+        ["missing prior lookup", p => p.prior_state.values.root_module.resources = p.prior_state.values.root_module.resources.filter(item => item.address !== DATA)],
+        ["missing prior managed", p => p.prior_state.values.root_module.resources.pop()],
+        ["duplicate prior resource", p => p.prior_state.values.root_module.resources.push(structuredClone(p.prior_state.values.root_module.resources[0]))],
+        ...["id", "arn", "url", "client_id_list"].map(key => [`read-mutated lookup ${key}`, p => {
+            p.prior_state.values.root_module.resources.find(item => item.address === DATA).values[key] = key === "client_id_list" ? ["foreign"] : "foreign";
+        }]),
+        ["prior managed content", p => p.prior_state.values.root_module.resources.find(item => item.address === "aws_iam_role.ci").values.unique_id = "foreign"],
+        ["prior data provider", p => p.prior_state.values.root_module.resources.find(item => item.address === DATA).provider_name = "foreign"],
+        ["prior module", p => p.prior_state.values.root_module.child_modules = [{ resources: [] }]],
+        ["missing planned managed", p => p.planned_values.root_module.resources.pop()],
+        ["extra planned lookup", p => p.planned_values.root_module.resources.push(structuredClone(p.prior_state.values.root_module.resources.find(item => item.address === DATA)))],
+        ["planned content", p => p.planned_values.root_module.resources[0].values.id = "foreign"],
+        ["planned index", p => p.planned_values.root_module.resources[0].index = 0],
+        ["missing source lookup", p => p.configuration.root_module.resources = p.configuration.root_module.resources.filter(item => item.address !== DATA)],
+        ["extra source", p => p.configuration.root_module.resources.push({ ...p.configuration.root_module.resources[0], address: "aws_iam_role.extra" })],
+        ["dynamic data identity", p => p.configuration.root_module.resources.find(item => item.address === DATA).expressions.arn = { references: ["var.arn"] }],
+        ["foreign source identity", p => p.configuration.root_module.resources.find(item => item.address === DATA).expressions.arn.constant_value = "foreign"],
+        ["source alias", p => p.configuration.root_module.resources[0].provider_config_key = "aws.foreign"],
+        ["source index", p => p.configuration.root_module.resources[0].count_expression = { constant_value: 1 }],
+        ["source module", p => p.configuration.root_module.module_calls = { extra: {} }],
+        ["provider version", p => p.configuration.provider_config.aws.version_constraint = ">= 6.62.0"],
+        ["provider origin", p => p.configuration.provider_config.aws.full_name = "foreign"],
+        ["extra provider", p => p.configuration.provider_config.extra = p.configuration.provider_config.aws],
+        ["provider alias", p => p.configuration.provider_config.aws.alias = "foreign"],
+        ["managed import", p => p.resource_changes[0].change.importing = { id: "foreign" }],
+        ["managed identity", p => p.resource_changes[0].change.after_identity = { id: "foreign" }],
+        ["managed module", p => p.resource_changes[0].address = `module.extra.${p.resource_changes[0].address}`],
+        ["managed index", p => p.resource_changes[0].index = 0],
+        ["managed provider", p => p.resource_changes[0].provider_name = "foreign"],
+        ["deferred", p => p.deferred_changes = [{ reason: "unknown" }]],
+        ["unknown", p => p.resource_changes[0].change.after_unknown.id = true],
+        ["prior output", p => p.prior_state.values.outputs.ci_assumption_enabled.value = false],
+        ["planned output", p => p.planned_values.outputs.ci_assumption_enabled.sensitive = true],
+        ["plan JSON version", p => p.format_version = "1.3"],
+        ["state JSON version", p => p.prior_state.format_version = "1.1"],
+        ["Terraform version", p => p.terraform_version = "1.12.3"],
+    ];
+    for (const stage of ["development", "production"]) for (const noOp of [false, true]) for (const [name, fault] of faults) {
+        const { baseline } = fixture(stage), plan = planFor(baseline, stage, noOp);
+        fault(plan);
+        assert.throws(() => inspectRepositoryTrustPlan(plan, baseline, stage, noOp), undefined, `${stage} ${noOp} ${name}`);
+    }
+});
+test("consistent planned values still reject permissions, other trust and output mutations", () => {
+    for (const stage of ["development", "production"]) for (const address of ["aws_iam_role_policy.ci", "aws_iam_role_policy.production_ci",
+        "aws_iam_policy.ci_boundary", "aws_iam_policy.production_ci_boundary", ...Object.values(trustEnvironments).map(spec => spec.role)]) {
+        const { baseline } = fixture(stage), plan = planFor(baseline, stage), change = plan.resource_changes.find(item => item.address === address).change;
+        if (address.startsWith("aws_iam_role.")) change.after.assume_role_policy = JSON.stringify(trust(trustEnvironments[stage], "foreign"));
+        else change.after.policy = "{}";
+        plan.planned_values.root_module.resources.find(item => item.address === address).values = structuredClone(change.after);
+        assert.throws(() => inspectRepositoryTrustPlan(plan, baseline, stage), /subject|no-op/);
+    }
+    const { baseline } = fixture(), plan = planFor(baseline);
+    plan.output_changes.ci_assumption_enabled.after = false;
+    assert.throws(() => inspectRepositoryTrustPlan(plan, baseline, "development"), /outputs must remain/);
+});
+test("full baseline retains exact lookup identity and single untainted resource inventory", () => {
+    for (const mutate of [
+        b => b.state.resources.pop(), b => b.state.resources.push(structuredClone(b.state.resources[0])),
+        b => b.state.resources[0].provider = 'provider["foreign"]', b => b.state.resources[0].module = "module.extra",
+        b => b.state.resources[0].instances[0].index_key = 0, b => b.state.resources[0].instances[0].status = "tainted",
+        b => b.state.resources[0].instances[0].deposed = "synthetic", b => b.state.resources[0].mode = "foreign",
+        ...["id", "arn", "url", "client_id_list"].map(key => b => { delete b.state.resources.find(item => item.mode === "data").instances[0].attributes[key]; }),
+        b => b.state.resources.find(item => item.mode === "data").instances[0].attributes.id = "foreign",
+    ]) {
+        const { baseline } = fixture(), plan = planFor(baseline);
+        mutate(baseline);
+        assert.throws(() => inspectRepositoryTrustPlan(plan, baseline, "development"));
     }
 });
 test("saved state requires an audience array containing the exact STS audience", () => {
@@ -528,6 +720,8 @@ test("only an enumerated exact existing child-backed parent observation may be a
     const observed = { ...structuredClone(resource.change.before), inline_policy: after };
     p.resource_drift.push({ address: resource.address, mode: "managed", provider_name: AWS, change: { actions: ["update"], before: resource.change.before, after: observed, after_unknown: {} } });
     resource.change.before = observed; resource.change.after.inline_policy = after;
+    p.prior_state.values.root_module.resources.find(item => item.address === resource.address).values = structuredClone(observed);
+    p.planned_values.root_module.resources.find(item => item.address === resource.address).values = structuredClone(resource.change.after);
     assert.equal(inspectRepositoryTrustPlan(p, baseline, "development").permissionsChanged, false);
     const changed = structuredClone(p); changed.resource_drift[0].change.after.max_session_duration = 7200;
     assert.throws(() => inspectRepositoryTrustPlan(changed, baseline, "development"));
