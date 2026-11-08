@@ -12,10 +12,15 @@ test("staged access requires one existing automation credential and never change
 });
 test("storefront promotion pins personal project, immutable source and unpromoted build", () => {
   verifyWebProject(project); verifyStagedWebDeployment(deployment, "a".repeat(40));
-  for (const delta of [{ accountId: "work" }, { id: "other" }, { link: {} }, { rootDirectory: "other" }]) assert.throws(() => verifyWebProject({ ...project, ...delta }));
+  for (const delta of [{ accountId: "work" }, { id: "other" }, { link: {} }, { rootDirectory: "other" }, { rootDirectory: "apps/web" }]) assert.throws(() => verifyWebProject({ ...project, ...delta }));
   for (const delta of [{ projectId: "other" }, { team: { id: "work" } }, { readyState: "BUILDING" }, { source: "git" }, { target: "preview" },
     { meta: { githubCommitSha: "b".repeat(40) } }, { alias: ["shop.bent.build"] }, { url: "evil.example" }])
     assert.throws(() => verifyStagedWebDeployment({ ...deployment, ...delta }, "a".repeat(40)));
+});
+test("promotion still requires the monorepo root after read-only legacy-root inspection", () => {
+  assert.throws(() => verifyWebProject({ ...project, rootDirectory: "apps/web" }), /exact unlinked personal project\/root/);
+  verifyWebProject({ ...project, link: null });
+  verifyWebProject(project);
 });
 test("staged Production build cannot use Development API or Preview challenge credentials", () => {
   const env = { FOREVER_TEE_API_URL: "https://forever-tee-api.socialqueue.workers.dev", FOREVER_TEE_API_SHARED_SECRET: "fixture-secret",
