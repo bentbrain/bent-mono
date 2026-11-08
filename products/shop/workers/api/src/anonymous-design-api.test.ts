@@ -3510,6 +3510,35 @@ describe("artwork authorization at the router and storage boundary", () => {
             VALUES (?, ?, ?, ?, ?, 'active', ?)`).bind(productId, BASE_PRODUCT_ID, id, revision ? revisionId : null, productId, Date.now()).run();
         return { productId, revisionId };
     }
+    it.each(["/v1/designs", "/%76%31/designs", "/v1/%64esigns", "/%76%31/%64esigns"])("enforces revocable media cache policy through admitted prefix %s", async prefix => {
+        const { id, sha256 } = await mediaDesign();
+        const { productId } = await publish(id);
+        const bucket = testPlatform().env.DESIGN_ARTWORK;
+        for (const method of ["GET", "HEAD"]) {
+            const paths = ["", "/artwork", "/artwork/preview"].flatMap(suffix =>
+                [`${prefix}/${id}${suffix}`, `${prefix}/${id}${suffix}/`]);
+            for (const path of paths) {
+                const response = await rawRequest(path, { method });
+                expect(response.status, `${method} ${path}`).toBe(200);
+                expect(response.headers.get("cache-control"), `${method} ${path}`).toBe("no-store");
+            }
+            await bucket.delete(artworkPreviewKey(id, sha256));
+            const generated = await rawRequest(`${prefix}/${id}/artwork/preview/`, { method });
+            expect(generated.status).toBe(200);
+            expect(generated.headers.get("cache-control")).toBe("no-store");
+        }
+        await testPlatform().env.DB.prepare("UPDATE products SET status = 'unpublished' WHERE id = ?").bind(productId).run();
+        for (const method of ["GET", "HEAD"]) {
+            for (const suffix of ["/artwork", "/artwork/preview"]) {
+                const response = await rawRequest(`${prefix}/${id}${suffix}`, { method });
+                expect(response.status).toBe(404);
+                expect(response.headers.get("cache-control")).toBe("no-store");
+            }
+            const missing = await rawRequest(`${prefix}/${crypto.randomUUID()}`, { method });
+            expect(missing.status).toBe(404);
+            expect(missing.headers.get("cache-control")).toBe("no-store");
+        }
+    });
     it.each(["artwork", "artwork/preview"])("denies private and guessed %s before storage", async suffix => {
         const { id } = await mediaDesign();
         const get = vi.spyOn(testPlatform().env.DESIGN_ARTWORK, "get");

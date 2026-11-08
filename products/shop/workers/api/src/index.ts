@@ -595,7 +595,7 @@ async function routeRequest(request: Request, env: ApiEnv, context?: Pick<Execut
       legacyCorsHeaders(origin, env.WEB_ORIGIN ?? "http://localhost:3000").forEach((value, key) => {
         headers.set(key, value);
       });
-      if (requestPath.startsWith("/v1/designs/")) {
+      if (legacyRequestPath(request).startsWith("/v1/designs/")) {
         headers.set("Cache-Control", "no-store");
       }
       if (isLegacyDraftMutation(request)) {
@@ -701,10 +701,13 @@ function withCors(
   });
 }
 
+function legacyRequestPath(request: Request) {
+  const path = new URL(request.url).pathname;
+  try { return decodeURIComponent(path); } catch { return path; }
+}
+
 function isLegacyDraftMutation(request: Request) {
-  let path = new URL(request.url).pathname;
-  try { path = decodeURIComponent(path); } catch { /* Reject malformed targets through the router. */ }
-  path = path.replace(/\/+$/, "");
+  const path = legacyRequestPath(request).replace(/\/+$/, "");
   return request.method !== "GET" && request.method !== "HEAD" &&
     (path === "/v1/background-removal" || path === "/v1/designs" || path === "/v1/products" ||
       path.startsWith("/v1/designs/"));
