@@ -1,3 +1,6 @@
+import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
+import { workerContentManifest, readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, prepareWorkerUpload, readSealedWorkerUpload } from "./native-worker-content.mjs";
+export { workerContentManifest } from "./native-worker-content.mjs";
 import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
@@ -53,27 +56,6 @@ export async function activeWorkerSettings(cf, expected) {
     check(singleVersion(await cf.deployments()) === id, "active version changed during settings inspection.");
     return { ...version.resources.script_runtime, bindings: version.resources.bindings };
 }
-export async function workerContentManifest(response) {
-    check(response.ok, "content download.");
-    const modules = [];
-    let entrypoint = "index.js";
-    if (response.headers.get("content-type")?.startsWith("multipart/")) {
-        entrypoint = response.headers.get("cf-entrypoint");
-        check(typeof entrypoint === "string" && entrypoint.length > 0, "module entrypoint header.");
-        for (const [name, value] of await response.formData()) {
-            check(typeof value !== "string" && !modules.some(item => item.name === name), "unique binary module parts.");
-            const bytes = Buffer.from(await value.arrayBuffer());
-            modules.push({ name, bytes: bytes.length, sha256: hash(bytes) });
-        }
-    }
-    else {
-        const bytes = Buffer.from(await response.arrayBuffer());
-        modules.push({ name: entrypoint, bytes: bytes.length, sha256: hash(bytes) });
-    }
-    check(modules.length > 0 && modules.some(item => item.name === entrypoint), "entrypoint module present.");
-    modules.sort((a, b) => a.name.localeCompare(b.name));
-    return { entrypoint, modules, sha256: hash(JSON.stringify({ entrypoint, modules })) };
-}
 export async function inspectDevelopmentWorker(cf, historicalArtifact) {
     const before = singleVersion(await cf.deployments());
     const latest = (await cf.versions()).items?.[0]?.id;
@@ -100,7 +82,7 @@ export async function inspectDevelopmentWorker(cf, historicalArtifact) {
     return { workerVersion: before, content, versionResourcesSha256: versionResourcesDigest(version),
         annotations: version.annotations ?? {}, workerBytesVerified: true };
 }
-export async function prepareDevelopmentWorker(env = process.env) {
+export async function prepareDevelopmentWorker(env = process.env, { recovery } = {}) {
     const cf = developmentCloudflare(env);
     check(env.RUNNER_TEMP?.startsWith("/") && process.platform === "linux", "cloud-only build.");
     const directory = await mkdtemp(join(env.RUNNER_TEMP, "native-worker-"));
@@ -130,16 +112,12 @@ export async function prepareDevelopmentWorker(env = process.env) {
             throw new Error("Native Worker command was not confirmed. Private output was not logged; admissions remain in their current state.");
         }
     };
-    const out = join(directory, "bundle");
-    await run(["deploy", "--dry-run", "--env", "development", "--outdir", out]);
-    const entrypoint = join(out, "index.js");
-    const bytes = await readFile(entrypoint);
-    const checked = join(directory, "checked-bundle");
-    await run(["deploy", entrypoint, "--no-bundle", "--dry-run", "--env", "development", "--outdir", checked]);
-    check(hash(await readFile(join(checked, "index.js"))) === hash(bytes), "Wrangler changed the prepared bundle bytes.");
+    const out = join(directory, "bundle"), entrypoint = join(out, "index.js");
+    const upload = await prepareWorkerUpload({ run, directory: out, environment: "development", sealed: recovery?.sealedWorker }), bytes = upload.code;
+    assertArtworkMediaBundle(bytes);
     const printExecutor = await preparePrintExecutorFoundation({ env, directory, api: cf,
-        run: args => run(args, true), inspectWorker: inspectDevelopmentWorker });
-    const review = { configuration: { api: apiConfig.resolvedSha256, executor: executorConfig.resolvedSha256 }, bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
+        run: args => run(args, true), inspectWorker: inspectDevelopmentWorker, interrupted: recovery, sealedUpload: recovery?.sealedExecutor });
+    const review = { schemaVersion: 2, content: upload.content, configuration: { api: apiConfig.resolvedSha256, executor: executorConfig.resolvedSha256 }, bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
         printExecutor: printExecutor.review };
     let historicalArtifact;
     if ((await cf.versions()).items?.[0]?.id !== singleVersion(await cf.deployments())) {
@@ -156,19 +134,31 @@ export async function prepareDevelopmentWorker(env = process.env) {
         } };
     const before = await inspectDevelopmentWorker(capture, historicalArtifact);
     const consumer = await inspectDevelopmentConsumer(cf);
-    const verifyPrintExecutor = async () => {
+    const verifyPrintExecutor = async (verifyApi = true) => {
         const recorded = await printExecutor.verifyDeployed();
-        verifyApiPrintExecutorBinding(await activeWorkerSettings(cf), recorded);
+        if (verifyApi) verifyApiPrintExecutorBinding(await activeWorkerSettings(cf), recorded);
         return recorded;
     };
-    return { review, before,
+    let deployedVariables, artifacts, preservedStore;
+    const verifyDeployed = async expected => {
+        const { printExecutor: _executor, ...apiExpected } = expected;
+        check(deployedVariables && isDeepStrictEqual(await inspectDevelopmentWorker(cf), apiExpected), "deployed API bytes/version/resources changed.");
+        verifyDevelopmentReleaseConfiguration(await activeWorkerSettings(cf, expected), await inspectDevelopmentConsumer(cf), deployedVariables);
+        await verifyPrintExecutor();
+        await verifyPrintQueue(cf, "development");
+        if (recovery) check(isDeepStrictEqual(await cf.schedules(), recovery.schedules), "API schedule changed.");
+    };
+    return { review, before, verifyDeployed,
         consumer,
         verifyPrintExecutor,
         preserve: async (store) => {
-            check(previousContent && hash(await readFile(entrypoint)) === review.bundleSha256, "artifact changed before preservation.");
+            check(!artifacts && previousContent && hash(await readFile(entrypoint)) === review.bundleSha256, "artifact changed before preservation.");
             const prior = await store.save("previous-worker.json", Buffer.from(JSON.stringify({ ...previousContent, before, consumer, settings: await activeWorkerSettings(cf, before) })));
-            const bundle = await store.save("candidate-worker.js", bytes);
-            return { previousArtifact: prior, candidateArtifact: bundle, printExecutor: await printExecutor.preserve(store) };
+            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            const bundle = await preserveWorkerUpload(store, upload, "candidate-worker");
+            artifacts = { previousArtifact: prior, ...bundle, printExecutor: await printExecutor.preserve(store) };
+            preservedStore = store;
+            return artifacts;
         },
         verifyPrevious: async () => {
             check(isDeepStrictEqual(await inspectDevelopmentWorker(cf, historicalArtifact), before), "Worker changed after preparation.");
@@ -177,6 +167,7 @@ export async function prepareDevelopmentWorker(env = process.env) {
         },
         migrate: async (releaseId) => {
             await assertReleasePaused(cf, releaseId);
+            if (recovery) await recovery.beforeMutation("migration");
             const expected = (await readdir(join(API, "drizzle"))).filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
             check(isReviewedMigrationInventory(expected), "reviewed migration inventory.");
             const applied = (await cf.query("SELECT name FROM d1_migrations ORDER BY name"))[0].results.map(row => row.name);
@@ -190,12 +181,16 @@ export async function prepareDevelopmentWorker(env = process.env) {
             check((await cf.query("SELECT name FROM pragma_table_info('print_assets') WHERE name = 'object_sha256'"))[0].results.length === 1, "shared print object reference column.");
             await assertReleasePaused(cf, releaseId);
         },
-        deploy: async (releaseId, candidate) => {
+        deploy: async (releaseId, candidate, executorApplied = () => {}) => {
             await assertReleasePaused(cf, releaseId);
             check(hash(await readFile(entrypoint)) === review.bundleSha256 && candidate.environment === "development" &&
                 /^[a-f0-9]{64}$/.test(candidate.sourceDigest) && /^sha256:[a-f0-9]{64}$/.test(candidate.imageDigest), "reviewed bytes and candidate.");
+            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            check(artifacts && preservedStore, "preserved complete Worker upload required.");
+            await readSealedWorkerUpload(preservedStore, artifacts, review);
             const executor = await printExecutor.deploy(releaseId);
             await printExecutor.verifyDeployed();
+            executorApplied();
             const variables = { PRINTIFY_ASSET_ORIGIN: env.WORKER_URL, PRINT_EXECUTION_MODE: "durable-object",
                 STORY_VIDEO_PROVIDER: "lambda", STORY_VIDEO_ENVIRONMENT: "development",
                 STORY_VIDEO_LAMBDA_FUNCTION: "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-development",
@@ -203,18 +198,22 @@ export async function prepareDevelopmentWorker(env = process.env) {
                 STORY_VIDEO_TRANSPORT: "direct", STORY_VIDEO_WARM_ON_CONFIRM: "1",
                 STORY_VIDEO_RELEASE_ID: releaseId, STORY_VIDEO_RELEASE_COMMIT: env.GITHUB_SHA,
                 STORY_VIDEO_IMAGE_DIGEST: candidate.imageDigest, STORY_VIDEO_SOURCE_DIGEST: candidate.sourceDigest };
-            await run(["deploy", entrypoint, "--no-bundle", "--env", "development", "--keep-vars", "--tag", releaseId,
+            if (recovery) await recovery.beforeMutation("api-deploy");
+            await assertReleasePaused(cf, releaseId);
+            await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--env", "development", "--keep-vars", "--tag", releaseId,
                 "--message", `Native pair ${env.GITHUB_SHA}`, "--secrets-file", secretsPath,
                 ...Object.entries(variables).flatMap(([key, value]) => ["--var", `${key}:${value}`])]);
             const live = await inspectDevelopmentWorker(cf);
             await printExecutor.verifyDeployed();
-            check(live.content.entrypoint === "index.js" && live.content.modules.length === 1 &&
-                live.content.modules[0].sha256 === review.bundleSha256, "deployed Worker bytes differ from the cloud bundle.");
+            verifyWorkerUpload(live.content, review);
             verifyDevelopmentReleaseConfiguration(await activeWorkerSettings(cf, live), await inspectDevelopmentConsumer(cf), variables);
             await verifyPrintExecutor();
             await verifyPrintQueue(cf, "development");
             await writeFile(join(directory, "deployed.json"), JSON.stringify(live), { flag: "wx", mode: 0o600 });
-            return { ...live, printExecutor: executor };
+            deployedVariables = variables;
+            const result = { ...live, printExecutor: executor };
+            await verifyDeployed(live);
+            return result;
         },
     };
 }

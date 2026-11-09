@@ -1,3 +1,5 @@
+import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
+import { readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, supportedWorkerContent, prepareWorkerUpload } from "./native-worker-content.mjs";
 import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
@@ -6,7 +8,7 @@ import { mkdtemp, readFile, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify, isDeepStrictEqual as equal } from "node:util";
-import { inspectDevelopmentWorker as inspectWorker, versionResourcesDigest, workerContentManifest } from "./native-ci-worker.mjs";
+import { inspectDevelopmentWorker as inspectWorker, versionResourcesDigest } from "./native-ci-worker.mjs";
 import { productionCloudflare, inspectProductionConsumer, verifyProductionBindings } from "./native-production-cloudflare.mjs";
 import { assertReleasePaused } from "./native-release-pause.mjs";
 import { isReviewedAppliedMigrationPrefix, isReviewedMigrationInventory, } from "./native-migration-inventory.mjs";
@@ -136,9 +138,9 @@ export async function loadRecordedProductionWorkerBaseline(cf, store, { pauseOwn
     }
     else if (!recoveredBacklog)
         check(equal(terminal.fallback, fallback), "completed fallback admission matches the recorded version.");
-    const bytes = await store.read(prepared.artifacts.candidateArtifact);
-    const content = await workerContentManifest(new Response(bytes));
-    check(equal(content, fallback.content) && content.modules.length === 1 && content.modules[0].sha256 === prepared.worker.bundleSha256, "recorded fallback bytes match the prepared bundle.");
+    const upload = await readSealedWorkerUpload(store, prepared.artifacts, prepared.worker);
+    const content = upload.content;
+    check(equal(content, fallback.content), "recorded fallback bytes match the prepared bundle.");
     const version = await cf.version(active);
     check(version.id === active && versionResourcesDigest(version) === fallback.versionResourcesSha256 && Array.isArray(version.resources?.bindings), "recorded fallback resources match the active immutable version.");
     const consumer = await inspectProductionConsumer(cf), schedules = await cf.schedules();
@@ -150,7 +152,7 @@ export async function loadRecordedProductionWorkerBaseline(cf, store, { pauseOwn
     check(singleActiveProductionVersion(await cf.deployments()) === active && (await cf.versions()).items?.[0]?.id === latest &&
         equal(await query("SELECT paused,release_id,current_release_id FROM native_video_release_control WHERE singleton=1"), controls), "Production fallback baseline changed during verification.");
     return { record: { releaseId, sourceReleaseId, terminalStage: terminalRows[0].stage, workerVersion: active, latestVersion: latest }, fallback,
-        historicalArtifact: { before: fallback, body: bytes.toString("base64"), contentType: "application/javascript+module", entrypoint: content.entrypoint },
+        historicalArtifact: await historicalWorkerUpload(fallback, upload),
         settings: activeSettings };
 }
 export function classifyProductionBaseline(settings, consumer, before, recordedFallback) {
@@ -165,7 +167,7 @@ export function classifyProductionBaseline(settings, consumer, before, recordedF
         check(applicationSecrets.length <= APPLICATION_SECRET_NAMES.length && applicationSecrets.every(item => item.type === "secret_text") &&
             APPLICATION_SECRET_NAMES.every(name => applicationSecrets.filter(item => item.name === name).length <= 1), "recorded fallback application secrets retained.");
         check(equal(consumer.settings, FALLBACK_PRODUCTION_QUEUE), "recorded fallback queue configuration.");
-        check(/^[a-f0-9-]{36}$/.test(before.workerVersion) && before.content.modules.length === 1, "verified recorded fallback Worker.");
+        check(/^[a-f0-9-]{36}$/.test(before.workerVersion) && supportedWorkerContent(before.content), "verified recorded fallback Worker.");
         return "fallback";
     }
     const initial = cloudflare;
@@ -183,7 +185,7 @@ export function classifyProductionBaseline(settings, consumer, before, recordedF
     check(applicationSecrets.length <= APPLICATION_SECRET_NAMES.length && applicationSecrets.every(item => item.type === "secret_text") &&
         APPLICATION_SECRET_NAMES.every(name => applicationSecrets.filter(item => item.name === name).length <= 1), "existing application secret bindings.");
     check(equal(consumer.settings, NATIVE_PRODUCTION_QUEUE), "existing native queue configuration.");
-    check(/^[a-f0-9-]{36}$/.test(before.workerVersion) && before.content.modules.length === 1, "verified current native Worker.");
+    check(/^[a-f0-9-]{36}$/.test(before.workerVersion) && supportedWorkerContent(before.content), "verified current native Worker.");
     const variable = name => settings.bindings.filter(item => item.name === name);
     const expected = {
         STORY_VIDEO_PROVIDER: "lambda", STORY_VIDEO_ENVIRONMENT: "production",
@@ -266,7 +268,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
     const printExecutor = qualifiedPrintExecutor ? await printProtocol.preparePrintExecutorFoundation({ env, directory,
         run: args => run(args, executorConfig.path), api: cf, inspectWorker, baselineStore: store }) : null;
     if (printExecutor) {
-        check(/^[a-f0-9]{40}$/.test(qualifiedPrintExecutor.sourceCommit ?? "") && qualifiedPrintExecutor.worker?.content?.modules?.length === 1 &&
+        check(/^[a-f0-9]{40}$/.test(qualifiedPrintExecutor.sourceCommit ?? "") && supportedWorkerContent(qualifiedPrintExecutor.worker?.content) &&
             qualifiedPrintExecutor.worker.content.modules[0].sha256 === printExecutor.review.bundleSha256, "Production print executor bytes must equal the qualified Development artifact.");
     }
     let deployedPrintExecutor;
@@ -280,19 +282,17 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
         check(evidence && equal(verified, saved), "executor deployment changed after preservation.");
         return deployedPrintExecutor;
     };
-    const out = join(directory, "bundle");
-    await run(["deploy", "--dry-run", "--outdir", out]);
-    const entrypoint = join(out, "index.js"), bytes = await readFile(entrypoint), checked = join(directory, "checked");
-    await run(["deploy", entrypoint, "--no-bundle", "--dry-run", "--outdir", checked]);
-    check(sha(await readFile(join(checked, "index.js"))) === sha(bytes), "prepared bundle changed under no-bundle.");
-    const artifacts = { previousArtifact, candidateArtifact: await store.save("candidate-worker.js", bytes),
+    const out = join(directory, "bundle"), entrypoint = join(out, "index.js");
+    const upload = await prepareWorkerUpload({ run, directory: out }), bytes = upload.code;
+    assertArtworkMediaBundle(bytes);
+    const artifacts = { previousArtifact, ...await preserveWorkerUpload(store, upload, "candidate-worker"),
         configArtifact: await store.save("candidate-config.json", await readFile(configPath)),
         fallbackConfigArtifact: await store.save("fallback-config.json", await readFile(fallbackPath)),
         ...(printExecutor ? { printExecutor: await printExecutor.preserve(store) } : {}) };
     const secretNames = baseline === "initial" ? [...PRODUCTION_NATIVE_SECRET_NAMES, ...APPLICATION_SECRET_NAMES] : APPLICATION_SECRET_NAMES;
     const secretsPath = join(directory, "release-secrets.json");
     await writeFile(secretsPath, JSON.stringify(Object.fromEntries(secretNames.map(name => [name, secrets[name]]))), { flag: "wx", mode: 0o600 });
-    const review = { sourceCommit: env.GITHUB_SHA, baseline, baselineReleaseId: recorded?.record.releaseId ?? null, secretNames,
+    const review = { schemaVersion: 2, content: upload.content, sourceCommit: env.GITHUB_SHA, baseline, baselineReleaseId: recorded?.record.releaseId ?? null, secretNames,
         bundleSha256: sha(bytes), bundleBytes: bytes.length, configSha256: configHash, fallbackConfigSha256: fallbackHash, sourceConfigSha256: sha(source), ...(printExecutor ? { printExecutor: printExecutor.review } : {}) };
     const verifyPrevious = async () => {
         if (printExecutor)
@@ -337,11 +337,13 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
             const path = provider === "lambda" ? configPath : fallbackPath;
             await assertReleasePaused(cf, releaseId);
             check(sha(await readFile(entrypoint)) === review.bundleSha256 && sha(await readFile(path)) === (provider === "lambda" ? configHash : fallbackHash), "immutable prepared bytes/configuration.");
-            await run(["deploy", entrypoint, "--no-bundle", "--keep-vars", "--tag", releaseId, "--message", `Native Production pair ${env.GITHUB_SHA}`,
+            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            await readSealedWorkerUpload(store, artifacts, review);
+            await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--keep-vars", "--tag", releaseId, "--message", `Native Production pair ${env.GITHUB_SHA}`,
                 "--secrets-file", secretsPath,
                 ...Object.entries(chosen.vars).flatMap(([key, value]) => ["--var", `${key}:${value}`])], path);
             const live = await inspectWorker(cf);
-            check(live.content.modules.length === 1 && live.content.modules[0].sha256 === review.bundleSha256, "live candidate bytes.");
+            verifyWorkerUpload(live.content, review);
             verifyProductionReleaseSettings(await cf.settings(), await inspectProductionConsumer(cf), chosen.vars, settings, provider === "lambda" ? NATIVE_PRODUCTION_QUEUE : FALLBACK_PRODUCTION_QUEUE, deployedPrintExecutor, { requireProtectedConfig: true });
             await verifyPrintExecutor();
             await verifyPrintQueue(cf, "production");

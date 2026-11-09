@@ -19,8 +19,16 @@ export function assertPreviewProofContext(env) {
     if (env.GITHUB_REF !== "refs/heads/main" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" ||
         env.GITHUB_RUN_ATTEMPT !== "1" || env.GITHUB_WORKFLOW_REF !== WORKFLOW_REF) fail();
 }
-export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now() / 1000)) {
-    assertPreviewProofContext(env);
+function assertNativeDevelopmentProofContext(env) {
+    assertActionsIdentityContext(env);
+    if (env.GITHUB_REF !== "refs/heads/main" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_RUN_ATTEMPT !== "1" ||
+        env.GITHUB_WORKFLOW_REF !== "bentbrain/bent-mono/.github/workflows/native-development.yml@refs/heads/main" ||
+        !["stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release"].includes(env.NATIVE_OPERATION) || (env.NATIVE_RELEASE_MODE ?? "full") !== "full") fail();
+}
+const proofContext = (env, options) => options.nativeDevelopment ? assertNativeDevelopmentProofContext(env) : assertPreviewProofContext(env);
+const proofWorkflow = options => options.nativeDevelopment ? "bentbrain/bent-mono/.github/workflows/native-development.yml" : WORKFLOW;
+export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now() / 1000), options = {}) {
+    proofContext(env, options);
     if (typeof token !== "string" || token.length > 20000 || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token))
         fail();
     const parts = token.split(".");
@@ -47,7 +55,7 @@ export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now()
     for (const [key, expected] of Object.entries({ iss: ISSUER, aud: "sts.amazonaws.com", sub: SUBJECT, run_attempt: "1", repository: "bentbrain/bent-mono",
         repository_id: protectedConfig("githubRepositoryId"), repository_owner: "bentbrain", repository_owner_id: protectedConfig("githubOwnerId"), environment: "Preview",
         ref: env.GITHUB_REF, sha: env.GITHUB_SHA, run_id: env.GITHUB_RUN_ID, event_name: env.GITHUB_EVENT_NAME,
-        workflow_ref: `${WORKFLOW}@${env.GITHUB_REF}` }))
+        workflow_ref: `${proofWorkflow(options)}@${env.GITHUB_REF}` }))
         if (claims[key] !== expected)
             fail();
     if (![claims.iat, claims.nbf, claims.exp].every(Number.isSafeInteger) || claims.exp <= now || claims.nbf > now + 60 ||
@@ -60,8 +68,8 @@ export function verifyActionsToken(token, keys, env, now = Math.floor(Date.now()
         repositoryId: claims.repository_id, ownerId: claims.repository_owner_id, runAttempt: claims.run_attempt, environment: claims.environment, ref: claims.ref,
         sourceCommit: claims.sha, runId: claims.run_id, workflowRef: claims.workflow_ref, awsAccessAttempted: false };
 }
-export async function inspectActionsIdentity(env = process.env, request = fetch) {
-    assertPreviewProofContext(env);
+export async function inspectActionsIdentity(env = process.env, request = fetch, options = {}) {
+    proofContext(env, options);
     let url;
     try {
         url = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL);
@@ -82,12 +90,13 @@ export async function inspectActionsIdentity(env = process.env, request = fetch)
         if (!keysResponse.ok)
             fail();
         const keys = await keysResponse.json();
-        return verifyActionsToken(result.value, keys.keys, env);
+        return verifyActionsToken(result.value, keys.keys, env, Math.floor(Date.now() / 1000), options);
     }
     catch {
         fail();
     }
 }
+export const inspectNativeDevelopmentIdentity = env => inspectActionsIdentity(env, fetch, { nativeDevelopment: true });
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     try {
         console.info(JSON.stringify(await inspectActionsIdentity()));

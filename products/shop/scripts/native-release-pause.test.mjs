@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { beginReleasePause, installPauseSchema, inspectDevelopmentDrain, resumeVerifiedRelease, verifyPauseSchema } from "./native-release-pause.mjs";
+import { beginReleasePause, installPauseSchema, inspectDevelopmentDrain, resumeVerifiedRelease, verifyPauseSchema, pauseSchemaManifest } from "./native-release-pause.mjs";
 
 const release = { releaseId: "native-123", sourceCommit: "a".repeat(40), planSha256: "b".repeat(64),
   previous: { workerVersion: "previous", imageDigest: "previous-immutable" }, candidate: { imageDigest: "new-immutable" } };
@@ -165,5 +165,20 @@ test("artwork jobs cannot start during pause and in-flight preparation blocks cu
     await resumeVerifiedRelease(cf, release.releaseId, async () => ({ verified: true }));
     db.prepare("UPDATE artwork_preparation_jobs SET status='processing' WHERE id='next'").run();
     assert.equal(db.prepare("SELECT status FROM artwork_preparation_jobs WHERE id='next'").get().status, 'processing');
+  } finally { db.close(); }
+});
+
+test("guarded migration preserves existing pause definitions while installing guards for a new job table", async () => {
+  const { db, cf } = database();
+  try {
+    await installPauseSchema(cf);
+    const before = await pauseSchemaManifest(cf);
+    db.exec("CREATE TABLE product_image_jobs (status TEXT, attempt_count INTEGER, updated_at INTEGER)");
+    await verifyPauseSchema(cf, before);
+    await assert.rejects(verifyPauseSchema(cf), /pause schema differs/);
+    db.exec("DROP TRIGGER native_video_pause_attempt_insert");
+    await assert.rejects(verifyPauseSchema(cf, before), /pause schema differs/);
+    await installPauseSchema(cf);
+    await verifyPauseSchema(cf);
   } finally { db.close(); }
 });

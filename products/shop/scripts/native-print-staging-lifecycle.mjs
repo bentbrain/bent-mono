@@ -54,7 +54,8 @@ function client(env, request = fetch) {
   const read = () => call("GET");
   return { read,
     append: async plan => {
-      check((environment === "production" ? env.NATIVE_OPERATION : developmentOperation(env)) === "release", "only the guarded first-attempt release may append the rule.");
+      const selected = environment === "production" ? env.NATIVE_OPERATION : developmentOperation(env);
+      check(selected === "release" || environment === "development" && selected === "recover-forward-release" && plan.mutationRequired === false, "only the guarded first-attempt release may append the rule.");
       verifyPrintStagingLifecyclePlan(plan);
       check(isDeepStrictEqual(await read(), plan.before), "live rules changed after review; no update performed.");
       if (plan.mutationRequired) await call("PUT", plan.after);

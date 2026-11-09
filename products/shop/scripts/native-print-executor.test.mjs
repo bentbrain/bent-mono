@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createPrintExecutorFoundationRelease, developmentPrintExecutorClient, PRINT_EXECUTOR, printExecutorProtocol, verifyApiPrintExecutorBinding, verifyPrintExecutorConfig, verifyPrintExecutorLifecycle, verifyPrintExecutorSettings, verifyRecordedPrintExecutor, verifyRestoredPrintExecutor, restoreDevelopmentPrintExecutor, loadActivePrintExecutorBaseline } from "./native-print-executor.mjs";
-import { printExecutorCommandArguments, versionResourcesDigest } from "./native-ci-worker.mjs";
+import { printExecutorCommandArguments, versionResourcesDigest, workerContentManifest } from "./native-ci-worker.mjs";
 import { planPrintStagingLifecycle, printStagingLifecycleProtocol } from "./native-print-staging-lifecycle.mjs";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const configBytes = await readFile(new URL("../workers/print-executor/wrangler.jsonc", import.meta.url));
@@ -41,7 +41,21 @@ test("only exact Worker-not-found response establishes an absent executor", asyn
     }
     assert.throws(() => developmentPrintExecutorClient({ ...env, CLOUDFLARE_ACCOUNT_ID: "work" }, () => assert.fail()));
 });
-async function foundation(t, environment = "development") {
+async function mockBundleOutput(args, bundle) {
+    const out = args[args.indexOf("--outdir") + 1];
+    if (args.includes("--outdir")) {
+        await mkdir(out, { recursive: true });
+        await writeFile(join(out, "index.js"), bundle);
+    }
+    if (args.includes("--outfile")) {
+        const parts = new FormData();
+        parts.append("metadata", JSON.stringify({ main_module: "index.js" }));
+        parts.append("index.js", new Blob([bundle]), "index.js");
+        const response = new Response(parts);
+        await writeFile(args[args.indexOf("--outfile") + 1], Buffer.from(await response.arrayBuffer()));
+    }
+}
+async function foundation(t, environment = "development", withMap = false) {
     const protocol = printExecutorProtocol(environment);
     const context = environment === "development" ? env : { ...env,
         GITHUB_WORKFLOW_REF: "bentbrain/bent-mono/.github/workflows/native-production.yml@refs/heads/main",
@@ -60,6 +74,14 @@ async function foundation(t, environment = "development") {
         before: { exists: false, worker: PRINT_EXECUTOR, accountId: context.CLOUDFLARE_ACCOUNT_ID, absence: "HTTP404/error10007" },
         stagingLifecycle: planPrintStagingLifecycle({ rules: [{ id: "Default Multipart Abort Rule", enabled: true, conditions: {},
                     abortMultipartUploadsTransition: { condition: { type: "Age", maxAge: 604800 } } }] }) };
+    if (withMap) {
+        await writeFile(join(directory, "index.js.map"), JSON.stringify({ version: 3, file: "index.js", sources: ["source.ts"], sourcesContent: ["export default {}"], names: [], mappings: "" }));
+        const parts = new FormData();
+        parts.append("index.js", new Blob([bundle]), "index.js");
+        parts.append("index.js.map", new Blob([await readFile(join(directory, "index.js.map"))]), "index.js.map");
+        review.schemaVersion = 2;
+        review.content = await workerContentManifest(new Response(parts, { headers: { "cf-entrypoint": "index.js" } }));
+    }
     const settings = { compatibility_date: "2026-08-12", compatibility_flags: ["nodejs_compat"],
         bindings: [{ name: "DB", type: "d1", id: environment === "development" ? protectedConfig("resource_fb377032d2f5") : protectedConfig("resource_1a1378f0d1dc") },
             { name: "DESIGN_ARTWORK", type: "r2_bucket", bucket_name: `forever-tee-design-artwork-${environment}` },
@@ -71,6 +93,7 @@ async function foundation(t, environment = "development") {
     const resources = () => ({ script_runtime: { migration_tag: "print-execution-v1", compatibility_date: settings.compatibility_date, compatibility_flags: settings.compatibility_flags }, bindings: structuredClone(settings.bindings) });
     const worker = { workerVersion: "11111111-1111-4111-8111-111111111111", versionResourcesSha256: versionResourcesDigest({ resources: resources() }),
         content: { entrypoint: "index.js", modules: [{ name: "index.js", bytes: bundle.length, sha256: hash(bundle) }] } };
+    if (withMap) worker.content = review.content;
     const state = { exists: false, calls: [], events: new Map(), worker, paused: true, releaseId: "native-123", currentReleaseId: "native-123", failDeploy: false,
         lifecycle: review.stagingLifecycle.before };
     const staging = { read: async () => state.lifecycle, append: async (plan) => {
@@ -224,9 +247,7 @@ test("API image reuse prepares the verified existing print executor without allo
         platform: "linux", api: f.api, client: f.client, staging: f.staging,
         baselineStore: f.store, inspectWorker: f.inspectWorker,
         run: async (args) => {
-            const out = args[args.indexOf("--outdir") + 1];
-            await mkdir(out, { recursive: true });
-            await writeFile(join(out, "index.js"), f.bundle);
+            await mockBundleOutput(args, f.bundle);
         } };
     const prepared = await f.protocol.preparePrintExecutorFoundation(input);
     assert.equal(prepared.review.before.recorded.namespaceId, f.recorded.namespaceId);
@@ -235,9 +256,7 @@ test("API image reuse prepares the verified existing print executor without allo
         client: { ...f.client, absentSettings: async () => null } }), /existing unchanged executor/u);
     await assert.rejects(f.protocol.preparePrintExecutorFoundation({ ...input,
         run: async (args) => {
-            const out = args[args.indexOf("--outdir") + 1];
-            await mkdir(out, { recursive: true });
-            await writeFile(join(out, "index.js"), "changed executor");
+            await mockBundleOutput(args, Buffer.from("changed executor"));
         } }), /existing unchanged executor/u);
     await assert.rejects(f.protocol.preparePrintExecutorFoundation({ ...input, platform: "darwin" }), /cloud-only/u);
 });
@@ -423,4 +442,52 @@ test("Production inspection rejects Development context before network access an
         return Response.json({ success: false, errors: [{ code: 10007 }] }, { status: 404 });
     });
     assert.equal(await client.absentSettings(), null);
+});
+
+test("sealed executor source map survives preservation, deployment and recorded verification in both environments", async t => {
+    for (const environment of ["development", "production"]) {
+        const f = await foundation(t, environment, true);
+        const artifacts = await f.release.preserve(f.store);
+        assert.ok(artifacts.candidateMapArtifact, "source map must be immutable before upload");
+        const deployed = await f.release.deploy("native-123");
+        assert.equal(deployed.worker.content.modules.length, 2);
+        const prepared = { releaseId: "native-123", sourceCommit: env.GITHUB_SHA, worker: { printExecutor: f.review }, artifacts: { printExecutor: artifacts } };
+        await f.protocol.verifyRecordedPrintExecutor({ env: f.context, api: f.api, prepared, store: f.store, inspectWorker: f.inspectWorker, client: f.client, staging: f.staging });
+    }
+});
+
+test("executor preparation seals its map and rejects a changed sidecar before preservation or upload", async t => {
+    const f = await deployedFoundation(t);
+    f.state.paused = false;
+    f.state.events.set("verified", JSON.stringify({ worker: { printExecutor: f.recorded } }));
+    const directory = await mkdtemp(join(tmpdir(), "map-executor-preparation-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["source.ts"], names: [], mappings: "" }));
+    const run = async args => {
+        await mockBundleOutput(args, f.bundle);
+        if (args.includes("--outdir")) await writeFile(join(args[args.indexOf("--outdir") + 1], "index.js.map"), map);
+        if (args.includes("--outfile")) {
+            const parts = new FormData(); parts.append("metadata", JSON.stringify({ main_module: "index.js" }));
+            parts.append("index.js", new Blob([f.bundle]), "index.js"); parts.append("index.js.map", new Blob([map]), "index.js.map");
+            await writeFile(args.at(-1), Buffer.from(await new Response(parts).arrayBuffer()));
+        }
+    };
+    const prepared = await f.protocol.preparePrintExecutorFoundation({ env: { ...env, RUNNER_TEMP: directory }, directory, platform: "linux",
+        run, api: f.api, client: f.client, staging: f.staging, baselineStore: f.store, inspectWorker: f.inspectWorker });
+    assert.equal(prepared.review.content.modules.length, 2);
+    assert.equal(prepared.review.bundleSha256, hash(f.bundle));
+    await writeFile(join(directory, "executor-bundle", "index.js.map"), map.toString().replace("source.ts", "tamper.ts"));
+    await assert.rejects(prepared.preserve(f.store), /sealed manifest/);
+    assert.equal(f.state.calls.length, 1);
+});
+test("map-bearing executor update and exact-version rollback retain the complete sealed predecessor", async t => {
+    const f = await foundation(t, "development", true);
+    const artifacts = await f.release.preserve(f.store), recorded = await f.release.deploy("native-123");
+    const next = await nextExecutor({ ...f, artifacts, recorded });
+    await next.release.deploy("native-124");
+    const recovery = rollbackContext(f, next.prepared, next.store);
+    const result = await restoreDevelopmentPrintExecutor(recovery.input);
+    assert.equal(result.restored.worker.content.modules.length, 2);
+    await result.verify();
+    assert.equal(f.state.calls.length, 2);
 });

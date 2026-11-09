@@ -124,7 +124,7 @@ export function inspectDevelopmentImagePlan(plan, candidate, recoveryCandidates)
         check(isDeepStrictEqual(output.actions, ["no-op"]), "unexpected output change.");
     return { imagePlanVerified: true, updateCount: updated.length, updated, creates: 0, deletes: 0, observations, applied: false };
 }
-export async function prepareDevelopmentImage(candidate, env = process.env, { recoveryCandidates } = {}) {
+export async function prepareDevelopmentImage(candidate, env = process.env, { recoveryCandidates, sealedPlan } = {}) {
     const call = await createDevelopmentCICall(env);
     // Provider 6.62.0 drops non-404 HeadBucket errors and reports an empty result
     // as missing. Fail explicitly before Terraform can propose replacement.
@@ -173,7 +173,13 @@ export async function prepareDevelopmentImage(candidate, env = process.env, { re
     };
     await run(["init", "-input=false", "-lockfile=readonly", "-no-color"]);
     const planPath = join(directory, "candidate.tfplan");
-    await run(["plan", "-input=false", "-no-color", "-parallelism=1", "-lock-timeout=0s", `-out=${planPath}`,
+    if (sealedPlan) {
+        check(env.NATIVE_OPERATION === "recover-forward-release" && sealedPlan.reference?.sha256 === sealedPlan.review?.planSha256,
+            "only dedicated recovery may reuse an approved immutable plan.");
+        const saved = await sealedPlan.store.read(sealedPlan.reference);
+        check(hash(saved) === sealedPlan.review.planSha256, "approved saved plan bytes differ.");
+        await writeFile(planPath, saved, { flag: "wx", mode: 0o600 });
+    } else await run(["plan", "-input=false", "-no-color", "-parallelism=1", "-lock-timeout=0s", `-out=${planPath}`,
         "-var=ci_execution=true", `-var=image_digest=${candidate.imageDigest}`, `-var=build_id=${candidate.sourceDigest}`, `-var=api_origin=${ORIGIN}`]);
     const output = await run(["show", "-json", planPath]);
     const plan = JSON.parse(output.stdout);
@@ -195,6 +201,7 @@ export async function prepareDevelopmentImage(candidate, env = process.env, { re
     }
     const evidence = { ...review, planSha256: hash(await readFile(planPath)), terraformVersion: "1.12.2", remoteStateLocked: true,
         sourceCommit: env.GITHUB_SHA, imageDigest: candidate.imageDigest, sourceDigest: candidate.sourceDigest };
+    check(!sealedPlan || isDeepStrictEqual(evidence, sealedPlan.review), "saved plan review differs from independently approved plan.");
     let attempted = false;
     return { review: evidence,
         preserve: async (store) => {

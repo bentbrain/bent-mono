@@ -1,3 +1,4 @@
+import { forwardRecoveryReference } from "./native-forward-recovery-reference.mjs";
 import { rollbackRecoveryReference } from "./native-rollback-reference.mjs";
 import { recoveryReference, rendererReference, failedQualificationReference } from "./native-qualification-reference.mjs";
 import { assertActionsIdentityContext } from "./native-ci-identity.mjs";
@@ -26,9 +27,16 @@ export function developmentOperation(env) {
     rollbackRecoveryReference(env.NATIVE_ROLLBACK_REFERENCE, env.NATIVE_ROLLBACK_RELEASE);
     if (env.GITHUB_REF !== "refs/heads/main") throw Error("Paused rollback recovery requires main.");
   } else if (env.NATIVE_ROLLBACK_REFERENCE) throw Error("Rollback reference is restricted to paused rollback recovery.");
+  if (["plan-forward-recovery", "recover-forward-release"].includes(operation)) {
+    forwardRecoveryReference(env.NATIVE_FORWARD_RECOVERY_REFERENCE, operation === "recover-forward-release");
+    if (env.GITHUB_REF !== "refs/heads/main" || mode !== "full") throw Error("Forward recovery requires first-attempt current-main full preparation.");
+  } else if (env.NATIVE_FORWARD_RECOVERY_REFERENCE) throw Error("Forward recovery reference requires its dedicated operation.");
+  if (operation === "stage-forward-recovery-authority") {
+    if (env.GITHUB_REF !== "refs/heads/main" || mode !== "full") throw Error("Authority staging requires first-attempt current-main full dispatch.");
+  } else if (env.NATIVE_FORWARD_RECOVERY_PACKAGE) throw Error("Forward recovery package requires its dedicated staging operation.");
   const referencedRelease = ["qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification"].includes(operation);
   if (env.GITHUB_WORKFLOW_REF !== `bentbrain/bent-mono/.github/workflows/native-development.yml@${env.GITHUB_REF}` ||
-    !["plan", "build-candidate", "release", "rollback", "recover-rollback", "qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification"].includes(operation) ||
+    !["plan", "build-candidate", "release", "rollback", "recover-rollback", "stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release", "qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification"].includes(operation) ||
     (operation === "repair-schedule" && env.GITHUB_REF !== "refs/heads/main") ||
     (operation !== "plan" && (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_RUN_ATTEMPT !== "1")) ||
     (!["rollback", "recover-rollback"].includes(operation) && env.NATIVE_ROLLBACK_RELEASE) ||
