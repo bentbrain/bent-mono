@@ -13,6 +13,9 @@ import { versionResourcesDigest } from "./native-ci-worker.mjs";
 import { workerContentManifest, workerContentResponse } from "./native-worker-content.mjs";
 import { sealDispatchInputs, resolveDispatchInputs } from "./release-dispatch-inputs.mjs";
 import { developmentOperation } from "./native-ci-operation.mjs";
+import { stageDevelopmentForwardRecoveryAuthority } from "./native-forward-recovery-staging.mjs";
+import { offlinePreflight } from "./release-preflight.mjs";
+import { NATIVE_MIGRATION_COUNT, NATIVE_MIGRATION_LATEST } from "./native-migration-inventory.mjs";
 import { forwardRecoveryReference } from "./native-forward-recovery-reference.mjs";
 
 const source = "a".repeat(40), originalSource = "b".repeat(40), owner = "native-101", current = "native-100";
@@ -400,4 +403,146 @@ test("fresh drain deadline leaves a still-live print lease and the new pause own
     assert.equal((await recoveryControl(f.cf)).paused, 1);
     assert.equal((await recoveryControl(f.cf)).release_id, "native-303");
     assert.equal(f.db.prepare("SELECT status FROM print_asset_jobs").get().status, "running");
+});
+
+async function stagingFixture(t) {
+  const f = await fixture(t), authority = { ...f.authority, snapshot: { sha256: f.authority.snapshot.sha256 } };
+  const packageBytes = JSON.stringify({ schemaVersion: 1, sourceCommit: source, authority, snapshot: f.snapshot });
+  const config = { ...JSON.parse(process.env.SHOP_PROTECTED_CONFIG_JSON), ...f.settings,
+    developmentForwardRecoveryPackageSha256: recoveryHash(packageBytes) };
+  delete config.developmentForwardRecoveryAuthoritySha256;
+  const beforeConfig = process.env.SHOP_PROTECTED_CONFIG_JSON;
+  process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
+  t.after(() => { process.env.SHOP_PROTECTED_CONFIG_JSON = beforeConfig; });
+  const context = { ...env, NATIVE_OPERATION: "stage-forward-recovery-authority", NATIVE_FORWARD_RECOVERY_PACKAGE: packageBytes };
+  const calls = [], originalQuery = f.cf.query;
+  f.cf.query = (sql, params) => {
+    assert.match(sql.trim(), /^SELECT /, "staging must issue read-only D1 queries");
+    calls.push("select"); return originalQuery(sql, params);
+  };
+  const store = { read: async ref => { calls.push(`read:${ref.key}:${ref.version}`); return f.store.read(ref); },
+    save: async (name, bytes) => { calls.push(`save:${name}`); return f.store.save(name, bytes); } };
+  const dependencies = { cf: f.cf, client: f.client, staging: f.staging, store,
+    currentMain: async () => { calls.push("main"); },
+    identity: async context => { calls.push("identity"); return { signatureVerified: true, runId: context.GITHUB_RUN_ID, sourceCommit: source }; } };
+  const update = value => {
+    context.NATIVE_FORWARD_RECOVERY_PACKAGE = JSON.stringify(value);
+    config.developmentForwardRecoveryPackageSha256 = recoveryHash(context.NATIVE_FORWARD_RECOVERY_PACKAGE);
+    process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config);
+  };
+  return { ...f, context, config, calls, dependencies, update, package: JSON.parse(packageBytes),
+    run: () => stageDevelopmentForwardRecoveryAuthority(context, dependencies) };
+}
+
+test("staging seals snapshot then authority in this run and requires separate final authority approval", async t => {
+  const f = await stagingFixture(t), result = await f.run();
+  assert.equal(result.operation, "stage-forward-recovery-authority"); assert.equal(result.deploymentPerformed, false);
+  const ref = forwardRecoveryReference(JSON.stringify(result.reference), false);
+  assert.equal(ref.authority.key, "source/releases/native-303/forward-recovery-authority.json");
+  const authority = JSON.parse(await f.store.read(ref.authority));
+  assert.equal(authority.snapshot.key, "source/releases/native-303/forward-recovery-snapshot.json");
+  assert.deepEqual(JSON.parse(await f.store.read(authority.snapshot)), f.snapshot);
+  assert.deepEqual(f.calls.filter(call => call.startsWith("save:")), ["save:forward-recovery-snapshot.json", "save:forward-recovery-authority.json"]);
+  for (const r of [authority.snapshot, ref.authority]) assert.ok(f.calls.includes(`read:${r.key}:${r.version}`));
+  assert.deepEqual(f.calls.slice(0, 2), ["main", "identity"]);
+  const args = { env: { ...env, NATIVE_FORWARD_RECOVERY_REFERENCE: JSON.stringify(ref) }, store: f.store, reference: ref.authority };
+  await assert.rejects(loadForwardRecoveryAuthority(args), /AuthoritySha256/);
+  f.config.developmentForwardRecoveryAuthoritySha256 = ref.authority.sha256;
+  process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(f.config);
+  assert.deepEqual((await loadForwardRecoveryAuthority(args)).authority, authority);
+  assert.deepEqual(await recoveryControl(f.cf), f.control);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='forward-recovery-claimed'").get().n, 0);
+});
+
+test("staging rejects missing or wrong protected approvals, identities and source before any write", async t => {
+  for (const field of ["developmentForwardRecoveryPackageSha256", "developmentForwardRecoverySourceCommit", "developmentForwardRecoverySnapshotSha256",
+    "developmentForwardRecoveryOriginalRepository", "developmentForwardRecoveryOriginalRepositoryId"]) {
+    for (const value of [undefined, "unapproved"]) {
+      const f = await stagingFixture(t); f.config[field] = value; process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(f.config);
+      await assert.rejects(f.run()); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+    }
+  }
+  for (const delta of [{ GITHUB_RUN_ATTEMPT: "2" }, { GITHUB_REF: "refs/heads/foreign" }, { GITHUB_REPOSITORY: "fixtures/retired-release" },
+    { GITHUB_REPOSITORY_ID: "70001" }, { GITHUB_EVENT_NAME: "push" }, { NATIVE_RELEASE_MODE: "api" },
+    { NATIVE_FORWARD_RECOVERY_REFERENCE: "{}" }, { GITHUB_SHA: originalSource }, { NATIVE_FORWARD_RECOVERY_PACKAGE: "" }]) {
+    const f = await stagingFixture(t); Object.assign(f.context, delta);
+    await assert.rejects(f.run()); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+  }
+  for (const proof of [{ signatureVerified: false, runId: "303", sourceCommit: source },
+    { signatureVerified: true, runId: "999", sourceCommit: source }, { signatureVerified: true, runId: "303", sourceCommit: originalSource }]) {
+    const f = await stagingFixture(t); f.dependencies.identity = async () => proof;
+    await assert.rejects(f.run(), /canonical CI signature/); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+  }
+  const f = await stagingFixture(t); f.dependencies.currentMain = async () => { throw Error("current main changed"); };
+  await assert.rejects(f.run(), /current main/); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+});
+
+test("staging package schema rejects arbitrary paths, extra fields, references and oversized bytes", async t => {
+  for (const change of [p => { p.extra = true; }, p => { p.authority.extra = true; }, p => { p.authority.snapshot.key = "arbitrary.json"; },
+    p => { p.authority.preparation.key = "source/releases/native-101/foreign.json"; }, p => { p.sourceCommit = originalSource; },
+    p => { p.snapshot.run.repository.id++; }, p => { delete p.snapshot.workerIntent; },
+    p => { p.authority.legacySidecar.justification = "x".repeat(48 * 1024); }]) {
+    const f = await stagingFixture(t); change(f.package); f.update(f.package);
+    await assert.rejects(f.run()); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+  }
+  const f = await stagingFixture(t); f.update({ schemaVersion: 1, authority: f.authorityRef });
+  await assert.rejects(f.run()); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+});
+
+test("staging rereads interrupted state around evidence writes and never changes pause or runtime", async t => {
+  for (const point of ["before", "snapshot", "authority"]) {
+    const f = await stagingFixture(t), save = f.dependencies.store.save;
+    if (point === "before") f.state.extra = true;
+    else f.dependencies.store.save = async (name, bytes) => {
+      const ref = await save(name, bytes); if (name === `forward-recovery-${point}.json`) f.state.extra = true; return ref;
+    };
+    await assert.rejects(f.run(), /provider bytes/);
+    assert.deepEqual(await recoveryControl(f.cf), f.control);
+    assert.equal(f.calls.filter(call => call.startsWith("save:")).length, point === "before" ? 0 : point === "snapshot" ? 1 : 2);
+  }
+});
+
+test("staging never retries failed snapshot or authority acknowledgements and refuses changed readbacks", async t => {
+  for (const name of ["forward-recovery-snapshot.json", "forward-recovery-authority.json"]) {
+    for (const failure of ["ack", "hash", "version", "key"]) {
+      const f = await stagingFixture(t), save = f.dependencies.store.save, read = f.dependencies.store.read;
+      f.dependencies.store.save = async (filename, bytes) => {
+        const ref = await save(filename, bytes); if (filename !== name) return ref;
+        if (failure === "ack") throw Error("lost acknowledgement");
+        if (failure === "version") return { ...ref, version: "null" };
+        if (failure === "key") return { ...ref, key: ref.key.replace("native-303", "native-999") };
+        return ref;
+      };
+      f.dependencies.store.read = ref => failure === "hash" && ref.key.endsWith(name) ? Buffer.from("changed") : read(ref);
+      await assert.rejects(f.run()); assert.equal(f.calls.filter(call => call === `save:${name}`).length, 1);
+      assert.deepEqual(await recoveryControl(f.cf), f.control);
+    }
+  }
+});
+
+test("staging preflight admits only approved protected packages on Development main", async t => {
+  const f = await stagingFixture(t), migrations = Array.from({ length: NATIVE_MIGRATION_COUNT }, (_, i) => `${i}.sql`);
+  migrations[migrations.length - 1] = NATIVE_MIGRATION_LATEST;
+  const input = { environment: "development", lane: "native", operation: f.context.NATIVE_OPERATION, ref: env.GITHUB_REF,
+    sha: source, migrations, forwardRecoveryPackage: f.context.NATIVE_FORWARD_RECOVERY_PACKAGE };
+  assert.equal(offlinePreflight(input).passed, true);
+  for (const delta of [{ environment: "production" }, { ref: "refs/heads/foreign" }, { sha: originalSource }, { releaseMode: "api" },
+    { forwardRecoveryPackage: "" }, { forwardRecoveryPackage: "{}" }, { forwardRecoveryReference: "{}" }, { operation: "release" }])
+    assert.equal(offlinePreflight({ ...input, ...delta }).passed, false);
+  delete f.config.developmentForwardRecoveryPackageSha256;
+  process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(f.config);
+  assert.equal(offlinePreflight(input).passed, false);
+});
+
+test("approved package bytes still require authentic historical identity and exact API intent", async t => {
+  for (const change of [p => { p.snapshot.run.run_attempt = 2; }, p => { p.snapshot.run.head_sha = source; },
+    p => { p.snapshot.authentication.method = "unverified"; }, p => { p.snapshot.workerIntent.atomicReleaseSecrets = 3; },
+    p => { delete p.snapshot.workerIntent; }, p => { p.snapshot.extra = true; }]) {
+    const f = await stagingFixture(t); change(f.package);
+    const hash = recoveryHash(JSON.stringify(f.package.snapshot));
+    f.package.authority.snapshot.sha256 = hash;
+    f.config.developmentForwardRecoverySnapshotSha256 = hash;
+    f.update(f.package);
+    await assert.rejects(f.run()); assert.equal(f.calls.some(call => call.startsWith("save:")), false);
+  }
 });

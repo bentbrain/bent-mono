@@ -17,8 +17,8 @@ export function developmentReleaseObjectKey(env, name) {
     check(/^native-\d+$/.test(env.NATIVE_VERIFY_RELEASE ?? ""));
     return `source/releases/native-${PRODUCTION_EVIDENCE_RUN_ID}/${stem}-${env.NATIVE_VERIFY_RELEASE}-run-${env.GITHUB_RUN_ID}${extension}`;
 }
-export async function createDevelopmentReleaseStore(env = process.env) {
-    const call = await createDevelopmentCICall(env);
+export async function createDevelopmentReleaseStore(env = process.env, run) {
+    const call = await createDevelopmentCICall(env, run);
     check(env.RUNNER_TEMP?.startsWith("/") && env.GITHUB_WORKFLOW_REF === `bentbrain/bent-mono/.github/workflows/native-development.yml@${env.GITHUB_REF}`);
     const directory = await mkdtemp(join(env.RUNNER_TEMP, "native-evidence-"));
     const bucket = ["--bucket", BUCKET, "--expected-bucket-owner", protectedConfig("awsAccountId")];
@@ -32,6 +32,8 @@ export async function createDevelopmentReleaseStore(env = process.env) {
         return bytes;
     };
     return { read, save: async (name, bytes) => {
+            if (env.NATIVE_OPERATION === "stage-forward-recovery-authority")
+                check(["forward-recovery-snapshot.json", "forward-recovery-authority.json"].includes(name));
             check(/^[a-z-]+\.(?:json|tfplan|js|zip)$/.test(name) && Buffer.isBuffer(bytes));
             const file = join(directory, name);
             await writeFile(file, bytes, { flag: "wx", mode: 0o600 });

@@ -14,7 +14,7 @@ on:
         description: Plan/deploy a pair, independently qualify the live pair, or recover it
         type: choice
         default: plan
-        options: [plan, build-candidate, release, rollback, recover-rollback, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
+        options: [plan, build-candidate, release, rollback, recover-rollback, stage-forward-recovery-authority, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
       release_mode:
         description: API mode reuses the live image; relevant qualification is required separately before Production
         type: choice
@@ -101,6 +101,7 @@ jobs:
         run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check native request before dependency installation
         env:
+          NATIVE_FORWARD_RECOVERY_PACKAGE: ${{ inputs.operation == 'stage-forward-recovery-authority' && secrets.SHOP_DEVELOPMENT_FORWARD_RECOVERY_PACKAGE || '' }}
           OPERATION: ${{ inputs.operation }}
           NATIVE_RELEASE_MODE: ${{ inputs.release_mode || 'full' }}
           NATIVE_VERIFY_RELEASE: ${{ inputs.verify_release }}
@@ -193,6 +194,7 @@ jobs:
           PRINTIFY_ASSET_DELIVERY_SECRET: ${{ secrets.PRINTIFY_ASSET_DELIVERY_SECRET }}
           PRINTIFY_WEBHOOK_SECRET: ${{ secrets.PRINTIFY_WEBHOOK_SECRET }}
           CART_LINE_CAPABILITY_SECRET: ${{ secrets.CART_LINE_CAPABILITY_SECRET }}
+          NATIVE_FORWARD_RECOVERY_PACKAGE: ${{ inputs.operation == 'stage-forward-recovery-authority' && secrets.SHOP_DEVELOPMENT_FORWARD_RECOVERY_PACKAGE || '' }}
           NATIVE_CANDIDATE_RECEIPT: ${{ secrets.SHOP_DEVELOPMENT_CANDIDATE_RECEIPT }}
           NATIVE_OPERATION: ${{ inputs.operation || 'plan' }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}

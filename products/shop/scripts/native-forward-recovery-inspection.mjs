@@ -30,7 +30,23 @@ export async function loadForwardRecoveryAuthority({ env, store, reference, conf
   forwardRecoveryObject(reference, "forward-recovery-authority.json");
   const bytes = await store.read(reference);
   check(recoveryHash(bytes) === reference.sha256 && reference.sha256 === config("developmentForwardRecoveryAuthoritySha256"), "independently reviewed protected authority hash required.");
-  const authority = JSON.parse(bytes), control = authority?.control, original = authority?.original;
+  const authority = JSON.parse(bytes);
+  validateForwardRecoveryAuthority({ env, authority, config });
+  forwardRecoveryObject(authority.snapshot, "forward-recovery-snapshot.json");
+  const snapshotBytes = await store.read(authority.snapshot);
+  check(recoveryHash(snapshotBytes) === authority.snapshot.sha256, "snapshot bytes differ.");
+  const snapshot = JSON.parse(snapshotBytes);
+  validateForwardRecoverySnapshot(snapshot, authority);
+  return { authority, snapshot, reference };
+}
+
+// Pure semantic checks shared by approved-package staging and final hash
+// admission. They grant no approval and perform no provider reads or writes.
+export function validateForwardRecoveryAuthority({ env, authority, config = protectedConfig }) {
+  check(authority && Object.keys(authority).sort().join() ===
+    "accountId,cloudflareAccountId,control,environment,executorIntentSha256,kind,legacySidecar,namespaceId,observed,original,preparation,region,schedules,schemaVersion,snapshot,sourceCommit,stagingLifecycle",
+    "exact authority schema required.");
+  const control = authority?.control, original = authority?.original;
   check(authority.schemaVersion === 1 && authority.kind === "development-interrupted-forward-release-v1" &&
     authority.sourceCommit === env.GITHUB_SHA && authority.sourceCommit === config("developmentForwardRecoverySourceCommit") &&
     authority.environment === "development" && authority.accountId === config("awsAccountId") && authority.cloudflareAccountId === CLOUDFLARE_ACCOUNT &&
@@ -45,11 +61,17 @@ export async function loadForwardRecoveryAuthority({ env, store, reference, conf
     String(original.ownerId) === config("githubOwnerId") && original.repositoryId !== Number(config("githubRepositoryId")) &&
     Number.isSafeInteger(original.runId) && original.runId > 0 && control.release_id === `native-${original.runId}` &&
     /^[a-f0-9]{40}$/.test(original.sourceCommit ?? ""), "separately pinned original repository/run/source required.");
-  forwardRecoveryObject(authority.snapshot, "forward-recovery-snapshot.json");
-  check(authority.snapshot.sha256 === config("developmentForwardRecoverySnapshotSha256"), "protected authenticated original snapshot hash required.");
-  const snapshotBytes = await store.read(authority.snapshot);
-  check(recoveryHash(snapshotBytes) === authority.snapshot.sha256, "snapshot bytes differ.");
-  const snapshot = JSON.parse(snapshotBytes), run = snapshot.run;
+  check(/^[a-f0-9]{64}$/.test(authority.snapshot?.sha256 ?? "") &&
+    authority.snapshot.sha256 === config("developmentForwardRecoverySnapshotSha256"), "protected authenticated original snapshot hash required.");
+  forwardRecoveryObject(authority.preparation, "prepared.json");
+  check(authority.preparation.key === `source/releases/${control.release_id}/prepared.json` &&
+    /^[a-f0-9]{64}$/.test(authority.executorIntentSha256 ?? ""), "exact original preparation and intent required.");
+}
+
+export function validateForwardRecoverySnapshot(snapshot, authority) {
+  check(snapshot && Object.keys(snapshot).sort().join() === "authentication,executorIntent,operation,prepared,releaseMode,run,schemaVersion,workerIntent" &&
+    snapshot.prepared && snapshot.executorIntent && snapshot.workerIntent, "exact authenticated snapshot schema required.");
+  const original = authority.original, run = snapshot?.run;
   check(snapshot.schemaVersion === 1 && snapshot.authentication?.method === "personal-github-api" &&
     snapshot.authentication.repository === original.repository && snapshot.authentication.repositoryId === original.repositoryId &&
     run?.id === original.runId && run.run_attempt === 1 && run.status === "completed" && run.conclusion === "failure" &&
@@ -58,10 +80,6 @@ export async function loadForwardRecoveryAuthority({ env, store, reference, conf
     run.repository.id === original.repositoryId && run.repository.owner?.id === original.ownerId && run.head_repository?.id === original.repositoryId &&
     snapshot.operation === "release" && snapshot.releaseMode === "full" &&
     (run.display_title ?? "").startsWith(`Native development · release · full · - · - · main · ${original.sourceCommit} ·`), "reviewed authenticated original first-attempt failed full release required.");
-  forwardRecoveryObject(authority.preparation, "prepared.json");
-  check(authority.preparation.key === `source/releases/${control.release_id}/prepared.json` &&
-    /^[a-f0-9]{64}$/.test(authority.executorIntentSha256 ?? ""), "exact original preparation and intent required.");
-  return { authority, snapshot, reference };
 }
 
 // This returns interrupted evidence, never a verified executor baseline.

@@ -1,3 +1,4 @@
+import { stageDevelopmentForwardRecoveryAuthority } from "./native-forward-recovery-staging.mjs";
 import { runDevelopmentForwardRecovery } from "./native-forward-recovery.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { recoverPausedDevelopmentRollback } from "./native-rollback-recovery.mjs";
@@ -30,7 +31,10 @@ try {
     const releaseId = `native-${env.GITHUB_RUN_ID}`;
     let operationFailure, functional;
     try {
-        if (["plan-forward-recovery", "recover-forward-release"].includes(operation)) {
+        if (operation === "stage-forward-recovery-authority") {
+            console.info(JSON.stringify(await stageDevelopmentForwardRecoveryAuthority(env)));
+        }
+        else if (["plan-forward-recovery", "recover-forward-release"].includes(operation)) {
             console.info(JSON.stringify(await runDevelopmentForwardRecovery(env)));
         }
         else if (operation === "recover-rollback") {

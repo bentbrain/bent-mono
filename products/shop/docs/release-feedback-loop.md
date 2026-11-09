@@ -506,10 +506,12 @@ application deployment baseline.
 
 ### Forward recovery of an interrupted Development release
 
-`plan-forward-recovery` and `recover-forward-release` use first-attempt full
+`stage-forward-recovery-authority`, `plan-forward-recovery` and
+`recover-forward-release` use first-attempt full
 dispatches from the reviewed current main commit through protected Preview.
-Both verify a fresh signed identity for the canonical monorepo workflow, the
-current immutable candidate receipt, and the exact interrupted release state.
+Each verifies a fresh signed identity for the canonical monorepo workflow and
+the exact interrupted release state. Planning and execution also verify the
+current immutable candidate receipt.
 Current main must still pass release admission when execution claims the pause.
 
 The protected configuration pins the reviewed source, authority and original
@@ -520,8 +522,44 @@ repository name and numeric ID with `developmentForwardRecoveryOriginalRepositor
 and `developmentForwardRecoveryOriginalRepositoryId`. The snapshot comes from an
 authenticated personal-operator read of the original first-attempt failed full
 release. Independent review authenticates its hash and original repository,
-owner, run, source, preparation and executor intent. The current workflow token
+owner, run, source, preparation, API intent and executor intent. The current workflow token
 retains its canonical monorepo identity and existing permissions.
+
+Prepare the staging package as one UTF-8 JSON secret of at most 48 KiB with
+exact top-level fields `{ "schemaVersion": 1, "sourceCommit": "<current main SHA>",
+"authority": <template>, "snapshot": <authenticated snapshot> }`. The authority
+uses the complete schema described below, with `snapshot` containing only
+`{ "sha256": "<snapshot hash>" }`. Compute that hash over the UTF-8 bytes of
+`JSON.stringify(package.snapshot)`. The snapshot contains exactly `schemaVersion`,
+`authentication`, `run`, `operation`, `releaseMode`, `prepared`, `workerIntent`
+and `executorIntent`. Preserve the actual D1 journal payloads. `workerIntent`
+must equal the original API deployment intent, including `atomicReleaseSecrets: 4`.
+Retain the authenticated original GitHub response in private operator review;
+`run` may retain only the identity, event, source and conclusion fields consumed
+by `validateForwardRecoverySnapshot`. A declared authentication method requires
+independent verification against that original response.
+
+Independently review the exact package bytes, snapshot and source, then install
+`SHOP_DEVELOPMENT_FORWARD_RECOVERY_PACKAGE` as a protected Preview secret and its
+exact byte SHA-256 as `developmentForwardRecoveryPackageSha256`. Install the
+source, snapshot and historical repository pins listed above. Dispatch
+`stage-forward-recovery-authority` through the existing coordinated workflow
+with exact `expected_source` and `release_mode=full`. The workflow exposes the
+secret only as `NATIVE_FORWARD_RECOVERY_PACKAGE` for this operation. It verifies
+the package approval and reads the interrupted D1/S3/API/executor/namespace,
+staging lifecycle, schedules and exact pause state before evidence writes.
+
+Staging writes `forward-recovery-snapshot.json` once under the current canonical
+run, checks its S3 version and hash, then writes `forward-recovery-authority.json`
+with that immutable snapshot reference and checks its version and hash. It
+rereads the interrupted state between and after the writes. The old pause stays
+held. Retrieve the authority reference through the encrypted operational
+diagnostics artifact. Independently review the staged authority and snapshot for
+semantic correspondence, then install the exact final authority SHA-256 as
+`developmentForwardRecoveryAuthoritySha256`. Package approval authorizes evidence
+staging; planning requires this separate final authority approval. Preserve the
+immutable objects after an uncertain write and inspect them before arranging a
+new independently reviewed operation. Staging never installs approval hashes.
 
 Supply `forward_recovery_reference` as a sealed schema-version-1 object containing
 an `authority` reference. References contain an exact immutable `key`, `version`
