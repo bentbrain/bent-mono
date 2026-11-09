@@ -18,6 +18,14 @@ let fail;
 let diagnostics = "";
 const result = new Promise((resolve, reject) => { complete = resolve; fail = reject; });
 const server = createServer(async (request, response) => {
+    if (request.url === "/2018-06-01/runtime/init/error") {
+        let error = "";
+        for await (const chunk of request)
+            error = `${error}${chunk}`.slice(0, 4096);
+        response.writeHead(202).end();
+        fail(new Error(`RIC initialization failed: ${error}`));
+        return;
+    }
     if (request.url === "/2018-06-01/runtime/invocation/next" && !received) {
         received = true;
         response.writeHead(200, { "content-type": "application/json", "lambda-runtime-aws-request-id": "smoke-request",
@@ -57,6 +65,7 @@ try {
             AWS_LAMBDA_FUNCTION_NAME: functionName, AWS_LAMBDA_FUNCTION_MEMORY_SIZE: "3008", AWS_REGION: REGION,
             AWS_LAMBDA_FUNCTION_VERSION: "$LATEST", AWS_LAMBDA_LOG_GROUP_NAME: `/aws/lambda/${NAME}`,
             AWS_LAMBDA_LOG_STREAM_NAME: "smoke-only",
+            SHOP_PROTECTED_CONFIG_JSON: JSON.stringify({ awsAccountId: protectedConfig("awsAccountId") }),
             STORY_BUCKET: BUCKET, STORY_BUILD_ID: process.env.STORY_IMAGE_BUILD_ID,
             STORY_API_ORIGIN: "https://forever-tee-api-development.socialqueue.workers.dev",
             STORY_IMAGE_BUILD_ID: process.env.STORY_IMAGE_BUILD_ID,
