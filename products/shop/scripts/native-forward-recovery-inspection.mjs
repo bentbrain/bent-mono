@@ -86,7 +86,12 @@ export async function inspectInterruptedDevelopmentRelease({ cf, client, staging
   const intent = await recoveryEvent(cf, owner, "print-executor-deploy-started");
   check(equal(intent, snapshot.executorIntent) && recoveryHash(JSON.stringify(intent)) === authority.executorIntentSha256 &&
     equal(intent.review, review) && equal(intent.artifacts, artifacts), "original executor mutation intent changed.");
-  const completed = (await cf.query("SELECT stage FROM native_video_release_events WHERE release_id = ? AND stage IN ('print-executor-verified', 'worker-deploy-started', 'worker-verified', 'verified')", [owner]))[0].results;
+  // The paired release records its API deployment intent before uploading the
+  // executor. That intent is part of this interrupted state, not completion.
+  const workerIntent = await recoveryEvent(cf, owner, "worker-deploy-started");
+  check(equal(workerIntent, snapshot.workerIntent) && equal(workerIntent, { ...prepared.worker, atomicReleaseSecrets: 4 }),
+    "original API deployment intent changed.");
+  const completed = (await cf.query("SELECT stage FROM native_video_release_events WHERE release_id = ? AND stage IN ('print-executor-verified', 'worker-verified', 'verified')", [owner]))[0].results;
   check(completed.length === 0, "interrupted release advanced beyond the approved mixed state.");
   const upload = await readSealedWorkerUpload(store, artifacts, review);
   const previous = JSON.parse(await store.read(prepared.artifacts.previousArtifact));

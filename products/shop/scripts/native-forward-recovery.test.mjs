@@ -95,13 +95,15 @@ async function fixture(t) {
     worker: { printExecutor: review }, artifacts: { printExecutor: artifacts, previousArtifact }, previous: { worker: api, consumer } };
   const preparation = await save(owner, "prepared.json", prepared), preparedEvent = { ...prepared, preparation }, intent = { review, artifacts };
   await recordReleaseEvent(cf, owner, "prepared", preparedEvent, 1000);
+  const workerIntent = { ...prepared.worker, atomicReleaseSecrets: 4 };
+  await recordReleaseEvent(cf, owner, "worker-deploy-started", workerIntent, 1500);
   await recordReleaseEvent(cf, owner, "print-executor-deploy-started", intent, 2000);
   const original = { repository: "fixtures/retired-release", repositoryId: 70001, ownerId: Number(protectedConfig("githubOwnerId")), sourceCommit: originalSource, runId: 101 };
   const snapshot = { schemaVersion: 1, authentication: { method: "personal-github-api", repository: original.repository, repositoryId: original.repositoryId },
     run: { id: original.runId, run_attempt: 1, status: "completed", conclusion: "failure", event: "workflow_dispatch", head_branch: "main", head_sha: originalSource,
       path: ".github/workflows/native-development.yml", repository: { full_name: original.repository, id: original.repositoryId, owner: { id: original.ownerId } },
       head_repository: { id: original.repositoryId }, display_title: `Native development · release · full · - · - · main · ${originalSource} · synthetic` },
-    operation: "release", releaseMode: "full", prepared: preparedEvent, executorIntent: intent };
+    operation: "release", releaseMode: "full", prepared: preparedEvent, workerIntent, executorIntent: intent };
   const authority = { schemaVersion: 1, kind: "development-interrupted-forward-release-v1", sourceCommit: source, control, original, environment: "development",
     accountId: protectedConfig("awsAccountId"), cloudflareAccountId: protectedConfig("cloudflareAccountId"), region: "ap-southeast-2", preparation,
     executorIntentSha256: recoveryHash(JSON.stringify(intent)), observed: { api, executor }, namespaceId, stagingLifecycle: stagingState, schedules,
@@ -175,6 +177,27 @@ test("interrupted inspector verifies exact mixed state while ordinary baseline s
   const read = f.client.deployments; let reads = 0;
   f.client.deployments = async () => { if (++reads > 1) f.state.activeExecutor = "33333333-3333-4333-8333-333333333333"; return read(); };
   await assert.rejects(f.inspect(), /changed during inspection/);
+});
+
+test("interrupted API intent must match sealed preparation and any completed deployment rejects recovery", async t => {
+  const f = await fixture(t);
+  await f.inspect();
+  const intent = f.snapshot.workerIntent;
+  delete f.snapshot.workerIntent;
+  await assert.rejects(f.inspect(), /API deployment intent changed/);
+  f.snapshot.workerIntent = { ...intent, atomicReleaseSecrets: 3 };
+  await assert.rejects(f.inspect(), /API deployment intent changed/);
+  f.snapshot.workerIntent = intent;
+  const query = f.cf.query;
+  f.cf.query = (sql, params) => params?.[1] === "worker-deploy-started"
+    ? [{ results: [], meta: { changes: 0 } }] : query(sql, params);
+  await assert.rejects(f.inspect(), /interrupted release journal/);
+  f.cf.query = query;
+  for (const stage of ["print-executor-verified", "worker-verified", "verified"]) {
+    const completed = await fixture(t);
+    await recordReleaseEvent(completed.cf, owner, stage, { completed: true }, 3000);
+    await assert.rejects(completed.inspect(), /advanced beyond the approved mixed state/);
+  }
 });
 
 test("D1 journal gives two claimants one winner and preserves the old immutable history", async t => {
