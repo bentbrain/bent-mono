@@ -2,6 +2,7 @@ import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual as equal } from 'node:util';
 import { inspectDevelopmentWorker, verifyDevelopmentPairStatus } from './native-ci-worker.mjs';
 import { inspectDevelopmentRuntime } from './native-ci-runtime.mjs';
+import { verifyWorkerUpload } from './native-worker-content.mjs';
 export async function qualificationIdentity(cf, store, env, { inspectWorker = inspectDevelopmentWorker, inspectRuntime = inspectDevelopmentRuntime, verifyStatus = verifyDevelopmentPairStatus } = {}) {
     const query = async (sql, params = []) => (await cf.query(sql, params))[0].results;
     const controls = await query('SELECT paused, release_id, current_release_id FROM native_video_release_control WHERE singleton = 1');
@@ -17,10 +18,10 @@ export async function qualificationIdentity(cf, store, env, { inspectWorker = in
         !equal(JSON.parse(await store.read(preparation)), prepared))
         throw Error('Release preparation differs from immutable evidence.');
     const worker = await inspectWorker(cf), runtime = await inspectRuntime(env);
-    if (worker.content.modules.length !== 1 || worker.content.modules[0].sha256 !== prepared.worker.bundleSha256 ||
-        runtime.renderer.imageDigest !== prepared.candidate.imageDigest || runtime.failure.imageDigest !== prepared.candidate.imageDigest ||
+    if (runtime.renderer.imageDigest !== prepared.candidate.imageDigest || runtime.failure.imageDigest !== prepared.candidate.imageDigest ||
         runtime.renderer.sourceDigest !== prepared.candidate.sourceDigest)
         throw Error('Live qualification pair changed.');
+    verifyWorkerUpload(worker.content, prepared.worker);
     await verifyStatus(env, prepared.candidate, env.NATIVE_VERIFY_RELEASE, fetch, { paused: false, sourceCommit: prepared.sourceCommit });
     return { releaseId: env.NATIVE_VERIFY_RELEASE, sourceCommit: prepared.sourceCommit, imageDigest: prepared.candidate.imageDigest,
         workerVersionId: worker.workerVersion, workerBundleSha256: prepared.worker.bundleSha256,

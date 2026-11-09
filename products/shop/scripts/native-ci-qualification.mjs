@@ -19,6 +19,7 @@ import { observePrintLatencyBurst } from "./print-latency-burst.mjs";
 import { printLatencyDistribution } from "./print-latency-report.mjs";
 import { verifyRecordedPrintExecutor } from "./native-print-executor.mjs";
 import { preserveQualifiedPrintExecutor } from "./native-print-qualification.mjs";
+import { verifyWorkerUpload } from "./native-worker-content.mjs";
 const ARTWORK_SHA = protectedConfig("resource_73e91e639e8e");
 const check = (value, reason) => { if (!value)
     throw new Error(`Native cloud qualification failed: ${reason}`); };
@@ -106,8 +107,8 @@ async function prepareQualification(env) {
     const prepared = JSON.parse(rows[0].payload);
     const runtime = await inspectDevelopmentRuntime(env), worker = await inspectDevelopmentWorker(cf);
     check(runtime.renderer.imageDigest === prepared.candidate.imageDigest && runtime.failure.imageDigest === prepared.candidate.imageDigest &&
-        runtime.renderer.sourceDigest === prepared.candidate.sourceDigest && worker.content.modules.length === 1 &&
-        worker.content.modules[0].sha256 === prepared.worker.bundleSha256, "live pair differs from the recorded release.");
+        runtime.renderer.sourceDigest === prepared.candidate.sourceDigest, "live pair differs from the recorded release.");
+    verifyWorkerUpload(worker.content, prepared.worker);
     await verifyDevelopmentPairStatus(env, prepared.candidate, releaseId, fetch, { paused: false, sourceCommit: prepared.sourceCommit });
     check((await query("SELECT COUNT(*) AS count FROM story_video_jobs WHERE status IN ('queued', 'rendering')"))[0].count === 0, "other active work must settle before the bounded fixture cohort.");
     const source = (await query("SELECT id, artwork_key FROM designs WHERE sha256 = ? AND status = 'ready' AND deleted_at IS NULL ORDER BY created_at LIMIT 1", [ARTWORK_SHA]))[0];

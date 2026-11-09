@@ -1,10 +1,76 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { assertQualificationApiPath, awaitFamilyPrintReadiness, awaitInitialExhaustionStop, beginFamilyPrintQualification, boundedApiFailure, createQualificationDispatchBarrier, observeFamilyStream, qualificationArtworkKey, qualificationPngDimensions, qualificationPrintProvider, readQualifiedArtwork, exhaustedJobs, preparedExhaustionJobs, observeReconnectingFamily, summarizeCommittedPrintLatency, summarizePrintAssetFailures, summarizePrintSourceChecks, verifyFaultEvidence, verifyTerminationEvidence, capacityMetricEvidence, completeQualificationSummary } from "./native-ci-qualification.mjs";
 const stream = events => new Response(events, { headers: { "Content-Type": "text/event-stream" } });
 const videos = [["tee", "black"], ["tee", "white"], ["tote", "black"], ["tote", "cream"]];
 const ready = videos.map(([productId, color]) => `event: video\ndata: ${JSON.stringify({ productId, color, status: "ready" })}\n\n`).join("");
 const complete = "event: complete\ndata: {}\n\n";
+test("family qualification admits complete sealed uploads before fixtures and rejects missing or unsealed parts", () => {
+    const moduleUrl = new URL("./native-ci-qualification.mjs", import.meta.url).href;
+    const program = `
+      import assert from 'node:assert/strict';
+      import { readFile } from 'node:fs/promises';
+      import { createContext, SourceTextModule, SyntheticModule } from 'node:vm';
+      const moduleUrl = ${JSON.stringify(moduleUrl)};
+      const { workerContentManifest, workerContentResponse } = await import(new URL('./native-worker-content.mjs', moduleUrl));
+      const code = Buffer.from('export default {};\\n//# sourceMappingURL=index.js.map');
+      const map = Buffer.from(JSON.stringify({ version: 3, file: 'index.js', sources: ['source.ts'], names: [], mappings: '' }));
+      const full = await workerContentManifest(workerContentResponse({ code, map }));
+      const codeOnly = await workerContentManifest(workerContentResponse({ code }));
+      const changedMap = structuredClone(full); changedMap.modules[1].sha256 = 'e'.repeat(64); delete changedMap.sha256;
+      const changedCode = structuredClone(full); changedCode.modules[0].sha256 = 'e'.repeat(64); delete changedCode.sha256;
+      const extra = structuredClone(full); extra.modules.push({ name: 'extra.js', bytes: 1, sha256: 'f'.repeat(64) }); delete extra.sha256;
+      const duplicate = structuredClone(full); duplicate.modules[1] = { ...duplicate.modules[0] }; delete duplicate.sha256;
+      const review = { schemaVersion: 2, bundleSha256: full.modules[0].sha256, bundleBytes: code.length, content: full };
+      const legacy = { bundleSha256: full.modules[0].sha256 };
+      const candidate = { imageDigest: 'sha256:' + 'b'.repeat(64), sourceDigest: 'c'.repeat(64) };
+      let fixtureWrites = 0;
+      const denyNetwork = async () => { throw Error('network forbidden'); };
+      globalThis.fetch = denyNetwork;
+      const source = await readFile(new URL(moduleUrl), 'utf8');
+      for (const [content, workerReview, admitted] of [[full, review, true], [codeOnly, review, false],
+          [changedMap, review, false], [changedCode, review, false], [extra, review, false], [duplicate, review, false],
+          [codeOnly, legacy, true], [full, legacy, false]]) {
+        let statusCalls = 0;
+        const prepared = { worker: workerReview, candidate };
+        const cf = { query: async sql => {
+          if (!sql.startsWith('SELECT')) { fixtureWrites++; throw Error('unexpected write'); }
+          return [{ results: sql.includes('release_control')
+            ? [{ paused: 0, release_id: null, current_release_id: 'native-100' }]
+            : [{ payload: JSON.stringify(prepared) }] }];
+        } };
+        const context = createContext({ Buffer, URL, JSON, console, process, fetch: denyNetwork, setTimeout, clearTimeout });
+        const mocks = {
+          './native-ci-cloudflare.mjs': { developmentCloudflare: () => cf },
+          './native-ci-runtime.mjs': { inspectDevelopmentRuntime: async () => ({ renderer: candidate, failure: candidate }) },
+          './native-ci-worker.mjs': { inspectDevelopmentWorker: async () => ({ content }),
+            verifyDevelopmentPairStatus: async () => { statusCalls++; throw Error('PAIR_GATE_PASSED_STOP_BEFORE_FIXTURES'); } },
+          './native-ci-release-store.mjs': { createDevelopmentReleaseStore: () => assert.fail('unexpected fixture store') },
+        };
+        const module = new SourceTextModule(source, { context, identifier: moduleUrl });
+        await module.link(async specifier => {
+          const namespace = mocks[specifier] ?? await import(specifier.startsWith('.') ? new URL(specifier, moduleUrl).href : specifier);
+          return new SyntheticModule(Object.keys(namespace), function () {
+            for (const key of Object.keys(namespace)) this.setExport(key, namespace[key]);
+          }, { context });
+        });
+        await module.evaluate();
+        const env = { NATIVE_VERIFY_RELEASE: 'native-100', GITHUB_RUN_ID: '200',
+          FOREVER_TEE_API_SHARED_SECRET: 'synthetic', BENT_SHIRT_OPERATIONS_SECRET: 'synthetic' };
+        await assert.rejects(module.namespace.qualifyDevelopmentFamilies(env), admitted
+          ? /PAIR_GATE_PASSED_STOP_BEFORE_FIXTURES/ : /Worker content verification failed/);
+        assert.equal(statusCalls, admitted ? 1 : 0);
+      }
+      assert.equal(fixtureWrites, 0);
+      assert.equal(await readFile(new URL(moduleUrl), 'utf8'), source);
+    `;
+    const child = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "--eval", program], {
+        env: { ...process.env, NODE_OPTIONS: "" }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    assert.ifError(child.error);
+    assert.equal(child.status, 0, child.stdout + child.stderr);
+});
 test("qualification artwork uses the immutable Print Asset source key", () => {
     const designId = "11111111-1111-4111-8111-111111111111";
     const digest = "a".repeat(64);
