@@ -10,7 +10,7 @@ import type { MapCamera, MapSize } from '../lib/map-view';
 
 const layerStyles = new Map([
   ['AdmArea', 'fill-background stroke-none dark:fill-muted'],
-  ['WA', 'fill-foreground/10 stroke-none dark:fill-foreground/15'],
+  ['WA', 'fill-map-water stroke-none'],
   ['TpgphArea', 'fill-foreground/5 stroke-none'],
   ['Cstline', 'fill-none stroke-foreground/35 [stroke-width:0.8]'],
   ['RvrCL', 'fill-none stroke-foreground/20 [stroke-width:1]'],
@@ -169,7 +169,7 @@ export function MapContext({
             data-map-detail-background
             width={size.width}
             height={size.height}
-            className="fill-background"
+            className="fill-map-water"
           />
         )}
       {rendered}

@@ -127,6 +127,21 @@ test('map has no highway overlay through zoom, pan, themes and preview gestures'
           }
         }
         const evidence = process.env.MAP_ROADS_EVIDENCE;
+        const ocean = await map.evaluate(
+          (element) => getComputedStyle(element).backgroundColor,
+        );
+        await expect(map).toHaveCSS('background-image', 'none');
+        // Pin the existing water tint as an opaque colour in each theme.
+        const pixel = await map.evaluate((element) => {
+          const context = document.createElement('canvas').getContext('2d');
+          if (!context) throw new Error('Canvas colour sampling unavailable');
+          context.fillStyle = getComputedStyle(element).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data];
+        });
+        expect(pixel).toEqual(
+          theme === 'light' ? [230, 237, 255, 255] : [6, 17, 38, 255],
+        );
         for (const state of ['country', 'broad', 'regional', 'street']) {
           const target =
             state === 'country'
@@ -167,6 +182,13 @@ test('map has no highway overlay through zoom, pan, themes and preview gestures'
           await expect(map.locator('[data-map-detail-background]')).toHaveCount(
             1,
           );
+          await expect(map).toHaveCSS('background-color', ocean);
+          await expect(map.locator('[data-map-detail-background]')).toHaveCSS(
+            'fill',
+            ocean,
+          );
+          for (const water of await map.locator('[data-map-layer="WA"]').all())
+            await expect(water).toHaveCSS('fill', ocean);
           await expect(
             map.locator('[data-map-vector-tile] > rect'),
           ).toHaveCount(0);
@@ -289,6 +311,10 @@ test('map has no highway overlay through zoom, pan, themes and preview gestures'
     )
       await page.getByRole('button', { name: 'Close map preview' }).click();
     const fallback = page.locator('#japan-map');
+    const fallbackOcean = await fallback.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await expect(fallback).toHaveCSS('background-image', 'none');
     await expect(fallback.getByRole('status')).toHaveText(
       'map detail unavailable',
     );
@@ -304,6 +330,11 @@ test('map has no highway overlay through zoom, pan, themes and preview gestures'
     await fallback.getByRole('button', { name: 'RETRY MAP' }).click();
     await expect(fallback.locator('[data-map-vector-tile]')).not.toHaveCount(0);
     await expect(fallback.getByRole('status')).toHaveCount(0);
+    await expect(fallback).toHaveCSS('background-color', fallbackOcean);
+    await expect(fallback.locator('[data-map-detail-background]')).toHaveCSS(
+      'fill',
+      fallbackOcean,
+    );
     expect(tileRequests.length).toBeGreaterThan(0);
     expect(
       tileRequests.every((url) =>

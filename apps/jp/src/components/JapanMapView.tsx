@@ -266,7 +266,7 @@ export function JapanMapView({
   return (
     <div
       ref={container}
-      className="map-wrap relative h-[390px] scroll-mt-28 overflow-hidden bg-background text-foreground [background-image:radial-gradient(color-mix(in_srgb,var(--foreground)_15%,transparent)_0.75px,transparent_0.75px)] [background-size:8px_8px] min-[601px]:h-[440px]"
+      className="map-wrap relative h-[390px] scroll-mt-28 overflow-hidden bg-map-water text-foreground min-[601px]:h-[440px]"
       id="japan-map"
       data-feedback-id="japan-map"
       data-zoom={camera.zoom}

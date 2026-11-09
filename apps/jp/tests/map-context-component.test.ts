@@ -75,6 +75,9 @@ void test('empty ocean tiles share one viewport background with loaded geometry'
         '[data-map-detail-background]',
       );
       assert.ok(background);
+      assert.ok(background.classList.contains('fill-map-water'));
+      const water = container.querySelector('[data-map-layer="WA"]');
+      assert.ok(water?.classList.contains('fill-map-water'));
       assert.equal(background.getAttribute('width'), String(width));
       assert.equal(background.getAttribute('height'), String(size.height));
       assert.equal(
