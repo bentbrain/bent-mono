@@ -1,3 +1,4 @@
+import { readSealedWorkerUpload } from "./native-worker-content.mjs";
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { measureReleaseStage } from "./release-stage-timing.mjs";
@@ -13,7 +14,7 @@ import { prepareProductionWorker, verifyProductionReleaseSettings } from "./nati
 import { verifyProductionRuntime, PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST } from "./native-production-runtime.mjs";
 import { probeProductionImageStartup, prepareProductionImage, verifyCurrentProductionRuntime } from "./native-production-image.mjs";
 import { printExecutorProtocol } from "./native-print-executor.mjs";
-import { inspectDevelopmentWorker, versionResourcesDigest, workerContentManifest } from "./native-ci-worker.mjs";
+import { inspectDevelopmentWorker, versionResourcesDigest } from "./native-ci-worker.mjs";
 import { productionMonitoringBaseline, runProductionMonitor, verifyStableProductionMonitoring } from "./native-production-monitor.mjs";
 import { installPauseSchema, beginReleasePause, recordReleaseEvent, assertReleasePaused, resumeVerifiedRelease, verifyPauseSchema } from "./native-release-pause.mjs";
 import { waitProductionNaturalDrain, waitUnchangedRendererDrain } from "./native-production-drain.mjs";
@@ -182,9 +183,9 @@ export async function rollbackProductionPair(env) {
     check(equal(fallback, fallbackRecord.fallback) && fallback.provider === "cloudflare", "verified compatible fallback required.");
     const original = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
     check(equal(original.before, prepared.previous.worker), "original Worker preservation.");
-    const bytes = await store.read(prepared.artifacts.candidateArtifact);
+    const upload = await readSealedWorkerUpload(store, prepared.artifacts, prepared.worker), bytes = upload.code;
     assertArtworkMediaBundle(bytes);
-    const content = await workerContentManifest(new Response(bytes));
+    const content = upload.content;
     check(equal(content, fallback.content) && hash(bytes) === prepared.worker.bundleSha256 &&
         versionResourcesDigest(await cf.version(fallback.workerVersion)) === fallback.versionResourcesSha256, "fallback code/resources unavailable or changed.");
     const verifyPrintExecutor = () => printExecutorProtocol("production").verifyRecordedPrintExecutor({

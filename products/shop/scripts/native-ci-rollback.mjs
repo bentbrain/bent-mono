@@ -1,8 +1,9 @@
+import { readPreservedWorkerUpload } from "./native-worker-content.mjs";
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { assertReleasePaused, recordReleaseEvent, inspectDevelopmentDrain, resumeVerifiedRelease, verifyPauseSchema } from "./native-release-pause.mjs";
-import { inspectDevelopmentConsumer, versionResourcesDigest, workerContentManifest } from "./native-ci-worker.mjs";
+import { inspectDevelopmentConsumer, versionResourcesDigest } from "./native-ci-worker.mjs";
 import { assertDeployableImage } from "./native-ci-image-policy.mjs";
 const check = (value, reason) => { if (!value)
     throw new Error(`Native rollback stopped: ${reason}`); };
@@ -27,9 +28,7 @@ export async function loadDevelopmentRollback(cf, store, fromReleaseId) {
     check(prepared.releaseId === fromReleaseId && isDeepStrictEqual(JSON.parse(await store.read(preparation)), prepared), "D1 and versioned S3 preparation disagree.");
     const target = previousDevelopmentCandidate(prepared);
     const artifact = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
-    const content = await workerContentManifest(new Response(Buffer.from(artifact.body, "base64"), {
-        headers: { "content-type": artifact.contentType, "cf-entrypoint": artifact.entrypoint },
-    }));
+    const { content } = await readPreservedWorkerUpload(artifact);
     check(isDeepStrictEqual(content, prepared.previous.worker.content) && isDeepStrictEqual(artifact.before, prepared.previous.worker) &&
         isDeepStrictEqual(artifact.consumer, prepared.previous.consumer), "previous Worker bytes/configuration differ from the recorded pair.");
     const version = await cf.version(prepared.previous.worker.workerVersion);
@@ -56,7 +55,9 @@ export async function executeDevelopmentRollback({ cf, store, prepared, target, 
     check(/^native-\d+$/.test(releaseId) && releaseId !== prepared.releaseId && /^[a-f0-9]{40}$/.test(sourceCommit) &&
         image.review.imageDigest === target.imageDigest && image.review.sourceDigest === target.sourceDigest, "rollback preparation.");
     const artifact = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
-    assertArtworkMediaBundle(Buffer.from(artifact.body, "base64"));
+    const upload = await readPreservedWorkerUpload(artifact);
+    assertArtworkMediaBundle(upload.code);
+    check(isDeepStrictEqual(upload.content, prepared.previous.worker.content), "previous executable content differs from its sealed predecessor.");
     await verifyPauseSchema(cf);
     const evidence = { releaseId, sourceCommit, fromReleaseId: prepared.releaseId, target, previous: prepared.previous, plan: image.review };
     await store.save("rollback.json", Buffer.from(JSON.stringify(evidence)));

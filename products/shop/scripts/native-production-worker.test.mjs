@@ -224,7 +224,7 @@ test("Production baseline accepts only the reviewed initial or already-native st
             STORY_VIDEO_IMAGE_DIGEST: PREVIOUS_PRODUCTION_IMAGE_DIGEST,
             STORY_VIDEO_SOURCE_DIGEST: PREVIOUS_PRODUCTION_SOURCE_DIGEST,
             STORY_VIDEO_RELEASE_ID: "native-" + protectedConfig("resource_df582621cced"), STORY_VIDEO_RELEASE_COMMIT: "a".repeat(40) }).map(([name, text]) => ({ name, type: "plain_text", text }))];
-    const current = { workerVersion: protectedConfig("resource_030ac180b0a9"), content: { modules: [{ sha256: "b".repeat(64) }] } };
+    const current = { workerVersion: protectedConfig("resource_030ac180b0a9"), content: { entrypoint: "index.js", modules: [{ name: "index.js", bytes: 1, sha256: "b".repeat(64) }] } };
     assert.equal(classifyProductionBaseline({ bindings: native }, { settings: NATIVE_PRODUCTION_QUEUE }, current), "forward");
     assert.equal(classifyProductionBaseline({ bindings: [...native, { name: "PRINTIFY_ASSET_DELIVERY_SECRET", type: "secret_text" }] }, { settings: NATIVE_PRODUCTION_QUEUE }, current), "forward");
     assert.equal(classifyProductionBaseline({ bindings: [...native, { name: "PRINTIFY_ASSET_DELIVERY_SECRET", type: "secret_text" },
@@ -287,6 +287,9 @@ test("recorded Cloudflare fallback is a reusable release baseline", async () => 
     const result = await loadRecordedProductionWorkerBaseline(cf, { read: async (reference) => objects.get(reference.name) });
     assert.equal(result.record.releaseId, releaseId);
     assert.equal(result.historicalArtifact.before.workerVersion, fallbackId);
+    assert.deepEqual(await workerContentManifest(new Response(Buffer.from(result.historicalArtifact.body, "base64"), {
+        headers: { "content-type": result.historicalArtifact.contentType, "cf-entrypoint": result.historicalArtifact.entrypoint },
+    })), content);
     assert.deepEqual(result.settings.bindings, shared);
     assert.equal(classifyProductionBaseline(result.settings, fallback.consumer, fallback, result.record), "fallback");
     terminalStage = "backlog-recovery-rolled-back";
@@ -303,7 +306,7 @@ test("recorded Cloudflare fallback is a reusable release baseline", async () => 
     paused = 0;
     pauseRelease = null;
     objects.set("candidate", Buffer.from("changed"));
-    await assert.rejects(loadRecordedProductionWorkerBaseline(cf, { read: async (reference) => objects.get(reference.name) }), /recorded fallback bytes/);
+    await assert.rejects(loadRecordedProductionWorkerBaseline(cf, { read: async (reference) => objects.get(reference.name) }), /recorded fallback bytes|immutable bundle/);
 });
 test("single Production queue accepts the actual script-name schema and rejects other consumers", async () => {
     const value = { type: "worker", script_name: "forever-tee-api", consumer_id: "a".repeat(32), settings: NATIVE_PRODUCTION_QUEUE };

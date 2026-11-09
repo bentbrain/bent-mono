@@ -1,7 +1,8 @@
+import { readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, prepareWorkerUpload } from "./native-worker-content.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { activeWorkerSettings } from "./native-ci-worker.mjs";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { CLOUDFLARE_ACCOUNT, DEVELOPMENT_DATABASE, developmentCloudflare } from "./native-ci-cloudflare.mjs";
@@ -131,23 +132,25 @@ function verifyApiPrintExecutorBinding(settings, expected) {
 }
 
 async function preparePrintExecutorFoundation({ env, directory, run, api, inspectWorker, baselineStore: existingStore, client = printExecutorClient(env),
-  platform = process.platform, staging = stagingClient(env) }) {
+  platform = process.platform, staging = stagingClient(env), interrupted, sealedUpload }) {
   check(env.RUNNER_TEMP?.startsWith("/") && platform === "linux", "cloud-only preparation.");
   const selectedOperation = operation(env);
-  check((environment === "production" ? ["release", "prepare-worker"] : ["release", "build-candidate", "plan"]).includes(selectedOperation) &&
+  check((environment === "production" ? ["release", "prepare-worker"] : ["release", "build-candidate", "plan", "plan-forward-recovery", "recover-forward-release"]).includes(selectedOperation) &&
     /^[a-f0-9]{40}$/.test(env.GITHUB_SHA), "guarded environment preparation only.");
   const configBytes = await readFile(CONFIG), config = JSON.parse(resolveProtectedTemplate(configBytes));
   verifyPrintExecutorConfig(config);
-  const out = join(directory, "executor-bundle"), checked = join(directory, "executor-checked");
-  await run(["deploy", "--dry-run", "--env", environment, "--outdir", out]);
-  const bundle = await readFile(join(out, "index.js"));
-  const files = await readdir(out);
-  check(files.every(file => ["index.js", "index.js.map", "README.md"].includes(file)), "unrecorded executor output module.");
-  await run(["deploy", join(out, "index.js"), "--no-bundle", "--dry-run", "--env", environment, "--outdir", checked]);
-  check(hash(await readFile(join(checked, "index.js"))) === hash(bundle), "executor bundler changed reviewed bytes.");
+  const out = join(directory, "executor-bundle");
+  const upload = await prepareWorkerUpload({ run, directory: out, environment, sealed: sealedUpload }), bundle = upload.code;
   const settings = await client.absentSettings();
   let before, baselineStore = existingStore;
   if (settings === null) before = { exists: false, worker: workerName, accountId: CLOUDFLARE_ACCOUNT, absence: "HTTP404/error10007" };
+  else if (interrupted) {
+    check(environment === "development" && ["plan-forward-recovery", "recover-forward-release"].includes(selectedOperation), "dedicated interrupted-state preparation required.");
+    const observed = await interrupted.verifyPrevious();
+    check(isDeepStrictEqual(observed, interrupted.review) && observed.kind === "interrupted-development-release", "interrupted-state evidence changed.");
+    before = { exists: true, worker: workerName, accountId: CLOUDFLARE_ACCOUNT, apiMode: "durable-object",
+      namespaceId: observed.namespaceId, interrupted: observed };
+  }
   else {
     const store = existingStore ?? (environment === "development" ? await createDevelopmentReleaseStore(env) : undefined);
     check(store, "Production preparation requires its scoped evidence store.");
@@ -163,32 +166,41 @@ async function preparePrintExecutorFoundation({ env, directory, run, api, inspec
     before.recorded.configSha256 === hash(configBytes) &&
     before.recorded.worker.content.modules[0].sha256 === hash(bundle),
   "API image reuse requires an existing unchanged executor; use the full lane.");
+  check(!interrupted || before.exists && before.interrupted, "recovery requires an existing owned namespace.");
   const stagingLifecycle = planPrintStagingLifecycle(await staging.read());
-  const review = { schemaVersion: 1, worker: workerName, accountId: CLOUDFLARE_ACCOUNT,
+  check(!interrupted || !stagingLifecycle.mutationRequired, "recovery requires the verified existing staging lifecycle.");
+  const review = { schemaVersion: 2, content: upload.content, worker: workerName, accountId: CLOUDFLARE_ACCOUNT,
     sourceCommit: env.GITHUB_SHA, releaseId: `native-${env.GITHUB_RUN_ID}`, bundleSha256: hash(bundle), bundleBytes: bundle.length,
     configSha256: hash(configBytes), config, migrations: migration, before, stagingLifecycle,
     rollback: "same-namespace-exact-version; retain-foundation-for-queue-rollback" };
-  return createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint: join(out, "index.js"), run, api, client, inspectWorker, staging, baselineStore });
+  return createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint: join(out, "index.js"), run, api, client, inspectWorker, staging, baselineStore, interrupted });
 }
 
-function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint, run, api, client, inspectWorker, staging, baselineStore }) {
+function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint, run, api, client, inspectWorker, staging, baselineStore, interrupted }) {
   const selectedOperation = operation(env), before = review.before;
   check(review.sourceCommit === env.GITHUB_SHA && review.releaseId === `native-${env.GITHUB_RUN_ID}` &&
     review.worker === workerName && review.accountId === CLOUDFLARE_ACCOUNT && typeof before.exists === "boolean" &&
     hash(bundle) === review.bundleSha256, "source-bound executor release required.");
   check(!before.exists || ["queue", "durable-object"].includes(before.apiMode), "recorded previous API execution mode required.");
+  check(!before.interrupted || environment === "development" && interrupted &&
+    ["plan-forward-recovery", "recover-forward-release"].includes(selectedOperation) && isDeepStrictEqual(before.interrupted, interrupted.review), "dedicated interrupted release context required.");
   verifyPrintStagingLifecyclePlan(review.stagingLifecycle);
   let artifacts, store = baselineStore, deployed, deploymentStarted = false;
   const verifyAbsent = async () => {
     if (before.exists) {
-      check(store, "prior executor evidence store required.");
-      await verifyPrintExecutorRecord({ recorded: before.recorded, store, client, inspectWorker, staging });
+      if (before.interrupted) {
+        check(isDeepStrictEqual(await interrupted.verifyPrevious(), before.interrupted), "interrupted executor changed.");
+      } else {
+        check(store, "prior executor evidence store required.");
+        await verifyPrintExecutorRecord({ recorded: before.recorded, store, client, inspectWorker, staging });
+      }
       check(isDeepStrictEqual(review.migrations, migration), "executor namespace migrations cannot change during update.");
     } else {
       check(await client.absentSettings() === null, "executor appeared after absence was recorded; creation stopped.");
       const intents = (await api.query("SELECT release_id FROM native_video_release_events WHERE stage = 'print-executor-deploy-started' LIMIT 1"))[0].results;
       check(intents.length === 0, "a prior executor creation intent exists; inspect its durable evidence instead of replaying creation.");
     }
+    verifyWorkerUpload((await readWorkerUpload(join(entrypoint, ".."))).content, review);
     check(hash(await readFile(CONFIG)) === review.configSha256 && hash(await readFile(entrypoint)) === review.bundleSha256,
       "prepared executor files changed.");
   };
@@ -210,21 +222,26 @@ function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint,
       check(!artifacts, "executor evidence was already preserved.");
       store = targetStore; await verifyAbsent();
       check(isDeepStrictEqual(await staging.read(), review.stagingLifecycle.before), "staging lifecycle changed before preservation.");
-      const candidateArtifact = await store.save("candidate-print-executor.js", bundle);
+      const upload = await readWorkerUpload(join(entrypoint, ".."));
+      verifyWorkerUpload(upload.content, review);
+      const candidate = await preserveWorkerUpload(store, upload, "candidate-print-executor");
       const foundationArtifact = await store.save("print-executor-foundation.json", Buffer.from(JSON.stringify(review)));
-      artifacts = { candidateArtifact, foundationArtifact };
+      artifacts = { ...candidate, foundationArtifact };
       return artifacts;
     },
     verifyPrevious: verifyAbsent,
     deploy: async releaseId => {
-      check(selectedOperation === "release" && releaseId === review.releaseId && artifacts && store && !deployed && !deploymentStarted,
+      check((selectedOperation === "release" || environment === "development" && selectedOperation === "recover-forward-release" && interrupted) && releaseId === review.releaseId && artifacts && store && !deployed && !deploymentStarted,
         "preserved first-attempt executor foundation required.");
       await assertReleasePaused(api, releaseId);
       await verifyAbsent();
       check(isDeepStrictEqual(JSON.parse(await store.read(artifacts.foundationArtifact)), review) &&
         hash(await store.read(artifacts.candidateArtifact)) === review.bundleSha256, "immutable executor artifact readback differs.");
+      await readSealedWorkerUpload(store, artifacts, review);
       deploymentStarted = true;
       await recordReleaseEvent(api, releaseId, "print-staging-lifecycle-started", { review: review.stagingLifecycle, artifacts });
+      if (interrupted) await interrupted.beforeMutation("staging-lifecycle");
+      await assertReleasePaused(api, releaseId);
       const stagingAfter = await staging.append(review.stagingLifecycle);
       const stagingEvidence = await store.save("print-staging-lifecycle.json", Buffer.from(JSON.stringify({ sourceCommit: review.sourceCommit,
         releaseId, before: review.stagingLifecycle.before, reviewed: review.stagingLifecycle.after, after: stagingAfter })));
@@ -234,13 +251,14 @@ function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint,
       await recordReleaseEvent(api, releaseId, "print-executor-deploy-started", { review, artifacts });
       const vars = { PRINT_EXECUTOR_SOURCE_COMMIT: review.sourceCommit, PRINT_EXECUTOR_CONFIG_SHA256: review.configSha256,
         PRINT_EXECUTOR_BUNDLE_SHA256: review.bundleSha256, PRINT_EXECUTION_RELEASE_ID: releaseId };
-      await run(["deploy", entrypoint, "--no-bundle", "--env", environment, "--tag", releaseId,
+      if (interrupted) await interrupted.beforeMutation("executor-deploy");
+      await assertReleasePaused(api, releaseId);
+      await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--env", environment, "--tag", releaseId,
         "--message", `Print foundation ${review.sourceCommit}`, ...Object.entries(vars).flatMap(([name, text]) => ["--var", `${name}:${text}`])]);
       const worker = await inspectWorker(client);
-      check(worker.content.entrypoint === "index.js" && worker.content.modules.length === 1 &&
-        worker.content.modules[0].sha256 === review.bundleSha256, "deployed executor differs from immutable bundle.");
+      verifyWorkerUpload(worker.content, review);
       const { namespaceId } = verifyPrintExecutorSettings(await activeWorkerSettings(client, worker), review);
-      check(!before.exists || namespaceId === before.recorded.namespaceId, "executor update changed the existing namespace.");
+      check(!before.exists || namespaceId === (before.interrupted ? before.namespaceId : before.recorded.namespaceId), "executor update changed the existing namespace.");
       const lifecycle = verifyPrintExecutorLifecycle(await client.version(worker.workerVersion), worker.workerVersion);
       deployed = { worker, namespaceId, lifecycle, stagingEvidence, sourceCommit: review.sourceCommit, configSha256: review.configSha256, releaseId, artifacts };
       await verifyDeployed();
@@ -267,22 +285,21 @@ async function readExecutorPreparation(store, artifacts) {
     /^[a-f0-9]{40}$/.test(review.sourceCommit) && /^native-\d+$/.test(review.releaseId), "executor preparation identity.");
   verifyPrintExecutorConfig(review.config);
   check(isDeepStrictEqual(review.migrations, migration), "executor lifecycle cannot change.");
-  const bytes = await store.read(artifacts.candidateArtifact);
-  check(hash(bytes) === review.bundleSha256 && bytes.length === review.bundleBytes, "immutable executor bundle differs.");
-  return { review, bytes };
+  const upload = await readSealedWorkerUpload(store, artifacts, review);
+  return { review, bytes: upload.code, upload };
 }
 
 async function verifyPrintExecutorRecord({ recorded, store, client, inspectWorker, staging }) {
   check(recorded?.evidence, "executor version evidence required.");
   const { evidence, ...saved } = recorded;
   check(isDeepStrictEqual(JSON.parse(await store.read(evidence)), saved), "executor deployment evidence differs.");
-  const { review, bytes } = await readExecutorPreparation(store, recorded.artifacts);
+  const { review, upload } = await readExecutorPreparation(store, recorded.artifacts);
   check(recorded.releaseId === review.releaseId && recorded.sourceCommit === review.sourceCommit &&
     recorded.configSha256 === review.configSha256, "executor immutable source/generation differs.");
-  const historical = { before: recorded.worker, body: bytes.toString("base64"), contentType: "application/javascript", entrypoint: "index.js" };
+  const historical = await historicalWorkerUpload(recorded.worker, upload);
   const current = await inspectWorker(client, historical);
-  check(isDeepStrictEqual(current, recorded.worker) && current.content.entrypoint === "index.js" &&
-    current.content.modules.length === 1 && current.content.modules[0].sha256 === review.bundleSha256,
+  verifyWorkerUpload(current.content, review);
+  check(isDeepStrictEqual(current, recorded.worker),
     "executor version, bytes or immutable resources changed.");
   check(isDeepStrictEqual(verifyPrintExecutorLifecycle(await client.version(current.workerVersion), current.workerVersion), recorded.lifecycle),
     "executor lifecycle changed.");
@@ -344,6 +361,7 @@ async function restoreDevelopmentPrintExecutor({ env, api, store, prepared, rele
     env.NATIVE_ROLLBACK_RELEASE === prepared.releaseId, "exact guarded rollback context required.");
   await assertReleasePaused(api, releaseId);
   const review = prepared.worker?.printExecutor;
+  check(!review?.before?.interrupted, "interrupted predecessor requires separate secure paired rollback qualification.");
   const previous = review?.before?.exists ? review.before.recorded : null;
   const settings = await client.absentSettings();
   if (!settings) {
@@ -380,8 +398,7 @@ async function restoreDevelopmentPrintExecutor({ env, api, store, prepared, rele
         [prepared.releaseId]))[0].results;
       check(lifecycleRows.length === 1, "staging fallback was not verified before executor deployment.");
       const worker = await inspectWorker(client);
-      check(worker.content.entrypoint === "index.js" && worker.content.modules.length === 1 &&
-        worker.content.modules[0].sha256 === review.bundleSha256, "uncertain executor upload does not match its intended bytes.");
+      verifyWorkerUpload(worker.content, review);
       const { namespaceId } = verifyPrintExecutorSettings(await activeWorkerSettings(client, worker), review);
       check(!previous || previous.namespaceId === namespaceId, "uncertain update changed namespace.");
       const record = { worker, namespaceId, lifecycle: verifyPrintExecutorLifecycle(await client.version(worker.workerVersion), worker.workerVersion),
@@ -427,6 +444,7 @@ async function verifyRestoredPrintExecutor({ api, store, prepared, releaseId, in
   check(rows.length === 1, "completed executor restoration journal required.");
   const result = JSON.parse(rows[0].payload);
   const review = prepared.worker?.printExecutor;
+  check(!review?.before?.interrupted, "interrupted predecessor requires separate secure paired rollback qualification.");
   const previous = review?.before?.exists ? review.before.recorded : null;
   if (result.restored) {
     check(previous && review.before.apiMode === "durable-object" && !result.retained && isDeepStrictEqual(result.restored, previous),

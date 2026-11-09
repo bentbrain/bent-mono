@@ -14,7 +14,7 @@ on:
         description: Plan/deploy a pair, independently qualify the live pair, or recover it
         type: choice
         default: plan
-        options: [plan, build-candidate, release, rollback, recover-rollback, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
+        options: [plan, build-candidate, release, rollback, recover-rollback, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
       release_mode:
         description: API mode reuses the live image; relevant qualification is required separately before Production
         type: choice
@@ -38,6 +38,11 @@ on:
         required: false
       rollback_release:
         description: Original release for rollback; failed rollback run for recover-rollback
+        type: string
+        required: false
+
+      forward_recovery_reference:
+        description: Sealed immutable authority and approved full-plan references for Development forward recovery
         type: string
         required: false
 
@@ -104,6 +109,7 @@ jobs:
           NATIVE_SCHEDULED_QUALIFICATION: ${{ inputs.scheduled_qualification }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
           NATIVE_ROLLBACK_REFERENCE: ${{ inputs.rollback_reference }}
+          NATIVE_FORWARD_RECOVERY_REFERENCE: ${{ inputs.forward_recovery_reference }}
         run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/release-preflight.mjs --environment development --lane native --operation "$OPERATION"
       - name: Reuse CI for the exact release commit
         id: ci
@@ -162,10 +168,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
-        if: inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
+        if: inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - run: bun install --frozen-lockfile
         working-directory: .
-        if: inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
+        if: inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.SHOP_AWS_DEVELOPMENT_ROLE_ARN }}
@@ -191,6 +197,7 @@ jobs:
           NATIVE_OPERATION: ${{ inputs.operation || 'plan' }}
           NATIVE_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
           NATIVE_ROLLBACK_REFERENCE: ${{ inputs.rollback_reference }}
+          NATIVE_FORWARD_RECOVERY_REFERENCE: ${{ inputs.forward_recovery_reference }}
           NATIVE_RELEASE_MODE: ${{ inputs.release_mode || 'full' }}
           NATIVE_VERIFY_RELEASE: ${{ inputs.verify_release }}
           NATIVE_QUALIFICATION_REFERENCE: ${{ inputs.qualification_reference }}

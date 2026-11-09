@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { releaseProgress } from "./release-progress.mjs";
 import { readFile } from "node:fs/promises";
 
@@ -21,8 +22,21 @@ async function pauseDefinitions(cf) {
   return [core, prints, images, artwork].flatMap(sql => sql.split("--> statement-breakpoint"));
 }
 
-export async function verifyPauseSchema(cf) {
-  const definitions = (await pauseDefinitions(cf)).map(normalize).filter(statement => statement.startsWith("CREATE "));
+export async function pauseSchemaManifest(cf) {
+  return (await pauseDefinitions(cf)).map(normalize).filter(statement => statement.startsWith("CREATE "));
+}
+
+export async function verifyPauseSchema(cf, preservedDefinitions) {
+  const current = await pauseSchemaManifest(cf);
+  const definitions = preservedDefinitions ?? current;
+  // During the guarded migration-to-install boundary, preserve every checked
+  // pre-migration definition. Newly created job tables acquire their guards in
+  // installPauseSchema, which then requires the complete current manifest.
+  check(Array.isArray(definitions) && definitions.length > 0 && new Set(definitions).size === definitions.length &&
+    definitions.every(definition => current.includes(definition)) &&
+    (await readFile(schemaPath, "utf8")).split("--> statement-breakpoint").map(normalize)
+      .filter(statement => statement.startsWith("CREATE ")).every(definition => definitions.includes(definition)),
+  "preserved pause definitions differ from reviewed source.");
   for (const definition of definitions) {
     const name = /^CREATE (?:TABLE|TRIGGER) (\w+)/.exec(definition)?.[1];
     check(name, "invalid checked-in pause schema.");
@@ -127,26 +141,38 @@ export async function inspectDevelopmentDrain(cf, releaseId, now = Date.now()) {
   return { drained: true, pausedAt: control.paused_at, minimumHoldMs: DEVELOPMENT_DRAIN_MS };
 }
 
-export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair) {
+export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair, { expectedControl } = {}) {
+  const verifyExactControl = async () => {
+    if (!expectedControl) return;
+    check(expectedControl.paused === 1 && expectedControl.release_id === releaseId, "exact resume control identity.");
+    const controls = (await cf.query("SELECT paused, release_id, current_release_id, paused_at, updated_at FROM native_video_release_control WHERE singleton = 1"))[0].results;
+    check(controls.length === 1 && isDeepStrictEqual(controls[0], expectedControl), "exact control changed before resume.");
+  };
+  const exactPredicate = expectedControl ? " AND current_release_id = ? AND paused_at = ? AND updated_at = ?" : "";
+  const exactValues = expectedControl ? [expectedControl.current_release_id, expectedControl.paused_at, expectedControl.updated_at] : [];
+  await verifyExactControl();
   await verifyPauseSchema(cf);
   await assertReleasePaused(cf, releaseId);
   // The caller supplies the actual AWS/Worker verifier, not a readiness boolean.
   // There is deliberately no catch/finally that reopens admissions on failure.
   const verified = await verifyLivePair();
+  await verifyExactControl();
   await recordReleaseEvent(cf, releaseId, "verified", verified);
   if (await printJobsExist(cf)) {
     await assertReleasePaused(cf, releaseId);
+    await verifyExactControl();
     // A historical queue consumer may have acknowledged a pause-rejected claim.
     // Make only its unclaimed delivery due for the restored API's normal cron.
     // Running attempts and pending render-failure backoffs remain untouched.
     const now = Date.now();
     await cf.query(`UPDATE print_asset_jobs SET next_attempt_at = ?, updated_at = ?
       WHERE status = 'dispatched' AND lease_id IS NULL AND next_attempt_at > ?
-        AND EXISTS (SELECT 1 FROM native_video_release_control WHERE singleton = 1 AND paused = 1 AND release_id = ?)`,
-    [now, now, now, releaseId]);
+        AND EXISTS (SELECT 1 FROM native_video_release_control WHERE singleton = 1 AND paused = 1 AND release_id = ?${exactPredicate})`,
+    [now, now, now, releaseId, ...exactValues]);
   }
+  await verifyExactControl();
   await cf.query(`UPDATE native_video_release_control SET paused = 0, release_id = NULL, current_release_id = ?, updated_at = ?
-    WHERE singleton = 1 AND paused = 1 AND release_id = ?`, [releaseId, Date.now(), releaseId]);
+    WHERE singleton = 1 AND paused = 1 AND release_id = ?${exactPredicate}`, [releaseId, Date.now(), releaseId, ...exactValues]);
   const result = await cf.query("SELECT paused, release_id, current_release_id FROM native_video_release_control WHERE singleton = 1");
   check(result[0].results.length === 1 && result[0].results[0].paused === 0 && result[0].results[0].release_id === null &&
     result[0].results[0].current_release_id === releaseId, "resume response was not confirmed; inspect live state before retrying.");

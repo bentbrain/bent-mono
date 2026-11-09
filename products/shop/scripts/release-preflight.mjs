@@ -8,6 +8,7 @@ import { parseArgs } from "node:util";
 import { changedComponents, deploymentPlan, gitChanges, webOnlyPreviewPlan } from "./deployment-plan.mjs";
 import { isReviewedMigrationInventory } from "./native-migration-inventory.mjs";
 import { developmentOperation } from "./native-ci-operation.mjs";
+import { forwardRecoveryReference as parseForwardRecoveryReference } from "./native-forward-recovery-reference.mjs";
 import { assertProductionContext } from "./native-production-ci.mjs";
 import { enforceWorkerRelease } from "../apps/web/scripts/verify-worker-release.mjs";
 import { githubApi } from "./github-actions.mjs";
@@ -16,7 +17,7 @@ const root = new URL("../", import.meta.url);
 const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const load = path => JSON.parse(resolveProtectedTemplate(readFileSync(new URL(path, root), "utf8")));
 const promotionOperations = new Set(["promote", "release", "verify-candidate", "inspect-image-plan", "prepare-runtime", "prepare-worker"]);
-export function offlinePreflight({ environment, lane, operation, ref, sha, base, paths, migrations, qualification, sourceChanged, manifest = promotionManifest, releaseMode = "full", verifyRelease = "", rollbackRelease = "", rollbackReference = "", qualificationReference = "", rendererReference = "", scheduledQualification = "", releaseBaseVerified = false }) {
+export function offlinePreflight({ environment, lane, operation, ref, sha, base, paths, migrations, qualification, sourceChanged, manifest = promotionManifest, releaseMode = "full", verifyRelease = "", rollbackRelease = "", rollbackReference = "", forwardRecoveryReference = "", qualificationReference = "", rendererReference = "", scheduledQualification = "", releaseBaseVerified = false }) {
     const checks = [];
     const check = (id, passed, message) => checks.push({ id, passed: Boolean(passed), message });
     check("environment", ["development", "production"].includes(environment), "Choose development or production.");
@@ -42,7 +43,7 @@ export function offlinePreflight({ environment, lane, operation, ref, sha, base,
             GITHUB_REPOSITORY_OWNER_ID: protectedConfig("githubOwnerId"), GITHUB_REF: ref, GITHUB_SHA: sha, GITHUB_RUN_ID: "100",
             GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", NATIVE_OPERATION: operation, NATIVE_RELEASE_MODE: releaseMode,
             GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/native-${environment}.yml@${ref}`,
-            NATIVE_VERIFY_RELEASE: verifyRelease, NATIVE_ROLLBACK_RELEASE: rollbackRelease, NATIVE_ROLLBACK_REFERENCE: rollbackReference, NATIVE_QUALIFICATION_REFERENCE: qualificationReference, NATIVE_RENDERER_REFERENCE: rendererReference, NATIVE_SCHEDULED_QUALIFICATION: scheduledQualification };
+            NATIVE_FORWARD_RECOVERY_REFERENCE: forwardRecoveryReference, NATIVE_VERIFY_RELEASE: verifyRelease, NATIVE_ROLLBACK_RELEASE: rollbackRelease, NATIVE_ROLLBACK_REFERENCE: rollbackReference, NATIVE_QUALIFICATION_REFERENCE: qualificationReference, NATIVE_RENDERER_REFERENCE: rendererReference, NATIVE_SCHEDULED_QUALIFICATION: scheduledQualification };
         let valid = true;
         // Pure argument validation only. Never call a cloud entry point or invent
         // actual identity evidence; Actions must verify its own real environment.
@@ -58,6 +59,16 @@ export function offlinePreflight({ environment, lane, operation, ref, sha, base,
         if (operation === "rollback" && !/^native-\d+$/.test(rollbackRelease))
             valid = false;
         check("native-request", valid, "This native operation/ref is not supported by the existing identity policy.");
+        if (["plan-forward-recovery", "recover-forward-release"].includes(operation)) {
+            let approved = false;
+            try {
+                const reference = parseForwardRecoveryReference(forwardRecoveryReference, operation === "recover-forward-release");
+                approved = environment === "development" && sha === protectedConfig("developmentForwardRecoverySourceCommit") &&
+                    reference.authority.sha256 === protectedConfig("developmentForwardRecoveryAuthoritySha256") &&
+                    (operation !== "recover-forward-release" || reference.plan.sha256 === protectedConfig("developmentForwardRecoveryPlanSha256"));
+            } catch { /* Missing independent protected approval is a blocker. */ }
+            check("forward-recovery-approval", approved, "Install independently reviewed authority, source and full-plan hashes in protected Preview configuration before dispatch.");
+        }
         if (environment === "production" && promotionOperations.has(operation)) {
             const q = qualification, reference = q?.reference;
             check("qualification-reference", q?.schemaVersion === 1 && Number.isSafeInteger(q?.qualificationRunId) && q.qualificationRunId > 0 &&
@@ -166,6 +177,7 @@ export async function runPreflight(values, env = process.env) {
     }
     catch { /* reported as unverified */ }
     const report = offlinePreflight({ environment, lane, operation: values.operation ?? (lane === "native" ? "plan" : "deploy"), ref, sha, base, paths,
+        forwardRecoveryReference: values["forward-recovery-reference"] ?? env.NATIVE_FORWARD_RECOVERY_REFERENCE,
         releaseMode: values["release-mode"] ?? env.NATIVE_RELEASE_MODE, verifyRelease: values["verify-release"] ?? env.NATIVE_VERIFY_RELEASE, rollbackRelease: values["rollback-release"] ?? env.NATIVE_ROLLBACK_RELEASE, rollbackReference: values["rollback-reference"] ?? env.NATIVE_ROLLBACK_REFERENCE, qualificationReference: values["qualification-reference"] ?? env.NATIVE_QUALIFICATION_REFERENCE, rendererReference: values["renderer-reference"] ?? env.NATIVE_RENDERER_REFERENCE, scheduledQualification: env.NATIVE_SCHEDULED_QUALIFICATION,
         manifest: input?.manifest ?? promotionManifest, migrations: readdirSync(new URL("workers/api/drizzle/", root)).filter(name => /^\d{4}_.+\.sql$/.test(name)).sort(), qualification, sourceChanged });
     report.checks.push({ id: "clean-source", passed: git(["status", "--porcelain"]) === "",
@@ -227,7 +239,7 @@ export async function runPreflight(values, env = process.env) {
 if (import.meta.main) {
     try {
         const { values } = parseArgs({ options: { environment: { type: "string" }, lane: { type: "string" }, operation: { type: "string" },
-                ref: { type: "string" }, "release-mode": { type: "string" }, "verify-release": { type: "string" }, "rollback-release": { type: "string" }, "rollback-reference": { type: "string" }, "qualification-reference": { type: "string" }, "renderer-reference": { type: "string" }, "promotion-input": { type: "string" }, "promotion-file": { type: "string" }, github: { type: "boolean" }, worker: { type: "boolean" }, aws: { type: "boolean" } } });
+                ref: { type: "string" }, "release-mode": { type: "string" }, "verify-release": { type: "string" }, "rollback-release": { type: "string" }, "rollback-reference": { type: "string" }, "forward-recovery-reference": { type: "string" }, "qualification-reference": { type: "string" }, "renderer-reference": { type: "string" }, "promotion-input": { type: "string" }, "promotion-file": { type: "string" }, github: { type: "boolean" }, worker: { type: "boolean" }, aws: { type: "boolean" } } });
         const report = await runPreflight(values);
         console.log(JSON.stringify(report, null, 2));
         if (!report.passed)

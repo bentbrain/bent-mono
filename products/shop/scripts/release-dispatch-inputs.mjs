@@ -2,10 +2,12 @@ import { sealReleaseEvidence, openReleaseEvidence } from "./release-evidence.mjs
 
 const fields = new Map([
   ["promotion_input", "NATIVE_PROMOTION_INPUT"], ["qualification_reference", "NATIVE_QUALIFICATION_REFERENCE"],
+  ["forward_recovery_reference", "NATIVE_FORWARD_RECOVERY_REFERENCE"],
   ["renderer_reference", "NATIVE_RENDERER_REFERENCE"], ["rollback_reference", "NATIVE_ROLLBACK_REFERENCE"],
 ]);
 function originalRun(value, field) {
   if (field === "promotion_input") return String(value.qualification?.qualificationRunId ?? "");
+  if (field === "forward_recovery_reference") return /^source\/releases\/native-([1-9][0-9]*)\//.exec(value.authority?.key ?? "")?.[1] ?? "";
   const key = value.key;
   return /-run-([1-9][0-9]*)\.json$/.exec(key ?? "")?.[1] ?? /^source\/releases\/native-([1-9][0-9]*)\/rollback\.json$/.exec(key ?? "")?.[1] ?? "";
 }

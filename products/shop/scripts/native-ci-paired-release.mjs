@@ -13,7 +13,7 @@ export async function executeDevelopmentRelease({ cf, release, image, worker, st
     check(release.environment === "development" && release.accountId === protectedConfig("awsAccountId") && release.region === "ap-southeast-2" &&
         release.planSha256 === image.review.planSha256 && release.sourceCommit === worker.review.sourceCommit &&
         release.candidate.imageDigest === image.review.imageDigest && release.candidate.sourceDigest === image.review.sourceDigest &&
-        release.worker.bundleSha256 === worker.review.bundleSha256 &&
+        isDeepStrictEqual(release.worker, worker.review) &&
         isDeepStrictEqual(release.worker.printExecutor, worker.review.printExecutor), "prepared source, plan and bundle do not agree.");
     await worker.verifyPrevious();
     const saved = await store.save("prepared.json", Buffer.from(JSON.stringify(release)));

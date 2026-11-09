@@ -504,6 +504,76 @@ review/startup evidence belongs to the recovery run; the original rollback journ
 is preserved. This operation creates no qualification receipt and is not a new
 application deployment baseline.
 
+### Forward recovery of an interrupted Development release
+
+`plan-forward-recovery` and `recover-forward-release` use first-attempt full
+dispatches from the reviewed current main commit through protected Preview.
+Both verify a fresh signed identity for the canonical monorepo workflow, the
+current immutable candidate receipt, and the exact interrupted release state.
+Current main must still pass release admission when execution claims the pause.
+
+The protected configuration pins the reviewed source, authority and original
+snapshot with `developmentForwardRecoverySourceCommit`,
+`developmentForwardRecoveryAuthoritySha256` and
+`developmentForwardRecoverySnapshotSha256`. It separately pins the historical
+repository name and numeric ID with `developmentForwardRecoveryOriginalRepository`
+and `developmentForwardRecoveryOriginalRepositoryId`. The snapshot comes from an
+authenticated personal-operator read of the original first-attempt failed full
+release. Independent review authenticates its hash and original repository,
+owner, run, source, preparation and executor intent. The current workflow token
+retains its canonical monorepo identity and existing permissions.
+
+Supply `forward_recovery_reference` as a sealed schema-version-1 object containing
+an `authority` reference. References contain an exact immutable `key`, `version`
+and `sha256`. The authority object is `forward-recovery-authority.json`; its
+snapshot is `forward-recovery-snapshot.json`. The authority binds the old paused
+control tuple, immutable preparation and executor intent, old API, uploaded
+executor, namespace, lifecycle, schedules and resources. Its legacy source-map
+disposition names one exact observed hash and length, explicitly records
+`originallySealed: false`, and requires independent review of its non-executable
+use. Review must justify that observation or authenticate a reconstruction with
+the original toolchain before approving the authority.
+
+The plan operation keeps the old pause held while it captures runtime,
+consumer, migrations, pause schema and staging lifecycle, verifies the existing
+candidate through `NATIVE_CANDIDATE_RECEIPT`, and seals a complete image and Worker
+plan. It returns the immutable `forward-recovery-plan.json` reference. Review this
+exact plan independently and install its SHA-256 as
+`developmentForwardRecoveryPlanSha256` in protected Preview configuration.
+
+For execution, add the approved `plan` reference to the sealed input and dispatch
+`recover-forward-release` with exact `expected_source` and `release_mode=full`.
+Execution reauthenticates the candidate and reuses the saved Terraform plan and
+complete Worker uploads. The new run ID is the sole generation substitution in
+the reviewed Worker plan. It writes a new immutable preparation, acquires a
+one-use claim under the old pause owner, and atomically transfers the exact
+control tuple while keeping admission paused. A fresh all-family drain precedes
+the migration, image, executor and API changes. A twenty-minute drain deadline
+leaves admission paused if active work remains. Final verification checks sealed
+bytes, immutable version resources, namespace, private executor endpoints,
+bounded queues, startup, current capabilities and the exact new pause tuple
+before `resumeVerifiedRelease` completes the new generation.
+
+An uncertain claim, transfer or mutation requires inspection and a separately
+reviewed recovery. Keep the recorded pause and journal; rerunning the workflow or
+replaying an upload is forbidden. The old release history remains immutable.
+The first forward recovery records `rollbackQualified: false`. Establish a
+subsequent secure paired release and qualify its paired rollback before
+Production admission.
+
+### Sealed Worker upload content
+
+Worker and executor preparations seal `index.js` and each supported
+`index.js.map` sidecar before upload. `bundleSha256` remains the JavaScript hash.
+The complete content manifest records the entrypoint and each part's exact byte
+length and SHA-256. Source maps retain their exact upload bytes in explicit
+`candidate-worker-map.json` and `candidate-print-executor-map.json` artifacts.
+Preparation reads Wrangler's actual dry-run multipart output and verifies its
+source-map transformation before preservation. Deployment, historical inspection,
+rollback and qualification compare the complete sealed content. Legacy
+single-module records retain their existing verification contract. A changed,
+missing, duplicate, unsealed or unknown upload part stops verification.
+
 
 ## Ten-minute routine path
 

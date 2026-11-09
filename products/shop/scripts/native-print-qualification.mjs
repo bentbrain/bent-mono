@@ -1,3 +1,4 @@
+import { workerContentManifest, workerContentResponse, verifyWorkerUpload } from "./native-worker-content.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual as equal } from "node:util";
@@ -5,11 +6,12 @@ import { verifyPrintExecutorConfig } from "./native-print-executor.mjs";
 const check = (value, reason) => { if (!value)
     throw Error(`Print qualification rejected: ${reason}`); };
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
-function archiveNames(cohort) {
+function archiveNames(cohort, withMap = false) {
     check(["normal", "load"].includes(cohort), "bounded qualification cohort.");
     return { deployment: `qualification-print-executor-${cohort}-deployment.json`,
         foundation: `qualification-print-executor-${cohort}-foundation.json`,
-        bundle: `qualification-print-executor-${cohort}-bundle.js` };
+        bundle: `qualification-print-executor-${cohort}-bundle.js`,
+        ...(withMap ? { map: `qualification-print-executor-${cohort}-map.json` } : {}) };
 }
 function immutableReference(reference) {
     check(/^source\/releases\/native-\d+\/[a-z0-9-]+\.(?:json|js)$/.test(reference?.key ?? "") &&
@@ -18,13 +20,14 @@ function immutableReference(reference) {
 }
 function originalReferences(record) {
     return { deployment: record?.evidence, foundation: record?.artifacts?.foundationArtifact,
-        bundle: record?.artifacts?.candidateArtifact };
+        bundle: record?.artifacts?.candidateArtifact,
+        ...(record?.artifacts?.candidateMapArtifact ? { map: record.artifacts.candidateMapArtifact } : {}) };
 }
-// Copy only the three already verified executor artifacts into the qualification
+// Copy the complete verified executor artifacts into the qualification
 // prefix that Production can read. Their original references stay in the report.
 // This avoids granting Production access to every Development release directory.
 export async function preserveQualifiedPrintExecutor(record, store, cohort) {
-    const names = archiveNames(cohort), archive = {};
+    const names = archiveNames(cohort, Boolean(record?.artifacts?.candidateMapArtifact)), archive = {};
     for (const [name, original] of Object.entries(originalReferences(record))) {
         immutableReference(original);
         const bytes = await store.read(original);
@@ -44,7 +47,7 @@ export async function verifyQualifiedPrintExecutor(record, pair, readObject, { a
         /^[a-f0-9-]{36}$/.test(record.worker?.workerVersion ?? "") &&
         /^[a-f0-9]{64}$/.test(record.worker?.versionResourcesSha256 ?? "") &&
         equal(record.lifecycle, { migrationTag: "print-execution-v1" }), "source, generation and namespace identity.");
-    const names = archiveNames(cohort), originals = originalReferences(record);
+    const names = archiveNames(cohort, Boolean(record?.artifacts?.candidateMapArtifact)), originals = originalReferences(record);
     check(Number.isSafeInteger(runId) && runId > 0 && archive &&
         equal(Object.keys(archive).sort(), Object.keys(names).sort()), "complete qualification artifact archive.");
     const read = async (name) => {
@@ -65,9 +68,8 @@ export async function verifyQualifiedPrintExecutor(record, pair, readObject, { a
         review.releaseId === pair.releaseId && review.configSha256 === record.configSha256, "qualified Development preparation identity.");
     verifyPrintExecutorConfig(review.config);
     const bytes = await read("bundle");
-    check(bytes.length === review.bundleBytes && hash(bytes) === review.bundleSha256 &&
-        record.worker.content?.entrypoint === "index.js" && record.worker.content.modules?.length === 1 &&
-        record.worker.content.modules[0].sha256 === review.bundleSha256 &&
-        record.worker.content.modules[0].bytes === bytes.length, "qualified executor bundle.");
+    const map = originals.map ? await read("map") : undefined;
+    const content = verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code: bytes, map })), review);
+    check(equal(content, record.worker.content), "qualified executor complete content.");
     return record;
 }

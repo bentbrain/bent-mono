@@ -60,7 +60,7 @@ test("accepts durable admission evidence and rejects throttling or unbounded cla
     }
     await assert.rejects(verifyDevelopmentQualification(input({}, 1)));
 });
-function addQualifiedPrints({ records, save, sourceCommit = "a".repeat(40), releaseId = "native-100" }) {
+function addQualifiedPrints({ records, save, sourceCommit = "a".repeat(40), releaseId = "native-100", withMap = false }) {
     const bytes = Buffer.from("qualified executor fixture"), digest = createHash("sha256").update(bytes).digest("hex");
     const configBytes = readFileSync(new URL("../workers/print-executor/wrangler.jsonc", import.meta.url));
     const review = { worker: "forever-tee-print-executor-development", accountId: protectedConfig("cloudflareAccountId"),
@@ -69,8 +69,17 @@ function addQualifiedPrints({ records, save, sourceCommit = "a".repeat(40), rele
     const record = { sourceCommit: review.sourceCommit, releaseId: review.releaseId, configSha256: review.configSha256,
         namespaceId: "e".repeat(32), lifecycle: { migrationTag: "print-execution-v1" },
         worker: { workerVersion: "11111111-1111-4111-8111-111111111111", versionResourcesSha256: "f".repeat(64),
-            content: { entrypoint: "index.js", modules: [{ name: "index.js", bytes: bytes.length, sha256: digest }] } },
+            content: { entrypoint: "index.js", modules: [{ name: "index.js", bytes: bytes.length, sha256: digest }], sha256: createHash("sha256").update(JSON.stringify({ entrypoint: "index.js", modules: [{ name: "index.js", bytes: bytes.length, sha256: digest }] })).digest("hex") } },
         artifacts: { foundationArtifact: save("print-executor-foundation", review, "json", true), candidateArtifact: save("candidate-print-executor", bytes, "js", true) } };
+    const map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["src.ts"], names: [], mappings: "" }));
+    if (withMap) {
+        record.worker.content.modules.push({ name: "index.js.map", bytes: map.length, sha256: createHash("sha256").update(map).digest("hex") });
+        record.worker.content.sha256 = createHash("sha256").update(JSON.stringify({ entrypoint: "index.js", modules: record.worker.content.modules })).digest("hex");
+        review.schemaVersion = 2;
+        review.content = record.worker.content;
+        record.artifacts.candidateMapArtifact = save("candidate-print-executor-map", map, "json", true);
+        record.artifacts.foundationArtifact = save("print-executor-foundation", review, "json", true);
+    }
     const printExecutor = { ...record, evidence: save("deployed-print-executor", record, "json", true) };
     for (const index of [0, 4]) {
         const count = index === 0 ? 2 : 3;
@@ -80,6 +89,7 @@ function addQualifiedPrints({ records, save, sourceCommit = "a".repeat(40), rele
             deployment: save(`print-executor-${cohort}-deployment`, record),
             foundation: save(`print-executor-${cohort}-foundation`, review),
             bundle: save(`print-executor-${cohort}-bundle`, bytes, "js"),
+            ...(withMap ? { map: save(`print-executor-${cohort}-map`, map) } : {}),
         };
         records[index].printLatency = { provider: "durable-object", passed: true, sourceCommit: review.sourceCommit,
             maxReadyMs: 12000, expectedFamilies: count, reportedFamilies: count,
@@ -300,4 +310,14 @@ test('commerce admission uses the freshly qualified executor generation, never t
         ({ smoke }) => smoke.printExecutorArchive.bundle.sha256 = '0'.repeat(64),
         ({ smoke }) => smoke.printLatency.reports[0].samples[0].recordToReadyMs = 12001])
         await assert.rejects(verifyDevelopmentQualification(await shippingFixture(mutate, true, true)));
+});
+
+test("Production qualification authenticates the complete source-map archive and rejects a missing or altered sidecar", async () => {
+    const input = () => fixture(value => addQualifiedPrints({ ...value, withMap: true }));
+    assert.equal((await verifyDevelopmentQualification(input())).printExecutor.worker.content.modules.length, 2);
+    for (const mutate of [records => delete records[0].printExecutorArchive.map,
+        records => { records[0].printExecutorArchive.map.sha256 = "0".repeat(64); },
+        records => { delete records[0].printExecutor.artifacts.candidateMapArtifact; }]) {
+        await assert.rejects(verifyDevelopmentQualification(fixture(value => { addQualifiedPrints({ ...value, withMap: true }); mutate(value.records); })));
+    }
 });

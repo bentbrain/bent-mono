@@ -1,3 +1,4 @@
+import { historicalWorkerUpload } from "./native-worker-content.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
@@ -268,6 +269,20 @@ test("rollback rejects a historical Worker without owner media before pause or d
     try {
         const artifact = JSON.parse(objects.get("previous-worker"));
         artifact.body = Buffer.from("historical public private-media reads").toString("base64");
+        objects.set("previous-worker", Buffer.from(JSON.stringify(artifact)));
+        await assert.rejects(executeDevelopmentRollback(input), /Worker rollback requires/);
+        assert.deepEqual(calls, []);
+        assert.equal(db.prepare("SELECT release_id FROM native_video_release_control").get().release_id, "native-123");
+    } finally { db.close(); }
+});
+
+test("a source-map capability string cannot authorize rollback of executable code without owner media", async () => {
+    const { db, calls, input, objects } = await fixture();
+    try {
+        const prior = JSON.parse(objects.get("previous-worker"));
+        const code = Buffer.from("export default {}"), map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["src.ts"],
+            sourcesContent: ['export const capability = "owner-artwork-media-v1"'], names: [], mappings: "" }));
+        const artifact = { ...prior, ...await historicalWorkerUpload(prior.before, { code, map }) };
         objects.set("previous-worker", Buffer.from(JSON.stringify(artifact)));
         await assert.rejects(executeDevelopmentRollback(input), /Worker rollback requires/);
         assert.deepEqual(calls, []);
