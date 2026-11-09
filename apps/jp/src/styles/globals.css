@@ -21,6 +21,7 @@
   --color-secondary: var(--muted);
   --color-secondary-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-map-water: var(--map-water);
   --color-muted-foreground: var(--foreground);
   --color-accent: var(--foreground);
   --color-accent-foreground: var(--background);
@@ -40,6 +41,7 @@
     --background: #fff;
     --foreground: var(--bent-color-accent-light);
     --muted: #f3f6ff;
+    --map-water: color-mix(in srgb, var(--foreground) 10%, var(--background));
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -47,6 +49,7 @@
       --background: #000;
       --foreground: var(--bent-color-accent-dark);
       --muted: #0b1329;
+      --map-water: color-mix(in srgb, var(--foreground) 15%, var(--background));
       color-scheme: dark;
     }
   }
