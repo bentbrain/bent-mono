@@ -30,7 +30,7 @@ export async function workerContentManifest(response, { sourceMapData = false } 
   modules.sort((a, b) => a.name.localeCompare(b.name));
   const content = { entrypoint, modules, sha256: hash(JSON.stringify({ entrypoint, modules })) };
   if (sourceMapData && bodies.has("index.js.map")) {
-    const map = verifySourceMap(bodies.get("index.js.map"), bodies.get("index.js") ?? Buffer.alloc(0));
+    const map = verifySourceMap(bodies.get("index.js.map"), bodies.get("index.js") ?? Buffer.alloc(0), { sourceMapData: true });
     content.sourceMapData = { algorithm: "complete-json-data-v1", sha256: hash(canonicalMap(map)) };
   }
   return content;
@@ -91,12 +91,20 @@ const canonicalMap = value => Array.isArray(value) ? `[${value.map(canonicalMap)
     : JSON.stringify(value);
 export const workerContentOptions = review => ({ sourceMapData: review?.schemaVersion === 3 || Boolean(review?.sourceMapData) });
 
-export function verifySourceMap(bytes, code) {
-  const map = parseMapData(bytes);
+export function verifySourceMap(bytes, code, { sourceMapData = false } = {}) {
+  // Historical contracts pin raw bytes. Their JSON admission stays unchanged;
+  // only the explicit V3 data seal requires strict canonical numeric inputs.
+  let map;
+  if (sourceMapData) map = parseMapData(bytes);
+  else {
+    try { map = JSON.parse(bytes); }
+    catch { check(false, "source map JSON."); }
+  }
   check(map?.version === 3 && map.file === "index.js" && Array.isArray(map.sources) &&
     map.sources.every(source => typeof source === "string") && Array.isArray(map.names) &&
-    map.names.every(name => typeof name === "string") && typeof map.mappings === "string" && !Object.hasOwn(map, "sections") &&
-    (!Object.hasOwn(map, "sourcesContent") || Array.isArray(map.sourcesContent) && map.sourcesContent.length === map.sources.length &&
+    map.names.every(name => typeof name === "string") && typeof map.mappings === "string" &&
+    (sourceMapData ? !Object.hasOwn(map, "sections") : !map.sections) &&
+    ((sourceMapData ? !Object.hasOwn(map, "sourcesContent") : !map.sourcesContent) || Array.isArray(map.sourcesContent) && map.sourcesContent.length === map.sources.length &&
       map.sourcesContent.every(source => source === null || typeof source === "string")), "supported v3 source map for index.js.");
   // A sidecar is data. It cannot participate in the module's executable imports.
   check(!/(?:\bimport\s*\(|\brequire\s*\(|\bfrom\s*|\bimport\s*)["'`]([^"'`]*\.map(?:[?#][^"'`]*)?)["'`]/.test(code.toString()), "executable source-map import.");
@@ -151,7 +159,7 @@ async function captureWorkerUpload(run, entrypoint, output, environment, review)
     return Buffer.from(await value.arrayBuffer());
   };
   const code = await binary("index.js"), map = parts.has("index.js.map") ? await binary("index.js.map") : undefined;
-  if (map) verifySourceMap(map, code);
+  if (map) verifySourceMap(map, code, workerContentOptions(review));
   return { code, map, content };
 }
 
@@ -232,7 +240,7 @@ export async function readPreservedWorkerUpload(artifact) {
   const parts = await response.formData(), codePart = parts.get("index.js"), mapPart = parts.get("index.js.map");
   check(codePart && typeof codePart !== "string", "preserved executable entrypoint required.");
   const code = Buffer.from(await codePart.arrayBuffer()), map = mapPart ? Buffer.from(await mapPart.arrayBuffer()) : undefined;
-  if (map) verifySourceMap(map, code);
+  if (map) verifySourceMap(map, code, workerContentOptions(artifact.before?.content));
   return { code, map, content };
 }
 

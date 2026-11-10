@@ -3,11 +3,71 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
-import { executeProductionPair, verifyProductionPairStatus, waitForProductionPairStatus, completeProductionRehearsal } from "./native-production-release.mjs";
+import { executeProductionPair, verifyProductionPairStatus, waitForProductionPairStatus, completeProductionRehearsal, rollbackProductionPair } from "./native-production-release.mjs";
+import { workerContentManifest, workerContentResponse } from "./native-worker-content.mjs";
+import { installPauseSchema } from "./native-release-pause.mjs";
 import { versionResourcesDigest } from "./native-ci-worker.mjs";
 import { NATIVE_PRODUCTION_QUEUE } from "./native-production-worker.mjs";
 import { PRODUCTION_DB } from "./native-production-cloudflare.mjs";
 import { PRODUCTION_IMAGE_DIGEST, PRODUCTION_SOURCE_DIGEST } from "./native-production-runtime.mjs";
+
+test("Production rollback admits V3 map formatting while preserving historical and immutable checks", async t => {
+    for (const example of [
+        { name: "V3 reformatted map", schemaVersion: 3, formatting: true, allowed: true },
+        { name: "V3 changed map data", schemaVersion: 3, changedMap: true, error: /complete source map data/ },
+        { name: "V3 changed executable", schemaVersion: 3, changedCode: true, error: /code bytes/ },
+        { name: "V3 changed version resources", schemaVersion: 3, changedResources: true, error: /fallback code\/resources/ },
+        { name: "V3 changed immutable raw map", schemaVersion: 3, changedArtifact: true, error: /immutable raw artifact/ },
+        { name: "V2 exact decimal map", schemaVersion: 2, decimal: true, allowed: true },
+        { name: "V2 reformatted map", schemaVersion: 2, formatting: true, error: /complete content/ },
+    ]) await t.test(example.name, async () => {
+        const db = new DatabaseSync(":memory:");
+        try {
+            db.exec("CREATE TABLE story_video_jobs (id TEXT NOT NULL, status TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0)");
+            const writes = [];
+            const resources = { bindings: [], script_runtime: {} };
+            const cf = { query: async (sql, params = []) => {
+                const statement = db.prepare(sql);
+                if (statement.columns().length) return [{ results: statement.all(...params).map(row => ({ ...row })) }];
+                writes.push(sql);
+                return [{ results: [], meta: statement.run(...params) }];
+            }, version: async () => ({ resources: example.changedResources ? { ...resources, bindings: [{ name: "changed" }] } : resources }) };
+            await installPauseSchema(cf);
+            writes.length = 0;
+            const code = Buffer.from('const capability = "owner-artwork-media-v1"; export default {};\n//# sourceMappingURL=index.js.map\n');
+            const value = { version: 3, file: "index.js", sources: ["fixture.ts"], sourcesContent: ["export default {}"], names: [], mappings: "", ...(example.decimal ? { extension: 0.5 } : {}) };
+            const map = Buffer.from(JSON.stringify(value));
+            const formatted = Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(value).reverse()), null, 2));
+            const options = { sourceMapData: example.schemaVersion === 3 };
+            const content = await workerContentManifest(workerContentResponse({ code, map }), options);
+            const review = { schemaVersion: example.schemaVersion, content, bundleSha256: content.modules[0].sha256, bundleBytes: code.length };
+            const observed = await workerContentManifest(workerContentResponse({
+                code: example.changedCode ? Buffer.from(code.toString().replace("export default {}", "export default { changed: true }")) : code,
+                map: example.changedMap ? Buffer.from(JSON.stringify({ ...value, mappings: "AAAA" })) : example.formatting ? formatted : map,
+            }), options);
+            const fallback = { provider: "cloudflare", workerVersion: "11111111-1111-4111-8111-111111111111", workerBytesVerified: true,
+                content: observed, versionResourcesSha256: versionResourcesDigest({ resources }) };
+            const previous = { workerVersion: "22222222-2222-4222-8222-222222222222" };
+            const artifacts = { candidateArtifact: { key: "code" }, candidateMapArtifact: { key: "map" }, previousArtifact: { key: "previous" } };
+            const prepared = { environment: "production", releaseId: "native-200", worker: review, artifacts, previous: { worker: previous } };
+            const objects = new Map([["code", code], ["map", example.changedArtifact ? formatted : map],
+                ["prepared", Buffer.from(JSON.stringify(prepared))], ["previous", Buffer.from(JSON.stringify({ before: previous }))],
+                ["fallback", Buffer.from(JSON.stringify(fallback))]]);
+            for (const [stage, payload] of [["prepared", { ...prepared, preparation: { key: "prepared" } }], ["fallback-verified", { fallback, artifact: { key: "fallback" } }]])
+                db.prepare("INSERT INTO native_video_release_events(release_id, stage, payload, created_at) VALUES(?,?,?,?)").run(prepared.releaseId, stage, JSON.stringify(payload), 1);
+            let runtimeReads = 0;
+            const dependencies = { aws: async () => ({ call: async () => { runtimeReads++; throw Error("synthetic runtime read boundary"); } }),
+                cloudflare: () => cf, releaseStore: async () => ({ read: async reference => {
+                    assert.ok(objects.has(reference.key)); return objects.get(reference.key);
+                } }) };
+            await assert.rejects(rollbackProductionPair({ NATIVE_OPERATION: "rollback", NATIVE_ROLLBACK_RELEASE: prepared.releaseId, GITHUB_RUN_ID: "300" }, dependencies),
+                example.allowed ? /synthetic runtime read boundary/ : example.error);
+            assert.equal(runtimeReads, example.allowed ? 1 : 0);
+            assert.deepEqual(writes, []);
+        } finally { db.close(); }
+    });
+});
+
 function fixture(failNative = false, interruptRehearsal = false, monitoringChanged = false, withPrintExecutor = false, failPrintVerification = false) {
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE story_video_jobs (id TEXT NOT NULL, status TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0)");

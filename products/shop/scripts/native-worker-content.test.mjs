@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { inspectDevelopmentWorker } from "./native-ci-worker.mjs";
 import { prepareWorkerUpload, readWorkerUpload, preserveWorkerUpload, readSealedWorkerUpload, verifyWorkerUpload,
-  workerContentManifest, workerContentResponse, historicalWorkerUpload, verifyWorkerUploadEvidence } from "./native-worker-content.mjs";
+  workerContentManifest, workerContentResponse, historicalWorkerUpload, verifyWorkerUploadEvidence, verifySourceMap } from "./native-worker-content.mjs";
 
 const code = Buffer.from('export default {};\n//# sourceMappingURL=index.js.map\n');
 const map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["src.ts"], sourcesContent: ["export default {}"], names: [], mappings: "" }));
@@ -103,8 +103,8 @@ test("map data seal preserves array order and extension fields and rejects ambig
     { extension: { ...value.extension, list: [2, 1] } }, { extension: { ...value.extension, enabled: false } }])
     await assert.rejects(async () => verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code, map: Buffer.from(JSON.stringify({ ...value, ...delta })) }), { sourceMapData: true }), review));
   for (const invalid of ['{"version":3,"version":3}', '{"nested":{"a":1,"\\u0061":2}}', '{"n":9007199254740993}', '{"n":1.0000000000000001}', '{"n":-0}', '{"n":1e999}', '{"n":}', '{"x":[1,]}', '{} trailing'])
-    assert.throws(() => workerContentResponse({ code, map: Buffer.from(invalid) }), /source map/);
-  assert.throws(() => workerContentResponse({ code, map: Buffer.from([0xff, 0xfe]) }), /UTF-8/);
+    assert.throws(() => verifySourceMap(Buffer.from(invalid), code, { sourceMapData: true }), /source map/);
+  assert.throws(() => verifySourceMap(Buffer.from([0xff, 0xfe]), code, { sourceMapData: true }), /UTF-8/);
   assert.throws(() => workerContentResponse({ code: Buffer.from('import("./index.js.map?module")'), map }), /executable/);
 });
 
@@ -113,6 +113,21 @@ test("V3 immutable reads still reject raw map reserialization while provider rea
   const review = { schemaVersion: 3, content, bundleSha256: content.modules[0].sha256, bundleBytes: code.length };
   const artifacts = { candidateArtifact: { key: "code" }, candidateMapArtifact: { key: "map" } };
   await assert.rejects(readSealedWorkerUpload({ read: async ref => ref.key === "code" ? code : Buffer.from(JSON.stringify(JSON.parse(map), null, 2)) }, artifacts, review), /immutable raw artifact/);
+});
+
+test("historical V2 reads preserve decimal map extensions and exact raw artifacts", async () => {
+  for (const extension of [0.5, 1.25]) {
+    const bytes = Buffer.from(JSON.stringify({ ...JSON.parse(map), extension }));
+    const content = await workerContentManifest(workerContentResponse({ code, map: bytes }));
+    const review = { schemaVersion: 2, content, bundleSha256: content.modules[0].sha256, bundleBytes: code.length };
+    const artifacts = { candidateArtifact: { key: "code" }, candidateMapArtifact: { key: "map" } };
+    const store = value => ({ read: async ref => ref.key === "code" ? code : value });
+    assert.deepEqual((await readSealedWorkerUpload(store(bytes), artifacts, review)).map, bytes);
+    const changed = Buffer.from(JSON.stringify({ ...JSON.parse(bytes), extension: extension + 0.25 }));
+    await assert.rejects(readSealedWorkerUpload(store(changed), artifacts, review), /complete content/);
+    await assert.rejects(readSealedWorkerUpload(store(Buffer.from(JSON.stringify(JSON.parse(bytes), null, 2))), artifacts, review), /complete content/);
+    await assert.rejects(workerContentManifest(workerContentResponse({ code, map: bytes }), { sourceMapData: true }), /valid and unambiguous/);
+  }
 });
 
 test("content mismatches retain encrypted bounded expected and actual manifests", async () => {
