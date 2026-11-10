@@ -27,7 +27,7 @@ import { readSealedWorkerUpload } from "./native-worker-content.mjs";
 // remain exact. The current run owns its own complete preparation and events.
 export function forwardWorkerPlan(review, releaseId) {
   const copy = structuredClone(review);
-  check(copy.printExecutor?.before?.interrupted && copy.printExecutor.schemaVersion === 2 && copy.schemaVersion === 2 &&
+  check(copy.printExecutor?.before?.interrupted && [2, 3].includes(copy.printExecutor.schemaVersion) && [2, 3].includes(copy.schemaVersion) &&
     copy.printExecutor.releaseId === releaseId, "complete interrupted-state upload plan required.");
   copy.printExecutor.releaseId = "execution-run";
   return copy;

@@ -34,6 +34,10 @@ export async function createDevelopmentReleaseStore(env = process.env, run) {
     return { read, save: async (name, bytes) => {
             if (env.NATIVE_OPERATION === "stage-forward-recovery-authority")
                 check(["forward-recovery-snapshot.json", "forward-recovery-authority.json"].includes(name));
+            if (env.NATIVE_OPERATION === "stage-forward-completion-authority")
+                check(["completion-snapshot.json", "completion-authority.json"].includes(name));
+            if (env.NATIVE_OPERATION === "complete-forward-release")
+                check(["completion-executor-foundation.json", "completion-prepared.json", "completion-deployed-executor.json", "completion-command-diagnostic.json", "completion-api-content-diagnostic.json", "completion-executor-content-diagnostic.json"].includes(name));
             check(/^[a-z-]+\.(?:json|tfplan|js|zip)$/.test(name) && Buffer.isBuffer(bytes));
             const file = join(directory, name);
             await writeFile(file, bytes, { flag: "wx", mode: 0o600 });

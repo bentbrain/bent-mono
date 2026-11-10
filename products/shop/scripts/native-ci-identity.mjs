@@ -23,7 +23,7 @@ function assertNativeDevelopmentProofContext(env) {
     assertActionsIdentityContext(env);
     if (env.GITHUB_REF !== "refs/heads/main" || env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_RUN_ATTEMPT !== "1" ||
         env.GITHUB_WORKFLOW_REF !== "bentbrain/bent-mono/.github/workflows/native-development.yml@refs/heads/main" ||
-        !["stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release"].includes(env.NATIVE_OPERATION) || (env.NATIVE_RELEASE_MODE ?? "full") !== "full") fail();
+        !["stage-forward-completion-authority", "complete-forward-release", "stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release"].includes(env.NATIVE_OPERATION) || (env.NATIVE_RELEASE_MODE ?? "full") !== "full") fail();
 }
 const proofContext = (env, options) => options.nativeDevelopment ? assertNativeDevelopmentProofContext(env) : assertPreviewProofContext(env);
 const proofWorkflow = options => options.nativeDevelopment ? "bentbrain/bent-mono/.github/workflows/native-development.yml" : WORKFLOW;

@@ -26,6 +26,7 @@ export async function loadDevelopmentRollback(cf, store, fromReleaseId) {
     const record = JSON.parse(rows[0].payload);
     const { preparation, ...prepared } = record;
     check(prepared.releaseId === fromReleaseId && isDeepStrictEqual(JSON.parse(await store.read(preparation)), prepared), "D1 and versioned S3 preparation disagree.");
+    check(!prepared.worker?.printExecutor?.before?.interrupted, "interrupted predecessor requires separate secure paired rollback qualification.");
     const target = previousDevelopmentCandidate(prepared);
     const artifact = JSON.parse(await store.read(prepared.artifacts.previousArtifact));
     const { content } = await readPreservedWorkerUpload(artifact);

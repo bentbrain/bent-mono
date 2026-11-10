@@ -1,5 +1,5 @@
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
-import { readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, supportedWorkerContent, prepareWorkerUpload } from "./native-worker-content.mjs";
+import { readWorkerUpload, verifyWorkerUpload, verifyWorkerUploadEvidence, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, supportedWorkerContent, prepareWorkerUpload } from "./native-worker-content.mjs";
 import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
@@ -140,7 +140,8 @@ export async function loadRecordedProductionWorkerBaseline(cf, store, { pauseOwn
         check(equal(terminal.fallback, fallback), "completed fallback admission matches the recorded version.");
     const upload = await readSealedWorkerUpload(store, prepared.artifacts, prepared.worker);
     const content = upload.content;
-    check(equal(content, fallback.content), "recorded fallback bytes match the prepared bundle.");
+    verifyWorkerUpload(fallback.content, prepared.worker);
+    check(prepared.worker.schemaVersion === 3 || equal(content, fallback.content), "recorded fallback bytes match the prepared bundle.");
     const version = await cf.version(active);
     check(version.id === active && versionResourcesDigest(version) === fallback.versionResourcesSha256 && Array.isArray(version.resources?.bindings), "recorded fallback resources match the active immutable version.");
     const consumer = await inspectProductionConsumer(cf), schedules = await cf.schedules();
@@ -292,7 +293,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
     const secretNames = baseline === "initial" ? [...PRODUCTION_NATIVE_SECRET_NAMES, ...APPLICATION_SECRET_NAMES] : APPLICATION_SECRET_NAMES;
     const secretsPath = join(directory, "release-secrets.json");
     await writeFile(secretsPath, JSON.stringify(Object.fromEntries(secretNames.map(name => [name, secrets[name]]))), { flag: "wx", mode: 0o600 });
-    const review = { schemaVersion: 2, content: upload.content, sourceCommit: env.GITHUB_SHA, baseline, baselineReleaseId: recorded?.record.releaseId ?? null, secretNames,
+    const review = { schemaVersion: 3, content: upload.content, sourceCommit: env.GITHUB_SHA, baseline, baselineReleaseId: recorded?.record.releaseId ?? null, secretNames,
         bundleSha256: sha(bytes), bundleBytes: bytes.length, configSha256: configHash, fallbackConfigSha256: fallbackHash, sourceConfigSha256: sha(source), ...(printExecutor ? { printExecutor: printExecutor.review } : {}) };
     const verifyPrevious = async () => {
         if (printExecutor)
@@ -337,13 +338,13 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
             const path = provider === "lambda" ? configPath : fallbackPath;
             await assertReleasePaused(cf, releaseId);
             check(sha(await readFile(entrypoint)) === review.bundleSha256 && sha(await readFile(path)) === (provider === "lambda" ? configHash : fallbackHash), "immutable prepared bytes/configuration.");
-            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            verifyWorkerUpload((await readWorkerUpload(out, review)).content, review);
             await readSealedWorkerUpload(store, artifacts, review);
             await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--keep-vars", "--tag", releaseId, "--message", `Native Production pair ${env.GITHUB_SHA}`,
                 "--secrets-file", secretsPath,
                 ...Object.entries(chosen.vars).flatMap(([key, value]) => ["--var", `${key}:${value}`])], path);
-            const live = await inspectWorker(cf);
-            verifyWorkerUpload(live.content, review);
+            const live = await inspectWorker(cf, undefined, review);
+            await verifyWorkerUploadEvidence(live.content, review, { store, env, filename: "worker-content-diagnostic.json" });
             verifyProductionReleaseSettings(await cf.settings(), await inspectProductionConsumer(cf), chosen.vars, settings, provider === "lambda" ? NATIVE_PRODUCTION_QUEUE : FALLBACK_PRODUCTION_QUEUE, deployedPrintExecutor, { requireProtectedConfig: true });
             await verifyPrintExecutor();
             await verifyPrintQueue(cf, "production");

@@ -1,3 +1,4 @@
+import { sealReleaseEvidence } from "./release-evidence.mjs";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,9 +9,9 @@ const check = (value, reason) => { if (!value) throw Error(`Worker content verif
 
 // This parser describes every provider part. Admission of supported upload
 // parts belongs to the sealed contract below, never to this evidence parser.
-export async function workerContentManifest(response) {
+export async function workerContentManifest(response, { sourceMapData = false } = {}) {
   check(response.ok, "content download.");
-  const modules = [];
+  const modules = [], bodies = new Map();
   let entrypoint = response.headers.get("cf-entrypoint") ?? "index.js";
   if (response.headers.get("content-type")?.startsWith("multipart/")) {
     entrypoint = response.headers.get("cf-entrypoint");
@@ -19,6 +20,7 @@ export async function workerContentManifest(response) {
       check(typeof value !== "string" && !modules.some(item => item.name === name), "unique binary module parts.");
       const bytes = Buffer.from(await value.arrayBuffer());
       modules.push({ name, bytes: bytes.length, sha256: hash(bytes) });
+      bodies.set(name, bytes);
     }
   } else {
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -26,19 +28,79 @@ export async function workerContentManifest(response) {
   }
   check(modules.length > 0 && modules.some(item => item.name === entrypoint), "entrypoint module present.");
   modules.sort((a, b) => a.name.localeCompare(b.name));
-  return { entrypoint, modules, sha256: hash(JSON.stringify({ entrypoint, modules })) };
+  const content = { entrypoint, modules, sha256: hash(JSON.stringify({ entrypoint, modules })) };
+  if (sourceMapData && bodies.has("index.js.map")) {
+    const map = verifySourceMap(bodies.get("index.js.map"), bodies.get("index.js") ?? Buffer.alloc(0));
+    content.sourceMapData = { algorithm: "complete-json-data-v1", sha256: hash(canonicalMap(map)) };
+  }
+  return content;
 }
 
+// JSON object order and whitespace have no map meaning. Arrays, unknown fields,
+// strings and every scalar do. Reject duplicate keys and lossy numeric parsing
+// before producing this explicitly versioned data seal.
+function parseMapData(bytes) {
+  check(bytes.byteLength <= 10_000_000, "bounded source map JSON.");
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { check(false, "source map UTF-8."); }
+  let at = 0;
+  const whitespace = () => { while (/[\t\r\n ]/.test(text[at] ?? "!") && at < text.length) at++; };
+  const string = () => {
+    const start = at++;
+    while (at < text.length) {
+      if (text[at++] === '"') return JSON.parse(text.slice(start, at));
+      if (text[at - 1] === "\\") at++;
+    }
+    throw Error("unterminated string");
+  };
+  const value = depth => {
+    check(depth <= 64, "source map JSON depth.");
+    whitespace();
+    if (text[at] === '"') return string();
+    if (text[at] === "{" || text[at] === "[") {
+      const object = text[at++] === "{", close = object ? "}" : "]", keys = new Set();
+      whitespace();
+      if (text[at] === close) { at++; return; }
+      for (;;) {
+        whitespace();
+        if (object) {
+          check(text[at] === '"', "source map JSON key.");
+          const key = string();
+          check(!keys.has(key), "duplicate source map JSON key."); keys.add(key);
+          whitespace(); check(text[at++] === ":", "source map JSON colon.");
+        }
+        value(depth + 1); whitespace();
+        if (text[at] === close) { at++; return; }
+        check(text[at++] === ",", "source map JSON separator.");
+      }
+    }
+    const token = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/.exec(text.slice(at))?.[0];
+    check(token, "source map JSON value."); at += token.length;
+    if (!/^(?:true|false|null)$/.test(token)) {
+      const number = Number(token);
+      check(Number.isSafeInteger(number) && !Object.is(number, -0) && token === String(number), "ambiguous source map JSON number.");
+    }
+  };
+  try { value(0); whitespace(); check(at === text.length, "source map trailing JSON."); return JSON.parse(text); }
+  catch { check(false, "source map JSON must be valid and unambiguous."); }
+}
+const canonicalMap = value => Array.isArray(value) ? `[${value.map(canonicalMap).join(",")}]`
+  : value !== null && typeof value === "object"
+    ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalMap(value[key])}`).join(",")}}`
+    : JSON.stringify(value);
+export const workerContentOptions = review => ({ sourceMapData: review?.schemaVersion === 3 || Boolean(review?.sourceMapData) });
+
 export function verifySourceMap(bytes, code) {
-  let map;
-  try { map = JSON.parse(bytes); } catch { check(false, "source map JSON."); }
+  const map = parseMapData(bytes);
   check(map?.version === 3 && map.file === "index.js" && Array.isArray(map.sources) &&
     map.sources.every(source => typeof source === "string") && Array.isArray(map.names) &&
-    map.names.every(name => typeof name === "string") && typeof map.mappings === "string" && !map.sections &&
-    (!map.sourcesContent || Array.isArray(map.sourcesContent) && map.sourcesContent.length === map.sources.length &&
+    map.names.every(name => typeof name === "string") && typeof map.mappings === "string" && !Object.hasOwn(map, "sections") &&
+    (!Object.hasOwn(map, "sourcesContent") || Array.isArray(map.sourcesContent) && map.sourcesContent.length === map.sources.length &&
       map.sourcesContent.every(source => source === null || typeof source === "string")), "supported v3 source map for index.js.");
   // A sidecar is data. It cannot participate in the module's executable imports.
-  check(!/(?:\bimport\s*\(|\brequire\s*\(|\bfrom\s*|\bimport\s*)["'`]([^"'`]*\.map)["'`]/.test(code.toString()), "executable source-map import.");
+  check(!/(?:\bimport\s*\(|\brequire\s*\(|\bfrom\s*|\bimport\s*)["'`]([^"'`]*\.map(?:[?#][^"'`]*)?)["'`]/.test(code.toString()), "executable source-map import.");
+  return map;
 }
 
 export function supportedWorkerContent(content) {
@@ -60,18 +122,18 @@ export function workerContentResponse({ code, map }) {
   return new Response(parts, { headers: { "cf-entrypoint": "index.js" } });
 }
 
-export async function readWorkerUpload(directory) {
+export async function readWorkerUpload(directory, review) {
   const files = await readdir(directory);
   check(files.includes("index.js") && files.every(name => ["index.js", "index.js.map", "README.md"].includes(name)), "unrecorded upload output module.");
   const code = await readFile(join(directory, "index.js"));
   const map = files.includes("index.js.map") ? await readFile(join(directory, "index.js.map")) : undefined;
-  const content = supportedWorkerContent(await workerContentManifest(workerContentResponse({ code, map })));
+  const content = supportedWorkerContent(await workerContentManifest(workerContentResponse({ code, map }), workerContentOptions(review)));
   return { code, map, content };
 }
 
 // --outfile contains Wrangler's actual multipart upload, including its source
 // map transformation. The raw esbuild map is not necessarily the uploaded map.
-async function captureWorkerUpload(run, entrypoint, output, environment) {
+async function captureWorkerUpload(run, entrypoint, output, environment, review) {
   await run(["deploy", entrypoint, "--no-bundle", "--dry-run", "--upload-source-maps",
     ...(environment ? ["--env", environment] : []), "--outfile", output]);
   const bytes = await readFile(output), firstLine = bytes.subarray(0, bytes.indexOf("\r\n")).toString();
@@ -82,7 +144,7 @@ async function captureWorkerUpload(run, entrypoint, output, environment) {
   check(metadata.main_module === "index.js" && !metadata.body_part, "exact upload entrypoint.");
   const parts = new FormData();
   for (const [name, value] of form) if (name !== "metadata") parts.append(name, value);
-  const content = supportedWorkerContent(await workerContentManifest(new Response(parts, { headers: { "cf-entrypoint": metadata.main_module } })));
+  const content = supportedWorkerContent(await workerContentManifest(new Response(parts, { headers: { "cf-entrypoint": metadata.main_module } }), workerContentOptions(review)));
   const binary = async name => {
     const value = parts.get(name);
     check(value && typeof value !== "string", "binary upload part.");
@@ -94,7 +156,7 @@ async function captureWorkerUpload(run, entrypoint, output, environment) {
 }
 
 export async function prepareWorkerUpload({ run, directory, environment, sealed }) {
-  const entrypoint = join(directory, "index.js");
+  const entrypoint = join(directory, "index.js"), contract = sealed?.review ?? { schemaVersion: 3 };
   let original;
   if (sealed) {
     original = await readSealedWorkerUpload(sealed.store, sealed.artifacts, sealed.review);
@@ -106,28 +168,38 @@ export async function prepareWorkerUpload({ run, directory, environment, sealed 
     const files = await readdir(directory);
     check(files.includes("index.js") && files.every(name => ["index.js", "index.js.map", "README.md"].includes(name)), "unrecorded bundled output module.");
   }
-  const upload = await captureWorkerUpload(run, entrypoint, `${directory}-upload.bin`, environment);
+  const upload = await captureWorkerUpload(run, entrypoint, `${directory}-upload.bin`, environment, contract);
   check(equal(upload.code, await readFile(entrypoint)), "Wrangler changed prepared code bytes.");
   if (original) check(equal(upload.content, original.content), "rehydrated upload differs from the reviewed plan.");
   // Retain the exact upload map beside its module. Wrangler's no-bundle map
   // normalization must be idempotent, proved by a second actual dry-run below.
   if (upload.map) await writeFile(join(directory, "index.js.map"), upload.map, { mode: 0o600 });
-  const checked = await captureWorkerUpload(run, entrypoint, `${directory}-checked-upload.bin`, environment);
+  const checked = await captureWorkerUpload(run, entrypoint, `${directory}-checked-upload.bin`, environment, contract);
   check(equal(checked.content, upload.content), "upload transformation is not stable.");
-  check(equal((await readWorkerUpload(directory)).content, upload.content), "local parts differ from exact upload.");
+  check(equal((await readWorkerUpload(directory, contract)).content, upload.content), "local parts differ from exact upload.");
   return upload;
 }
 
 export function verifyWorkerUpload(content, review) {
   supportedWorkerContent(content);
-  check([undefined, 1, 2].includes(review.schemaVersion), "supported upload evidence schema required.");
+  check([undefined, 1, 2, 3].includes(review.schemaVersion), "supported upload evidence schema required.");
   check(content.modules[0].sha256 === review.bundleSha256 &&
     (review.bundleBytes === undefined || content.modules[0].bytes === review.bundleBytes), "code bytes differ from immutable bundle.");
   if (review.content) {
-    check(review.schemaVersion === 2 && /^[a-f0-9]{64}$/.test(review.content.sha256 ?? ""), "complete versioned content manifest required.");
+    check([2, 3].includes(review.schemaVersion) && /^[a-f0-9]{64}$/.test(review.content.sha256 ?? ""), "complete versioned content manifest required.");
     supportedWorkerContent(review.content);
-    check(equal(content, review.content), "complete content differs from sealed manifest.");
-  } else check(review.schemaVersion !== 2 && content.modules.length === 1, "unsealed upload part.");
+    check(equal(content.modules[0], review.content.modules[0]), "complete executable code bytes differ.");
+    if (review.schemaVersion === 3) {
+      for (const manifest of [content, review.content]) check(Object.keys(manifest).sort().join() === (manifest.modules.length === 2 ? "entrypoint,modules,sha256,sourceMapData" : "entrypoint,modules,sha256") &&
+        manifest.modules.every(part => Object.keys(part).sort().join() === "bytes,name,sha256"), "exact v3 content contract.");
+      check(content.modules.length === review.content.modules.length, "complete part set differs.");
+      if (content.modules.length === 2) {
+        for (const manifest of [content, review.content]) check(manifest.sourceMapData?.algorithm === "complete-json-data-v1" &&
+          Object.keys(manifest.sourceMapData).sort().join() === "algorithm,sha256" && /^[a-f0-9]{64}$/.test(manifest.sourceMapData.sha256), "complete source map data seal required.");
+        check(equal(content.sourceMapData, review.content.sourceMapData), "complete source map data differs from sealed manifest.");
+      }
+    } else check(equal(content, review.content), "complete content differs from sealed manifest.");
+  } else check(![2, 3].includes(review.schemaVersion) && content.modules.length === 1, "unsealed upload part.");
   return content;
 }
 
@@ -140,7 +212,8 @@ export async function preserveWorkerUpload(store, upload, stem) {
 export async function readSealedWorkerUpload(store, artifacts, review) {
   const code = await store.read(artifacts.candidateArtifact);
   const map = artifacts.candidateMapArtifact ? await store.read(artifacts.candidateMapArtifact) : undefined;
-  const content = verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code, map })), review);
+  const content = verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code, map }), workerContentOptions(review)), review);
+  if (review.content) check(equal(content, review.content), "immutable raw artifact differs from sealed manifest.");
   return { code, map, content };
 }
 
@@ -154,11 +227,29 @@ export async function readPreservedWorkerUpload(artifact) {
   const response = new Response(Buffer.from(artifact.body, "base64"), {
     headers: { "content-type": artifact.contentType, "cf-entrypoint": artifact.entrypoint },
   });
-  const content = supportedWorkerContent(await workerContentManifest(response.clone()));
+  const content = supportedWorkerContent(await workerContentManifest(response.clone(), workerContentOptions(artifact.before?.content)));
   if (!artifact.contentType?.startsWith("multipart/")) return { code: Buffer.from(await response.arrayBuffer()), content };
   const parts = await response.formData(), codePart = parts.get("index.js"), mapPart = parts.get("index.js.map");
   check(codePart && typeof codePart !== "string", "preserved executable entrypoint required.");
   const code = Buffer.from(await codePart.arrayBuffer()), map = mapPart ? Buffer.from(await mapPart.arrayBuffer()) : undefined;
   if (map) verifySourceMap(map, code);
   return { code, map, content };
+}
+
+// Only bounded manifests enter encrypted diagnostic storage. Map source text and
+// provider response bodies remain outside public logs and diagnostic records.
+export async function verifyWorkerUploadEvidence(content, review, { store, env, filename }) {
+  try { return verifyWorkerUpload(content, review); }
+  catch (error) {
+    check(store && /^[a-z-]+\.json$/.test(filename), "private diagnostic destination required.");
+    const evidence = { schemaVersion: 1, contract: review.schemaVersion, expected: review.content, actual: content };
+    const encoded = sealReleaseEvidence(evidence, { sourceCommit: env.GITHUB_SHA, runId: env.GITHUB_RUN_ID, filename }, env);
+    await store.save(filename, Buffer.from(encoded));
+    throw error;
+  }
+}
+
+export function verifyWorkerContentEquivalent(content, expected) {
+  if (!expected.sourceMapData) { check(equal(content, expected), "complete historical Worker bytes differ."); return content; }
+  return verifyWorkerUpload(content, { schemaVersion: 3, content: expected, bundleSha256: expected.modules[0].sha256, bundleBytes: expected.modules[0].bytes });
 }

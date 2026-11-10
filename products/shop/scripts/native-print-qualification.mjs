@@ -1,4 +1,4 @@
-import { workerContentManifest, workerContentResponse, verifyWorkerUpload } from "./native-worker-content.mjs";
+import { workerContentManifest, workerContentOptions, workerContentResponse, verifyWorkerUpload } from "./native-worker-content.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual as equal } from "node:util";
@@ -69,7 +69,8 @@ export async function verifyQualifiedPrintExecutor(record, pair, readObject, { a
     verifyPrintExecutorConfig(review.config);
     const bytes = await read("bundle");
     const map = originals.map ? await read("map") : undefined;
-    const content = verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code: bytes, map })), review);
-    check(equal(content, record.worker.content), "qualified executor complete content.");
+    const content = verifyWorkerUpload(await workerContentManifest(workerContentResponse({ code: bytes, map }), workerContentOptions(review)), review);
+    verifyWorkerUpload(record.worker.content, review);
+    check(review.schemaVersion === 3 || equal(content, record.worker.content), "qualified executor complete content.");
     return record;
 }

@@ -1,5 +1,5 @@
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
-import { workerContentManifest, readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, prepareWorkerUpload, readSealedWorkerUpload } from "./native-worker-content.mjs";
+import { workerContentManifest, workerContentOptions, verifyWorkerContentEquivalent, readWorkerUpload, verifyWorkerUpload, verifyWorkerUploadEvidence, preserveWorkerUpload, prepareWorkerUpload, readSealedWorkerUpload } from "./native-worker-content.mjs";
 export { workerContentManifest } from "./native-worker-content.mjs";
 import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
 import { protectedConfig } from "./protected-config.mjs";
@@ -56,7 +56,8 @@ export async function activeWorkerSettings(cf, expected) {
     check(singleVersion(await cf.deployments()) === id, "active version changed during settings inspection.");
     return { ...version.resources.script_runtime, bindings: version.resources.bindings };
 }
-export async function inspectDevelopmentWorker(cf, historicalArtifact) {
+export async function inspectDevelopmentWorker(cf, historicalArtifact, review) {
+    const options = workerContentOptions(review ?? historicalArtifact?.before?.content);
     const before = singleVersion(await cf.deployments());
     const latest = (await cf.versions()).items?.[0]?.id;
     // content/v2 is the script's latest content, not an arbitrary historical
@@ -64,15 +65,16 @@ export async function inspectDevelopmentWorker(cf, historicalArtifact) {
     check(typeof latest === "string", "latest Worker version missing.");
     let content;
     if (latest === before)
-        content = await workerContentManifest(await cf.content());
+        content = await workerContentManifest(await cf.content(), options);
     else {
         // A completed rollback can make a historical version active. Its bytes
         // must come from the immutable D1/S3 preparation, never content/v2.
         check(historicalArtifact?.before?.workerVersion === before, "latest content is not the single active version; recorded rollback artifact required.");
         content = await workerContentManifest(new Response(Buffer.from(historicalArtifact.body, "base64"), {
             headers: { "content-type": historicalArtifact.contentType, "cf-entrypoint": historicalArtifact.entrypoint },
-        }));
-        check(isDeepStrictEqual(content, historicalArtifact.before.content), "historical Worker bytes differ from the recorded manifest.");
+        }), options);
+        try { verifyWorkerContentEquivalent(content, historicalArtifact.before.content); }
+        catch { check(false, "historical Worker bytes differ from the recorded manifest."); }
     }
     const version = await cf.version(before);
     if (latest !== before)
@@ -117,7 +119,7 @@ export async function prepareDevelopmentWorker(env = process.env, { recovery } =
     assertArtworkMediaBundle(bytes);
     const printExecutor = await preparePrintExecutorFoundation({ env, directory, api: cf,
         run: args => run(args, true), inspectWorker: inspectDevelopmentWorker, interrupted: recovery, sealedUpload: recovery?.sealedExecutor });
-    const review = { schemaVersion: 2, content: upload.content, configuration: { api: apiConfig.resolvedSha256, executor: executorConfig.resolvedSha256 }, bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
+    const review = { schemaVersion: recovery?.sealedWorker?.review.schemaVersion ?? 3, content: upload.content, configuration: { api: apiConfig.resolvedSha256, executor: executorConfig.resolvedSha256 }, bundleSha256: hash(bytes), bundleBytes: bytes.length, sourceCommit: env.GITHUB_SHA,
         printExecutor: printExecutor.review };
     let historicalArtifact;
     if ((await cf.versions()).items?.[0]?.id !== singleVersion(await cf.deployments())) {
@@ -142,7 +144,7 @@ export async function prepareDevelopmentWorker(env = process.env, { recovery } =
     let deployedVariables, artifacts, preservedStore;
     const verifyDeployed = async expected => {
         const { printExecutor: _executor, ...apiExpected } = expected;
-        check(deployedVariables && isDeepStrictEqual(await inspectDevelopmentWorker(cf), apiExpected), "deployed API bytes/version/resources changed.");
+        check(deployedVariables && isDeepStrictEqual(await inspectDevelopmentWorker(cf, undefined, review), apiExpected), "deployed API bytes/version/resources changed.");
         verifyDevelopmentReleaseConfiguration(await activeWorkerSettings(cf, expected), await inspectDevelopmentConsumer(cf), deployedVariables);
         await verifyPrintExecutor();
         await verifyPrintQueue(cf, "development");
@@ -154,7 +156,7 @@ export async function prepareDevelopmentWorker(env = process.env, { recovery } =
         preserve: async (store) => {
             check(!artifacts && previousContent && hash(await readFile(entrypoint)) === review.bundleSha256, "artifact changed before preservation.");
             const prior = await store.save("previous-worker.json", Buffer.from(JSON.stringify({ ...previousContent, before, consumer, settings: await activeWorkerSettings(cf, before) })));
-            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            verifyWorkerUpload((await readWorkerUpload(out, review)).content, review);
             const bundle = await preserveWorkerUpload(store, upload, "candidate-worker");
             artifacts = { previousArtifact: prior, ...bundle, printExecutor: await printExecutor.preserve(store) };
             preservedStore = store;
@@ -185,27 +187,21 @@ export async function prepareDevelopmentWorker(env = process.env, { recovery } =
             await assertReleasePaused(cf, releaseId);
             check(hash(await readFile(entrypoint)) === review.bundleSha256 && candidate.environment === "development" &&
                 /^[a-f0-9]{64}$/.test(candidate.sourceDigest) && /^sha256:[a-f0-9]{64}$/.test(candidate.imageDigest), "reviewed bytes and candidate.");
-            verifyWorkerUpload((await readWorkerUpload(out)).content, review);
+            verifyWorkerUpload((await readWorkerUpload(out, review)).content, review);
             check(artifacts && preservedStore, "preserved complete Worker upload required.");
             await readSealedWorkerUpload(preservedStore, artifacts, review);
             const executor = await printExecutor.deploy(releaseId);
             await printExecutor.verifyDeployed();
             executorApplied();
-            const variables = { PRINTIFY_ASSET_ORIGIN: env.WORKER_URL, PRINT_EXECUTION_MODE: "durable-object",
-                STORY_VIDEO_PROVIDER: "lambda", STORY_VIDEO_ENVIRONMENT: "development",
-                STORY_VIDEO_LAMBDA_FUNCTION: "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-development",
-                STORY_VIDEO_FAMILY_CONFIGURATION: "1", STORY_VIDEO_LANES: "2", STORY_VIDEO_NOTIFICATION_MODE: "push",
-                STORY_VIDEO_TRANSPORT: "direct", STORY_VIDEO_WARM_ON_CONFIRM: "1",
-                STORY_VIDEO_RELEASE_ID: releaseId, STORY_VIDEO_RELEASE_COMMIT: env.GITHUB_SHA,
-                STORY_VIDEO_IMAGE_DIGEST: candidate.imageDigest, STORY_VIDEO_SOURCE_DIGEST: candidate.sourceDigest };
+            const variables = developmentReleaseVariables(env, candidate, releaseId);
             if (recovery) await recovery.beforeMutation("api-deploy");
             await assertReleasePaused(cf, releaseId);
             await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--env", "development", "--keep-vars", "--tag", releaseId,
                 "--message", `Native pair ${env.GITHUB_SHA}`, "--secrets-file", secretsPath,
                 ...Object.entries(variables).flatMap(([key, value]) => ["--var", `${key}:${value}`])]);
-            const live = await inspectDevelopmentWorker(cf);
+            const live = await inspectDevelopmentWorker(cf, undefined, review);
             await printExecutor.verifyDeployed();
-            verifyWorkerUpload(live.content, review);
+            await verifyWorkerUploadEvidence(live.content, review, { store: preservedStore, env, filename: "worker-content-diagnostic.json" });
             verifyDevelopmentReleaseConfiguration(await activeWorkerSettings(cf, live), await inspectDevelopmentConsumer(cf), variables);
             await verifyPrintExecutor();
             await verifyPrintQueue(cf, "development");
@@ -241,4 +237,14 @@ export async function verifyDevelopmentPairStatus(env, candidate, releaseId, req
         value.environment === "development" && value.functionArn === "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-development" &&
         value.paused === paused && value.pauseOwner === (paused ? releaseId : null), "live protocol/configuration/pause mismatch.");
     return { protocolVerified: true, executionProtocol: value.executionProtocol, releaseId, sourceCommit: value.sourceCommit };
+}
+
+export function developmentReleaseVariables(env, candidate, releaseId, sourceCommit = env.GITHUB_SHA) {
+    return { PRINTIFY_ASSET_ORIGIN: env.WORKER_URL, PRINT_EXECUTION_MODE: "durable-object",
+                STORY_VIDEO_PROVIDER: "lambda", STORY_VIDEO_ENVIRONMENT: "development",
+                STORY_VIDEO_LAMBDA_FUNCTION: "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-development",
+                STORY_VIDEO_FAMILY_CONFIGURATION: "1", STORY_VIDEO_LANES: "2", STORY_VIDEO_NOTIFICATION_MODE: "push",
+                STORY_VIDEO_TRANSPORT: "direct", STORY_VIDEO_WARM_ON_CONFIRM: "1",
+                STORY_VIDEO_RELEASE_ID: releaseId, STORY_VIDEO_RELEASE_COMMIT: sourceCommit,
+                STORY_VIDEO_IMAGE_DIGEST: candidate.imageDigest, STORY_VIDEO_SOURCE_DIGEST: candidate.sourceDigest };
 }
