@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import test from "node:test";
-import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { workerContentManifest, workerContentResponse } from "./native-worker-content.mjs";
 import { inspectDevelopmentWorker, developmentReleaseVariables } from "./native-ci-worker.mjs";
 import { planPrintStagingLifecycle } from "./native-print-staging-lifecycle.mjs";
