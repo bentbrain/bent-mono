@@ -33,12 +33,12 @@ test("family qualification admits complete sealed uploads before fixtures and re
           [changedMap, review, false], [changedCode, review, false], [extra, review, false], [duplicate, review, false],
           [codeOnly, legacy, true], [full, legacy, false]]) {
         let statusCalls = 0;
-        const prepared = { worker: workerReview, candidate };
+        const prepared = { releaseId: 'native-100', worker: workerReview, candidate };
         const cf = { query: async sql => {
           if (!sql.startsWith('SELECT')) { fixtureWrites++; throw Error('unexpected write'); }
           return [{ results: sql.includes('release_control')
             ? [{ paused: 0, release_id: null, current_release_id: 'native-100' }]
-            : [{ payload: JSON.stringify(prepared) }] }];
+            : [{ payload: JSON.stringify({ ...prepared, preparation: { key: 'original' } }) }] }];
         } };
         const context = createContext({ Buffer, URL, JSON, console, process, fetch: denyNetwork, setTimeout, clearTimeout });
         const mocks = {
@@ -46,7 +46,7 @@ test("family qualification admits complete sealed uploads before fixtures and re
           './native-ci-runtime.mjs': { inspectDevelopmentRuntime: async () => ({ renderer: candidate, failure: candidate }) },
           './native-ci-worker.mjs': { inspectDevelopmentWorker: async () => ({ content }),
             verifyDevelopmentPairStatus: async () => { statusCalls++; throw Error('PAIR_GATE_PASSED_STOP_BEFORE_FIXTURES'); } },
-          './native-ci-release-store.mjs': { createDevelopmentReleaseStore: () => assert.fail('unexpected fixture store') },
+          './native-ci-release-store.mjs': { createDevelopmentReleaseStore: () => ({ read: async () => Buffer.from(JSON.stringify(prepared)), save: () => assert.fail('unexpected fixture write') }) },
         };
         const module = new SourceTextModule(source, { context, identifier: moduleUrl });
         await module.link(async specifier => {

@@ -1,4 +1,4 @@
-import { readWorkerUpload, verifyWorkerUpload, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, prepareWorkerUpload } from "./native-worker-content.mjs";
+import { readWorkerUpload, verifyWorkerContentEquivalent, verifyWorkerUpload, verifyWorkerUploadEvidence, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, prepareWorkerUpload } from "./native-worker-content.mjs";
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { activeWorkerSettings } from "./native-ci-worker.mjs";
 import { createHash } from "node:crypto";
@@ -169,7 +169,7 @@ async function preparePrintExecutorFoundation({ env, directory, run, api, inspec
   check(!interrupted || before.exists && before.interrupted, "recovery requires an existing owned namespace.");
   const stagingLifecycle = planPrintStagingLifecycle(await staging.read());
   check(!interrupted || !stagingLifecycle.mutationRequired, "recovery requires the verified existing staging lifecycle.");
-  const review = { schemaVersion: 2, content: upload.content, worker: workerName, accountId: CLOUDFLARE_ACCOUNT,
+  const review = { schemaVersion: sealedUpload?.review.schemaVersion ?? 3, content: upload.content, worker: workerName, accountId: CLOUDFLARE_ACCOUNT,
     sourceCommit: env.GITHUB_SHA, releaseId: `native-${env.GITHUB_RUN_ID}`, bundleSha256: hash(bundle), bundleBytes: bundle.length,
     configSha256: hash(configBytes), config, migrations: migration, before, stagingLifecycle,
     rollback: "same-namespace-exact-version; retain-foundation-for-queue-rollback" };
@@ -200,13 +200,13 @@ function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint,
       const intents = (await api.query("SELECT release_id FROM native_video_release_events WHERE stage = 'print-executor-deploy-started' LIMIT 1"))[0].results;
       check(intents.length === 0, "a prior executor creation intent exists; inspect its durable evidence instead of replaying creation.");
     }
-    verifyWorkerUpload((await readWorkerUpload(join(entrypoint, ".."))).content, review);
+    verifyWorkerUpload((await readWorkerUpload(join(entrypoint, ".."), review)).content, review);
     check(hash(await readFile(CONFIG)) === review.configSha256 && hash(await readFile(entrypoint)) === review.bundleSha256,
       "prepared executor files changed.");
   };
   const verifyDeployed = async () => {
     check(deployed, "executor has not been provisioned by this guarded release.");
-    const current = await inspectWorker(client);
+    const current = await inspectWorker(client, undefined, review);
     check(isDeepStrictEqual(current, deployed.worker), "executor active version/resources changed before API binding.");
     check(isDeepStrictEqual(verifyPrintExecutorLifecycle(await client.version(current.workerVersion), current.workerVersion), deployed.lifecycle),
       "executor lifecycle changed before API binding.");
@@ -222,7 +222,7 @@ function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint,
       check(!artifacts, "executor evidence was already preserved.");
       store = targetStore; await verifyAbsent();
       check(isDeepStrictEqual(await staging.read(), review.stagingLifecycle.before), "staging lifecycle changed before preservation.");
-      const upload = await readWorkerUpload(join(entrypoint, ".."));
+      const upload = await readWorkerUpload(join(entrypoint, ".."), review);
       verifyWorkerUpload(upload.content, review);
       const candidate = await preserveWorkerUpload(store, upload, "candidate-print-executor");
       const foundationArtifact = await store.save("print-executor-foundation.json", Buffer.from(JSON.stringify(review)));
@@ -255,8 +255,8 @@ function createPrintExecutorFoundationRelease({ env, review, bundle, entrypoint,
       await assertReleasePaused(api, releaseId);
       await run(["deploy", entrypoint, "--no-bundle", "--upload-source-maps", "--env", environment, "--tag", releaseId,
         "--message", `Print foundation ${review.sourceCommit}`, ...Object.entries(vars).flatMap(([name, text]) => ["--var", `${name}:${text}`])]);
-      const worker = await inspectWorker(client);
-      verifyWorkerUpload(worker.content, review);
+      const worker = await inspectWorker(client, undefined, review);
+      await verifyWorkerUploadEvidence(worker.content, review, { store, env, filename: "print-executor-content-diagnostic.json" });
       const { namespaceId } = verifyPrintExecutorSettings(await activeWorkerSettings(client, worker), review);
       check(!before.exists || namespaceId === (before.interrupted ? before.namespaceId : before.recorded.namespaceId), "executor update changed the existing namespace.");
       const lifecycle = verifyPrintExecutorLifecycle(await client.version(worker.workerVersion), worker.workerVersion);
@@ -297,10 +297,11 @@ async function verifyPrintExecutorRecord({ recorded, store, client, inspectWorke
   check(recorded.releaseId === review.releaseId && recorded.sourceCommit === review.sourceCommit &&
     recorded.configSha256 === review.configSha256, "executor immutable source/generation differs.");
   const historical = await historicalWorkerUpload(recorded.worker, upload);
-  const current = await inspectWorker(client, historical);
+  const current = await inspectWorker(client, historical, review);
   verifyWorkerUpload(current.content, review);
-  check(isDeepStrictEqual(current, recorded.worker),
-    "executor version, bytes or immutable resources changed.");
+  verifyWorkerContentEquivalent(current.content, recorded.worker.content);
+  const { content: _content, ...currentIdentity } = current, { content: _recordedContent, ...recordedIdentity } = recorded.worker;
+  check(isDeepStrictEqual(currentIdentity, recordedIdentity), "executor version or immutable resources changed.");
   check(isDeepStrictEqual(verifyPrintExecutorLifecycle(await client.version(current.workerVersion), current.workerVersion), recorded.lifecycle),
     "executor lifecycle changed.");
   check(isDeepStrictEqual(verifyPrintExecutorSettings(await activeWorkerSettings(client, recorded.worker), review), { namespaceId: recorded.namespaceId }),
@@ -342,8 +343,9 @@ async function verifyRecordedPrintExecutor({ env, api, prepared, store, inspectW
   const artifacts = prepared.artifacts?.printExecutor;
   const sealed = await readExecutorPreparation(store, artifacts);
   check(isDeepStrictEqual(sealed.review, review), "immutable executor foundation differs.");
-  const rows = (await api.query("SELECT payload FROM native_video_release_events WHERE release_id = ? AND stage = 'print-executor-verified'",
-    [prepared.releaseId]))[0].results;
+  const rows = prepared.completion
+    ? (await api.query("SELECT payload FROM native_video_release_events WHERE release_id = ? AND stage = 'verified'", [prepared.releaseId]))[0].results.map(row => ({ payload: JSON.stringify(JSON.parse(row.payload).worker?.printExecutor) }))
+    : (await api.query("SELECT payload FROM native_video_release_events WHERE release_id = ? AND stage = 'print-executor-verified'", [prepared.releaseId]))[0].results;
   check(rows.length === 1, "exact recorded executor deployment required.");
   const recorded = JSON.parse(rows[0].payload);
   check(recorded.releaseId === prepared.releaseId && isDeepStrictEqual(recorded.artifacts, artifacts), "executor deployment evidence differs.");
@@ -397,8 +399,8 @@ async function restoreDevelopmentPrintExecutor({ env, api, store, prepared, rele
       const lifecycleRows = (await api.query("SELECT payload FROM native_video_release_events WHERE release_id = ? AND stage = 'print-staging-lifecycle-verified'",
         [prepared.releaseId]))[0].results;
       check(lifecycleRows.length === 1, "staging fallback was not verified before executor deployment.");
-      const worker = await inspectWorker(client);
-      verifyWorkerUpload(worker.content, review);
+      const worker = await inspectWorker(client, undefined, review);
+      await verifyWorkerUploadEvidence(worker.content, review, { store, env, filename: "print-executor-content-diagnostic.json" });
       const { namespaceId } = verifyPrintExecutorSettings(await activeWorkerSettings(client, worker), review);
       check(!previous || previous.namespaceId === namespaceId, "uncertain update changed namespace.");
       const record = { worker, namespaceId, lifecycle: verifyPrintExecutorLifecycle(await client.version(worker.workerVersion), worker.workerVersion),

@@ -47,7 +47,7 @@ test("forward recovery verifies a fresh canonical Development workflow signature
     const context = { ...env, GITHUB_WORKFLOW_REF: "bentbrain/bent-mono/.github/workflows/native-development.yml@refs/heads/main",
         NATIVE_OPERATION: "recover-forward-release", NATIVE_RELEASE_MODE: "full" };
     const current = { ...claims, workflow_ref: context.GITHUB_WORKFLOW_REF };
-    for (const operation of ["stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release"])
+    for (const operation of ["stage-forward-completion-authority", "complete-forward-release", "stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release"])
         assert.equal(verifyActionsToken(token(current), keys, { ...context, NATIVE_OPERATION: operation }, 1100, { nativeDevelopment: true }).signatureVerified, true);
     for (const delta of [{ repository: "fixtures/retired-release" }, { repository_id: "70001" }, { run_attempt: "2" }, { environment: "Production" },
         { workflow_ref: claims.workflow_ref }, { run_id: "999" }, { sha: "b".repeat(40) }])

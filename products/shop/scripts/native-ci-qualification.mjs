@@ -1,3 +1,4 @@
+import { loadDevelopmentPreparation } from "./native-development-preparation.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { commerceBoundary } from './rendering-inputs.mjs';
 import { captureRendererArchive } from "./native-renderer-archive.mjs";
@@ -104,8 +105,8 @@ async function prepareQualification(env) {
     check(control?.paused === 0 && control.release_id === null && control.current_release_id === releaseId, "release must be live and unpaused.");
     const rows = await query("SELECT payload FROM native_video_release_events WHERE release_id = ? AND stage = 'prepared'", [releaseId]);
     check(rows.length === 1, "deployed pair preparation.");
-    const prepared = JSON.parse(rows[0].payload);
-    const runtime = await inspectDevelopmentRuntime(env), worker = await inspectDevelopmentWorker(cf);
+    const prepared = await loadDevelopmentPreparation(cf, await createDevelopmentReleaseStore(env), releaseId);
+    const runtime = await inspectDevelopmentRuntime(env), worker = await inspectDevelopmentWorker(cf, undefined, prepared.worker);
     check(runtime.renderer.imageDigest === prepared.candidate.imageDigest && runtime.failure.imageDigest === prepared.candidate.imageDigest &&
         runtime.renderer.sourceDigest === prepared.candidate.sourceDigest, "live pair differs from the recorded release.");
     verifyWorkerUpload(worker.content, prepared.worker);

@@ -1,3 +1,4 @@
+import { completionReference, approvedCompletionPackage } from "./native-completion-authority.mjs";
 import { approvedForwardRecoveryPackage } from "./native-forward-recovery-package.mjs";
 import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { qualificationPolicy } from './release-qualification-policy.mjs';
@@ -18,7 +19,7 @@ const root = new URL("../", import.meta.url);
 const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const load = path => JSON.parse(resolveProtectedTemplate(readFileSync(new URL(path, root), "utf8")));
 const promotionOperations = new Set(["promote", "release", "verify-candidate", "inspect-image-plan", "prepare-runtime", "prepare-worker"]);
-export function offlinePreflight({ environment, lane, operation, ref, sha, base, paths, migrations, qualification, sourceChanged, manifest = promotionManifest, releaseMode = "full", verifyRelease = "", rollbackRelease = "", rollbackReference = "", forwardRecoveryReference = "", forwardRecoveryPackage = "", qualificationReference = "", rendererReference = "", scheduledQualification = "", releaseBaseVerified = false }) {
+export function offlinePreflight({ environment, lane, operation, ref, sha, base, paths, migrations, qualification, sourceChanged, manifest = promotionManifest, releaseMode = "full", verifyRelease = "", rollbackRelease = "", rollbackReference = "", forwardRecoveryReference = "", forwardRecoveryPackage = "", completionAuthorityReference = "", completionPackage = "", qualificationReference = "", rendererReference = "", scheduledQualification = "", releaseBaseVerified = false }) {
     const checks = [];
     const check = (id, passed, message) => checks.push({ id, passed: Boolean(passed), message });
     check("environment", ["development", "production"].includes(environment), "Choose development or production.");
@@ -44,6 +45,7 @@ export function offlinePreflight({ environment, lane, operation, ref, sha, base,
             GITHUB_REPOSITORY_OWNER_ID: protectedConfig("githubOwnerId"), GITHUB_REF: ref, GITHUB_SHA: sha, GITHUB_RUN_ID: "100",
             GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", NATIVE_OPERATION: operation, NATIVE_RELEASE_MODE: releaseMode,
             GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/native-${environment}.yml@${ref}`,
+            NATIVE_COMPLETION_REFERENCE: completionAuthorityReference, NATIVE_COMPLETION_PACKAGE: completionPackage,
             NATIVE_FORWARD_RECOVERY_PACKAGE: forwardRecoveryPackage, NATIVE_FORWARD_RECOVERY_REFERENCE: forwardRecoveryReference, NATIVE_VERIFY_RELEASE: verifyRelease, NATIVE_ROLLBACK_RELEASE: rollbackRelease, NATIVE_ROLLBACK_REFERENCE: rollbackReference, NATIVE_QUALIFICATION_REFERENCE: qualificationReference, NATIVE_RENDERER_REFERENCE: rendererReference, NATIVE_SCHEDULED_QUALIFICATION: scheduledQualification };
         let valid = true;
         // Pure argument validation only. Never call a cloud entry point or invent
@@ -60,6 +62,15 @@ export function offlinePreflight({ environment, lane, operation, ref, sha, base,
         if (operation === "rollback" && !/^native-\d+$/.test(rollbackRelease))
             valid = false;
         check("native-request", valid, "This native operation/ref is not supported by the existing identity policy.");
+        if (["stage-forward-completion-authority", "complete-forward-release"].includes(operation)) {
+            let approved = false;
+            try {
+                approved = environment === "development" && sha === protectedConfig("developmentCompletionSourceCommit");
+                if (operation === "stage-forward-completion-authority") approvedCompletionPackage(completionPackage, { GITHUB_SHA: sha, GITHUB_RUN_ID: "100" });
+                else approved = approved && completionReference(completionAuthorityReference).authority.sha256 === protectedConfig("developmentCompletionAuthoritySha256");
+            } catch { approved = false; }
+            check("completion-approval", approved, "Install the independently reviewed completion package and source pins for staging; approve the final authority hash after staged artifact readback.");
+        }
         if (operation === "stage-forward-recovery-authority") {
             let approved = false;
             try { approvedForwardRecoveryPackage(forwardRecoveryPackage, sha); approved = environment === "development"; }
@@ -185,6 +196,7 @@ export async function runPreflight(values, env = process.env) {
     catch { /* reported as unverified */ }
     const report = offlinePreflight({ environment, lane, operation: values.operation ?? (lane === "native" ? "plan" : "deploy"), ref, sha, base, paths,
         forwardRecoveryPackage: env.NATIVE_FORWARD_RECOVERY_PACKAGE,
+        completionAuthorityReference: env.NATIVE_COMPLETION_REFERENCE, completionPackage: env.NATIVE_COMPLETION_PACKAGE,
         forwardRecoveryReference: values["forward-recovery-reference"] ?? env.NATIVE_FORWARD_RECOVERY_REFERENCE,
         releaseMode: values["release-mode"] ?? env.NATIVE_RELEASE_MODE, verifyRelease: values["verify-release"] ?? env.NATIVE_VERIFY_RELEASE, rollbackRelease: values["rollback-release"] ?? env.NATIVE_ROLLBACK_RELEASE, rollbackReference: values["rollback-reference"] ?? env.NATIVE_ROLLBACK_REFERENCE, qualificationReference: values["qualification-reference"] ?? env.NATIVE_QUALIFICATION_REFERENCE, rendererReference: values["renderer-reference"] ?? env.NATIVE_RENDERER_REFERENCE, scheduledQualification: env.NATIVE_SCHEDULED_QUALIFICATION,
         manifest: input?.manifest ?? promotionManifest, migrations: readdirSync(new URL("workers/api/drizzle/", root)).filter(name => /^\d{4}_.+\.sql$/.test(name)).sort(), qualification, sourceChanged });

@@ -14,7 +14,7 @@ on:
         description: Plan/deploy a pair, independently qualify the live pair, or recover it
         type: choice
         default: plan
-        options: [plan, build-candidate, release, rollback, recover-rollback, stage-forward-recovery-authority, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
+        options: [stage-forward-completion-authority, complete-forward-release, plan, build-candidate, release, rollback, recover-rollback, stage-forward-recovery-authority, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
       release_mode:
         description: API mode reuses the live image; relevant qualification is required separately before Production
         type: choice
@@ -38,6 +38,11 @@ on:
         required: false
       rollback_release:
         description: Original release for rollback; failed rollback run for recover-rollback
+        type: string
+        required: false
+
+      completion_reference:
+        description: Sealed independently approved failed recovery completion authority
         type: string
         required: false
 
@@ -101,6 +106,8 @@ jobs:
         run: node ../../scripts/require-release-checks.mjs --sha "$GITHUB_SHA"
       - name: Check native request before dependency installation
         env:
+          NATIVE_COMPLETION_PACKAGE: ${{ inputs.operation == 'stage-forward-completion-authority' && secrets.SHOP_DEVELOPMENT_COMPLETION_PACKAGE || '' }}
+          NATIVE_COMPLETION_REFERENCE: ${{ inputs.completion_reference }}
           NATIVE_FORWARD_RECOVERY_PACKAGE: ${{ inputs.operation == 'stage-forward-recovery-authority' && secrets.SHOP_DEVELOPMENT_FORWARD_RECOVERY_PACKAGE || '' }}
           OPERATION: ${{ inputs.operation }}
           NATIVE_RELEASE_MODE: ${{ inputs.release_mode || 'full' }}
@@ -169,10 +176,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
-        if: inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
+        if: inputs.operation == 'complete-forward-release' || inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - run: bun install --frozen-lockfile
         working-directory: .
-        if: inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
+        if: inputs.operation == 'complete-forward-release' || inputs.operation == 'plan-forward-recovery' || inputs.operation == 'recover-forward-release' || inputs.operation == 'plan' || inputs.operation == 'release' || inputs.operation == 'rollback' || inputs.operation == 'recover-rollback' || inputs.operation == 'qualify-all' || inputs.operation == 'qualify-components' || inputs.operation == 'cleanup-failed-qualification'
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.SHOP_AWS_DEVELOPMENT_ROLE_ARN }}
@@ -194,6 +201,8 @@ jobs:
           PRINTIFY_ASSET_DELIVERY_SECRET: ${{ secrets.PRINTIFY_ASSET_DELIVERY_SECRET }}
           PRINTIFY_WEBHOOK_SECRET: ${{ secrets.PRINTIFY_WEBHOOK_SECRET }}
           CART_LINE_CAPABILITY_SECRET: ${{ secrets.CART_LINE_CAPABILITY_SECRET }}
+          NATIVE_COMPLETION_PACKAGE: ${{ inputs.operation == 'stage-forward-completion-authority' && secrets.SHOP_DEVELOPMENT_COMPLETION_PACKAGE || '' }}
+          NATIVE_COMPLETION_REFERENCE: ${{ inputs.completion_reference }}
           NATIVE_FORWARD_RECOVERY_PACKAGE: ${{ inputs.operation == 'stage-forward-recovery-authority' && secrets.SHOP_DEVELOPMENT_FORWARD_RECOVERY_PACKAGE || '' }}
           NATIVE_CANDIDATE_RECEIPT: ${{ secrets.SHOP_DEVELOPMENT_CANDIDATE_RECEIPT }}
           NATIVE_OPERATION: ${{ inputs.operation || 'plan' }}

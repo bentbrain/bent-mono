@@ -23,7 +23,7 @@ export async function createDevelopmentCICall(env = process.env, run = execute) 
         AWS_PAGER: "", AWS_CLI_AUTO_PROMPT: "off", AWS_MAX_ATTEMPTS: "2" };
     const call = async (args) => {
         try {
-            const output = await run("aws", [...args, "--region", REGION, "--output", "json", "--no-cli-pager"], { env: env.NATIVE_OPERATION === "stage-forward-recovery-authority" && args[0] === "s3api" && args[1] === "put-object"
+            const output = await run("aws", [...args, "--region", REGION, "--output", "json", "--no-cli-pager"], { env: ["stage-forward-recovery-authority", "stage-forward-completion-authority", "complete-forward-release"].includes(env.NATIVE_OPERATION) && args[0] === "s3api" && args[1] === "put-object"
                 ? { ...childEnv, AWS_MAX_ATTEMPTS: "1" } : childEnv, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024 });
             return JSON.parse(output.stdout);
         }

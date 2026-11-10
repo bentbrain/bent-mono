@@ -1,4 +1,4 @@
-import { readSealedWorkerUpload } from "./native-worker-content.mjs";
+import { readSealedWorkerUpload, verifyWorkerUpload } from "./native-worker-content.mjs";
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { measureReleaseStage } from "./release-stage-timing.mjs";
@@ -167,10 +167,11 @@ export async function releaseProductionPair(env, candidate) {
     await waitForProductionPairStatus(env, releaseId, env.GITHUB_SHA, false);
     return { ...result, pairedReleaseComplete: true, evidence: await store.save("release-complete.json", Buffer.from(JSON.stringify(result))) };
 }
-export async function rollbackProductionPair(env) {
+export async function rollbackProductionPair(env, dependencies = {}) {
     const from = env.NATIVE_ROLLBACK_RELEASE, releaseId = `native-${env.GITHUB_RUN_ID}`;
     check(env.NATIVE_OPERATION === "rollback" && /^native-[1-9][0-9]+$/.test(from ?? "") && from !== releaseId, "explicit recorded rollback source.");
-    const { call } = await productionAWS(env), cf = productionCloudflare(env), store = await productionReleaseStore(env, call);
+    const { call } = await (dependencies.aws ?? productionAWS)(env), cf = (dependencies.cloudflare ?? productionCloudflare)(env),
+        store = await (dependencies.releaseStore ?? productionReleaseStore)(env, call);
     await verifyPauseSchema(cf);
     const event = async (stage) => {
         const rows = (await cf.query("SELECT payload FROM native_video_release_events WHERE release_id=? AND stage=?", [from, stage]))[0].results;
@@ -185,8 +186,8 @@ export async function rollbackProductionPair(env) {
     check(equal(original.before, prepared.previous.worker), "original Worker preservation.");
     const upload = await readSealedWorkerUpload(store, prepared.artifacts, prepared.worker), bytes = upload.code;
     assertArtworkMediaBundle(bytes);
-    const content = upload.content;
-    check(equal(content, fallback.content) && hash(bytes) === prepared.worker.bundleSha256 &&
+    verifyWorkerUpload(fallback.content, prepared.worker);
+    check(hash(bytes) === prepared.worker.bundleSha256 &&
         versionResourcesDigest(await cf.version(fallback.workerVersion)) === fallback.versionResourcesSha256, "fallback code/resources unavailable or changed.");
     const verifyPrintExecutor = () => printExecutorProtocol("production").verifyRecordedPrintExecutor({
         env, api: cf, prepared, store, inspectWorker: inspectDevelopmentWorker
