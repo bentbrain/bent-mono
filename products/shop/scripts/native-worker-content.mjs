@@ -40,7 +40,7 @@ export async function workerContentManifest(response, { sourceMapData = false } 
 // strings and every scalar do. Reject duplicate keys and lossy numeric parsing
 // before producing this explicitly versioned data seal.
 function parseMapData(bytes) {
-  check(bytes.byteLength <= 10_000_000, "bounded source map JSON.");
+  check(bytes.byteLength <= 16 * 1024 * 1024, "bounded source map JSON.");
   let text;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
   catch { check(false, "source map UTF-8."); }

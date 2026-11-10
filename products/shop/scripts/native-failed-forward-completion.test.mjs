@@ -24,7 +24,7 @@ import { offlinePreflight } from "./release-preflight.mjs";
 import { sealDispatchInputs, resolveDispatchInputs } from "./release-dispatch-inputs.mjs";
 
 const app = "a".repeat(40), tool = "c".repeat(40), oldOwner = "native-101", failedOwner = "native-304", namespaceId = "e".repeat(32);
-async function fixture(t) {
+async function fixture(t, { mapBytes = 0 } = {}) {
   const previousConfig = process.env.SHOP_PROTECTED_CONFIG_JSON;
   t.after(() => { process.env.SHOP_PROTECTED_CONFIG_JSON = previousConfig; });
   const config = JSON.parse(previousConfig), db = new DatabaseSync(":memory:"); t.after(() => db.close());
@@ -56,7 +56,7 @@ async function fixture(t) {
   };
   const store = { read: async ref => { const bytes = saved.get(ref.key); assert.ok(bytes, ref.key); assert.equal(hash(bytes), ref.sha256); return bytes; },
     save: (name, bytes) => save("native-401", name, bytes) };
-  const code = Buffer.from('export const capability="owner-artwork-media-v1";export default {}'), map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["synthetic.ts"], sourcesContent: ["export default {}"], names: [], mappings: "" })),
+  const code = Buffer.from('export const capability="owner-artwork-media-v1";export default {}'), map = Buffer.from(JSON.stringify({ version: 3, file: "index.js", sources: ["synthetic.ts"], sourcesContent: ["export default {}"], names: [], mappings: "" }).padEnd(mapBytes)),
     content = await workerContentManifest(workerContentResponse({ code, map }));
   const temporary = await mkdtemp(join(tmpdir(), "completion-test-")); t.after(() => rm(temporary, { recursive: true, force: true }));
   const rendered = await renderWranglerConfig(fileURLToPath(new URL("../workers/api/wrangler.jsonc", import.meta.url)), join(temporary, "api.json"));
@@ -163,6 +163,19 @@ test("completion stages separately approved immutable state, then uploads only t
   await verifyRecordedPrintExecutor({ env: context, api: f.cf, prepared, store: f.store, client: f.client, inspectWorker: inspectDevelopmentWorker,
     staging: { read: async () => f.snapshot.stagingLifecycle } });
   assert.equal(f.calls.some(sql => /^(?:UPDATE (?:story|product|artwork)|CREATE)/.test(sql)), false);
+});
+
+test("completion stages V3 evidence for sealed maps above ten megabytes without changing raw artifacts", async t => {
+  const f = await fixture(t, { mapBytes: 10_000_001 });
+  const reference = f.inputs.prepared.artifacts.candidateMapArtifact;
+  const original = Buffer.from(await f.store.read(reference));
+  assert.equal(original.byteLength, 10_000_001);
+  assert.equal(f.inputs.uploads.api.content.modules.find(part => part.name === "index.js.map").bytes, original.byteLength);
+  const result = await f.stage();
+  assert.equal(result.deploymentPerformed, false);
+  assert.deepEqual(await recoveryControl(f.cf), f.control);
+  assert.deepEqual(await f.store.read(reference), original);
+  assert.equal(f.calls.includes("upload-api"), false);
 });
 
 test("completion rejects altered authority, source, failed provenance and operation boundaries", async t => {

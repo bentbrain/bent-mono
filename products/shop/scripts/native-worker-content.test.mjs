@@ -108,6 +108,20 @@ test("map data seal preserves array order and extension fields and rejects ambig
   assert.throws(() => workerContentResponse({ code: Buffer.from('import("./index.js.map?module")'), map }), /executable/);
 });
 
+test("V3 map parsing accepts sixteen MiB and rejects larger UTF-8 payloads before parsing", async () => {
+  const limit = 16 * 1024 * 1024;
+  const value = { ...JSON.parse(map), sourcesContent: [""] };
+  const padding = limit - Buffer.byteLength(JSON.stringify(value));
+  value.sourcesContent[0] = "é".repeat(Math.floor(padding / 2)) + "x".repeat(padding % 2);
+  const bytes = Buffer.from(JSON.stringify(value));
+  assert.equal(bytes.byteLength, limit);
+  assert.ok(bytes.toString().length < bytes.byteLength);
+  const content = await workerContentManifest(workerContentResponse({ code, map: bytes }), { sourceMapData: true });
+  assert.equal(content.modules.find(part => part.name === "index.js.map").bytes, limit);
+  await assert.rejects(workerContentManifest(workerContentResponse({ code, map: Buffer.concat([bytes, Buffer.from(" ")]) }), { sourceMapData: true }), /bounded source map JSON/);
+  assert.throws(() => verifySourceMap(Buffer.alloc(limit + 1), code, { sourceMapData: true }), /bounded source map JSON/);
+});
+
 test("V3 immutable reads still reject raw map reserialization while provider readback accepts it", async () => {
   const content = await workerContentManifest(workerContentResponse({ code, map }), { sourceMapData: true });
   const review = { schemaVersion: 3, content, bundleSha256: content.modules[0].sha256, bundleBytes: code.length };
