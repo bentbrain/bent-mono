@@ -120,6 +120,12 @@ export async function inspectCompletionState({ cf, client, staging, store, autho
     runtime, startup: evidence.startup, migrations, schema, bindings: await bindingsRead(), uploads };
   check(equal(await recoveryControl(cf), control) && equal(await inspectDevelopmentWorker(client, undefined, uploads.executor), executor) &&
     equal(await inspectDevelopmentWorker(cf, undefined, liveApi ? uploads.api : undefined), api), "provider state changed during completion inspection.");
+  const active = (await cf.deployments()).deployments?.[0];
+  check(state.bindings.workerVersion === api.workerVersion &&
+    /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(state.bindings.deploymentId ?? "") &&
+    active?.id === state.bindings.deploymentId && active.versions?.length === 1 &&
+    active.versions[0].percentage === 100 && active.versions[0].version_id === api.workerVersion,
+    "active API and binding-summary deployment changed during completion inspection.");
   return state;
 }
 

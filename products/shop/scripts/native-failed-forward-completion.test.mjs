@@ -74,9 +74,10 @@ async function fixture(t, { mapBytes = 0 } = {}) {
     { name: "PRINT_EXECUTIONS", type: "durable_object_namespace", class_name: "PrintAssetExecution", script_name: executorReview(failedOwner).worker, namespace_id: namespaceId }] };
   let nextApiSettings;
   const response = () => workerContentResponse({ code, map: Buffer.from(JSON.stringify(Object.fromEntries(Object.entries({ ...JSON.parse(map), ...(state.mapChanged ? { mappings: "AAAA" } : {}) }).reverse()), null, 2)) });
-  const provider = (settings, id, response) => ({ settings: async () => settings(), deployments: async () => ({ deployments: [{ versions: [{ version_id: id(), percentage: 100 }] }] }),
+  const provider = (settings, id, response, deploymentId = () => "66666666-6666-4666-8666-666666666666") => ({ settings: async () => settings(), deployments: async () => ({ deployments: [{ id: deploymentId(), versions: [{ version_id: id(), percentage: 100 }] }] }),
     versions: async () => ({ items: [{ id: id() }] }), version: async versionId => { const { bindings, ...script_runtime } = settings(); return { id: versionId, resources: { bindings, script_runtime } }; }, content: async () => response() });
-  Object.assign(cf, provider(() => state.apiDeployed ? nextApiSettings : oldApiSettings, () => state.apiDeployed ? "33333333-3333-4333-8333-333333333333" : "22222222-2222-4222-8222-222222222222", () => state.apiDeployed ? response() : new Response("synthetic predecessor")));
+  Object.assign(cf, provider(() => state.apiDeployed ? nextApiSettings : oldApiSettings, () => state.apiDeployed ? "33333333-3333-4333-8333-333333333333" : "22222222-2222-4222-8222-222222222222", () => state.apiDeployed ? response() : new Response("synthetic predecessor"),
+    () => state.apiDeployed ? "55555555-5555-4555-8555-555555555555" : "44444444-4444-4444-8444-444444444444"));
   const client = { ...provider(() => executorSettings, () => "11111111-1111-4111-8111-111111111111", response), subdomain: async () => ({ enabled: false, previews_enabled: false }) };
   const api = await inspectDevelopmentWorker(cf), consumer = { consumerId: "f".repeat(32), settings: { batch_size: 1, max_retries: 100, max_wait_time_ms: 1000, max_concurrency: 2, retry_delay: 10 } }, schedules = { schedules: [{ cron: "* * * * *" }] };
   cf.consumers = async () => [{ type: "worker", script: "forever-tee-api-development", consumer_id: consumer.consumerId, settings: consumer.settings }]; cf.schedules = async () => schedules;
@@ -126,7 +127,12 @@ async function fixture(t, { mapBytes = 0 } = {}) {
   const install = () => { process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(config); }; install();
   const inputs = await completionInputs(store, authority), dependencies = { cf, client, staging, store, currentMain: async () => { calls.push("current-main"); },
     identity: async context => ({ signatureVerified: true, sourceCommit: context.GITHUB_SHA, runId: context.GITHUB_RUN_ID }), runtimeRead: async () => runtime,
-    bindingsRead: async () => ({ cloudflareVerified: true }), runRead: async () => run,
+    bindingsRead: async () => {
+      const active = (await cf.deployments()).deployments[0];
+      return { cloudflareVerified: true, environment: "development", workerVersion: active.versions[0].version_id, deploymentId: active.id,
+        executionFencePresent: true, jobCounts: (await cf.query("SELECT status, COUNT(*) AS count FROM story_video_jobs GROUP BY status"))[0].results,
+        applicationMutations: false };
+    }, runRead: async () => run,
     candidate: async () => ({ ...candidate, verifiedForCommit: tool }), verifyStatus: async () => ({ protocolVerified: true, artworkMediaCapabilityVerified: true }),
     worker: async () => ({ deploy: async before => { await before(); calls.push("upload-api"); state.apiDeployed = true; return inspectDevelopmentWorker(cf, undefined, inputs.uploads.api); } }) };
   const snapshot = await inspectCompletionState({ ...dependencies, authority, inputs });
@@ -141,7 +147,7 @@ async function fixture(t, { mapBytes = 0 } = {}) {
   // Execute with a distinct current tool-run store while preserving staged refs.
   const execute = async context => runFailedForwardCompletion(context, { ...dependencies, store: { ...store, save: (name, bytes) => save(`native-${context.GITHUB_RUN_ID}`, name, bytes) } });
   calls.length = 0;
-  return { db, cf, client, store, saved, state, calls, env, config, authority, run, inputs, snapshot, install, stage, execution, execute, control, event };
+  return { db, cf, client, store, saved, state, calls, env, config, authority, run, inputs, snapshot, dependencies, install, stage, execution, execute, control, event };
 }
 
 test("completion stages separately approved immutable state, then uploads only the original API under the failed generation", async t => {
@@ -153,6 +159,7 @@ test("completion stages separately approved immutable state, then uploads only t
   assert.equal(result.releaseId, failedOwner); assert.equal(result.sourceCommit, app); assert.equal(result.completion.toolIdentity.sourceCommit, tool);
   assert.equal(result.rollbackQualified, false); assert.equal(f.calls.filter(call => call === "upload-api").length, 1);
   assert.equal((await recoveryControl(f.cf)).paused, 0); assert.equal((await recoveryControl(f.cf)).current_release_id, failedOwner);
+  assert.notEqual(result.worker.workerVersion, f.snapshot.bindings.workerVersion);
   assert.equal(f.saved.get(f.authority.failedPreparation.key), originalPrepared);
   const prepared = await loadDevelopmentPreparation(f.cf, f.store, failedOwner);
   assert.equal(prepared.worker.schemaVersion, 3); assert.equal(prepared.worker.printExecutor.schemaVersion, 3);
@@ -176,6 +183,66 @@ test("completion stages V3 evidence for sealed maps above ten megabytes without 
   assert.deepEqual(await recoveryControl(f.cf), f.control);
   assert.deepEqual(await f.store.read(reference), original);
   assert.equal(f.calls.includes("upload-api"), false);
+});
+
+test("post-upload binding summaries preserve every field except the verified new deployment identities", async t => {
+  for (const patch of [
+    { workerVersion: "77777777-7777-4777-8777-777777777777" },
+    { deploymentId: "44444444-4444-4444-8444-444444444444" },
+    { deploymentId: "not-a-deployment" },
+    { cloudflareVerified: false }, { environment: "production" }, { executionFencePresent: false },
+    { jobCounts: [{ status: "rendering", count: 1 }] }, { applicationMutations: true }, { unexpected: true },
+  ]) {
+    const f = await fixture(t), context = await f.execution(), read = f.dependencies.bindingsRead;
+    f.dependencies.bindingsRead = async () => ({ ...await read(), ...(f.state.apiDeployed ? patch : {}) });
+    await assert.rejects(f.execute(context));
+    assert.equal(f.calls.filter(call => call === "upload-api").length, 1);
+    assert.deepEqual(await recoveryControl(f.cf), f.control);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='completion-attempt-one-claimed'").get().n, 1);
+  }
+});
+
+test("completion rejects an API deployment change during binding inspection", async t => {
+  const f = await fixture(t), context = await f.execution(), read = f.dependencies.bindingsRead, deployments = f.cf.deployments;
+  f.dependencies.bindingsRead = async () => {
+    const result = await read();
+    if (f.state.apiDeployed) f.cf.deployments = async () => {
+      const value = await deployments();
+      value.deployments[0].id = "88888888-8888-4888-8888-888888888888";
+      return value;
+    };
+    return result;
+  };
+  await assert.rejects(f.execute(context), /binding-summary deployment changed/);
+  assert.deepEqual(await recoveryControl(f.cf), f.control);
+  assert.equal(f.calls.filter(call => call === "upload-api").length, 1);
+});
+
+test("completion rejects a new API version reported under the predecessor deployment ID", async t => {
+  const f = await fixture(t), context = await f.execution(), deployments = f.cf.deployments;
+  f.cf.deployments = async () => {
+    const value = await deployments();
+    value.deployments[0].id = f.snapshot.bindings.deploymentId;
+    return value;
+  };
+  await assert.rejects(f.execute(context), /verified new API deployment/);
+  assert.deepEqual(await recoveryControl(f.cf), f.control);
+  assert.equal(f.calls.filter(call => call === "upload-api").length, 1);
+});
+
+test("completion pins the first verified deployment through the final status check", async t => {
+  const f = await fixture(t), context = await f.execution(), deployments = f.cf.deployments;
+  f.dependencies.verifyStatus = async () => {
+    f.cf.deployments = async () => {
+      const value = await deployments();
+      value.deployments[0].id = "99999999-9999-4999-8999-999999999999";
+      return value;
+    };
+    return { protocolVerified: true, artworkMediaCapabilityVerified: true };
+  };
+  await assert.rejects(f.execute(context), /approved current state changed/);
+  assert.deepEqual(await recoveryControl(f.cf), f.control);
+  assert.equal(f.calls.filter(call => call === "upload-api").length, 1);
 });
 
 test("completion rejects altered authority, source, failed provenance and operation boundaries", async t => {
