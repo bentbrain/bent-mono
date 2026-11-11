@@ -1,0 +1,100 @@
+name: Shop native validation
+
+on:
+  pull_request:
+    paths:
+      - 'products/shop/**'
+      - '.github/**'
+      - 'scripts/**'
+      - 'packages/design-tokens/**'
+      - 'packages/ui/**'
+      - 'bun.lock'
+      - 'package.json'
+      - 'turbo.json'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check:
+    name: Shop native Linux checks
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/bin/zip:ro
+        - /usr/bin/unzip:/usr/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: products/shop
+    timeout-minutes: 35
+    steps:
+      - name: Trust the mounted checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        working-directory: .
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Configure synthetic validation
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { validationEnvironment } from './scripts/validation-environment.mjs';
+          const env = validationEnvironment({});
+          delete env.GITHUB_SHA;
+          env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(JSON.parse(env.SHOP_PROTECTED_CONFIG_JSON));
+          appendFileSync(process.env.GITHUB_ENV, Object.entries(env).map(([key, value]) => `${key}=${value}`).join('\n') + '\n');
+          NODE
+      - name: Run the complete native checks
+        uses: ./products/shop/.github/actions/check
+        with:
+          node-version: '24.18.0'
+          fresh: 'true'
+          suite: all
+      - name: Download composite evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "task-cache-$GITHUB_RUN_ID-$GITHUB_JOB-" --dir "$RUNNER_TEMP/composite-evidence"
+      - name: Verify composite evidence
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const name = `task-cache-${process.env.GITHUB_JOB}.json`;
+          const original = readFileSync(join(process.env.RUNNER_TEMP, name));
+          const downloaded = readFileSync(join(process.env.RUNNER_TEMP, 'composite-evidence', name));
+          assert.ok(original.equals(downloaded), 'The downloaded composite evidence must match its producer.');
+          const report = JSON.parse(downloaded);
+          assert.equal(report.schemaVersion, 1);
+          assert.equal(report.runs.length, 2, 'Browser and repository checks must both emit summaries.');
+          for (const run of report.runs) {
+            assert.equal(run.exitCode, 0);
+            assert.ok(run.tasks.length > 0);
+            for (const task of run.tasks) {
+              assert.equal(task.cache, 'MISS');
+              assert.equal(task.executed, true, `Task did not execute successfully: ${task.task}`);
+            }
+          }
+          const tasks = new Set(report.runs.flatMap(run => run.tasks.map(task => task.task)));
+          for (const task of ['@forever-tee/web#test:e2e:local', '@forever-tee/web#verify:worker-release'])
+            assert.ok(tasks.has(task), `Missing task: ${task}`);
+          for (const directory of ['apps/web', 'workers/api', 'workers/video-renderer', 'packages/contracts', 'packages/product-image-renderer']) {
+            const manifest = JSON.parse(readFileSync(join(directory, 'package.json')));
+            for (const command of ['test', 'lint', 'typecheck', 'types:check', 'build']) {
+              if (manifest.scripts[command]) assert.ok(tasks.has(`${manifest.name}#${command}`), `Missing ${manifest.name}#${command}`);
+            }
+          }
+          console.info('Verified downloaded evidence for complete fresh browser and repository checks.');
+          NODE

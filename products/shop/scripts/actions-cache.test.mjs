@@ -59,3 +59,30 @@ test('task snapshots retain the newest archives within the byte ceiling and refu
         await rm(directory, { recursive: true, force: true });
     }
 });
+
+test('cache CLIs read and bound the monorepo task output from the product working directory', async (t) => {
+    const { execFileSync } = await import('node:child_process');
+    const { mkdir, copyFile } = await import('node:fs/promises');
+    const directory = await mkdtemp(join(tmpdir(), 'monorepo-cache-cli-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const product = join(directory, 'products/shop');
+    await mkdir(join(product, 'scripts'), { recursive: true });
+    for (const name of ['cache-report.mjs', 'actions-cache.mjs', 'protected-config.mjs'])
+        await copyFile(new URL(name, import.meta.url), join(product, 'scripts', name));
+    await mkdir(join(directory, '.turbo/runs'), { recursive: true });
+    await mkdir(join(directory, '.turbo/cache'));
+    const summary = { turboVersion: '2.11.8', execution: { startTime: 1, exitCode: 0 }, tasks: [
+        { taskId: '@forever-tee/video-renderer#test', cache: { status: 'MISS' }, execution: { exitCode: 0 } },
+    ] };
+    await writeFile(join(directory, '.turbo/runs/native.json'), JSON.stringify(summary));
+    for (const suffix of ['.tar.zst', '-meta.json'])
+        await writeFile(join(directory, '.turbo/cache', 'a'.repeat(16) + suffix), '12345');
+    const report = join(directory, 'report.json');
+    execFileSync(process.execPath, ['scripts/cache-report.mjs', report], { cwd: product });
+    const parsed = JSON.parse(await readFile(report, 'utf8'));
+    assert.equal(parsed.runs.length, 1);
+    assert.equal(parsed.runs[0].tasks[0].task, '@forever-tee/video-renderer#test');
+    assert.equal(parsed.runs[0].tasks[0].executed, true);
+    const trim = execFileSync(process.execPath, ['scripts/actions-cache.mjs', '--trim'], { cwd: product, encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(trim), { removed: 0, bytes: 10 });
+});

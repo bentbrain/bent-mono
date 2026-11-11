@@ -1,6 +1,7 @@
 import { resolveProtectedTemplate } from "./protected-config.mjs";
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 // Do not publish environment values, replayed logs or the raw Turbo summaries.
 // A hit's original duration is not a fresh test execution or billed time saved.
 export function cacheReport(summaries) {
@@ -19,7 +20,7 @@ export function cacheReport(summaries) {
         })) };
 }
 if (import.meta.main) {
-    const directory = '.turbo/runs';
+    const directory = fileURLToPath(new URL('../../../.turbo/runs', import.meta.url));
     const paths = await readdir(directory).catch(error => {
         if (error.code === 'ENOENT')
             return [];

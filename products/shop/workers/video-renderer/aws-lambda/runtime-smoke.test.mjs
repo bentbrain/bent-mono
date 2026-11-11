@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,15 +9,23 @@ import test from "node:test";
 
 const exec = promisify(execFile);
 const smoke = fileURLToPath(new URL("runtime-smoke.mjs", import.meta.url));
+const root = typeof process.getuid === "function" && process.getuid() === 0;
+const identity = root ? { uid: 65534, gid: 65534 } : {};
 
 async function runSmoke(t, mode, scenario = "invoke") {
-    const directory = await mkdtemp(join(tmpdir(), "runtime-smoke-test-"));
+    // Root Linux runners must traverse the fixture after dropping privileges.
+    // /tmp is shared by the container's users; HOME and runner temp may be private.
+    const directory = await mkdtemp(join(root ? "/tmp" : tmpdir(), "runtime-smoke-test-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
+    await chmod(directory, 0o755);
     // Replace only the image-specific executable/location. The CLI constructs
     // its real environment and Runtime API, then spawns a separate Node process
     // that imports the actual entry. The hosted image still qualifies real RIC.
     const probe = `
         import assert from "node:assert/strict";
+        assert.equal(process.getuid(), ${root ? identity.uid : process.getuid()});
+        assert.equal(process.getgid(), ${root ? identity.gid : process.getgid()});
+        assert.notEqual(process.getuid(), 0);
         const api = "http://" + process.env.AWS_LAMBDA_RUNTIME_API + "/2018-06-01/runtime/";
         let entry;
         try {
@@ -55,6 +63,9 @@ async function runSmoke(t, mode, scenario = "invoke") {
         import assert from "node:assert/strict";
         import childProcess from "node:child_process";
         import { syncBuiltinESMExports } from "node:module";
+        assert.equal(process.getuid(), ${root ? identity.uid : process.getuid()});
+        assert.equal(process.getgid(), ${root ? identity.gid : process.getgid()});
+        assert.notEqual(process.getuid(), 0);
         const spawn = childProcess.spawn;
         childProcess.spawn = (command, args, options) => {
             assert.equal(command, "/bin/sh");
@@ -64,7 +75,10 @@ async function runSmoke(t, mode, scenario = "invoke") {
         };
         syncBuiltinESMExports();
     `);
+    await chmod(preload, 0o644);
     return exec(process.execPath, ["--import", preload, smoke, ...(mode ? [mode] : [])], {
+        ...identity,
+        cwd: directory,
         timeout: 10000,
         env: {
             PATH: "/usr/bin:/bin",
@@ -94,6 +108,21 @@ test("smoke rejects unrelated invocation errors", async (t) => {
         return true;
     });
 });
+
+for (const mode of ["app", "failure"]) {
+    test(`${mode} smoke rejects an actual root process before starting its Runtime API`, {
+        skip: root ? false : "Requires a root runner to launch a real UID 0 subprocess.",
+    }, async () => {
+        await assert.rejects(exec(process.execPath, [smoke, mode], {
+            uid: 0, gid: 0, timeout: 10000,
+            env: { PATH: "/usr/bin:/bin", SHOP_PROTECTED_CONFIG_JSON: JSON.stringify({ awsAccountId: "000000000000" }) },
+        }), error => {
+            assert.match(error.stderr, /App image smoke checks must run as a non-root user/);
+            assert.doesNotMatch(error.stdout, /RIC loaded/);
+            return true;
+        });
+    });
+}
 
 test("smoke reports initialization errors and fails before invoking the handler", async (t) => {
     await assert.rejects(runSmoke(t, "app", "init-error"), (error) => {
