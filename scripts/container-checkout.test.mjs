@@ -54,3 +54,23 @@ test("all container jobs establish workspace trust before checkout and source co
   }
   assert.equal(containers, 13);
 });
+
+test("pinned browser containers mount trusted archive tools at the absolute caller paths", () => {
+  const workflows = [".github/workflows/quality.yml"];
+  for (const name of ["deploy.yml", "native-development.yml", "web-production.yml", "preview-smoke.yml", "ci.yml"]) {
+    if (name !== "ci.yml") workflows.push(`.github/workflows/${name}`);
+    workflows.push(`products/shop/.github/workflows/${name}`);
+  }
+  let containers = 0;
+  for (const path of workflows) {
+    for (const block of read(path).split(/\n  [a-zA-Z][\w-]*:\n/)) {
+      if (!block.includes("    container:\n")) continue;
+      containers++;
+      for (const executable of ["zip", "unzip"])
+        assert.ok(block.includes(`        - /usr/bin/${executable}:/usr/bin/${executable}:ro\n`), `${path}: ${executable}`);
+    }
+  }
+  assert.equal(containers, 13);
+  for (const file of ["package-source.mjs", "package-app-source.mjs"])
+    assert.match(read(`products/shop/workers/video-renderer/aws-lambda/${file}`), /execFile\)\("\/usr\/bin\/zip",/);
+});

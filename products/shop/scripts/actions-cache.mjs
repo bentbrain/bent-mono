@@ -3,9 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { lstat, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 // Only Turbo's regenerable hash archives are eligible. Never follow symlinks,
 // recurse into arbitrary paths, or touch release/qualification artifacts.
-export async function trimTaskCache(directory = '.turbo/cache', maxBytes = 256 * 1024 * 1024) {
+export async function trimTaskCache(directory = fileURLToPath(new URL('../../../.turbo/cache', import.meta.url)), maxBytes = 256 * 1024 * 1024) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
         throw Error('Invalid task cache byte limit.');
     const stat = await lstat(directory).catch(error => { if (error.code !== 'ENOENT')

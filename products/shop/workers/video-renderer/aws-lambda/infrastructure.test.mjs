@@ -13,6 +13,7 @@ import {
   sourceFilePath,
 } from "./package-source.mjs";
 import { prepareFixture, uploadFixture } from "./prepare-fixture.mjs";
+import { packageAppSource } from "./package-app-source.mjs";
 import { jobsFor } from "./benchmark-core.mjs";
 import { ROOT } from "./local-tools.mjs";
 import { sha256 } from "./contract.mjs";
@@ -74,6 +75,29 @@ test("source geometry resolves before workspace dependencies are installed", asy
   const source = await readFile(new URL("../src/product-mockup-geometry.mjs", import.meta.url), "utf8");
   assert.match(source, /from "\.\.\/\.\.\/\.\.\/packages\/contracts\/src\/product-mockup-geometry\.js"/);
   assert.doesNotMatch(source, /@forever-tee\/contracts/);
+});
+
+test("app source packaging preserves its code and product assets in a verified exact archive", async (t) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "story-app-package-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const bundle = await packageAppSource(directory);
+  const exec = promisify(execFile);
+  const { stdout: manifest } = await exec("/usr/bin/unzip", ["-p", bundle.zip, "bundle-manifest.json"]);
+  assert.equal(sha256(manifest), bundle.sourceDigest);
+  const files = Object.keys(JSON.parse(manifest).files);
+  const { stdout: names } = await exec("/usr/bin/unzip", ["-Z1", bundle.zip]);
+  assert.deepEqual(names.trim().split("\n").sort(), ["bundle-manifest.json", ...files].sort());
+  for (const path of ["aws-lambda/app-entry.mjs", "aws-lambda/failure-entry.mjs", "aws-lambda/runtime-smoke.mjs", "product-assets/lifestyle-white.png", "product-assets/lifestyle-black.png"])
+    assert.ok(files.includes(path), path);
+  assert.ok(files.every(path => !/(?:^|\/)\.(?:env|data)|credentials/.test(path)));
+  const extracted = resolve(directory, "extracted");
+  await exec("/usr/bin/unzip", ["-q", bundle.zip, "-d", extracted]);
+  const verify = () => exec(process.execPath, ["aws-lambda/verify-bundle.mjs"], {
+    cwd: extracted, env: { PATH: "/usr/bin:/bin", SOURCE_DIGEST: bundle.sourceDigest },
+  });
+  assert.match((await verify()).stdout, /Verified the isolated source bundle/);
+  await writeFile(resolve(extracted, "product-assets/lifestyle-white.png"), "corrupt");
+  await assert.rejects(verify(), /source file mismatch/);
 });
 
 test("fixture preparation preserves saved settings; corrupt local assets cannot upload", async (t) => {
