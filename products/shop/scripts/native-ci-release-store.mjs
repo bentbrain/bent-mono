@@ -37,7 +37,8 @@ export async function createDevelopmentReleaseStore(env = process.env, run) {
             if (env.NATIVE_OPERATION === "stage-forward-completion-authority")
                 check(["completion-snapshot.json", "completion-authority.json"].includes(name));
             if (env.NATIVE_OPERATION === "complete-forward-release")
-                check(["completion-executor-foundation.json", "completion-prepared.json", "completion-deployed-executor.json", "completion-command-diagnostic.json", "completion-api-content-diagnostic.json", "completion-executor-content-diagnostic.json"].includes(name));
+                check(["completion-executor-foundation.json", "completion-prepared.json", "completion-deployed-executor.json", "completion-command-diagnostic.json", "completion-api-content-diagnostic.json", "completion-executor-content-diagnostic.json",
+                    "completion-verification-prepared.json", "completion-verification-evidence.json", "completion-verification-executor.json"].includes(name));
             check(/^[a-z-]+\.(?:json|tfplan|js|zip)$/.test(name) && Buffer.isBuffer(bytes));
             const file = join(directory, name);
             await writeFile(file, bytes, { flag: "wx", mode: 0o600 });

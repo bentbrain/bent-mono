@@ -1,3 +1,4 @@
+import { equalWorkerSettings } from "./native-worker-settings.mjs";
 import { assertArtworkMediaBundle } from "./artwork-media-compatibility.mjs";
 import { readWorkerUpload, verifyWorkerUpload, verifyWorkerUploadEvidence, preserveWorkerUpload, readSealedWorkerUpload, historicalWorkerUpload, supportedWorkerContent, prepareWorkerUpload } from "./native-worker-content.mjs";
 import { renderWranglerConfig, workerProtectedConfiguration, wranglerCli } from "./deployment-config.mjs";
@@ -300,7 +301,7 @@ export async function prepareProductionWorker(env, store, qualifiedPrintExecutor
             await printExecutor.verifyPrevious();
         const current = recorded ? await loadRecordedProductionWorkerBaseline(cf, store, { pauseOwner: releaseId }) : undefined;
         check(equal(await inspectWorker(cf, recorded?.historicalArtifact), before) &&
-            equal(current?.record, recorded?.record) && equal(current?.settings ?? await cf.settings(), settings) &&
+            equal(current?.record, recorded?.record) && equalWorkerSettings(current?.settings ?? await cf.settings(), settings) &&
             equal(await inspectProductionConsumer(cf), consumer), "previous Worker/settings/queue changed.");
     };
     await verifyPrevious();

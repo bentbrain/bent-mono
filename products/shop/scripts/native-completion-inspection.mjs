@@ -1,5 +1,7 @@
+import { equalCompletionState, equalWorkerSettings } from "./native-worker-settings.mjs";
 import { isDeepStrictEqual as equal } from "node:util";
 import { readdir } from "node:fs/promises";
+import { forwardRecoveryObject } from "./native-forward-recovery-reference.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { recoveryCheck as check, recoveryHash as hash, recoveryControl, validateForwardRecoverySnapshot } from "./native-forward-recovery-inspection.mjs";
 import { forwardWorkerPlan } from "./native-forward-recovery.mjs";
@@ -8,7 +10,7 @@ import { readSealedWorkerUpload, workerContentManifest, workerContentResponse, v
 import { verifyPrintExecutorSettings, verifyPrintExecutorConfig, verifyPrintExecutorLifecycle, verifyApiPrintExecutorBinding } from "./native-print-executor.mjs";
 import { verifyPauseSchema } from "./native-release-pause.mjs";
 import { isReviewedMigrationInventory } from "./native-migration-inventory.mjs";
-import { failedRecoveryProvenance } from "./native-completion-authority.mjs";
+import { failedRecoveryProvenance, interruptedCompletionProvenance, isVerificationCompletion, validateCompletionAuthority } from "./native-completion-authority.mjs";
 
 const failedStages = ["prepared", "forward-pause-transferred", "drained", "forward-migration-started", "migration-verified", "image-apply-started", "image-verified", "image-startup-verified", "worker-deploy-started", "print-staging-lifecycle-started", "print-staging-lifecycle-verified", "print-executor-deploy-started"].sort();
 const read = async (store, reference) => {
@@ -49,7 +51,41 @@ export async function completionInputs(store, authority) {
     uploads[name] = { ...review, schemaVersion: 3, content };
   }
   check(equal(await read(store, prepared.artifacts.printExecutor.foundationArtifact), prepared.worker.printExecutor), "original executor foundation changed.");
-  return { original, plan, prepared, uploads };
+  const inputs = { original, plan, prepared, uploads };
+  if (isVerificationCompletion(authority)) {
+    const old = authority.interruptedCompletion, prior = await read(store, old.authority);
+    // Historical authority keeps its own tool source and raw snapshot hash.
+    // Only the new authority is admitted by current protected package/source pins.
+    validateCompletionAuthority(prior, { GITHUB_SHA: old.sourceCommit, GITHUB_RUN_ID: old.runId }, { config: key =>
+      key === "developmentCompletionSourceCommit" ? old.sourceCommit : key === "developmentCompletionSnapshotSha256" ? prior.snapshot.sha256 : protectedConfig(key) });
+    check(prior.schemaVersion === 1 && equal(prior.originalAuthority, authority.originalAuthority) && equal(prior.originalPlan, authority.originalPlan) &&
+      equal(prior.failedPreparation, authority.failedPreparation) && prior.failedRunId === authority.failedRunId &&
+      equalWorkerSettings(prior.expectedApiSettings, authority.expectedApiSettings) && equalWorkerSettings(prior.expectedApiLatestSettings, authority.expectedApiLatestSettings),
+      "interrupted completion authority changed original approvals or full settings.");
+    const snapshot = await read(store, prior.snapshot), completed = await read(store, old.preparation);
+    const claim = JSON.parse(old.claim.payload), intent = JSON.parse(old.deployStarted.payload);
+    const identity = claim.identity;
+    check(identity?.signatureVerified === true && identity.runId === old.runId && identity.sourceCommit === old.sourceCommit &&
+      equal(claim, { schemaVersion: 1, failedRunId: authority.failedRunId, failedAttempt: 1, authority: old.authority,
+        preparation: old.preparation, identity, control: snapshot.control }) && old.claim.created_at > snapshot.control.updated_at &&
+      old.deployStarted.created_at >= old.claim.created_at &&
+      equal(intent, { authority: old.authority, preparation: old.preparation, originalArtifacts: prepared.artifacts }),
+      "consumed completion claim and upload intent provenance changed.");
+    const foundationArtifact = completed.artifacts?.printExecutor?.foundationArtifact;
+    forwardCompletionFoundation(foundationArtifact, old.runId);
+    check(equal(await read(store, foundationArtifact), uploads.executor), "original completion executor foundation changed.");
+    check(equal(completed, { ...prepared, worker: { ...uploads.api, printExecutor: uploads.executor },
+      artifacts: { ...prepared.artifacts, printExecutor: { ...prepared.artifacts.printExecutor, foundationArtifact } },
+      completion: { authority: old.authority, originalPreparation: authority.failedPreparation, toolIdentity: identity,
+        currentCandidate: { ...prepared.candidate, verifiedForCommit: old.sourceCommit }, startup: snapshot.startup }, rollbackQualified: false }),
+      "original immutable completion preparation changed.");
+    inputs.interrupted = { authority: prior, snapshot, prepared: completed };
+  }
+  return inputs;
+}
+function forwardCompletionFoundation(reference, runId) {
+  forwardRecoveryObject(reference, "completion-executor-foundation.json");
+  check(reference.key === `source/releases/native-${runId}/completion-executor-foundation.json`, "original completion foundation run required.");
 }
 async function completionJournals(cf, inputs, authority, extra = []) {
   const owner = inputs.prepared.releaseId, oldOwner = inputs.original.control.release_id;
@@ -60,7 +96,9 @@ async function completionJournals(cf, inputs, authority, extra = []) {
     if (key === "failed") {
       for (const event of extra) check(equal(rows.find(row => row.stage === event.stage), event), "completion journal changed.");
       journals[key] = rows.filter(row => !extra.some(event => event.stage === row.stage));
-      check(equal(journals[key].map(row => row.stage).sort(), failedStages), "failed recovery advanced beyond the executor verification boundary.");
+      const historical = isVerificationCompletion(authority) ? [authority.interruptedCompletion.claim, authority.interruptedCompletion.deployStarted] : [];
+      for (const event of historical) check(equal(journals[key].find(row => row.stage === event.stage), event), "interrupted completion journal provenance changed.");
+      check(equal(journals[key].map(row => row.stage).sort(), [...failedStages, ...historical.map(event => event.stage)].sort()), "failed recovery advanced beyond the executor verification boundary.");
     } else journals[key] = rows;
   }
   const event = stage => JSON.parse(journals.failed.find(row => row.stage === stage).payload);
@@ -80,17 +118,17 @@ async function completionJournals(cf, inputs, authority, extra = []) {
   const control = { ...claim.control, release_id: owner, paused_at: claim.pausedAt, updated_at: claim.pausedAt };
   return { journals, control, stagingEvidence: event("print-staging-lifecycle-verified").evidence, runtime: event("image-verified"), startup: event("image-startup-verified") };
 }
-export async function inspectCompletionState({ cf, client, staging, store, authority, inputs, runtimeRead, bindingsRead, runRead, extra = [], liveApi, env = process.env }) {
+export async function inspectCompletionState({ cf, client, staging, store, authority, inputs, runtimeRead, bindingsRead, runRead, interruptedRunRead, extra = [], liveApi, env = process.env }) {
   const evidence = await completionJournals(cf, inputs, authority, extra), control = await recoveryControl(cf);
   check(equal(control, evidence.control), "exact failed-owner pause tuple changed.");
   await verifyPauseSchema(cf);
-  const { prepared, uploads } = inputs;
+  const { prepared, uploads } = inputs, verification = isVerificationCompletion(authority), deployed = verification || Boolean(liveApi);
   const migrations = (await cf.query("SELECT name FROM d1_migrations ORDER BY name"))[0].results.map(row => row.name);
   const expected = (await readdir(new URL("../workers/api/drizzle/", import.meta.url))).filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
   check(isReviewedMigrationInventory(expected) && equal(migrations, expected), "complete current reviewed migrations required.");
   const schema = (await cf.query("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name"))[0].results;
   check(schema.length > 0, "complete schema unavailable.");
-  const api = await inspectDevelopmentWorker(cf, undefined, liveApi ? uploads.api : undefined), executor = await inspectDevelopmentWorker(client, undefined, uploads.executor);
+  const api = await inspectDevelopmentWorker(cf, undefined, deployed ? uploads.api : undefined), executor = await inspectDevelopmentWorker(client, undefined, uploads.executor);
   await verifyWorkerUploadEvidence(executor.content, uploads.executor, { store, env, filename: "completion-executor-content-diagnostic.json" });
   const apiSettings = await activeWorkerSettings(cf, api), executorSettings = await activeWorkerSettings(client, executor);
   verifyPrintExecutorConfig(uploads.executor.config);
@@ -99,9 +137,9 @@ export async function inspectCompletionState({ cf, client, staging, store, autho
   verifyApiPrintExecutorBinding(apiSettings, namespace);
   const executorLifecycle = verifyPrintExecutorLifecycle(await client.version(executor.workerVersion), executor.workerVersion), privateEndpoint = await client.subdomain();
   check(privateEndpoint.enabled === false && privateEndpoint.previews_enabled === false, "executor endpoint must remain private.");
-  if (liveApi) {
+  if (deployed) {
     verifyWorkerUpload(api.content, uploads.api);
-    check(equal(api, liveApi) && equal(apiSettings, authority.expectedApiSettings), "deployed API complete content, version or full settings changed.");
+    check((!liveApi || equal(api, liveApi)) && equalWorkerSettings(apiSettings, authority.expectedApiSettings), "deployed API complete content, version or full settings changed.");
   } else check(equal(api, prepared.previous.worker) && equal(api, inputs.original.observed.api), "API predecessor changed.");
   const consumer = await inspectDevelopmentConsumer(cf), schedules = await cf.schedules(), stagingLifecycle = await staging.read();
   check(equal(consumer, prepared.previous.consumer) && equal(schedules, inputs.original.schedules) &&
@@ -118,8 +156,19 @@ export async function inspectCompletionState({ cf, client, staging, store, autho
     api, executor, apiSettings, executorSettings, latestApiSettings: await cf.settings(), latestExecutorSettings: await client.settings(),
     consumer, schedules, stagingLifecycle, stagingEvidence: evidence.stagingEvidence, executorLifecycle, privateEndpoint,
     runtime, startup: evidence.startup, migrations, schema, bindings: await bindingsRead(), uploads };
+  if (verification) {
+    state.interruptedCompletionRun = interruptedCompletionProvenance(await interruptedRunRead(), authority);
+    const old = inputs.interrupted.snapshot;
+    const { interruptedCompletionRun: _run, ...current } = state;
+    const expected = { ...old, api, apiSettings: authority.expectedApiSettings, latestApiSettings: authority.expectedApiLatestSettings,
+      journals: { ...old.journals, failed: [...old.journals.failed, authority.interruptedCompletion.claim, authority.interruptedCompletion.deployStarted].sort((a, b) => a.stage.localeCompare(b.stage)) },
+      bindings: { ...old.bindings, workerVersion: api.workerVersion, deploymentId: state.bindings.deploymentId } };
+    check(api.workerVersion !== old.api.workerVersion && state.bindings.deploymentId !== old.bindings.deploymentId &&
+      equalCompletionState(current, expected), "interrupted completion changed beyond the original API upload boundary.");
+    await verifyCompletionDrain(cf, control);
+  }
   check(equal(await recoveryControl(cf), control) && equal(await inspectDevelopmentWorker(client, undefined, uploads.executor), executor) &&
-    equal(await inspectDevelopmentWorker(cf, undefined, liveApi ? uploads.api : undefined), api), "provider state changed during completion inspection.");
+    equal(await inspectDevelopmentWorker(cf, undefined, deployed ? uploads.api : undefined), api), "provider state changed during completion inspection.");
   const active = (await cf.deployments()).deployments?.[0];
   check(state.bindings.workerVersion === api.workerVersion &&
     /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(state.bindings.deploymentId ?? "") &&

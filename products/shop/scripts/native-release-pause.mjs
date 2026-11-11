@@ -141,7 +141,7 @@ export async function inspectDevelopmentDrain(cf, releaseId, now = Date.now()) {
   return { drained: true, pausedAt: control.paused_at, minimumHoldMs: DEVELOPMENT_DRAIN_MS };
 }
 
-export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair, { expectedControl } = {}) {
+export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair, { expectedControl, rescheduleDispatchedPrints = true, beforeResume } = {}) {
   const verifyExactControl = async () => {
     if (!expectedControl) return;
     check(expectedControl.paused === 1 && expectedControl.release_id === releaseId, "exact resume control identity.");
@@ -157,8 +157,9 @@ export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair, { exp
   // There is deliberately no catch/finally that reopens admissions on failure.
   const verified = await verifyLivePair();
   await verifyExactControl();
-  await recordReleaseEvent(cf, releaseId, "verified", verified);
-  if (await printJobsExist(cf)) {
+  const verifiedEvent = { stage: "verified", payload: JSON.stringify(verified), created_at: Date.now() };
+  await recordReleaseEvent(cf, releaseId, verifiedEvent.stage, verified, verifiedEvent.created_at);
+  if (rescheduleDispatchedPrints && await printJobsExist(cf)) {
     await assertReleasePaused(cf, releaseId);
     await verifyExactControl();
     // A historical queue consumer may have acknowledged a pause-rejected claim.
@@ -170,6 +171,7 @@ export async function resumeVerifiedRelease(cf, releaseId, verifyLivePair, { exp
         AND EXISTS (SELECT 1 FROM native_video_release_control WHERE singleton = 1 AND paused = 1 AND release_id = ?${exactPredicate})`,
     [now, now, now, releaseId, ...exactValues]);
   }
+  if (beforeResume) await beforeResume(verifiedEvent);
   await verifyExactControl();
   await cf.query(`UPDATE native_video_release_control SET paused = 0, release_id = NULL, current_release_id = ?, updated_at = ?
     WHERE singleton = 1 AND paused = 1 AND release_id = ?${exactPredicate}`, [releaseId, Date.now(), releaseId, ...exactValues]);
