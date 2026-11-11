@@ -9,6 +9,7 @@ const check = (value, reason) => {
         throw new Error(`Native qualification cleanup failed: ${reason}`);
 };
 export async function cleanupDevelopmentQualification(env = process.env, cf = developmentCloudflare(env), options = {}) {
+    check(!options.inventory || options.inventoryReference || !options.requireSavedInventory, "saved inventory reference missing; inspect the uncertain create-only save.");
     const store = options.store ?? await createDevelopmentReleaseStore(env);
     const inventory = options.inventory ?? await captureQualificationInventory(cf, env);
     const originalEnv = options.originalEnv ?? env;
@@ -23,7 +24,14 @@ export async function cleanupDevelopmentQualification(env = process.env, cf = de
     catch (error) {
         lifecycleFailure = error;
     }
-    const result = await deleteQualificationInventory(cf, inventory, originalEnv);
+    let result;
+    try {
+        result = await deleteQualificationInventory(cf, inventory, originalEnv);
+    }
+    catch (error) {
+        if (lifecycleFailure) throw new AggregateError([lifecycleFailure, error], "Qualification lifecycle verification and inventory deletion failed.", { cause: lifecycleFailure });
+        throw error;
+    }
     if (lifecycleFailure)
         throw lifecycleFailure;
     const receipt = { schemaVersion: 1, cleanupComplete: true, runId: env.GITHUB_RUN_ID,

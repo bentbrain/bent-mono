@@ -695,14 +695,27 @@ export function completeQualificationSummary(stages, releaseId) {
     return { cloudQualificationComplete: true, releaseId, sourceCommit: stages[0].sourceCommit,
         imageDigest: stages[0].imageDigest, stages, realMobilePlaybackVerified: false, productionPromotionPerformed: false };
 }
-export async function qualifyDevelopmentRelease(env = process.env) {
-    const contextStore = await createDevelopmentReleaseStore(env), contextCf = developmentCloudflare(env);
-    const before = await qualificationIdentity(contextCf, contextStore, env);
-    const rendererEvidence = await captureRendererEvidence(env, contextCf, contextStore, before);
-    const shipping = env.GITHUB_REF === "refs/heads/main" ? await measureReleaseStage("shipping-qualification", () => qualifyShippingDatabase(env, contextStore, { pair: before, paidJourney: true })) : null;
+async function preserveCleanupInventory(env, cf, store, options, capture) {
+    const inventory = await capture(cf, env);
+    // Retain the snapshot before the create-only save. An uncertain write must
+    // stop cleanup rather than capture or create a second inventory.
+    const cleanup = options.cleanup ?? {};
+    cleanup.inventory = inventory;
+    cleanup.requireSavedInventory = true;
+    const inventoryReference = await store.save("qualification-cleanup-inventory.json", Buffer.from(JSON.stringify(inventory)));
+    cleanup.inventoryReference = inventoryReference;
+    check(isDeepStrictEqual(JSON.parse(await store.read(inventoryReference)), inventory), "durable cleanup inventory readback changed.");
+    return { inventoryReference };
+}
+export async function qualifyDevelopmentRelease(env = process.env, options = {}) {
+    const deps = { createDevelopmentReleaseStore, developmentCloudflare, qualificationIdentity, captureRendererEvidence, qualifyShippingDatabase, qualifyDevelopmentFamilies, qualifyDevelopmentExhaustion, qualifyDevelopmentFaults, qualifyDevelopmentTermination, qualifyDevelopmentLoad, captureQualificationInventory, captureRendererArchive, ...options.dependencies };
+    const contextStore = await deps.createDevelopmentReleaseStore(env), contextCf = deps.developmentCloudflare(env);
+    const before = await deps.qualificationIdentity(contextCf, contextStore, env);
+    const rendererEvidence = await deps.captureRendererEvidence(env, contextCf, contextStore, before);
+    const shipping = env.GITHUB_REF === "refs/heads/main" ? await measureReleaseStage("shipping-qualification", () => deps.qualifyShippingDatabase(env, contextStore, { pair: before, paidJourney: true })) : null;
     const stages = [];
-    for (const [name, run] of [["families", qualifyDevelopmentFamilies], ["exhaustion", qualifyDevelopmentExhaustion],
-        ["faults", qualifyDevelopmentFaults], ["termination", qualifyDevelopmentTermination], ["load", qualifyDevelopmentLoad]]) {
+    for (const [name, run] of [["families", deps.qualifyDevelopmentFamilies], ["exhaustion", deps.qualifyDevelopmentExhaustion],
+        ["faults", deps.qualifyDevelopmentFaults], ["termination", deps.qualifyDevelopmentTermination], ["load", deps.qualifyDevelopmentLoad]]) {
         const report = await measureReleaseStage(`qualification-${name}`, () => run(env));
         check(report.releaseId === env.NATIVE_VERIFY_RELEASE && report.evidence?.version && report.evidence.sha256, "stage did not preserve its immutable evidence.");
         if (stages.length)
@@ -710,11 +723,10 @@ export async function qualifyDevelopmentRelease(env = process.env) {
         stages.push({ name, releaseId: report.releaseId, sourceCommit: report.sourceCommit, imageDigest: report.imageDigest, evidence: report.evidence });
         console.info(JSON.stringify({ qualificationStage: name, ...report }));
     }
-    const store = await createDevelopmentReleaseStore(env);
-    const identity = await qualificationIdentity(developmentCloudflare(env), store, env);
-    const inventory = await captureQualificationInventory(developmentCloudflare(env), env);
-    const inventoryReference = await store.save("qualification-cleanup-inventory.json", Buffer.from(JSON.stringify(inventory)));
-    const rendererArchive = await captureRendererArchive(env, store, identity);
+    const store = await deps.createDevelopmentReleaseStore(env);
+    const identity = await deps.qualificationIdentity(deps.developmentCloudflare(env), store, env);
+    const { inventoryReference } = await preserveCleanupInventory(env, contextCf, store, options, deps.captureQualificationInventory);
+    const rendererArchive = await deps.captureRendererArchive(env, store, identity);
     const report = { ...completeQualificationSummary(stages, env.NATIVE_VERIFY_RELEASE),
         schemaVersion: 2, identity, inventoryReference, rendererEvidence, rendererArchive, baselineSelectionEligible: env.NATIVE_SCHEDULED_QUALIFICATION !== "true", shippingEvidence: shipping?.evidence ?? null };
     check(isDeepStrictEqual(before, identity), "qualification identity changed during the functional suite.");
@@ -722,24 +734,24 @@ export async function qualifyDevelopmentRelease(env = process.env) {
     const evidence = await store.save("qualification-complete-summary.json", Buffer.from(JSON.stringify(report)));
     return { ...report, evidence };
 }
-export async function qualifyDevelopmentComponents(env = process.env) {
-    const cf = developmentCloudflare(env), store = await createDevelopmentReleaseStore(env);
-    const before = await qualificationIdentity(cf, store, env);
+export async function qualifyDevelopmentComponents(env = process.env, options = {}) {
+    const deps = { createDevelopmentReleaseStore, developmentCloudflare, qualificationIdentity, verifyReusableRenderer, qualifyShippingDatabase, qualifyDevelopmentFamilies, captureQualificationInventory, ...options.dependencies };
+    const cf = deps.developmentCloudflare(env), store = await deps.createDevelopmentReleaseStore(env);
+    const before = await deps.qualificationIdentity(cf, store, env);
     let renderer;
     try {
-        renderer = await verifyReusableRenderer({ value: env.NATIVE_RENDERER_REFERENCE, env, cf, store, identity: before });
+        renderer = await deps.verifyReusableRenderer({ value: env.NATIVE_RENDERER_REFERENCE, env, cf, store, identity: before });
     }
     catch {
         console.info("Renderer input or runtime equivalence was not established; selecting full qualification.");
-        return qualifyDevelopmentRelease(env);
+        return qualifyDevelopmentRelease(env, options);
     }
     const commerce = renderer.boundary === commerceBoundary;
-    const shipping = await measureReleaseStage("shipping-qualification", () => qualifyShippingDatabase(env, store, { pair: before, paidJourney: commerce }));
-    const smoke = await measureReleaseStage("video-smoke", () => qualifyDevelopmentFamilies(env));
-    const identity = await qualificationIdentity(cf, store, env);
+    const shipping = await measureReleaseStage("shipping-qualification", () => deps.qualifyShippingDatabase(env, store, { pair: before, paidJourney: commerce }));
+    const smoke = await measureReleaseStage("video-smoke", () => deps.qualifyDevelopmentFamilies(env));
+    const identity = await deps.qualificationIdentity(cf, store, env);
     check(isDeepStrictEqual(before, identity), "shipping qualification pair changed.");
-    const inventory = await captureQualificationInventory(cf, env);
-    const inventoryReference = await store.save("qualification-cleanup-inventory.json", Buffer.from(JSON.stringify(inventory)));
+    const { inventoryReference } = await preserveCleanupInventory(env, cf, store, options, deps.captureQualificationInventory);
     const report = { schemaVersion: commerce ? 4 : 3, qualificationKind: commerce ? "commerce" : "shipping", cloudQualificationComplete: true,
         releaseId: identity.releaseId, sourceCommit: identity.sourceCommit, imageDigest: identity.imageDigest, identity,
         shippingEvidence: shipping.evidence, smokeEvidence: smoke.evidence, rendererQualification: renderer, inventoryReference,

@@ -1,3 +1,4 @@
+import { reportDevelopmentFailure } from './native-ci-development.mjs';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
@@ -179,4 +180,20 @@ test("logging accessor and proxy values does not invoke getters or serialization
   const decoded = (await messages(output))[0];
   assert.match(decoded.text, /private-accessor/); assert.match(decoded.argumentsText, /\[Getter\]/); assert.match(decoded.argumentsText, /private-proxy/);
   assert.equal(decoded.serializedArguments, undefined);
+}));
+
+test('encrypted capture retains qualification primary and all underlying cleanup exception stacks', () => fixture(async directory => {
+  const writer = createDiagnosticWriter(join(directory, 'encrypted'), identity, key);
+  const primary = Error('private-archive-failure');
+  const underlying = Object.assign(Error('private-aws-failure'), { stderr: 'private-original-aws-stderr', stdout: 'private-original-aws-stdout' });
+  const cleanup = Error('Scoped CI AWS request failed.', { cause: underlying });
+  const combined = new AggregateError([primary, cleanup], 'Qualification operation and cleanup failed.', { cause: primary });
+  reportDevelopmentFailure(combined, (...args) => writer.write('error', args)); writer.finish();
+  const ciphertext = await readFile(writer.path, 'utf8');
+  for (const value of [primary.message, underlying.message, underlying.stderr, underlying.stdout]) assert.ok(!ciphertext.includes(value));
+  const output = join(directory, 'private.jsonl');
+  await recoverReleaseDiagnostics(join(directory, 'encrypted'), output, identity, { env: key });
+  const decoded = await messages(output);
+  const complete = decoded.map(message => message.text).join('\n');
+  for (const value of [primary.stack, cleanup.stack, underlying.stack, underlying.stderr, underlying.stdout]) assert.ok(complete.includes(value));
 }));

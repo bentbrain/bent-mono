@@ -143,6 +143,19 @@ test('failed-fixture cleanup is ignored while discovering actual deployment base
     assert.equal(result.native.runId, 2);
     assert.equal(result.web.runId, 3);
 });
+test('retained qualification inspection is ignored while discovering actual deployment baselines', async () => {
+    const runs = { 4: { id: 4, path: '.github/workflows/native-development.yml', display_title: 'Native development · inspect-failed-qualification · full · native-100' },
+        3: { id: 3, path: '.github/workflows/deploy.yml', display_title: 'Storefront · development · preview=true · main' },
+        2: { id: 2, path: '.github/workflows/native-development.yml', display_title: 'Native development · release · full · -' } };
+    const deployments = [4, 3, 2].map(id => ({ id, environment: 'Preview', sha: source }));
+    for (const run of Object.values(runs))
+        Object.assign(run, { head_sha: source, head_branch: 'main', repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } },
+            head_repository: { id: Number(protectedConfig("githubRepositoryId")) }, run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' });
+    const api = async (path) => path.startsWith('deployments?') ? deployments : path.includes('/statuses?') ? [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1]}` }] : runs[path.split('/').at(-1)];
+    const result = await componentBaselines({ api, target: 'preview' });
+    assert.equal(result.native.runId, 2);
+    assert.equal(result.web.runId, 3);
+});
 test('routine provider-contract releases omit unchanged web and reuse only the proven renderer boundary', () => {
     const rendererBaseline = { sourceCommit: old, nodeVersion: 'v24.7.0', reference: { key: 'original' }, inputsDigest: 'd'.repeat(64), boundary: 'isolated-printify-contracts-v2' };
     const manifest = () => ({ schemaVersion: 1, boundary: rendererBaseline.boundary, inputsDigest: rendererBaseline.inputsDigest });

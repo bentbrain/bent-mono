@@ -1,10 +1,10 @@
-import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import { protectedConfig } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual as equal } from "node:util";
 import { readFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { createDevelopmentCICall } from "./native-ci-aws.mjs";
-import { loadVerifiedCandidate } from "./native-ci-candidate.mjs";
+import { developmentCandidateReceipt, loadVerifiedCandidate } from "./native-ci-candidate.mjs";
 const check = (value, reason) => {
     if (!value)
         throw Error(`Renderer archive rejected: ${reason}`);
@@ -45,11 +45,11 @@ export function rendererArchiveReference(qualification, name, original) {
         entry.copy.key === "source/releases/native-" + protectedConfig("resource_8d0190ecec7d") + "/" + (filename), "exact qualified copy of the original build artifact.");
     return entry.copy;
 }
-export async function captureRendererArchive(env, store, pair) {
-    const receipt = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../infra/story-video-lambda/development-candidate.json", import.meta.url))));
-    const candidate = await loadVerifiedCandidate(receipt, env);
+export async function captureRendererArchive(env, store, pair, dependencies = {}) {
+    const receipt = await developmentCandidateReceipt(env);
+    const candidate = await (dependencies.loadCandidate ?? loadVerifiedCandidate)(receipt, env);
     check(candidate.imageDigest === pair.imageDigest && candidate.verifiedForCommit === pair.sourceCommit, "live qualified renderer.");
-    const call = await createDevelopmentCICall(env), directory = await mkdtemp(join(env.RUNNER_TEMP, "renderer-archive-"));
+    const call = await (dependencies.createCall ?? createDevelopmentCICall)(env), directory = await mkdtemp(join(env.RUNNER_TEMP, "renderer-archive-"));
     let index = 0;
     return preserveRendererArchive({ receipt, candidate, store, readObject: async (ref) => {
             const path = join(directory, `original-${index++}`);

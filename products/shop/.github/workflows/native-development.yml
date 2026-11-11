@@ -14,7 +14,7 @@ on:
         description: Plan/deploy a pair, independently qualify the live pair, or recover it
         type: choice
         default: plan
-        options: [stage-forward-completion-authority, complete-forward-release, plan, build-candidate, release, rollback, recover-rollback, stage-forward-recovery-authority, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, qualify-components]
+        options: [stage-forward-completion-authority, complete-forward-release, plan, build-candidate, release, rollback, recover-rollback, stage-forward-recovery-authority, plan-forward-recovery, recover-forward-release, qualify, qualify-exhaustion, qualify-faults, qualify-termination, qualify-load, qualify-all, verify-qualification, repair-schedule, cleanup-qualification, cleanup-failed-qualification, inspect-failed-qualification, qualify-components]
       release_mode:
         description: API mode reuses the live image; relevant qualification is required separately before Production
         type: choice
@@ -25,7 +25,7 @@ on:
         type: string
         required: false
       qualification_reference:
-        description: For cleanup recovery, exact immutable functional-summary JSON; failed cleanup uses original cleanup-inventory JSON
+        description: Sealed cleanup reference or retained failed-inventory inspection descriptor
         type: string
         required: false
       scheduled_qualification:
@@ -225,13 +225,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
       - name: Preserve immutable qualification reference pointers
-        if: always() && (inputs.operation == 'qualify-all' || inputs.operation == 'cleanup-qualification' || inputs.operation == 'qualify-components')
+        if: always() && (inputs.operation == 'qualify-all' || inputs.operation == 'cleanup-qualification' || inputs.operation == 'qualify-components' || inputs.operation == 'inspect-failed-qualification')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: qualification-reference-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/qualification*reference.json
             ${{ runner.temp }}/renderer-reference.json
+            ${{ runner.temp }}/qualification-inventory-export.json
           if-no-files-found: ignore
           retention-days: 90
       - name: Preserve release stage timings
