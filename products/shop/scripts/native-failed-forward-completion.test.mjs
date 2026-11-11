@@ -17,6 +17,7 @@ import { completionEffects, completionVerificationEffects, validateCompletionAut
 import { completionInputs, inspectCompletionState, verifyCompletionDrain } from "./native-completion-inspection.mjs";
 import { claimFailedRecoveryCompletion } from "./native-completion-claim.mjs";
 import { runFailedForwardCompletion } from "./native-failed-forward-completion.mjs";
+import { createDevelopmentReleaseStore } from "./native-ci-release-store.mjs";
 import { loadDevelopmentPreparation } from "./native-development-preparation.mjs";
 import { verifyRecordedPrintExecutor } from "./native-print-executor.mjs";
 import { developmentOperation } from "./native-ci-operation.mjs";
@@ -473,6 +474,66 @@ test("v2 existing entrypoints verify uploaded API and resume once without prepar
   assert.equal(prepared.completion.toolIdentity.sourceCommit, tool);
   assert.equal(prepared.completion.toolIdentity.runId, "402");
   await assert.rejects(f.execute({ ...context, GITHUB_RUN_ID: "405" }));
+});
+
+test("v2 execution persists all verification evidence through the default release store and stops on uncertain writes or readbacks", async t => {
+  for (const failure of [undefined, "prepared-ack", "evidence-ack", "executor-ack", "hash", "version", "claim-ack", "resume-ack"]) {
+    const f = await verificationFixture(t, { reordered: true }), context = await f.execution();
+    const objects = new Map(f.saved), requests = [], names = ["completion-verification-prepared.json", "completion-verification-evidence.json", "completion-verification-executor.json"];
+    const env = { ...context, AWS_REGION: "ap-southeast-2", AWS_DEFAULT_REGION: "ap-southeast-2",
+      AWS_ACCESS_KEY_ID: "synthetic", AWS_SECRET_ACCESS_KEY: "synthetic", AWS_SESSION_TOKEN: "synthetic", AWS_PROFILE: "foreign" };
+    const run = async (command, args, options) => {
+      assert.equal(command, "aws"); requests.push(args);
+      assert.equal(options.env.AWS_PROFILE, undefined);
+      assert.equal(options.env.AWS_CONFIG_FILE, "/dev/null");
+      if (args[0] === "sts") return { stdout: JSON.stringify({ Account: f.config.awsAccountId,
+        Arn: `arn:aws:sts::${f.config.awsAccountId}:assumed-role/forever-tee-video-development-ci/native-404` }) };
+      assert.equal(args[0], "s3api");
+      assert.equal(args[args.indexOf("--expected-bucket-owner") + 1], f.config.awsAccountId);
+      const key = args[args.indexOf("--key") + 1];
+      if (args[1] === "put-object") {
+        assert.ok(names.some(name => key === `source/releases/native-404/${name}`));
+        assert.equal(options.env.AWS_MAX_ATTEMPTS, "1");
+        assert.equal(args[args.indexOf("--if-none-match") + 1], "*");
+        assert.equal(args[args.indexOf("--server-side-encryption") + 1], "AES256");
+        assert.ok(!objects.has(key));
+        objects.set(key, await readFile(args[args.indexOf("--body") + 1]));
+        if (names.some((name, index) => failure === ["prepared-ack", "evidence-ack", "executor-ack"][index] && key.endsWith(name)))
+          throw Error("synthetic uncertain write acknowledgement");
+        return { stdout: JSON.stringify({ VersionId: failure === "version" ? "null" : "synthetic-version" }) };
+      }
+      assert.equal(args[1], "get-object");
+      assert.equal(args[args.indexOf("--version-id") + 1], "synthetic-version");
+      assert.ok(objects.has(key));
+      const bytes = failure === "hash" && key.endsWith(names[0]) ? Buffer.from("changed") : objects.get(key);
+      await writeFile(args[args.indexOf("--version-id") + 2], bytes);
+      return { stdout: "{}" };
+    };
+    const store = await createDevelopmentReleaseStore(env, run);
+    await assert.rejects(store.save("arbitrary.json", Buffer.from("{}")), /Native release evidence verification failed/);
+    f.state.lostClaim = failure === "claim-ack"; f.state.lostResume = failure === "resume-ack";
+    const execute = () => runFailedForwardCompletion(context, { ...f.dependencies, store });
+    if (failure) await assert.rejects(execute());
+    else {
+      const result = await execute();
+      assert.equal(result.status.protocolVerified, true);
+      assert.equal(result.status.artworkMediaCapabilityVerified, true);
+      for (const ref of [result.reconciliation.preparation, result.reconciliation.evidence, result.worker.printExecutor.evidence])
+        assert.equal(hash(await store.read(ref)), ref.sha256);
+      await assert.rejects(store.save(names[0], Buffer.from("{}")), { code: "EEXIST" });
+    }
+    const writes = requests.filter(args => args[1] === "put-object");
+    assert.equal(writes.length, failure === "prepared-ack" || failure === "hash" || failure === "version" || failure === "claim-ack" ? 1 : failure === "evidence-ack" ? 2 : 3);
+    for (const name of names) assert.ok(writes.filter(args => args.includes(`source/releases/native-404/${name}`)).length <= 1);
+    for (const [key, bytes] of f.saved) assert.equal(objects.get(key), bytes);
+    const claim = f.db.prepare("SELECT stage,payload,created_at FROM native_video_release_events WHERE stage='completion-attempt-one-claimed'").get();
+    assert.equal(JSON.stringify({ ...claim }), f.originalClaim);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='completion-verification-claimed'").get().n,
+      ["prepared-ack", "hash", "version"].includes(failure) ? 0 : 1);
+    assert.equal((await recoveryControl(f.cf)).paused, !failure || failure === "resume-ack" ? 0 : 1);
+    assert.equal(f.calls.includes("upload-api"), false);
+    assert.equal(f.calls.some(call => /^(UPDATE (?!native_video_release_control)|DELETE|CREATE|ALTER)/.test(call)), false);
+  }
 });
 
 test("v2 requires exact authority phase, interrupted first run, approvals, preparation, claim and upload intent", async t => {
