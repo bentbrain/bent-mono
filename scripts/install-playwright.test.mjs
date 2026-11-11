@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { installationArguments, installPlaywright } from "./install-playwright.mjs";
 
@@ -20,15 +22,29 @@ const job = (path, name) => {
   assert(text, `${path} requires job ${name}`);
   return text.split(/\n  [a-zA-Z][\w-]*:\n/)[0];
 };
+const applicationFixture = context => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "playwright-install-fixture-")));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const installed = join(directory, "node_modules/@playwright/test");
+  mkdirSync(installed, { recursive: true });
+  writeFileSync(join(directory, "package.json"), "{}\n");
+  writeFileSync(join(installed, "package.json"), JSON.stringify({
+    name: "@playwright/test", version,
+    exports: { "./package.json": "./package.json", "./cli": "./cli.mjs" },
+  }));
+  writeFileSync(join(installed, "cli.mjs"), "// Synthetic CLI. Execution is captured by the test runner.\n");
+  return directory;
+};
 
-test("the matched official image installs exact browsers without invoking apt", () => {
+test("the matched official image installs exact browsers without invoking apt", context => {
+  const application = applicationFixture(context);
   assert.deepEqual(installationArguments(version, ["chromium", "webkit"], hosted), ["install", "chromium", "webkit"]);
   let calls = 0;
-  installPlaywright("products/shop/apps/web", ["chromium"], { ...hosted,
+  installPlaywright(application, ["chromium"], { ...hosted,
     run: (command, args) => {
       calls++;
       assert.equal(command, process.execPath);
-      assert.match(args[0], /playwright/);
+      assert.equal(args[0], join(application, "node_modules/@playwright/test/cli.mjs"));
       assert.deepEqual(args.slice(1), ["install", "chromium"]);
       return { status: 0 };
     },
@@ -36,7 +52,8 @@ test("the matched official image installs exact browsers without invoking apt", 
   assert.equal(calls, 1);
 });
 
-test("missing or mismatched containers fail before any install or privileged command", () => {
+test("missing or mismatched containers fail before any install or privileged command", context => {
+  const application = applicationFixture(context);
   const invalid = [
     { read: () => { throw new Error("missing image"); } },
     { read: () => "{}" },
@@ -47,22 +64,25 @@ test("missing or mismatched containers fail before any install or privileged com
     { env: { GITHUB_ACTIONS: "true", PLAYWRIGHT_BROWSERS_PATH: "/other-cache" } },
   ];
   for (const overrides of invalid) {
-    assert.throws(() => installPlaywright("products/shop/apps/web", ["chromium"], {
-      ...hosted, ...overrides, run: () => assert.fail("unexpected install"),
-    }));
+    let calls = 0;
+    assert.throws(() => installPlaywright(application, ["chromium"], {
+      ...hosted, ...overrides, run: () => { calls++; return { status: 0 }; },
+    }), error => error.code !== "MODULE_NOT_FOUND");
+    assert.equal(calls, 0);
   }
 });
 
-test("local browser setup retains dependency installation and propagates CLI failures", () => {
+test("local browser setup retains dependency installation and propagates CLI failures", context => {
+  const application = applicationFixture(context);
   for (const options of [{ platform: "darwin", env: {} }, { platform: "linux", env: {} }]) {
     assert.deepEqual(installationArguments(version, ["chromium"], {
       ...options, read: () => assert.fail("unexpected container read"),
     }), ["install", "--with-deps", "chromium"]);
   }
-  assert.throws(() => installPlaywright("products/shop/apps/web", ["chromium"], {
+  assert.throws(() => installPlaywright(application, ["chromium"], {
     ...hosted, run: () => ({ status: 1 }),
   }), /installation failed/);
-  assert.throws(() => installPlaywright("products/shop/apps/web", ["chromium"], {
+  assert.throws(() => installPlaywright(application, ["chromium"], {
     ...hosted, run: () => ({ status: null, error: new Error("spawn failed") }),
   }), /spawn failed/);
 });
