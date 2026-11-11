@@ -164,6 +164,9 @@ test("composite evidence commands and uploads use the mounted runner temp", asyn
         .replaceAll("${{ runner.temp }}", host).replaceAll("${{ github.job }}", "check");
       execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: PRODUCT_ROOT, encoding: "utf8",
         env: { PATH: process.env.PATH, RUNNER_TEMP: mounted, GITHUB_JOB: "check", GITHUB_OUTPUT: output,
+          GIT_TEST_ASSUME_DIFFERENT_OWNER: "1",
+          GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "safe.directory", GIT_CONFIG_VALUE_0: REPOSITORY_ROOT.replace(/\/$/, ""),
           SHOP_PROTECTED_CONFIG_JSON: process.env.SHOP_PROTECTED_CONFIG_JSON, GITHUB_ACTIONS: "true",
           GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_ID: fixture.githubRepositoryId, GITHUB_REPOSITORY_OWNER_ID: fixture.githubOwnerId,
           GITHUB_RUN_ATTEMPT: "1", GITHUB_RUN_ID: "123", GITHUB_SHA: source(), ImageOS: "ubuntu24", ImageVersion: "20261105.1" }, stdio: ["ignore", "pipe", "pipe"] });
