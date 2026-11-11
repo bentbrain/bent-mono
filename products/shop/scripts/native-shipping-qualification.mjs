@@ -1,9 +1,11 @@
-import { resolveProtectedTemplate } from "./protected-config.mjs";
+import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
+import fixtures from './protected-config.fixtures.json' with { type: 'json' };
 import { measureReleaseStage } from "./release-stage-timing.mjs";
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { assertActionsIdentityContext } from './native-ci-identity.mjs';
@@ -151,6 +153,13 @@ export function shippingDatabaseClient(env, request = fetch) {
 export async function qualifyShippingDatabase(env, store, { request = fetch, run = execute, pair, paidJourney = false } = {}) {
     check(pair?.releaseId === env.NATIVE_VERIFY_RELEASE && pair.sourceCommit === env.GITHUB_SHA && /^sha256:[a-f0-9]{64}$/.test(pair.imageDigest ?? ''), 'exact deployed pair for the test source');
     const client = shippingDatabaseClient(env, request);
+    const apiRequire = createRequire(new URL('../workers/api/package.json', import.meta.url));
+    const testCli = join(dirname(apiRequire.resolve('vitest/package.json')), 'vitest.mjs');
+    // The isolated test process uses synthetic merchant/provider configuration.
+    // Guard identities and application-database exclusions follow the protected runner.
+    const testConfig = { ...fixtures, ...Object.fromEntries([
+        'cloudflareAccountId', 'githubRepositoryId', 'githubOwnerId', 'resource_fb377032d2f5', 'resource_1a1378f0d1dc',
+    ].map(key => [key, protectedConfig(key)])) };
     check(env.RUNNER_TEMP?.startsWith('/'), 'private runner directory');
     const directory = join(env.RUNNER_TEMP, 'shipping-qualification');
     await mkdir(directory, { recursive: false, mode: 0o700 });
@@ -176,10 +185,11 @@ export async function qualifyShippingDatabase(env, store, { request = fetch, run
         const childEnv = Object.fromEntries(['PATH', 'HOME', 'CI', 'RUNNER_TEMP', 'GITHUB_ACTIONS', 'GITHUB_REPOSITORY', 'GITHUB_REPOSITORY_ID',
             'GITHUB_REPOSITORY_OWNER_ID', 'GITHUB_REF', 'GITHUB_SHA', 'GITHUB_EVENT_NAME', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_WORKFLOW_REF',
             'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'].flatMap(key => typeof env[key] === 'string' ? [[key, env[key]]] : []));
-        Object.assign(childEnv, { NATIVE_SHIPPING_QUALIFICATION_CONFIG: configPath, NATIVE_SHIPPING_DATABASE_ID: databaseId, NATIVE_SHIPPING_DATABASE_NONCE: nonce });
+        Object.assign(childEnv, { SHOP_PROTECTED_CONFIG_JSON: JSON.stringify(testConfig),
+            NATIVE_SHIPPING_QUALIFICATION_CONFIG: configPath, NATIVE_SHIPPING_DATABASE_ID: databaseId, NATIVE_SHIPPING_DATABASE_NONCE: nonce });
         const selected = paidJourney ? [...shippingCases, ...paidOrderCases] : shippingCases;
         const pattern = `(?:${selected.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`;
-        await runShippingTestProcess(run, [join(root, 'workers/api/node_modules/vitest/vitest.mjs'), 'run', 'src/shopify-webhooks.test.ts',
+        await runShippingTestProcess(run, [testCli, 'run', 'src/shopify-webhooks.test.ts',
             '--testNamePattern', pattern, '--reporter=json', `--outputFile=${reportPath}`, '--testTimeout=60000', '--hookTimeout=120000'], { cwd: join(root, 'workers/api'), env: childEnv, timeout: 600000, maxBuffer: 2 * 1024 * 1024 }, reportPath, store, childEnv);
         const tests = (paidJourney ? verifyPaidOrderTestReport : verifyShippingTestReport)(JSON.parse(resolveProtectedTemplate(await readFile(reportPath, 'utf8'))));
         const proof = (await client.query('SELECT run_id,nonce,connected FROM shipping_qualification_proof WHERE singleton=1'))[0].results;

@@ -405,7 +405,7 @@ for (const width of [390, 1440]) {
       await expect(size).toContainText("L");
     }
 
-    const panel = page.getByRole("tabpanel");
+    const panel = page.getByRole("tabpanel", { name: "t-shirt", exact: true });
     await expect(panel.getByRole("button", { name: "Show story video", exact: true })).toBeVisible();
     const earlyVideos = await page.locator("video[src]").count();
     const highPriorityImages = await page.locator('img[fetchpriority="high"]').count();
@@ -446,10 +446,17 @@ for (const width of [390, 1440]) {
     await expect.poll(() => lifestyle.locator('[data-lifestyle-color]:not([hidden]) img').evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
     await page.screenshot({path:testInfo.outputPath(`configured-lifestyle-${String(width)}.png`)});
     await panel.getByRole("button", {name:"Show product image",exact:true}).click();
-    await page.getByRole("tab", { name: "tote", exact: true }).click();
+    const toteTab = page.getByRole("tab", { name: "tote", exact: true });
+    await toteTab.click();
+    await expect(toteTab).toHaveAttribute("aria-selected", "true");
+    await expect(panel).toBeHidden();
+    const totePanel = page.getByRole("tabpanel", { name: "tote", exact: true });
+    await expect(totePanel).toBeVisible();
+    const toteImage = totePanel.locator('[data-variant-active="true"] img[src*="configured-product-image"]');
+    await expect(toteImage).toBeVisible();
     // A new colour/width image can still be cold on the development server.
     // Match the initial image allowance without slowing successful responses.
-    await expect.poll(() => panel.locator('[data-variant-active="true"] img[src*="configured-product-image"]').evaluate(image =>
+    await expect.poll(() => toteImage.evaluate(image =>
       image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0), { timeout: 15_000 }).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`configured-tote-${String(width)}.png`) });
     console.info("Responsive product fixture", JSON.stringify({ viewport: width, imageSource, earlyVideos, highPriorityImages }));

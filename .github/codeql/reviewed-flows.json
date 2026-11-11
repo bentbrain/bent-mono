@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "b07d78f074892185872671dbc97ddf5de05c102b30dc538ab507bb578043bcf2",
+  "sourceManifestSha256": "1d5dd1348929d89612b33e8ee9d0f899bc3bc03fd8ea6ea68ef0dc9c6d1f0270",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -1003,9 +1003,9 @@
         "primaryLocationLineHash": "b9bd187e1529a8a8:1",
         "primaryLocationStartColumnFingerprint": "28"
       },
-      "canonicalFlowSha256": "d4c93e4a643b925d5005983422255491bdb326001f50d1646690ef0346ea4872",
+      "canonicalFlowSha256": "4dc05f03200a24e1460adbd6d1df139f2963cf162c957471fa7abb7655f57515",
       "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
-      "rationale": "An authenticated fixed-account Cloudflare create response must match the exact run-specific disposable database name and UUID before it becomes databaseId in a fixed wrangler.json. The config is written wx 0600 in a newly created 0700 runner directory, contains fixed bindings, and is used only by explicit Development shipping qualification with a nonce/proof and no provider credentials in the child. Tests reject local/foreign/rerun contexts, verify durable intent and fixed database scope, and block stranded/partial qualification. The generated remote D1 test config is intentional, not arbitrary executable/file content.",
+      "rationale": "An authenticated fixed-account Cloudflare create response must match the exact run-specific disposable database name and UUID before it becomes databaseId in a fixed wrangler.json. The config is written wx 0600 in a newly created 0700 runner directory with fixed bindings and a nonce/proof. The isolated test process resolves Vitest from its API workspace dependency, uses synthetic commerce configuration with five protected runner-identity and application-database-exclusion overrides, and retains the existing Cloudflare binding-token allowlist. Merchant credentials and release evidence keys are filtered. Tests exercise the real subprocess boundary, reject local/foreign/rerun contexts, verify durable intent and fixed database scope, and block stranded/partial qualification. The generated remote D1 test configuration is intentional and cannot select an arbitrary pathname or executable.",
       "guardPaths": [
         "products/shop/scripts/native-shipping-qualification.mjs"
       ],
