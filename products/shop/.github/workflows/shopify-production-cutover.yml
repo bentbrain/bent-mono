@@ -88,15 +88,10 @@ jobs:
           pause-sales "Launch qualification is incomplete."
       - name: Configure Shopify Worker secrets
         run: |
-          jq -n \
-            --arg shopifyDomain "$SHOPIFY_ADMIN_STORE_DOMAIN" \
-            --arg shopifyClientId "$SHOPIFY_CLIENT_ID" \
-            --arg shopifyClientSecret "$SHOPIFY_CLIENT_SECRET" \
-            '{
-              SHOPIFY_ADMIN_STORE_DOMAIN: $shopifyDomain,
-              SHOPIFY_CLIENT_ID: $shopifyClientId,
-              SHOPIFY_CLIENT_SECRET: $shopifyClientSecret
-            }' |
+          SHOPIFY_ADMIN_STORE_DOMAIN="$SHOPIFY_ADMIN_STORE_DOMAIN" SHOPIFY_CLIENT_ID="$SHOPIFY_CLIENT_ID" SHOPIFY_CLIENT_SECRET="$SHOPIFY_CLIENT_SECRET" node -e '
+            const names = ["SHOPIFY_ADMIN_STORE_DOMAIN", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"];
+            process.stdout.write(JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]]))) + "\n");
+          ' |
             (cd workers/api && bunx --no-install wrangler secret bulk --env production)
       - name: Refresh Printify catalogue
         run: >-

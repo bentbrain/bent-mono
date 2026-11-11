@@ -145,9 +145,9 @@ jobs:
           mkdir "$RUNNER_TEMP/shop-trust-terraform"
           unzip -q "$archive" -d "$RUNNER_TEMP/shop-trust-terraform"
       - run: node scripts/install-browsers.mjs shop
-      - run: node scripts/ci-check.mjs shop
-        env:
-          SHOP_TRUST_SCHEMA_TERRAFORM: ${{ runner.temp }}/shop-trust-terraform/terraform
+      - run: |
+          export SHOP_TRUST_SCHEMA_TERRAFORM="$RUNNER_TEMP/shop-trust-terraform/terraform"
+          node scripts/ci-check.mjs shop
   public-source:
     name: public-source
     runs-on: ubuntu-latest

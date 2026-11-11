@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { spawnSync } from "node:child_process";
+import childProcess, { spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { promisify } from "node:util";
+import { REPOSITORY_ROOT } from "./monorepo-source.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { runPersonalTerraform } from "./aws-personal-terraform.mjs";
 import { validatePersonalArguments, PERSONAL_CONFIG_PATH } from "./aws-personal-guard.mjs";
@@ -727,4 +730,55 @@ test("only an enumerated exact existing child-backed parent observation may be a
     assert.throws(() => inspectRepositoryTrustPlan(changed, baseline, "development"));
     const unknownChild = structuredClone(baseline); unknownChild.parentObservations[0].after[0].policy = JSON.stringify({ Version: "2012-10-17", Statement: [] });
     assert.throws(() => inspectRepositoryTrustPlan(p, unknownChild, "development"));
+});
+
+
+test("guarded repository trust admits only its source root under differing ownership", async t => {
+    const original = childProcess.execFile, calls = [];
+    let mode = "clean", listings = 0;
+    const execute = async (file, args, options) => {
+        assert.equal(file, "/usr/bin/git");
+        assert.deepEqual(options.env, { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0" });
+        assert.equal(options.cwd, REPOSITORY_ROOT);
+        calls.push(args);
+        const result = await promisify(original)(file, args, { ...options,
+            env: { ...options.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" } });
+        // Keep real Git ownership checks. Supply deterministic checkout metadata
+        // so the guarded route is testable while the developer has source edits.
+        if (args.includes("rev-parse")) result.stdout = (mode === "wrong-head" ? "b" : "a").repeat(40) + "\n";
+        if (args.includes("status")) result.stdout = mode === "dirty" ? " M package.json\n" : "";
+        if (args.includes("ls-files") && mode === "changed-source" && ++listings > 1)
+            result.stdout = result.stdout.split("\0").filter(path => path !== "package.json").join("\0");
+        return result;
+    };
+    const instrumented = () => { throw new Error("Use the asynchronous Git caller"); };
+    instrumented[promisify.custom] = execute;
+    childProcess.execFile = instrumented;
+    syncBuiltinESMExports();
+    let guarded;
+    try { guarded = await import("./aws-personal-repository-trust.mjs?mounted-owner-test"); }
+    finally { childProcess.execFile = original; syncBuiltinESMExports(); }
+    for (const scenario of ["clean", "wrong-head", "dirty", "changed-source"]) {
+        mode = scenario; listings = 0;
+        const h = await harness(t);
+        delete h.dependencies.inspectTrustCheckout;
+        const invoke = () => guarded.runRepositoryTrust(["development", "discover"], h.dependencies);
+        if (scenario === "clean") {
+            const result = JSON.parse(await invoke());
+            const record = JSON.parse(await readFile(join(result.discoveryDirectory, "discovery.json")));
+            assert.ok(record.source.files.some(([path]) => path === "products/shop/scripts/aws-personal-repository-trust.mjs"));
+            assert.equal(record.source.sha256, result.sourceSha256);
+        } else {
+            await assert.rejects(invoke(), scenario === "changed-source" ? /source\/remote object\/state changed/ : /clean exact reviewed source/);
+            if (scenario !== "changed-source") assert.deepEqual(h.commands, []);
+        }
+    }
+    const other = await mkdtemp(join(tmpdir(), "shop-untrusted-repository-"));
+    t.after(() => rm(other, { recursive: true, force: true }));
+    assert.equal(spawnSync("/usr/bin/git", ["init", "--quiet"], { cwd: other }).status, 0);
+    const args = calls.find(args => args.includes("status"));
+    const rejected = spawnSync("/usr/bin/git", args, { cwd: other, encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" } });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /dubious ownership/);
 });

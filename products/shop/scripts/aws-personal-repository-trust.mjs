@@ -15,6 +15,7 @@ import { trustCheck as check, trustEnvironments, targetPrefix, freshTime, verify
 const exec = promisify(execFile);
 const gitEnvironment = { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0" };
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+const sourceGit = ["-c", `safe.directory=${ROOT.replace(/\/$/, "")}`];
 const PRIVATE = join(BOOTSTRAP_PRIVATE, "repository-trust");
 const AWS = "registry.terraform.io/hashicorp/aws";
 const PROVIDER = `provider["${AWS}"]`;
@@ -192,7 +193,7 @@ async function renderTrustModule(directory, baseline, stage, verifyOnly = false)
     return manifest;
 }
 async function sourceEvidence() {
-    const { stdout } = await exec("/usr/bin/git", ["ls-files", "-z"], { cwd: ROOT, env: gitEnvironment, maxBuffer: 16 * 1024 * 1024 });
+    const { stdout } = await exec("/usr/bin/git", [...sourceGit, "ls-files", "-z"], { cwd: ROOT, env: gitEnvironment, maxBuffer: 16 * 1024 * 1024 });
     const paths = stdout.split("\0").filter(name => name && (/^(scripts\/|\.github\/|products\/shop\/(scripts\/|infra\/|\.github\/))/.test(name) || /(^|\/)AGENTS.md$/.test(name) || ["bun.lock", "package.json", "products/shop/package.json", "SOURCE_PROVENANCE.json"].includes(name))).sort();
     const files = [];
     for (const path of paths) files.push([path, sha(await readRegularFile(join(ROOT, path)))]);
@@ -200,8 +201,8 @@ async function sourceEvidence() {
 }
 async function checkout(dependencies, expected) {
     if (dependencies.inspectTrustCheckout) return dependencies.inspectTrustCheckout(expected);
-    const head = (await exec("/usr/bin/git", ["rev-parse", "HEAD"], { cwd: ROOT, env: gitEnvironment })).stdout.trim();
-    const dirty = (await exec("/usr/bin/git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: ROOT, env: gitEnvironment })).stdout.trim();
+    const head = (await exec("/usr/bin/git", [...sourceGit, "rev-parse", "HEAD"], { cwd: ROOT, env: gitEnvironment })).stdout.trim();
+    const dirty = (await exec("/usr/bin/git", [...sourceGit, "status", "--porcelain", "--untracked-files=normal"], { cwd: ROOT, env: gitEnvironment })).stdout.trim();
     check(head === expected && !dirty, "clean exact reviewed source checkout required.");
 }
 function backendIdentity(backend) {

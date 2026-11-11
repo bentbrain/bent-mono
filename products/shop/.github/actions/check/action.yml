@@ -104,7 +104,11 @@ runs:
         key: ${{ runner.os }}-${{ runner.arch }}-checks-v2-${{ hashFiles('bun.lock') }}-${{ inputs.suite }}-${{ inputs.browser-shard }}-${{ github.sha }}
     - name: Summarize task cache evidence
       if: always()
-      run: node scripts/cache-report.mjs "${{ runner.temp }}/task-cache-${{ github.job }}.json"
+      id: cache-report
+      run: |
+        path="$RUNNER_TEMP/task-cache-$GITHUB_JOB.json"
+        node scripts/cache-report.mjs "$path"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
       shell: bash
       working-directory: products/shop
     - name: Preserve task cache evidence
@@ -112,12 +116,15 @@ runs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: task-cache-${{ github.run_id }}-${{ github.job }}-${{ inputs.browser-shard }}
-        path: ${{ runner.temp }}/task-cache-${{ github.job }}.json
+        path: ${{ steps.cache-report.outputs.path }}
         if-no-files-found: ignore
         retention-days: 14
     - name: Record validated component inputs
       if: github.ref == 'refs/heads/main' && github.run_attempt == 1 && inputs.suite == 'all'
-      run: node scripts/validation-inputs.mjs
+      id: validation-inputs
+      run: |
+        node scripts/validation-inputs.mjs
+        echo "path=$RUNNER_TEMP/validation-inputs-$GITHUB_JOB.json" >> "$GITHUB_OUTPUT"
       shell: bash
       working-directory: products/shop
     - name: Preserve validated component inputs
@@ -125,6 +132,6 @@ runs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: validation-inputs-${{ github.run_id }}-${{ github.job }}
-        path: ${{ runner.temp }}/validation-inputs-${{ github.job }}.json
+        path: ${{ steps.validation-inputs.outputs.path }}
         if-no-files-found: ignore
         retention-days: 30
