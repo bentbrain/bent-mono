@@ -1,7 +1,7 @@
 import { completionReference } from "./native-completion-authority.mjs";
 import { forwardRecoveryReference } from "./native-forward-recovery-reference.mjs";
 import { rollbackRecoveryReference } from "./native-rollback-reference.mjs";
-import { recoveryReference, rendererReference, failedQualificationReference } from "./native-qualification-reference.mjs";
+import { recoveryReference, rendererReference, failedQualificationReference, failedInventoryInspectionDescriptor } from "./native-qualification-reference.mjs";
 import { assertActionsIdentityContext } from "./native-ci-identity.mjs";
 
 export function developmentOperation(env) {
@@ -12,7 +12,10 @@ export function developmentOperation(env) {
   if (env.NATIVE_SCHEDULED_QUALIFICATION === "true" && (operation !== "qualify-all" || env.GITHUB_REF !== "refs/heads/main"))
     throw Error("Scheduled checks require full main qualification.");
   if (!["full", "api"].includes(mode) || (mode === "api" && operation !== "release")) throw Error("API-only mode requires a release operation.");
-  if (operation === "cleanup-failed-qualification") {
+  if (operation === "inspect-failed-qualification") {
+    failedInventoryInspectionDescriptor(env.NATIVE_QUALIFICATION_REFERENCE, env.NATIVE_VERIFY_RELEASE);
+    if (env.GITHUB_REF !== "refs/heads/main") throw Error("Failed qualification inspection requires main.");
+  } else if (operation === "cleanup-failed-qualification") {
     failedQualificationReference(env.NATIVE_QUALIFICATION_REFERENCE, env.NATIVE_VERIFY_RELEASE);
     if (env.GITHUB_REF !== "refs/heads/main") throw Error("Failed qualification cleanup requires main.");
   } else if (operation === "cleanup-qualification") {
@@ -42,9 +45,9 @@ export function developmentOperation(env) {
   }
   if (operation !== "complete-forward-release" && env.NATIVE_COMPLETION_REFERENCE) throw Error("Completion reference requires its dedicated operation.");
   if (operation !== "stage-forward-completion-authority" && env.NATIVE_COMPLETION_PACKAGE) throw Error("Completion package requires its dedicated staging operation.");
-  const referencedRelease = ["qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification"].includes(operation);
+  const referencedRelease = ["qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification", "inspect-failed-qualification"].includes(operation);
   if (env.GITHUB_WORKFLOW_REF !== `bentbrain/bent-mono/.github/workflows/native-development.yml@${env.GITHUB_REF}` ||
-    !["stage-forward-completion-authority", "complete-forward-release", "plan", "build-candidate", "release", "rollback", "recover-rollback", "stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release", "qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification"].includes(operation) ||
+    !["stage-forward-completion-authority", "complete-forward-release", "plan", "build-candidate", "release", "rollback", "recover-rollback", "stage-forward-recovery-authority", "plan-forward-recovery", "recover-forward-release", "qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "verify-qualification", "repair-schedule", "cleanup-qualification", "cleanup-failed-qualification", "inspect-failed-qualification"].includes(operation) ||
     (operation === "repair-schedule" && env.GITHUB_REF !== "refs/heads/main") ||
     (operation !== "plan" && (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_RUN_ATTEMPT !== "1")) ||
     (!["rollback", "recover-rollback"].includes(operation) && env.NATIVE_ROLLBACK_RELEASE) ||

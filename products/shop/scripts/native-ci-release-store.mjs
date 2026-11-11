@@ -18,6 +18,7 @@ export function developmentReleaseObjectKey(env, name) {
     return `source/releases/native-${PRODUCTION_EVIDENCE_RUN_ID}/${stem}-${env.NATIVE_VERIFY_RELEASE}-run-${env.GITHUB_RUN_ID}${extension}`;
 }
 export async function createDevelopmentReleaseStore(env = process.env, run) {
+    check(env.NATIVE_OPERATION !== "inspect-failed-qualification");
     const call = await createDevelopmentCICall(env, run);
     check(env.RUNNER_TEMP?.startsWith("/") && env.GITHUB_WORKFLOW_REF === `bentbrain/bent-mono/.github/workflows/native-development.yml@${env.GITHUB_REF}`);
     const directory = await mkdtemp(join(env.RUNNER_TEMP, "native-evidence-"));

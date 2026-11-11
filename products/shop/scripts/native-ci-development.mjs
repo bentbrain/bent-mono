@@ -1,3 +1,5 @@
+import { inspectRetainedFailedQualification } from "./native-failed-qualification-inspection.mjs";
+import { pathToFileURL } from "node:url";
 import { runFailedForwardCompletion } from "./native-failed-forward-completion.mjs";
 import { stageDevelopmentForwardRecoveryAuthority } from "./native-forward-recovery-staging.mjs";
 import { runDevelopmentForwardRecovery } from "./native-forward-recovery.mjs";
@@ -12,7 +14,7 @@ import { readFile } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { runCloudBuild, verifyCandidateCheckout } from "./native-ci-build.mjs";
 import { prepareDevelopmentImage } from "./native-ci-terraform.mjs";
-import { loadVerifiedCandidate } from "./native-ci-candidate.mjs";
+import { developmentCandidateReceipt, loadVerifiedCandidate } from "./native-ci-candidate.mjs";
 import { developmentCloudflare, inspectDevelopmentCloudflare } from "./native-ci-cloudflare.mjs";
 import { inspectDevelopmentRuntime } from "./native-ci-runtime.mjs";
 import { prepareDevelopmentWorker, verifyDevelopmentPairStatus, inspectDevelopmentWorker } from "./native-ci-worker.mjs";
@@ -25,14 +27,18 @@ import { probeDevelopmentFunctions } from "./native-ci-health.mjs";
 import { verifySavedDevelopmentQualification } from "./native-ci-qualification-verification.mjs";
 import { cleanupDevelopmentQualification, ensureDevelopmentStorageLifecycle } from "./native-ci-qualification-cleanup.mjs";
 import { repairDevelopmentSchedule } from "./native-ci-schedule-repair.mjs";
-try {
-    const env = process.env, operation = developmentOperation(env);
-    const cf = developmentCloudflare(env);
-    await verifyCandidateCheckout(env);
+export async function executeNativeDevelopment(env = process.env, dependencies = {}) {
+    const operation = developmentOperation(env);
+    const cf = (dependencies.cloudflare ?? developmentCloudflare)(env);
+    await (dependencies.verifyCheckout ?? verifyCandidateCheckout)(env);
     const releaseId = `native-${env.GITHUB_RUN_ID}`;
     let operationFailure, functional;
+    const cleanup = {};
     try {
-        if (["stage-forward-completion-authority", "complete-forward-release"].includes(operation)) {
+        if (operation === "inspect-failed-qualification") {
+            console.info(JSON.stringify(await (dependencies.inspectFailedQualification ?? inspectRetainedFailedQualification)(env, { cf })));
+        }
+        else if (["stage-forward-completion-authority", "complete-forward-release"].includes(operation)) {
             console.info(JSON.stringify(await runFailedForwardCompletion(env)));
         }
         else if (operation === "stage-forward-recovery-authority") {
@@ -73,7 +79,7 @@ try {
             console.info(JSON.stringify(await qualifyDevelopmentLoad(env)));
         }
         else if (["qualify-all", "qualify-components"].includes(operation)) {
-            functional = operation === "qualify-all" ? await qualifyDevelopmentRelease(env) : await qualifyDevelopmentComponents(env);
+            functional = operation === "qualify-all" ? await (dependencies.qualifyRelease ?? qualifyDevelopmentRelease)(env, { cleanup }) : await (dependencies.qualifyComponents ?? qualifyDevelopmentComponents)(env, { cleanup });
             await writeQualificationPointer(env, functional.evidence);
             console.info(JSON.stringify(functional));
         }
@@ -98,9 +104,9 @@ try {
             const runtime = await inspectDevelopmentRuntime(env);
             console.info(JSON.stringify({ bindings, runtime }));
             let receipt;
-            if (env.NATIVE_CANDIDATE_RECEIPT) receipt = JSON.parse(env.NATIVE_CANDIDATE_RECEIPT);
+            if (env.NATIVE_CANDIDATE_RECEIPT) receipt = await developmentCandidateReceipt(env);
             try {
-                if (!receipt && env.NATIVE_RELEASE_MODE === "api") receipt = JSON.parse(resolveProtectedTemplate(await readFile(new URL("../infra/story-video-lambda/development-candidate.json", import.meta.url), "utf8")));
+                if (!receipt && env.NATIVE_RELEASE_MODE === "api") receipt = await developmentCandidateReceipt(env);
             }
             catch (error) {
                 if (error.code !== "ENOENT")
@@ -138,19 +144,34 @@ try {
         try {
             console.info(JSON.stringify(functional
                 ? await finishQualification(env, cf, await createDevelopmentReleaseStore(env), functional)
-                : await cleanupDevelopmentQualification(env, cf)));
+                : await (dependencies.cleanup ?? cleanupDevelopmentQualification)(env, cf, cleanup)));
         }
         catch (error) {
             if (!operationFailure)
                 operationFailure = error;
             else
-                console.error("Qualification cleanup failed after the primary operation failure.");
+                operationFailure = new AggregateError([operationFailure, error], "Qualification operation and cleanup failed.", { cause: operationFailure });
         }
     }
     if (operationFailure)
         throw operationFailure;
 }
-catch (error) {
-    console.error(error instanceof Error ? error.message : "Development operation failed.");
-    process.exitCode = 1;
+export function reportDevelopmentFailure(error, report = console.error, seen = new Set()) {
+    if (seen.has(error)) return;
+    seen.add(error);
+    report(error);
+    // Error inspection abbreviates shared frames, and V8 serialization omits
+    // AggregateError.errors. Preserve each original stack in encrypted capture.
+    if (error instanceof Error) {
+        report(error.stack);
+        if (error.cause) reportDevelopmentFailure(error.cause, report, seen);
+        if (error instanceof AggregateError) for (const underlying of error.errors) reportDevelopmentFailure(underlying, report, seen);
+    }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    try { await executeNativeDevelopment(); }
+    catch (error) {
+        reportDevelopmentFailure(error);
+        process.exitCode = 1;
+    }
 }

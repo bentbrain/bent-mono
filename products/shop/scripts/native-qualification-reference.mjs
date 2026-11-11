@@ -45,3 +45,14 @@ export function failedQualificationReference(value, releaseId) {
     check(Number.isSafeInteger(runId), 'original failed run ID');
     return { reference, runId };
 }
+export function failedInventoryInspectionDescriptor(value, releaseId) {
+    check(typeof value === 'string' && value.length <= 4096, 'bounded failed inventory inspection descriptor');
+    const descriptor = JSON.parse(value);
+    check(descriptor && Object.keys(descriptor).sort().join() === 'key,qualificationRunId,releaseId,schemaVersion,sourceCommit' &&
+        descriptor.schemaVersion === 1 && Number.isSafeInteger(descriptor.qualificationRunId) && descriptor.qualificationRunId > 0 &&
+        descriptor.releaseId === releaseId && /^native-[1-9][0-9]*$/.test(releaseId ?? '') &&
+        /^[a-f0-9]{40}$/.test(descriptor.sourceCommit ?? ''), 'exact original failed run, release and source descriptor');
+    const expected = `source/releases/native-${protectedConfig('resource_8d0190ecec7d')}/qualification-cleanup-inventory-${releaseId}-run-${descriptor.qualificationRunId}.json`;
+    check(descriptor.key === expected, 'derived original failed inventory key');
+    return descriptor;
+}

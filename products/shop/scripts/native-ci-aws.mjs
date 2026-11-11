@@ -1,3 +1,4 @@
+import { failedInventoryInspectionDescriptor } from "./native-qualification-reference.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -21,18 +22,28 @@ export async function createDevelopmentCICall(env = process.env, run = execute) 
         AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION, AWS_CONFIG_FILE: "/dev/null", AWS_SHARED_CREDENTIALS_FILE: "/dev/null",
         BOTO_CONFIG: "/dev/null", AWS_EC2_METADATA_DISABLED: "true", AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true",
         AWS_PAGER: "", AWS_CLI_AUTO_PROMPT: "off", AWS_MAX_ATTEMPTS: "2" };
+    const inspection = env.NATIVE_OPERATION === "inspect-failed-qualification"
+        ? failedInventoryInspectionDescriptor(env.NATIVE_QUALIFICATION_REFERENCE, env.NATIVE_VERIFY_RELEASE) : null;
     const call = async (args) => {
+        if (inspection && !(args.length === 2 && args[0] === "sts" && args[1] === "get-caller-identity")) {
+            const at = flag => args[args.indexOf(flag) + 1];
+            if (args[0] !== "s3api" || !["head-object", "get-object"].includes(args[1]) ||
+                at("--bucket") !== `forever-tee-video-development-${ACCOUNT}-${REGION}` || at("--expected-bucket-owner") !== ACCOUNT ||
+                ![inspection.key, `source/releases/${inspection.releaseId}/prepared.json`].includes(at("--key"))) fail();
+        }
         try {
             const output = await run("aws", [...args, "--region", REGION, "--output", "json", "--no-cli-pager"], { env: ["stage-forward-recovery-authority", "stage-forward-completion-authority", "complete-forward-release"].includes(env.NATIVE_OPERATION) && args[0] === "s3api" && args[1] === "put-object"
                 ? { ...childEnv, AWS_MAX_ATTEMPTS: "1" } : childEnv, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024 });
             return JSON.parse(output.stdout);
         }
         catch (error) {
-            // Negative permission/lock tests may inspect only the service error code,
-            // never raw command output, credentials or object contents.
+            // Public guidance uses the service code. Qualification failures retain the
+            // original exception for the protected encrypted diagnostic capture.
+            const cause = ["qualify", "qualify-exhaustion", "qualify-faults", "qualify-termination", "qualify-load", "qualify-all", "qualify-components", "cleanup-qualification", "cleanup-failed-qualification"].includes(env.NATIVE_OPERATION) ? error : undefined;
             const code = typeof error.stderr === "string" ? /\(([A-Za-z0-9]+)\) when calling the [A-Za-z0-9]+ operation/.exec(error.stderr)?.[1] : undefined;
             if (code)
-                throw Object.assign(new Error("Scoped CI AWS request failed."), { code });
+                throw Object.assign(new Error("Scoped CI AWS request failed.", { cause }), { code });
+            if (cause) throw new Error("Native CI AWS verification failed; inspect protected diagnostics.", { cause });
             fail();
         }
     };

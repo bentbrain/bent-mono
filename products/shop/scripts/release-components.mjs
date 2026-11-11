@@ -61,7 +61,7 @@ export async function componentBaselines({ api, target }) {
         let components;
         if (run.path === `.github/workflows/native-${target === 'production' ? 'production' : 'development'}.yml`) {
             const operation = /^Native (?:development|production) · ([a-z-]+) ·/.exec(run.display_title ?? '')?.[1];
-            if (['plan', 'verify-qualification', 'qualify', 'qualify-all', 'qualify-exhaustion', 'qualify-faults', 'qualify-termination', 'qualify-load', 'monitor', 'inspect-release', 'verify-candidate', 'inspect-image-plan', 'canary', 'cleanup-qualification', 'cleanup-failed-qualification', 'qualify-components'].includes(operation))
+            if (['plan', 'verify-qualification', 'qualify', 'qualify-all', 'qualify-exhaustion', 'qualify-faults', 'qualify-termination', 'qualify-load', 'monitor', 'inspect-release', 'verify-candidate', 'inspect-image-plan', 'canary', 'cleanup-qualification', 'cleanup-failed-qualification', 'inspect-failed-qualification', 'qualify-components'].includes(operation))
                 continue;
             if (!['release', 'promote'].includes(operation))
                 break;

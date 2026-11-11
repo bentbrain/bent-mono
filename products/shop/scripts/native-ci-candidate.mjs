@@ -1,4 +1,4 @@
-import { protectedConfig } from "./protected-config.mjs";
+import { protectedConfig, resolveProtectedTemplate } from "./protected-config.mjs";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,6 +11,11 @@ const BUCKET = `${PROJECT}-${ACCOUNT}-${REGION}`;
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = (value, reason) => { if (!value)
     throw new Error(`Native candidate verification failed: ${reason}`); };
+export async function developmentCandidateReceipt(env = process.env) {
+    return env.NATIVE_CANDIDATE_RECEIPT
+        ? JSON.parse(env.NATIVE_CANDIDATE_RECEIPT)
+        : JSON.parse(resolveProtectedTemplate(await readFile(new URL("../infra/story-video-lambda/development-candidate.json", import.meta.url), "utf8")));
+}
 export function verifyCandidateRecord(receipt, candidate, currentDigest) {
     assertDeployableImage(candidate?.imageDigest);
     check(receipt.schemaVersion === 1 && /^[a-f0-9]{64}$/.test(currentDigest) && receipt.sourceDigest === currentDigest &&
@@ -27,11 +32,11 @@ export function verifyCandidateRecord(receipt, candidate, currentDigest) {
         candidate.deploymentPerformed === false, "immutable Development image and protocol.");
     return candidate;
 }
-export async function loadVerifiedCandidate(receipt, env = process.env) {
-    const call = await createDevelopmentCICall(env);
+export async function loadVerifiedCandidate(receipt, env = process.env, dependencies = {}) {
+    const call = await createDevelopmentCICall(env, dependencies.run);
     check(env.GITHUB_WORKFLOW_REF === `bentbrain/bent-mono/.github/workflows/native-development.yml@${env.GITHUB_REF}` &&
         env.RUNNER_TEMP?.startsWith("/"), "cloud-only candidate verification.");
-    await verifyCandidateCheckout(env);
+    await (dependencies.verifyCheckout ?? verifyCandidateCheckout)(env);
     check(typeof receipt.candidateKey === "string" && /^source\/candidates\/[a-f0-9]{64}\/\d+\.json$/.test(receipt.candidateKey) &&
         typeof receipt.candidateVersion === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._~+/=-]{0,1023}$/.test(receipt.candidateVersion), "receipt object path.");
     process.umask(0o077);
@@ -41,7 +46,7 @@ export async function loadVerifiedCandidate(receipt, env = process.env) {
     await call(["s3api", "get-object", ...bucket, "--key", receipt.candidateKey, "--version-id", receipt.candidateVersion, recordPath]);
     const bytes = await readFile(recordPath);
     check(bytes.length < 16384 && hash(bytes) === receipt.candidateSha256, "candidate record bytes.");
-    const packaged = await packageAppSource(directory);
+    const packaged = await (dependencies.packageSource ?? packageAppSource)(directory);
     const candidate = verifyCandidateRecord(receipt, JSON.parse(bytes), packaged.sourceDigest);
     check(new RegExp(`^${PROJECT}:[0-9a-f-]{36}$`).test(candidate.buildId), "original build ID.");
     const sourcePath = join(directory, "source.zip");

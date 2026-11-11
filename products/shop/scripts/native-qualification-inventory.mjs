@@ -104,7 +104,7 @@ async function bounded(items, execute) {
     while (pending.length) await execute(pending.shift());
   }));
   const failures = results.filter(result => result.status === 'rejected');
-  if (failures.length) throw Error('Qualification object cleanup incomplete; resume the saved inventory.');
+  if (failures.length) throw new AggregateError(failures.map(failure => failure.reason), 'Qualification object cleanup incomplete; resume the saved inventory.');
 }
 export async function deleteQualificationInventory(cf, inventory, env, { fence } = {}) {
   validateQualificationInventory(inventory,env);
