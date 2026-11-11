@@ -450,6 +450,8 @@ jobs:
         run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - run: bun install --frozen-lockfile
         working-directory: .
+      - name: Use the primary Ubuntu archive
+        run: node ../../scripts/prepare-ubuntu-archive.mjs
       - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
       - run: |
           node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
