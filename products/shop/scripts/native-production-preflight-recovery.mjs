@@ -1,3 +1,4 @@
+import { equalWorkerSettings } from "./native-worker-settings.mjs";
 import { protectedConfig } from "./protected-config.mjs";
 import { isDeepStrictEqual as equal } from "node:util";
 import { productionAWS } from "./native-production-ci.mjs";
@@ -55,7 +56,7 @@ export async function executeProductionReleaseAbort({ cf, store, releaseId, reco
     }));
     check(equal(previous.before, prepared.previous.worker) && equal(previous.before, fallbackWorker) &&
         equal(previousContent, fallbackWorker.content) && equal(previous.consumer, consumer) &&
-        equal(previous.settings, baseline.settings) && previous.schedules?.schedules?.length === 1 &&
+        equalWorkerSettings(previous.settings, baseline.settings) && previous.schedules?.schedules?.length === 1 &&
         previous.schedules.schedules[0].cron === cron, "preserved prior Worker baseline.");
     const intent = await store.save("release-abort-intent.json", Buffer.from(JSON.stringify({ releaseId, previousReleaseId, phase,
         failedPreparation: preparation, recoveryRunId, verifierSourceCommit })));

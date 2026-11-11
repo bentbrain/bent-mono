@@ -1,3 +1,4 @@
+import { equalCompletionState } from "./native-worker-settings.mjs";
 import { isDeepStrictEqual as equal } from "node:util";
 import { requireReleaseChecks, githubApi as canonicalGithub } from "../../../scripts/require-release-checks.mjs";
 import { githubApi } from "./github-actions.mjs";
@@ -15,9 +16,9 @@ import { enforceWorkerRelease } from "../apps/web/scripts/verify-worker-release.
 import { recordReleaseEvent, resumeVerifiedRelease } from "./native-release-pause.mjs";
 import { forwardRecoveryObject } from "./native-forward-recovery-reference.mjs";
 import { recoveryCheck as check, recoveryHash as hash } from "./native-forward-recovery-inspection.mjs";
-import { completionReference, approvedCompletionPackage, validateCompletionAuthority } from "./native-completion-authority.mjs";
+import { completionReference, approvedCompletionPackage, validateCompletionAuthority, isVerificationCompletion } from "./native-completion-authority.mjs";
 import { completionInputs, inspectCompletionState, verifyCompletionDrain } from "./native-completion-inspection.mjs";
-import { claimFailedRecoveryCompletion } from "./native-completion-claim.mjs";
+import { claimFailedRecoveryCompletion, claimCompletionVerification } from "./native-completion-claim.mjs";
 import { prepareCompletionApi } from "./native-completion-worker.mjs";
 
 export async function runFailedForwardCompletion(env, dependencies = {}) {
@@ -41,13 +42,15 @@ export async function runFailedForwardCompletion(env, dependencies = {}) {
     check(hash(snapshot) === authority.snapshot.sha256, "completion snapshot bytes changed.");
     approved = JSON.parse(snapshot);
   }
-  const inputs = await completionInputs(store, authority), extra = [];
+  if (!stage) check(JSON.parse(env.NATIVE_COMPLETION_REFERENCE).schemaVersion === authority.schemaVersion, "completion reference version differs from authority.");
+  const inputs = await completionInputs(store, authority), extra = [], verification = isVerificationCompletion(authority);
   const runtimeRead = dependencies.runtimeRead ?? (() => inspectDevelopmentRuntime(env));
   const inspect = liveApi => inspectCompletionState({ cf, client, staging, store, authority, inputs, runtimeRead, extra, liveApi, env,
+    interruptedRunRead: dependencies.interruptedRunRead ?? (() => githubApi({ token: env.GITHUB_TOKEN, repository: env.GITHUB_REPOSITORY })(`actions/runs/${authority.interruptedCompletion.runId}/attempts/1`)),
     bindingsRead: dependencies.bindingsRead ?? (() => inspectDevelopmentCloudflare(env)),
     runRead: dependencies.runRead ?? (() => githubApi({ token: env.GITHUB_TOKEN, repository: env.GITHUB_REPOSITORY })(`actions/runs/${authority.failedRunId}/attempts/1`)) });
   const state = await inspect();
-  check(hash(JSON.stringify(state)) === authority.snapshot.sha256 && (!approved || equal(state, approved)), "current complete failed state differs from independently approved snapshot.");
+  check((approved ? equalCompletionState(state, approved) : hash(JSON.stringify(state)) === authority.snapshot.sha256), "current complete failed state differs from independently approved snapshot.");
   inputs.state = state;
   const save = async (filename, value) => {
     const bytes = Buffer.from(JSON.stringify(value)), ref = await store.save(filename, bytes);
@@ -58,16 +61,57 @@ export async function runFailedForwardCompletion(env, dependencies = {}) {
   };
   if (stage) {
     const snapshot = await save("completion-snapshot.json", state);
-    check(equal(await inspect(), state), "state changed during snapshot staging.");
+    check(equalCompletionState(await inspect(), state), "state changed during snapshot staging.");
     const staged = await save("completion-authority.json", { ...authority, snapshot });
-    check(equal(await inspect(), state), "state changed during authority staging.");
-    return { operation, reference: { schemaVersion: 1, authority: staged }, deploymentPerformed: false, admissionsPaused: true, rollbackQualified: false };
+    check(equalCompletionState(await inspect(), state), "state changed during authority staging.");
+    return { operation, reference: { schemaVersion: authority.schemaVersion, authority: staged }, deploymentPerformed: false, admissionsPaused: true, rollbackQualified: false };
   }
   const currentCandidate = await (dependencies.candidate ?? loadVerifiedCandidate)(JSON.parse(env.NATIVE_CANDIDATE_RECEIPT), env);
   const { verifiedForCommit: originalVerification, ...originalCandidate } = inputs.prepared.candidate;
   const { verifiedForCommit: toolVerification, ...observedCandidate } = currentCandidate;
   check(originalVerification === authority.applicationSourceCommit && toolVerification === authority.toolSourceCommit &&
     equal(originalCandidate, observedCandidate), "fresh immutable candidate authentication must bind original application and current tool source independently.");
+  const statusRead = dependencies.verifyStatus ?? (async () => {
+    const value = await verifyDevelopmentPairStatus(env, inputs.prepared.candidate, inputs.prepared.releaseId, fetch, { sourceCommit: authority.applicationSourceCommit });
+    await enforceWorkerRelease({ enforcement: "1", apiUrl: env.WORKER_URL, sharedSecret: env.FOREVER_TEE_API_SHARED_SECRET });
+    return { ...value, artworkMediaCapabilityVerified: true };
+  });
+  if (verification) {
+    const verify = async () => {
+      check(equalCompletionState(await inspect(), state), "approved verification-only state changed.");
+      await verifyCompletionDrain(cf, state.control);
+    };
+    await verify(); await currentMain();
+    // This branch has no Worker preparation or deploy capability. The original
+    // consumed upload claim and completion preparation remain immutable.
+    const preparation = await save("completion-verification-prepared.json", { schemaVersion: 2, phase: authority.phase,
+      authority: reference, identity, currentCandidate, interruptedCompletion: authority.interruptedCompletion, state });
+    await verify(); await currentMain();
+    extra.push(await claimCompletionVerification({ cf, authority, reference, preparation, control: state.control, identity }));
+    await verify();
+    return resumeVerifiedRelease(cf, inputs.prepared.releaseId, async () => {
+      await verify(); await currentMain();
+      const status = await statusRead();
+      check(status?.protocolVerified === true && status.artworkMediaCapabilityVerified === true, "complete live protocol and artwork media verification required.");
+      await verify();
+      const evidence = await save("completion-verification-evidence.json", { schemaVersion: 2, phase: authority.phase,
+        authority: reference, preparation, identity, state, status });
+      await verify();
+      const executor = { worker: state.executor, namespaceId: inputs.original.namespaceId, lifecycle: state.executorLifecycle,
+        stagingEvidence: state.stagingEvidence, sourceCommit: authority.applicationSourceCommit, configSha256: inputs.uploads.executor.configSha256,
+        releaseId: inputs.prepared.releaseId, artifacts: inputs.interrupted.prepared.artifacts.printExecutor };
+      const executorEvidence = await save("completion-verification-executor.json", executor);
+      return { releaseId: inputs.prepared.releaseId, sourceCommit: authority.applicationSourceCommit, candidate: inputs.prepared.candidate,
+        worker: { ...state.api, printExecutor: { ...executor, evidence: executorEvidence } }, runtime: state.runtime, status,
+        completion: { authority: authority.interruptedCompletion.authority, preparation: authority.interruptedCompletion.preparation,
+          toolIdentity: inputs.interrupted.prepared.completion.toolIdentity, originalPreparation: authority.failedPreparation },
+        reconciliation: { schemaVersion: 2, phase: authority.phase, authority: reference, preparation, evidence, identity },
+        forwardRecovery: { authority: authority.originalAuthority, plan: authority.originalPlan, interrupted: inputs.prepared.interrupted, rollbackQualified: false }, rollbackQualified: false };
+    }, { expectedControl: state.control, rescheduleDispatchedPrints: false, beforeResume: async verifiedEvent => {
+      extra.push(verifiedEvent);
+      await currentMain(); await verify();
+    } });
+  }
   let deployedBindings;
   const verify = async liveApi => {
     const actual = await inspect(liveApi);
@@ -80,7 +124,7 @@ export async function runFailedForwardCompletion(env, dependencies = {}) {
     }
     const expected = liveApi ? { ...state, api: liveApi, apiSettings: authority.expectedApiSettings,
       latestApiSettings: authority.expectedApiLatestSettings, bindings: deployedBindings } : state;
-    check(equal(actual, expected), "approved current state changed before completion mutation.");
+    check(equalCompletionState(actual, expected), "approved current state changed before completion mutation.");
     // Latest settings must match the same uploaded active version's reviewed
     // runtime and bindings. The full latest read is sealed after deployment.
     await verifyCompletionDrain(cf, state.control);
@@ -115,11 +159,8 @@ export async function runFailedForwardCompletion(env, dependencies = {}) {
   await verify(live);
   return resumeVerifiedRelease(cf, inputs.prepared.releaseId, async () => {
     await verify(live);
-    const status = await (dependencies.verifyStatus ?? (async () => {
-      const value = await verifyDevelopmentPairStatus(env, inputs.prepared.candidate, inputs.prepared.releaseId, fetch, { sourceCommit: authority.applicationSourceCommit });
-      await enforceWorkerRelease({ enforcement: "1", apiUrl: env.WORKER_URL, sharedSecret: env.FOREVER_TEE_API_SHARED_SECRET });
-      return { ...value, artworkMediaCapabilityVerified: true };
-    }))();
+    const status = await statusRead();
+    check(status?.protocolVerified === true && status.artworkMediaCapabilityVerified === true, "complete live protocol and artwork media verification required.");
     await verify(live);
     return { releaseId: inputs.prepared.releaseId, sourceCommit: authority.applicationSourceCommit, candidate: inputs.prepared.candidate,
       worker: { ...live, printExecutor: { ...executor, evidence: executorEvidence } }, runtime: state.runtime, status,

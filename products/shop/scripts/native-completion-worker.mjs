@@ -1,5 +1,6 @@
+import { equalWorkerSettings } from "./native-worker-settings.mjs";
 import { execFile } from "node:child_process";
-import { promisify, isDeepStrictEqual as equal } from "node:util";
+import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import { sealReleaseEvidence } from "./release-evidence.mjs";
 const execute = promisify(execFile);
 const API = fileURLToPath(new URL("../workers/api/", import.meta.url));
 export async function prepareCompletionApi({ env, cf, store, authority, inputs, platform = process.platform, executeCommand = execute }) {
+  check(authority.schemaVersion === 1 && authority.kind === "development-failed-forward-completion-v1", "API upload requires the original v1 completion phase.");
   check(platform === "linux" && env.RUNNER_TEMP?.startsWith("/"), "cloud-only completion preparation required.");
   const directory = await mkdtemp(join(env.RUNNER_TEMP, "native-completion-"));
   const rendered = await renderWranglerConfig(join(API, "wrangler.jsonc"), join(directory, "api.json"));
@@ -58,7 +60,7 @@ export async function prepareCompletionApi({ env, cf, store, authority, inputs, 
       ...Object.entries(variables).flatMap(([key, value]) => ["--var", `${key}:${value}`])]);
     const live = await inspectDevelopmentWorker(cf, undefined, inputs.uploads.api);
     await verifyWorkerUploadEvidence(live.content, inputs.uploads.api, { store, env, filename: "completion-api-content-diagnostic.json" });
-    check(equal(await activeWorkerSettings(cf, live), authority.expectedApiSettings), "complete original API settings differ after upload.");
+    check(equalWorkerSettings(await activeWorkerSettings(cf, live), authority.expectedApiSettings), "complete original API settings differ after upload.");
     return live;
   } };
 }

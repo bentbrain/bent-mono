@@ -13,7 +13,7 @@ import { inspectDevelopmentWorker, developmentReleaseVariables } from "./native-
 import { planPrintStagingLifecycle } from "./native-print-staging-lifecycle.mjs";
 import { installPauseSchema } from "./native-release-pause.mjs";
 import { recoveryHash as hash, recoveryControl } from "./native-forward-recovery-inspection.mjs";
-import { completionEffects, validateCompletionAuthority, failedRecoveryProvenance } from "./native-completion-authority.mjs";
+import { completionEffects, completionVerificationEffects, validateCompletionAuthority, failedRecoveryProvenance } from "./native-completion-authority.mjs";
 import { completionInputs, inspectCompletionState, verifyCompletionDrain } from "./native-completion-inspection.mjs";
 import { claimFailedRecoveryCompletion } from "./native-completion-claim.mjs";
 import { runFailedForwardCompletion } from "./native-failed-forward-completion.mjs";
@@ -116,6 +116,17 @@ async function fixture(t, { mapBytes = 0 } = {}) {
   nextApiSettings = { bindings: [...oldApiSettings.bindings.filter(binding => binding.name !== "PRINT_EXECUTION_MODE"),
     ...Object.entries(developmentReleaseVariables(env, candidate, failedOwner, app)).map(([name, text]) => ({ name, type: "plain_text", text })),
     ...["SHOP_PROTECTED_CONFIG_JSON", "CART_LINE_CAPABILITY_SECRET", "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_WEBHOOK_SECRET", "PRODUCT_IMAGE_RENDERER_BYPASS_SECRET"].map(name => ({ name, type: "secret_text" }))] };
+  // Complete provider response shape, with synthetic resource identifiers only.
+  Object.assign(nextApiSettings, { compatibility_date: "2026-08-12", compatibility_flags: ["nodejs_compat"],
+    migration_tag: "synthetic-migration-v1", usage_model: "standard" });
+  nextApiSettings.bindings.push({ name: "SYNTHETIC_DB", type: "d1", id: "1".repeat(32), database_id: "1".repeat(32) },
+    { name: "SYNTHETIC_BUCKET", type: "r2_bucket", bucket_name: "synthetic-artwork" },
+    { name: "SYNTHETIC_AI", type: "ai", project: "synthetic-project" }, { name: "SYNTHETIC_IMAGES", type: "images" },
+    { name: "SYNTHETIC_QUEUE", type: "queue", queue_name: "synthetic-video" },
+    { name: "SYNTHETIC_RATE", type: "ratelimit", namespace_id: "1001", simple: { limit: 100, period: 60 } },
+    { name: "SYNTHETIC_SERVICE", type: "service", service: "synthetic-service", environment: "development", entrypoint: "Synthetic" });
+  while (nextApiSettings.bindings.length < 52) nextApiSettings.bindings.push({
+    name: `SYNTHETIC_SETTING_${nextApiSettings.bindings.length}`, type: "plain_text", text: "synthetic-value" });
   const authority = { schemaVersion: 1, kind: "development-failed-forward-completion-v1", environment: "development", accountId: config.awsAccountId, region: "ap-southeast-2", cloudflareAccountId: config.cloudflareAccountId,
     toolSourceCommit: tool, applicationSourceCommit: app, failedRunId: "304", failedAttempt: 1, originalAuthority, originalPlan, failedPreparation,
     allowedEffects: completionEffects, snapshot: { sha256: "0".repeat(64) }, expectedApiSettings: nextApiSettings, expectedApiLatestSettings: nextApiSettings };
@@ -311,23 +322,22 @@ test("staging approval never authorizes execution until the separate final hash 
 test("failed API acknowledgement or post-upload drift preserves the pause and consumes completion", async t => {
   for (const point of ["upload-ack", "post-upload-map", "status"]) {
     const f = await fixture(t), context = await f.execution();
-    const dependencies = {
-      cf: f.cf, client: f.client, staging: { read: async () => f.snapshot.stagingLifecycle },
+    let statusReached = false;
+    const deploy = f.dependencies.worker;
+    const dependencies = { ...f.dependencies,
       store: { ...f.store, save: async (name, bytes) => {
         const key = `source/releases/native-402/${name}`; assert.ok(!f.saved.has(key)); f.saved.set(key, bytes); return { key, version: "synthetic-version", sha256: hash(bytes) };
-      } }, currentMain: async () => {}, identity: async () => ({ signatureVerified: true, sourceCommit: tool, runId: "402" }),
-      runtimeRead: async () => f.snapshot.runtime, bindingsRead: async () => f.snapshot.bindings, runRead: async () => f.run,
-      candidate: async () => ({ ...f.inputs.prepared.candidate, verifiedForCommit: tool }),
-      verifyStatus: async () => { throw Error("status not verified"); },
-      worker: async () => ({ deploy: async before => {
-        await before(); f.state.apiDeployed = true;
+      } },
+      verifyStatus: async () => { statusReached = true; throw Error("status not verified"); },
+      worker: async args => ({ deploy: async before => {
+        const live = await (await deploy(args)).deploy(before);
         if (point === "upload-ack") throw Error("upload acknowledgement lost");
-        const live = await inspectDevelopmentWorker(f.cf, undefined, f.inputs.uploads.api);
         if (point === "post-upload-map") f.state.mapChanged = true;
         return live;
       } }),
     };
-    await assert.rejects(runFailedForwardCompletion(context, dependencies));
+    await assert.rejects(runFailedForwardCompletion(context, dependencies), point === "status" ? /status not verified/ : point === "upload-ack" ? /upload acknowledgement lost/ : /complete source map data differs from sealed manifest/);
+    assert.equal(statusReached, point === "status");
     assert.deepEqual(await recoveryControl(f.cf), f.control);
     assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='completion-attempt-one-claimed'").get().n, 1);
     assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='verified'").get().n, 0);
@@ -385,5 +395,240 @@ test("completion requires unchanged executor settings, private endpoint, namespa
     await assert.rejects(f.execute(context));
     assert.equal(f.calls.includes("upload-api"), false); assert.equal((await recoveryControl(f.cf)).paused, 1);
     assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='completion-attempt-one-claimed'").get().n, 0);
+  }
+});
+
+test("complete handler accepts full 52-binding provider readback reordered against reviewed settings", async t => {
+  const f = await fixture(t), context = await f.execution();
+  assert.equal(f.authority.expectedApiSettings.bindings.length, 52);
+  f.authority.expectedApiSettings = structuredClone(f.authority.expectedApiSettings);
+  // The immutable staged authority has the original order. Change only the
+  // provider response, shared by its active version and latest-settings reads.
+  const version = f.cf.version, settings = f.cf.settings;
+  f.cf.version = async id => { const value = structuredClone(await version(id)); if (f.state.apiDeployed) value.resources.bindings.reverse(); return value; };
+  f.cf.settings = async () => { const value = structuredClone(await settings()); if (f.state.apiDeployed) value.bindings.reverse(); return value; };
+  const result = await f.execute(context);
+  assert.equal(result.status.protocolVerified, true);
+  assert.equal((await recoveryControl(f.cf)).paused, 0);
+});
+
+async function verificationFixture(t, { reordered = false } = {}) {
+  const f = await fixture(t), originalContext = await f.execution(), deploy = f.dependencies.worker;
+  f.dependencies.worker = async args => ({ deploy: async before => {
+    await (await deploy(args)).deploy(before);
+    throw Error("interrupted after upload");
+  } });
+  await assert.rejects(f.execute(originalContext), /interrupted after upload/);
+  const rows = f.db.prepare("SELECT stage,payload,created_at FROM native_video_release_events WHERE release_id=? ORDER BY stage").all(failedOwner).map(row => ({ ...row }));
+  const claim = rows.find(row => row.stage === "completion-attempt-one-claimed"), deployStarted = rows.find(row => row.stage === "completion-api-deploy-started");
+  if (reordered) {
+    const settings = f.cf.settings, version = f.cf.version;
+    f.cf.settings = async () => { const value = structuredClone(await settings()); value.bindings.reverse(); return value; };
+    f.cf.version = async id => { const value = structuredClone(await version(id)); value.resources.bindings.reverse(); return value; };
+  }
+  const originalClaim = JSON.stringify(claim), originalAuthority = JSON.parse(originalContext.NATIVE_COMPLETION_REFERENCE).authority;
+  const nextTool = "d".repeat(40), nextEnv = { ...f.env, GITHUB_SHA: nextTool, GITHUB_RUN_ID: "403" };
+  const authority = { ...structuredClone(f.authority), schemaVersion: 2, kind: "development-failed-forward-completion-v2", phase: "verify-uploaded-api",
+    toolSourceCommit: nextTool, allowedEffects: completionVerificationEffects, snapshot: { sha256: "0".repeat(64) },
+    interruptedCompletion: { runId: "402", attempt: 1, sourceCommit: tool, authority: originalAuthority,
+      preparation: JSON.parse(claim.payload).preparation, claim, deployStarted } };
+  const interruptedRun = { ...f.run, id: 402, head_sha: tool,
+    display_title: `Native development · complete-forward-release · full · - · - · main · ${tool} · synthetic` };
+  f.dependencies.interruptedRunRead = async () => interruptedRun;
+  f.dependencies.candidate = async () => ({ ...f.inputs.prepared.candidate, verifiedForCommit: nextTool });
+  f.dependencies.worker = async () => { throw Error("VERIFY-ONLY MUST NOT PREPARE OR DEPLOY"); };
+  f.config.developmentCompletionSourceCommit = nextTool; f.install();
+  const inputs = await completionInputs(f.store, authority);
+  const snapshot = await inspectCompletionState({ ...f.dependencies, authority, inputs });
+  authority.snapshot.sha256 = hash(JSON.stringify(snapshot));
+  nextEnv.NATIVE_COMPLETION_PACKAGE = JSON.stringify({ schemaVersion: 2, authority });
+  f.config.developmentCompletionSnapshotSha256 = authority.snapshot.sha256;
+  f.config.developmentCompletionPackageSha256 = hash(nextEnv.NATIVE_COMPLETION_PACKAGE); f.install();
+  const stage = () => f.execute(nextEnv);
+  const execution = async () => {
+    const staged = await stage();
+    f.config.developmentCompletionAuthoritySha256 = staged.reference.authority.sha256; f.install();
+    return { ...nextEnv, GITHUB_RUN_ID: "404", NATIVE_OPERATION: "complete-forward-release", NATIVE_COMPLETION_PACKAGE: "", NATIVE_COMPLETION_REFERENCE: JSON.stringify(staged.reference) };
+  };
+  f.calls.length = 0;
+  return { ...f, authority, inputs, snapshot, nextEnv, interruptedRun, stage, execution, originalClaim, nextTool };
+}
+
+test("v2 existing entrypoints verify uploaded API and resume once without preparing or deploying any resource", async t => {
+  const f = await verificationFixture(t, { reordered: true }), context = await f.execution();
+  assert.equal(developmentOperation(context), "complete-forward-release");
+  assert.equal(offlinePreflight({ environment: "development", lane: "native", operation: "stage-forward-completion-authority", ref: "refs/heads/main", sha: f.nextTool,
+    migrations: f.snapshot.migrations, completionPackage: f.nextEnv.NATIVE_COMPLETION_PACKAGE }).passed, true);
+  const oldArtifacts = new Map(f.saved);
+  const result = await f.execute(context);
+  assert.equal(result.reconciliation.phase, "verify-uploaded-api");
+  assert.equal(result.status.artworkMediaCapabilityVerified, true);
+  assert.equal(f.calls.includes("upload-api"), false);
+  assert.equal(f.calls.some(call => /^(UPDATE (?!native_video_release_control)|DELETE|CREATE|ALTER)/.test(call)), false);
+  assert.equal((await recoveryControl(f.cf)).paused, 0);
+  const claim = f.db.prepare("SELECT stage,payload,created_at FROM native_video_release_events WHERE stage='completion-attempt-one-claimed'").get();
+  assert.equal(JSON.stringify({ ...claim }), f.originalClaim);
+  for (const [key, bytes] of oldArtifacts) assert.equal(f.saved.get(key), bytes);
+  const prepared = await loadDevelopmentPreparation(f.cf, f.store, failedOwner);
+  assert.equal(prepared.completion.toolIdentity.sourceCommit, tool);
+  assert.equal(prepared.completion.toolIdentity.runId, "402");
+  await assert.rejects(f.execute({ ...context, GITHUB_RUN_ID: "405" }));
+});
+
+test("v2 requires exact authority phase, interrupted first run, approvals, preparation, claim and upload intent", async t => {
+  for (const change of [
+    a => { a.phase = "retry-upload"; }, a => { a.interruptedCompletion.attempt = 2; },
+    a => { a.interruptedCompletion.runId = "999"; }, a => { a.interruptedCompletion.sourceCommit = "e".repeat(40); },
+    a => { a.interruptedCompletion.authority.sha256 = "0".repeat(64); },
+    a => { a.interruptedCompletion.preparation.sha256 = "0".repeat(64); },
+    a => { a.interruptedCompletion.claim.payload = "{}"; }, a => { a.interruptedCompletion.deployStarted.payload = "{}"; },
+    a => { a.allowedEffects = completionEffects; }, a => { a.expectedApiSettings.bindings[0].type = "secret_text"; },
+  ]) {
+    const f = await verificationFixture(t), authority = structuredClone(f.authority); change(authority);
+    // Simulate an independently hash-approved but internally inconsistent package.
+    f.nextEnv.NATIVE_COMPLETION_PACKAGE = JSON.stringify({ schemaVersion: 2, authority });
+    f.config.developmentCompletionPackageSha256 = hash(f.nextEnv.NATIVE_COMPLETION_PACKAGE); f.install();
+    await assert.rejects(f.stage());
+    assert.equal(f.calls.some(call => call.startsWith("INSERT") || call.startsWith("UPDATE")), false);
+  }
+});
+
+test("v2 current failed completion run metadata is authenticated and cannot admit captured state", async t => {
+  for (const patch of [{ id: 999 }, { run_attempt: 2 }, { head_sha: "e".repeat(40) }, { status: "in_progress" }, { conclusion: "success" },
+    { event: "push" }, { repository: { id: 1 } }, { path: ".github/workflows/native-production.yml" }, { display_title: "synthetic other operation" }]) {
+    const f = await verificationFixture(t), context = await f.execution(); Object.assign(f.interruptedRun, patch);
+    await assert.rejects(f.execute(context), /provenance|operation/);
+    assert.equal(f.calls.some(call => call.startsWith("INSERT") || call.startsWith("UPDATE")), false);
+  }
+});
+
+test("v2 rejects state, full settings, content, resources, runtime, lifecycle and journal drift before mutation", async t => {
+  for (const mutate of [
+    f => { f.state.mapChanged = true; }, f => f.db.exec("UPDATE native_video_release_control SET updated_at=updated_at+1"),
+    f => f.event(failedOwner, "unknown-phase", {}), f => f.event(failedOwner, "completion-api-verified", {}),
+    f => f.db.exec("CREATE TABLE synthetic_drift(id TEXT)"), f => f.db.exec("DELETE FROM d1_migrations WHERE name=(SELECT max(name) FROM d1_migrations)"),
+    f => { f.dependencies.runtimeRead = async () => ({ ...f.snapshot.runtime, extra: true }); },
+    f => { f.client.subdomain = async () => ({ enabled: true, previews_enabled: false }); },
+    f => { f.staging = undefined; f.dependencies.staging = { read: async () => ({ rules: [] }) }; },
+    f => { f.cf.consumers = async () => []; }, f => { f.cf.schedules = async () => ({ schedules: [] }); },
+    f => { const settings = f.cf.settings; f.cf.settings = async () => ({ ...await settings(), usage_model: "changed" }); },
+    f => { const version = f.client.version; f.client.version = async id => { const value = structuredClone(await version(id)); value.resources.bindings.reverse(); return value; }; },
+    f => { const deployments = f.cf.deployments; f.cf.deployments = async () => { const value = await deployments(); value.deployments[0].id = "99999999-9999-4999-8999-999999999999"; return value; }; },
+    f => { const version = f.cf.version; f.cf.version = async id => { const value = structuredClone(await version(id)); value.resources.bindings[0].extra = true; return value; }; },
+  ]) {
+    const f = await verificationFixture(t), context = await f.execution(); mutate(f);
+    await assert.rejects(f.execute(context));
+    assert.equal(f.calls.some(call => call.startsWith("INSERT") || call.startsWith("UPDATE")), false);
+    assert.equal(f.calls.includes("upload-api"), false);
+  }
+});
+
+test("v2 fresh drain rejects each of the four families without recovering jobs", async t => {
+  for (const [table, status] of [["story_video_jobs", "rendering"], ["print_asset_jobs", "running"], ["product_image_jobs", "rendering"], ["artwork_preparation_jobs", "processing"]]) {
+    const f = await verificationFixture(t), context = await f.execution();
+    f.db.exec("UPDATE native_video_release_control SET paused=0"); f.db.prepare(`INSERT INTO ${table}(id,status) VALUES ('active',?)`).run(status); f.db.exec("UPDATE native_video_release_control SET paused=1");
+    await assert.rejects(f.execute(context));
+    assert.equal(f.db.prepare(`SELECT status FROM ${table}`).get().status, status);
+    assert.equal(f.calls.some(call => call.startsWith("INSERT") || call.startsWith("UPDATE")), false);
+  }
+});
+
+test("v2 reaches status and stops on its specific failure; status and final-journal drift stop resume", async t => {
+  for (const point of ["status", "status-drift", "final-drift", "control-before-cas", "cas-race", "verified-timestamp"]) {
+    const f = await verificationFixture(t), context = await f.execution(); let reached = false;
+    f.dependencies.verifyStatus = async () => {
+      reached = true;
+      if (point === "status") throw Error("v2 status not verified");
+      if (point === "status-drift") f.state.mapChanged = true;
+      return { protocolVerified: true, artworkMediaCapabilityVerified: true };
+    };
+    const query = f.cf.query;
+    f.cf.query = async (sql, params) => {
+      if (point === "cas-race" && sql.includes("SET paused = 0")) f.db.exec("UPDATE native_video_release_control SET updated_at=updated_at+1");
+      const result = await query(sql, params);
+      if (point === "verified-timestamp" && sql.includes("ORDER BY stage")) {
+        const event = result[0].results.find(row => row.stage === "verified");
+        if (event) event.created_at++;
+      }
+      if (sql.includes("VALUES (?, ?, ?, ?)") && params?.[1] === "verified") {
+
+        if (point === "final-drift") f.state.mapChanged = true;
+        if (point === "control-before-cas") f.db.exec("UPDATE native_video_release_control SET updated_at=updated_at+1");
+      }
+      return result;
+    };
+    await assert.rejects(f.execute(context), point === "status" ? /v2 status not verified/ : /content|control|pause|journal|resume response/);
+    assert.equal(reached, true);
+    assert.equal((await recoveryControl(f.cf)).paused, 1);
+    assert.equal(f.calls.includes("upload-api"), false);
+  }
+});
+
+test("v2 lost claim and resume acknowledgements consume the one-use fence and require inspection", async t => {
+  for (const point of ["claim", "resume"]) {
+    const f = await verificationFixture(t), context = await f.execution();
+    f.state.lostClaim = point === "claim"; f.state.lostResume = point === "resume";
+    await assert.rejects(f.execute(context), /acknowledgement lost/);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='completion-verification-claimed'").get().n, 1);
+    assert.equal((await recoveryControl(f.cf)).paused, point === "claim" ? 1 : 0);
+    f.state.lostClaim = false; f.state.lostResume = false;
+    await assert.rejects(f.execute({ ...context, GITHUB_RUN_ID: "405" }));
+    assert.equal(f.calls.includes("upload-api"), false);
+  }
+});
+
+test("complete handler rejects binding structure, metadata, nested order and all other settings drift", async t => {
+  for (const mutate of [
+    settings => settings.bindings.push(structuredClone(settings.bindings[0])),
+    settings => settings.bindings.pop(), settings => settings.bindings.push({ name: "EXTRA", type: "images" }),
+    settings => { settings.bindings[0].name = "print_executions"; }, settings => { settings.bindings[0].name = ""; },
+    settings => { settings.bindings[0] = null; }, settings => { settings.bindings[0].type = "secret_text"; },
+    settings => { settings.bindings.find(b => b.type === "secret_text").metadata = { version: "changed" }; },
+    settings => { settings.bindings.find(b => b.type === "plain_text").text = "changed"; },
+    settings => { settings.usage_model = "changed"; }, settings => { settings.compatibility_flags.push("changed"); },
+    settings => { settings.bindings[0].unknown = ["changed"]; },
+  ]) {
+    const f = await fixture(t), context = await f.execution(), version = f.cf.version, settings = f.cf.settings;
+    f.cf.version = async id => { const value = structuredClone(await version(id)); if (f.state.apiDeployed) { const wrapper = { bindings: value.resources.bindings, ...value.resources.script_runtime }; mutate(wrapper); const { bindings, ...script_runtime } = wrapper; value.resources = { bindings, script_runtime }; } return value; };
+    f.cf.settings = async () => { const value = structuredClone(await settings()); if (f.state.apiDeployed) mutate(value); return value; };
+    await assert.rejects(f.execute(context));
+    assert.equal((await recoveryControl(f.cf)).paused, 1);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='verified'").get().n, 0);
+  }
+});
+
+test("v2 status drift before callback and incomplete protocol evidence stop safely", async t => {
+  for (const point of ["before-status", "protocol", "media"]) {
+    const f = await verificationFixture(t), context = await f.execution(); let reached = false;
+    const query = f.cf.query;
+    f.cf.query = async (sql, params) => {
+      const result = await query(sql, params);
+      if (point === "before-status" && sql.includes("SELECT ?, ?, ?, ? WHERE EXISTS")) f.state.mapChanged = true;
+      return result;
+    };
+    f.dependencies.verifyStatus = async () => { reached = true; return { protocolVerified: point !== "protocol", artworkMediaCapabilityVerified: point !== "media" }; };
+    await assert.rejects(f.execute(context), point === "before-status" ? /source map data/ : /complete live protocol and artwork media verification/);
+    assert.equal(reached, point !== "before-status");
+    assert.equal((await recoveryControl(f.cf)).paused, 1);
+  }
+});
+
+test("v2 authority cannot enter the API preparation capability", async t => {
+  const f = await verificationFixture(t);
+  await assert.rejects(prepareCompletionApi({ env: f.nextEnv, cf: f.cf, store: f.store, authority: f.authority, inputs: f.inputs,
+    platform: "linux", executeCommand: async () => assert.fail("verification authority cannot invoke Wrangler") }), /API upload requires the original v1 completion phase/);
+});
+
+test("v2 verification requires fresh current-main and candidate authentication before its claim", async t => {
+  for (const point of ["main", "candidate", "staged-state"]) {
+    const f = await verificationFixture(t), context = await f.execution();
+    if (point === "main") f.dependencies.currentMain = async () => { throw Error("current-main qualification failed"); };
+    if (point === "candidate") f.dependencies.candidate = async () => ({ ...f.inputs.prepared.candidate, verifiedForCommit: tool });
+    if (point === "staged-state") {
+      const read = f.dependencies.bindingsRead;
+      f.dependencies.bindingsRead = async () => ({ ...await read(), unexpected: true });
+    }
+    await assert.rejects(f.execute(context));
+    assert.equal(f.calls.some(call => call.startsWith("INSERT") || call.startsWith("UPDATE")), false);
   }
 });

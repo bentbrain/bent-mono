@@ -25,7 +25,10 @@ async function fixture({ extraStage = false, activeJob = false, phase = "early" 
         versionResourcesSha256: "d".repeat(64), annotations: {}, workerBytesVerified: true };
     const fallback = { ...fallbackWorker, provider: "cloudflare",
         consumer: { consumerId: "a".repeat(32), settings: { max_concurrency: 1 } }, cron: "*/15 * * * *" };
-    const settings = { bindings: [{ name: "STORY_VIDEO_PROVIDER", type: "plain_text", text: "cloudflare" }] };
+    const settings = { compatibility_date: "2026-08-12", compatibility_flags: ["nodejs_compat", "synthetic-flag"], bindings: [
+        { name: "STORY_VIDEO_PROVIDER", type: "plain_text", text: "cloudflare" },
+        { name: "SYNTHETIC_SECRET", type: "secret_text", metadata: { sequence: [1, 2] } },
+        ...Array.from({ length: 50 }, (_, index) => ({ name: `SYNTHETIC_${index}`, type: "plain_text", text: "synthetic-value" }))] };
     const previous = { before: fallbackWorker, consumer: fallback.consumer, settings, schedules: { schedules: [{ cron: fallback.cron }] },
         body: bytes.toString("base64"), contentType: "application/javascript+module", entrypoint: "index.js" };
     const runtime = { runtimeVerified: true, imageDigest: "sha256:" + "a".repeat(64) };
@@ -118,5 +121,43 @@ test("release abort rejects any unsupported stage or live rendering work before 
     }
     finally {
         active.db.close();
+    }
+});
+
+test("fallback consumer compares full settings by binding name and stops every other drift before mutation", async () => {
+    for (const [accepted, mutate] of [
+        [true, settings => settings.bindings.reverse()],
+        [false, settings => settings.bindings.push(structuredClone(settings.bindings[0]))],
+        [false, settings => settings.bindings.pop()],
+        [false, settings => settings.bindings.push({ name: "EXTRA", type: "images" })],
+        [false, settings => { settings.bindings[0].name = "story_video_provider"; }],
+        [false, settings => { settings.bindings[0].type = "secret_text"; }],
+        [false, settings => { settings.bindings[0].text = "changed"; }],
+        [false, settings => { settings.bindings[1].metadata.sequence.reverse(); }],
+        [false, settings => { settings.compatibility_flags.reverse(); }],
+        [false, settings => { settings.extra = true; }],
+    ]) {
+        const value = await fixture(), load = value.args.loadBaseline;
+        let changedOrderOnly;
+        value.args.loadBaseline = async (...args) => {
+            const baseline = await load(...args), settings = structuredClone(baseline.settings);
+            mutate(settings);
+            changedOrderOnly = settings.bindings.length === 52 && settings.bindings[0].name === "SYNTHETIC_49";
+            return { ...baseline, settings };
+        };
+        try {
+            // Reversal is the sole accepted change. All full-entry and runtime
+            // changes must stop before writing intent or changing release control.
+            const result = executeProductionReleaseAbort(value.args);
+            // loadBaseline runs after the first asynchronous evidence reads.
+            if (accepted) {
+                assert.equal((await result).releaseAbortComplete, true);
+                assert.equal(changedOrderOnly, true);
+            } else {
+                await assert.rejects(result, /preserved prior Worker baseline/);
+                assert.equal(value.db.prepare("SELECT paused FROM native_video_release_control WHERE singleton=1").get().paused, 1);
+                assert.equal(value.db.prepare("SELECT count(*) AS n FROM native_video_release_events WHERE stage='release-abort-started'").get().n, 0);
+            }
+        } finally { value.db.close(); }
     }
 });
