@@ -72,7 +72,7 @@ test("the actual composite browser install command resolves Playwright without p
   const command = /^      run: (.+)$/m.exec(block)?.[1];
   const directory = /^      working-directory: (.+)$/m.exec(block)?.[1];
   assert.ok(command && directory, "the actual fallback install step must exist");
-  assert.match(command, /^(?:bunx --no-install playwright|bun run --filter @forever-tee\/web exec playwright) install --with-deps chromium$/);
+  assert.equal(command, "node ../../../../scripts/install-playwright.mjs . chromium");
   const output = execFileSync("bash", ["-c", `${command} --dry-run`], {
     cwd: join(REPOSITORY_ROOT, directory), encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
   });

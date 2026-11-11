@@ -45,6 +45,17 @@ jobs:
   validate:
     environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: products/shop
     timeout-minutes: 25
     permissions:
       statuses: read
@@ -60,6 +71,9 @@ jobs:
       RELEASE_EXPECTED_SOURCE: ${{ inputs.expected_source }}
       RELEASE_COORDINATION_ID: ${{ inputs.coordination_id }}
     steps:
+      - name: Trust the mounted checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        working-directory: .
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
@@ -412,6 +426,17 @@ jobs:
     if: inputs.environment == 'development'
     needs: deploy
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: products/shop
     timeout-minutes: 20
     permissions:
       contents: read
@@ -430,6 +455,9 @@ jobs:
       E2E_BASE_URL: ${{ vars.WEB_ORIGIN }}
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
+      - name: Trust the mounted checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        working-directory: .
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
@@ -450,7 +478,7 @@ jobs:
         run: node ../../scripts/require-shop-release-checks.mjs --sha "$GITHUB_SHA"
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
+      - run: node ../../scripts/install-playwright.mjs apps/web chromium
       - run: |
           node scripts/protected-command.mjs -- bash -euo pipefail <<'SHOP_PROTECTED_SHELL'
           bun run --filter @forever-tee/web test:e2e
