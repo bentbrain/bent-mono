@@ -1,7 +1,10 @@
 import { protectedConfig } from "./protected-config.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shippingDatabaseClient, shippingCases, verifyShippingTestReport } from './native-shipping-qualification.mjs';
@@ -10,6 +13,71 @@ const env = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'bentbrain/bent-mono', 
     GITHUB_REF: 'refs/heads/main', GITHUB_SHA: 'a'.repeat(40), GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1',
     GITHUB_WORKFLOW_REF: 'bentbrain/bent-mono/.github/workflows/native-development.yml@refs/heads/main', NATIVE_OPERATION: 'qualify-all',
     CLOUDFLARE_ACCOUNT_ID: protectedConfig("cloudflareAccountId"), CLOUDFLARE_API_TOKEN: 'fixture' };
+async function exerciseShippingLaunch(t, inspect) {
+    const directory = await mkdtemp(join(tmpdir(), 'shipping-launch-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const id = '11111111-1111-4111-8111-111111111111', name = `forever-tee-shipping-qualification-${env.GITHUB_RUN_ID}`;
+    let nonce, deleted = false, launched = false;
+    const request = async (url, options) => {
+        let result;
+        if (options.method === 'DELETE') { deleted = true; return Response.json({ success: true }); }
+        if (url.endsWith('/query')) {
+            const body = JSON.parse(options.body);
+            if (body.sql?.startsWith('INSERT INTO shipping_qualification_proof')) nonce = body.params[1];
+            result = body.batch ? body.batch.map(() => ({ success: true })) : [{ success: true,
+                results: body.sql?.startsWith('SELECT run_id') ? [{ run_id: env.GITHUB_RUN_ID, nonce, connected: 1 }] : [] }];
+        }
+        else if (options.method === 'POST') result = { uuid: id, name };
+        else if (url.endsWith(`/${id}`)) {
+            if (deleted) return new Response(null, { status: 404 });
+            result = { uuid: id, name };
+        }
+        else result = [];
+        return Response.json({ success: true, result });
+    };
+    const run = async (command, args, options) => {
+        launched = true;
+        await inspect(command, args, options);
+        const results = [...shippingCases, ...qualification.paidOrderCases].map(title => ({ title, fullName: title, status: 'passed' }));
+        const report = args.find(value => value.startsWith('--outputFile=')).slice('--outputFile='.length);
+        await writeFile(report, JSON.stringify({ success: true, numPassedTests: results.length, testResults: [{ assertionResults: results }] }));
+    };
+    const report = await qualification.qualifyShippingDatabase({ ...env, PATH: process.env.PATH, RUNNER_TEMP: directory,
+        NATIVE_VERIFY_RELEASE: 'native-123', SHOP_PROTECTED_CONFIG_JSON: process.env.SHOP_PROTECTED_CONFIG_JSON,
+        PRINTIFY_API_TOKEN: 'synthetic-merchant-secret', SHOP_EVIDENCE_ENCRYPTION_KEY: 'synthetic-evidence-secret' },
+        { save: async () => ({ synthetic: true }) }, { request, run, paidJourney: true,
+            pair: { releaseId: 'native-123', sourceCommit: env.GITHUB_SHA, imageDigest: `sha256:${'a'.repeat(64)}` } });
+    assert.equal(launched, true);
+    assert.equal(deleted, true);
+    assert.equal(report.tests.length, 32);
+}
+test('shipping qualification launches the installed Vitest CLI through the real subprocess boundary', async t => {
+    await exerciseShippingLaunch(t, async (command, args, options) => {
+        const result = await promisify(execFile)(command, [args[0], '--version'], options);
+        assert.match(result.stdout, /vitest\/4\./);
+        assert.equal(args[1], 'run');
+        assert.equal(args[2], 'src/shopify-webhooks.test.ts');
+        const pattern = new RegExp(args[args.indexOf('--testNamePattern') + 1]);
+        for (const name of [...shippingCases, ...qualification.paidOrderCases]) assert.match(name, pattern);
+    });
+});
+test('shipping qualification supplies only guarded identities alongside synthetic provider configuration', async t => {
+    const fixtures = JSON.parse(await readFile(new URL('./protected-config.fixtures.json', import.meta.url), 'utf8'));
+    const keys = ['cloudflareAccountId', 'githubRepositoryId', 'githubOwnerId', 'resource_fb377032d2f5', 'resource_1a1378f0d1dc'];
+    await exerciseShippingLaunch(t, async (command, _args, options) => {
+        assert.equal(typeof options.env.SHOP_PROTECTED_CONFIG_JSON, 'string');
+        const expected = { ...fixtures, ...Object.fromEntries(keys.map(key => [key, protectedConfig(key)])) };
+        assert.deepEqual(JSON.parse(options.env.SHOP_PROTECTED_CONFIG_JSON), expected);
+        assert.equal(options.env.PRINTIFY_API_TOKEN, undefined);
+        assert.equal(options.env.SHOP_EVIDENCE_ENCRYPTION_KEY, undefined);
+        const setup = new URL('./test-protected-config.mjs', import.meta.url).href;
+        const reader = new URL('../workers/api/src/protected-config.ts', import.meta.url).href;
+        const script = `await import(${JSON.stringify(setup)}); const {protectedConfig}=await import(${JSON.stringify(reader)}); process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,protectedConfig(key)]))));`;
+        const result = await promisify(execFile)(command, ['--input-type=module', '-e', script], options);
+        assert.deepEqual(JSON.parse(result.stdout), Object.fromEntries(keys.map(key => [key, protectedConfig(key)])));
+        assert.equal(options.cwd, fileURLToPath(new URL('../workers/api', import.meta.url)));
+    });
+});
 test('remote qualification refuses local execution, other accounts, reruns and ordinary release operations', () => {
     for (const delta of [{ GITHUB_ACTIONS: 'false' }, { CLOUDFLARE_ACCOUNT_ID: 'work' }, { GITHUB_RUN_ATTEMPT: '2' }, { NATIVE_OPERATION: 'release' }])
         assert.throws(() => shippingDatabaseClient({ ...env, ...delta }));

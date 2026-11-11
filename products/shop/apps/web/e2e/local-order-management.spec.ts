@@ -48,7 +48,7 @@ test("expired and malformed links offer support without exposing an address", as
 
 test("manage order heading clears the shared header", async ({page}) => {
   await page.goto("/manage-order#bad");
-  const header = await page.locator("header").boundingBox();
+  const header = await page.getByRole("banner").boundingBox();
   const heading = await page.getByRole("heading", {name: "Manage order", exact: true}).boundingBox();
   if (!header || !heading) throw new Error("Order page layout is missing");
   expect(heading.y - (header.y + header.height)).toBeGreaterThanOrEqual(32);
