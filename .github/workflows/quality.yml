@@ -68,7 +68,17 @@ jobs:
       - run: node scripts/ci-check.mjs '${{ matrix.check }}'
   browser:
     name: browser
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -100,7 +110,17 @@ jobs:
           retention-days: 14
   shop:
     name: shop
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803

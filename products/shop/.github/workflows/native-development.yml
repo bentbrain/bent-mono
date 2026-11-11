@@ -75,6 +75,17 @@ jobs:
     environment: Preview
     if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: products/shop
     timeout-minutes: 25
     permissions:
       statuses: read

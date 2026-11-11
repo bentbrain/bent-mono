@@ -25,7 +25,18 @@ defaults:
 jobs:
   smoke:
     if: github.repository_id == vars.SHOP_REPOSITORY_ID && github.repository_owner_id == vars.SHOP_OWNER_ID && github.ref == 'refs/heads/main' && github.run_attempt == 1
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --ipc=host --init
+      volumes:
+        - /usr/bin/gh:/usr/local/bin/gh:ro
+        - /usr/bin/zip:/usr/local/bin/zip:ro
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: products/shop
     timeout-minutes: 10
     environment: Preview
     permissions:
@@ -73,9 +84,7 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
         working-directory: .
-      - name: Use the primary Ubuntu archive
-        run: node ../../scripts/prepare-ubuntu-archive.mjs
-      - run: cd apps/web && bunx --no-install playwright install --with-deps chromium
+      - run: node ../../scripts/install-playwright.mjs apps/web chromium
       # One bounded camera-to-design/cart journey. No test retry can hide a
       # failed upload. Its authenticated source-bound artifact may accompany full cloud qualification
       # for the owner's authorized autonomous alert repair task.

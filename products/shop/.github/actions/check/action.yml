@@ -57,14 +57,9 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: ${{ runner.os }}-${{ runner.arch }}-chromium-${{ hashFiles('bun.lock') }}
-    - name: Use the primary Ubuntu archive
-      if: inputs.suite != 'repository'
-      run: node scripts/prepare-ubuntu-archive.mjs
-      shell: bash
-      working-directory: .
     - name: Install local browser and OS dependencies
       if: inputs.suite != 'repository'
-      run: bunx --no-install playwright install --with-deps chromium
+      run: node ../../../../scripts/install-playwright.mjs . chromium
       shell: bash
       working-directory: products/shop/apps/web
     - name: Catch browser regressions before deployment
