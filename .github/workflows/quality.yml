@@ -81,6 +81,9 @@ jobs:
         shell: bash
     timeout-minutes: 45
     steps:
+      - name: Trust the mounted checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        working-directory: .
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
@@ -123,6 +126,9 @@ jobs:
         shell: bash
     timeout-minutes: 45
     steps:
+      - name: Trust the mounted checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        working-directory: .
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
