@@ -68,9 +68,18 @@ export async function runFailedForwardCompletion(env, dependencies = {}) {
   const { verifiedForCommit: toolVerification, ...observedCandidate } = currentCandidate;
   check(originalVerification === authority.applicationSourceCommit && toolVerification === authority.toolSourceCommit &&
     equal(originalCandidate, observedCandidate), "fresh immutable candidate authentication must bind original application and current tool source independently.");
+  let deployedBindings;
   const verify = async liveApi => {
     const actual = await inspect(liveApi);
-    const expected = liveApi ? { ...state, api: liveApi, apiSettings: authority.expectedApiSettings, latestApiSettings: authority.expectedApiLatestSettings } : state;
+    if (liveApi) {
+      check(liveApi.workerVersion !== state.api.workerVersion && actual.bindings.workerVersion === liveApi.workerVersion &&
+        actual.bindings.deploymentId !== state.bindings.deploymentId, "completion requires the verified new API deployment.");
+      // Keep the first independently inspected deployment identity for every
+      // subsequent check. Only these two binding-summary fields may change.
+      deployedBindings ??= { ...state.bindings, workerVersion: liveApi.workerVersion, deploymentId: actual.bindings.deploymentId };
+    }
+    const expected = liveApi ? { ...state, api: liveApi, apiSettings: authority.expectedApiSettings,
+      latestApiSettings: authority.expectedApiLatestSettings, bindings: deployedBindings } : state;
     check(equal(actual, expected), "approved current state changed before completion mutation.");
     // Latest settings must match the same uploaded active version's reviewed
     // runtime and bindings. The full latest read is sealed after deployment.
