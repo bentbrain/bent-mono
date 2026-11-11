@@ -175,7 +175,7 @@
         "primaryLocationLineHash": "7a16211eaf01b96:1",
         "primaryLocationStartColumnFingerprint": "31"
       },
-      "canonicalFlowSha256": "1d3bf8ffca475f9312e237da47c84cfe7e743279410c31f7062c2189d71cadb0",
+      "canonicalFlowSha256": "0dfaf92049a102f1a75e9e02a0d1772ca977d9be0467de77b3823ecab29e9400",
       "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
       "rationale": "A saved qualification receipt contributes only a positive safe-integer run ID to the fixed repository GitHub Actions API path. Explicit verify-qualification operation, authenticated workflow context, token, schema and exact release pairing are checked before HTTP; redirects are denied. The returned ID is checked, and qualification verification authenticates workflow/source and immutable artifacts. Tests reject local/push/rerun/different-release/missing-token contexts before requests and failed original runs before artifact reads. This is authenticated provenance lookup, not arbitrary file-to-host disclosure.",
       "guardPaths": [
