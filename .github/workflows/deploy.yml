@@ -275,37 +275,16 @@ jobs:
           if [ "$DEPLOY_ENV" = "development" ]; then
             web_origins="$WEB_ORIGIN"
           fi
-          jq -n \
-            --arg operations "$BENT_SHIRT_OPERATIONS_SECRET" \
-            --arg cartLineCapability "$CART_LINE_CAPABILITY_SECRET" \
-            --arg service "$FOREVER_TEE_API_SHARED_SECRET" \
-            --arg openai "$OPENAI_API_KEY" \
-            --arg printifyAssetDelivery "$PRINTIFY_ASSET_DELIVERY_SECRET" \
-            --arg printifyAssetOrigin "$WORKER_URL" \
-            --arg printifyToken "$PRINTIFY_API_TOKEN" \
-            --arg printifyShop "$PRINTIFY_SHOP_ID" \
-            --arg printifyWebhook "$PRINTIFY_WEBHOOK_SECRET" \
-            --arg scheduled "$SCHEDULED_TASK_SECRET" \
-            --arg shopifyDomain "$SHOPIFY_ADMIN_STORE_DOMAIN" \
-            --arg shopifyClientId "$SHOPIFY_CLIENT_ID" \
-            --arg shopifyClientSecret "$SHOPIFY_CLIENT_SECRET" \
-            --arg webOrigins "$web_origins" \
-            '{
-              BENT_SHIRT_OPERATIONS_SECRET: $operations,
-              CART_LINE_CAPABILITY_SECRET: $cartLineCapability,
-              FOREVER_TEE_API_SHARED_SECRET: $service,
-              OPENAI_API_KEY: $openai,
-              PRINTIFY_ASSET_DELIVERY_SECRET: $printifyAssetDelivery,
-              PRINTIFY_ASSET_ORIGIN: $printifyAssetOrigin,
-              PRINTIFY_API_TOKEN: $printifyToken,
-              PRINTIFY_SHOP_ID: $printifyShop,
-              PRINTIFY_WEBHOOK_SECRET: $printifyWebhook,
-              SCHEDULED_TASK_SECRET: $scheduled,
-              SHOPIFY_ADMIN_STORE_DOMAIN: $shopifyDomain,
-              SHOPIFY_CLIENT_ID: $shopifyClientId,
-              SHOPIFY_CLIENT_SECRET: $shopifyClientSecret,
-              WEB_ORIGINS: $webOrigins
-            } | with_entries(select(.value != ""))' |
+          PRINTIFY_ASSET_ORIGIN="$WORKER_URL" WEB_ORIGINS="$web_origins" SCHEDULED_TASK_SECRET="$SCHEDULED_TASK_SECRET" node -e '
+            const names = [
+              "BENT_SHIRT_OPERATIONS_SECRET", "CART_LINE_CAPABILITY_SECRET", "FOREVER_TEE_API_SHARED_SECRET",
+              "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_ASSET_ORIGIN", "PRINTIFY_API_TOKEN",
+              "PRINTIFY_SHOP_ID", "PRINTIFY_WEBHOOK_SECRET", "SCHEDULED_TASK_SECRET", "SHOPIFY_ADMIN_STORE_DOMAIN",
+              "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "WEB_ORIGINS"
+            ];
+            process.stdout.write(JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]])
+              .filter(([, value]) => value !== ""))) + "\n");
+          ' |
             (cd workers/api && bunx --no-install wrangler secret bulk --env "$DEPLOY_ENV")
           SHOP_PROTECTED_SHELL
       - name: Deploy story video renderer

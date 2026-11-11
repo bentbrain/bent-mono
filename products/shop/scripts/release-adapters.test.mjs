@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -91,34 +91,106 @@ test("the release-preflight file URL classifies nonempty repository history like
 });
 
 test("Worker secret steps preserve the complete synthetic JSON stream across their directory change", async () => {
-  for (const [workflow, step, environment] of [["deploy.yml", "Configure Worker secrets", "development"], ["shopify-production-cutover.yml", "Configure Shopify Worker secrets", "production"]]) {
+  for (const [workflow, step, environment] of [["deploy.yml", "Configure Worker secrets", "development"], ["deploy.yml", "Configure Worker secrets", "production"], ["shopify-production-cutover.yml", "Configure Shopify Worker secrets", "production"]]) {
     const directory = await mkdtemp(join(tmpdir(), "shop-secret-stream-"));
     try {
       await mkdir(join(directory, "bin"));
+      await symlink(process.execPath, join(directory, "bin/node"));
       await mkdir(join(directory, "workers/api"), { recursive: true });
       const captured = join(directory, "captured.json");
       await writeFile(join(directory, "bin/bunx"), `#!/usr/bin/env node
         const fs = require("node:fs");
         if (JSON.stringify(process.argv.slice(2)) !== ${JSON.stringify(JSON.stringify(["--no-install", "wrangler", "secret", "bulk", "--env", environment]))}) throw new Error("Unexpected command");
-        const value = JSON.parse(fs.readFileSync(0, "utf8"));
-        fs.writeFileSync(${JSON.stringify(captured)}, JSON.stringify(value), { flag: "wx", mode: 0o600 });
+        if (process.cwd() !== fs.realpathSync(${JSON.stringify(join(directory, "workers/api"))})) throw new Error("Unexpected working directory");
+        const raw = fs.readFileSync(0, "utf8");
+        JSON.parse(raw);
+        fs.writeFileSync(${JSON.stringify(captured)}, raw, { flag: "wx", mode: 0o600 });
       `, { mode: 0o700 });
       const source = await readFile(join(PRODUCT_ROOT, ".github/workflows", workflow), "utf8");
       const block = source.split(`      - name: ${step}\n`)[1]?.split("      - name:")[0];
       const body = block.split("        run: |\n")[1].split("\n").map(line => line.replace(/^ {10}/, "")).join("\n");
       const script = body.includes("<<'SHOP_PROTECTED_SHELL'") ? body.split("<<'SHOP_PROTECTED_SHELL'\n")[1].split("\nSHOP_PROTECTED_SHELL")[0] : body;
       const names = ["BENT_SHIRT_OPERATIONS_SECRET", "CART_LINE_CAPABILITY_SECRET", "FOREVER_TEE_API_SHARED_SECRET", "OPENAI_API_KEY", "PRINTIFY_ASSET_DELIVERY_SECRET", "PRINTIFY_API_TOKEN", "PRINTIFY_SHOP_ID", "PRINTIFY_WEBHOOK_SECRET", "SCHEDULED_TASK_SECRET", "SHOPIFY_ADMIN_STORE_DOMAIN", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"];
-      const fixtures = Object.fromEntries(names.map(name => [name, `synthetic-${name}`]));
-      execFileSync("bash", ["-euo", "pipefail", "-c", script], { cwd: directory, timeout: 10_000,
-        stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...fixtures, PATH: join(directory, "bin") + ":" + process.env.PATH,
+      const fixtures = Object.fromEntries(names.map(name => [name, `synthetic-${name}-"\\\n\t雪`]));
+      execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: directory, timeout: 10_000,
+        stdio: ["ignore", "pipe", "pipe"], env: { ...fixtures, PATH: join(directory, "bin"),
           DEPLOY_ENV: environment, WORKER_URL: "https://worker.example.invalid", WEB_ORIGIN: "https://web.example.invalid" } });
       const result = JSON.parse(await readFile(captured, "utf8"));
-      assert.equal(result.SHOPIFY_CLIENT_SECRET, fixtures.SHOPIFY_CLIENT_SECRET);
+      const shopify = Object.fromEntries(Object.entries(fixtures).filter(([name]) => name.startsWith("SHOPIFY_")));
+      const expected = workflow === "deploy.yml" ? { ...fixtures, PRINTIFY_ASSET_ORIGIN: "https://worker.example.invalid",
+        ...(environment === "development" ? { WEB_ORIGINS: "https://web.example.invalid" } : {}) } : shopify;
+      assert.deepEqual(result, expected);
+      const raw = await readFile(captured, "utf8");
+      assert.equal(raw.endsWith("\n"), true);
       if (workflow === "deploy.yml") {
-        assert.equal(Object.keys(result).length, 14);
-        assert.equal(result.FOREVER_TEE_API_SHARED_SECRET, fixtures.FOREVER_TEE_API_SHARED_SECRET);
-        assert.equal(result.WEB_ORIGINS, "https://web.example.invalid");
-      } else assert.equal(Object.keys(result).length, 3);
+        const env = { ...fixtures, PATH: join(directory, "bin"), DEPLOY_ENV: environment,
+          WORKER_URL: "https://worker.example.invalid", WEB_ORIGIN: "https://web.example.invalid", SCHEDULED_TASK_SECRET: "" };
+        await rm(captured);
+        execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] });
+        const optional = { ...expected }; delete optional.SCHEDULED_TASK_SECRET;
+        assert.deepEqual(JSON.parse(await readFile(captured, "utf8")), optional);
+        await rm(captured);
+        env.SHOPIFY_CLIENT_SECRET = "";
+        assert.throws(() => execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: directory, env,
+          stdio: ["ignore", "pipe", "pipe"] }), error => /Missing GitHub environment secret: SHOPIFY_CLIENT_SECRET/.test(error.stderr.toString()));
+        await assert.rejects(readFile(captured), { code: "ENOENT" });
+      }
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
+});
+
+
+test("composite evidence commands and uploads use the mounted runner temp", async () => {
+  const action = await readFile(new URL("../.github/actions/check/action.yml", import.meta.url), "utf8");
+  const directory = await mkdtemp(join(tmpdir(), "shop-container-temp-"));
+  try {
+    const mounted = join(directory, "mounted-temp"), host = join(directory, "absent-host-temp");
+    await mkdir(mounted);
+    const preload = join(directory, "linux.mjs");
+    await writeFile(preload, 'Object.defineProperty(process, "platform", { value: "linux" }); Object.defineProperty(process, "arch", { value: "x64" });');
+    const fixture = JSON.parse(process.env.SHOP_PROTECTED_CONFIG_JSON);
+    for (const [name, artifact, filename] of [
+      ["Summarize task cache evidence", "Preserve task cache evidence", "task-cache-check.json"],
+      ["Record validated component inputs", "Preserve validated component inputs", "validation-inputs-check.json"],
+    ]) {
+      const block = action.split(`    - name: ${name}\n`)[1]?.split("    - name:")[0];
+      const id = /^      id: (.+)$/m.exec(block)?.[1];
+      const command = block.split("      run: |\n")[1]?.split("      shell:")[0].split("\n").map(line => line.replace(/^ {8}/, "")).join("\n")
+        ?? /^      run: (.+)$/m.exec(block)?.[1];
+      assert.ok(command);
+      const output = join(directory, filename + ".output");
+      const script = command.replace("node scripts/validation-inputs.mjs",
+        `node --import "${preload}" scripts/validation-inputs.mjs`)
+        .replaceAll("${{ runner.temp }}", host).replaceAll("${{ github.job }}", "check");
+      execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: PRODUCT_ROOT, encoding: "utf8",
+        env: { PATH: process.env.PATH, RUNNER_TEMP: mounted, GITHUB_JOB: "check", GITHUB_OUTPUT: output,
+          SHOP_PROTECTED_CONFIG_JSON: process.env.SHOP_PROTECTED_CONFIG_JSON, GITHUB_ACTIONS: "true",
+          GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_ID: fixture.githubRepositoryId, GITHUB_REPOSITORY_OWNER_ID: fixture.githubOwnerId,
+          GITHUB_RUN_ATTEMPT: "1", GITHUB_RUN_ID: "123", GITHUB_SHA: source(), ImageOS: "ubuntu24", ImageVersion: "20261105.1" }, stdio: ["ignore", "pipe", "pipe"] });
+      assert.ok(id);
+      assert.equal(await readFile(output, "utf8"), `path=${join(mounted, filename)}\n`);
+      const upload = action.split(`    - name: ${artifact}\n`)[1]?.split("    - name:")[0];
+      assert.ok(upload.includes(`path: \${{ steps.${id}.outputs.path }}`));
+      assert.ok(JSON.parse(await readFile(join(mounted, filename), "utf8")));
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("the actual Shop quality command resolves Terraform inside mounted temp", async () => {
+  const workflow = await readFile(join(REPOSITORY_ROOT, ".github/workflows/quality.yml"), "utf8");
+  const block = workflow.split("      - run: node scripts/install-browsers.mjs shop\n")[1].split("  public-source:")[0];
+  const command = block.split("      - run: |\n")[1]?.split("        env:")[0].split("\n").map(line => line.replace(/^ {10}/, "")).join("\n")
+    ?? /      - run: (.+)/.exec(block)?.[1];
+  assert.ok(command);
+  const directory = await mkdtemp(join(tmpdir(), "shop-quality-temp-"));
+  try {
+    await mkdir(join(directory, "mounted/shop-trust-terraform"), { recursive: true });
+    const terraform = join(directory, "mounted/shop-trust-terraform/terraform");
+    await writeFile(terraform, "synthetic Terraform path fixture");
+    const script = command.replace("node scripts/ci-check.mjs shop", `node -e 'require("node:fs").accessSync(process.env.SHOP_TRUST_SCHEMA_TERRAFORM)'`);
+    execFileSync("/bin/bash", ["-euo", "pipefail", "-c", script], { cwd: REPOSITORY_ROOT,
+      env: { PATH: process.env.PATH, RUNNER_TEMP: join(directory, "mounted"), SHOP_TRUST_SCHEMA_TERRAFORM: join(directory, "absent-host/shop-trust-terraform/terraform") },
+      stdio: ["ignore", "pipe", "pipe"] });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
