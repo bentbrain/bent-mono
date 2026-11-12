@@ -1,3 +1,4 @@
+import { componentHistory } from './release-component-history.fixtures.mjs';
 import { protectedConfig } from "./protected-config.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -208,28 +209,26 @@ test('unknown or inconsistent journal policies are refused before dispatch', asy
 test('independent qualification discovers its dispatched run and retains the pinned live release on cleanup recovery', async () => {
     const { componentReleasePlan } = await import('./release-components.mjs');
     const changes = () => [];
-    const base = { source, runId: 70, deploymentId: 7 };
-    const selection = componentReleasePlan({ source, target: 'qualification', baselines: { native: base, web: { ...base, runId: 71, deploymentId: 8 } }, changes });
+    const deployed = componentHistory();
+    const base = { source, runId: 10, deploymentId: 101 };
+    const selection = componentReleasePlan({ source, target: 'qualification', baselines: { native: base, web: { ...base, runId: 20, deploymentId: 201 } }, changes });
     const journal = createCoordinator({ source, id, target: 'qualification', mode: 'auto', selection });
     const runs = [], posts = [], saves = [];
     const history = id => ({ id, head_sha: source, head_branch: 'main', repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } }, head_repository: { id: Number(protectedConfig("githubRepositoryId")) },
         run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success',
-        path: id === 70 ? '.github/workflows/native-development.yml' : '.github/workflows/deploy.yml',
-        display_title: id === 70 ? 'Native development · release · api · -' : 'Storefront · development · preview=true · full=false' });
+        path: '.github/workflows/native-development.yml' });
     const deps = { changes, save: async (value) => saves.push(structuredClone(value)), preflight: async () => ({ passed: true }),
         recoverReference: async (runId, releaseId) => {
-            assert.equal(releaseId, 'native-70');
+            assert.equal(releaseId, 'native-10');
             return { key: "source/releases/native-" + protectedConfig("resource_8d0190ecec7d") + "/qualification-complete-summary-" + (releaseId) + "-run-" + (runId) + ".json", version: 'version', sha256: 'b'.repeat(64) };
         }, api: async (path, body) => {
             if (path === 'branches/main')
                 return { commit: { sha: source } };
-            if (path.startsWith('deployments?'))
-                return [{ id: 7, environment: 'Preview', sha: source }, { id: 8, environment: 'Preview', sha: source }];
-            if (path.includes('/statuses?'))
-                return [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1] === '7' ? 70 : 71}` }];
+            if (path.startsWith('deployments') || /^actions\/runs\/(10|20)(?:\/|$)/.test(path))
+                return deployed.api(path);
             if (body) {
                 const cleanup = body.inputs.operation === 'cleanup-qualification';
-                assert.equal(body.inputs.verify_release, 'native-70');
+                assert.equal(body.inputs.verify_release, 'native-10');
                 const savedStage = cleanup ? saves.at(-1).stages[0].recovery.stages[0] : saves.at(-1).stages[0];
                 assert.equal(savedStage.status, 'dispatching');
                 posts.push(body);
@@ -240,7 +239,7 @@ test('independent qualification discovers its dispatched run and retains the pin
             }
             if (path.startsWith('actions/runs/')) {
                 const runId = Number(path.split('/').at(-1));
-                return runId < 100 ? history(runId) : runs.find(run => run.id === runId);
+                return runs.find(run => run.id === runId);
             }
             return { workflow_runs: runs };
         } };

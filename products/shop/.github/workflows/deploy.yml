@@ -132,7 +132,7 @@ jobs:
       checks: read
       contents: read
       actions: read
-      deployments: read
+      deployments: write
     environment: ${{ inputs.environment == 'production' && 'Production' || 'Preview' }}
     env:
       SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
@@ -392,6 +392,12 @@ jobs:
           printf '%s\n' "$deployment_url" "$WEB_ORIGIN"
           echo "Storefront deployment completed; immutable details are in encrypted diagnostics." >> "$GITHUB_STEP_SUMMARY"
           SHOP_PROTECTED_SHELL
+      - name: Record verified component release
+        if: inputs.environment == 'development' && inputs.web_only_preview && github.ref == 'refs/heads/main' && github.run_attempt == 1
+        env:
+          SHOP_RELEASE_COMPONENT: web
+          SHOP_RELEASE_TARGET: preview
+        run: node --import ./scripts/public-release-logging.mjs scripts/release-component-record.mjs
       - name: Preserve encrypted operational diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
