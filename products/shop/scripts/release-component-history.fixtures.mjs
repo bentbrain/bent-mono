@@ -24,11 +24,18 @@ export function componentHistory(target = 'preview') {
         }) };
         if (!smoke && (!native || ['release', 'promote'].includes(operation))) {
             const component = native ? 'native' : 'web', writer = jobs[id].jobs.find(j => j.name === (native ? target === 'preview' ? 'build' : 'verify' : target === 'preview' ? 'deploy' : 'release'));
-            const record = { id: 100000 + writer.id, environment, task: `shop-component-${component}`, sha: historySource, ref: historySource,
+            const runtime = native ? target === 'preview' ? 'Verify candidate and execute only the selected guarded Development operation' :
+                'Verify evidence and perform only the selected runtime operation' : target === 'preview' ? 'Deploy storefront' : 'Stage, verify and promote storefront';
+            const start = deployments.findIndex(d => d.id === writer.id) * 4 + 1;
+            writer.started_at = time(start); writer.completed_at = time(start + 3);
+            writer.steps = [{ name: runtime, number: 1, status: 'completed', conclusion: 'success', started_at: time(start), completed_at: time(start + 1) },
+                { name: 'Record verified component release', number: 2, status: 'completed', conclusion: 'success', started_at: time(start + 1), completed_at: time(start + 2) }];
+            const creator = { id: 41898282, login: 'github-actions[bot]', type: 'Bot' };
+            const record = { creator, created_at: time(start + 1), id: 100000 + writer.id, environment, task: `shop-component-${component}`, sha: historySource, ref: historySource,
                 transient_environment: target === 'preview', production_environment: target === 'production',
                 payload: { schemaVersion: 1, component, runId: id, jobId: writer.id, source: historySource } };
             componentRecords.push(record);
-            statuses[record.id] = [{ ...statuses[writer.id][0], id: record.id * 10, deployment_url: `https://api.github.com/repos/bentbrain/bent-mono/deployments/${record.id}` }];
+            statuses[record.id] = [{ ...statuses[writer.id][0], creator, created_at: time(start + 2), id: record.id * 10, deployment_url: `https://api.github.com/repos/bentbrain/bent-mono/deployments/${record.id}` }];
         }
         return runs[id];
     }

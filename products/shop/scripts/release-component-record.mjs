@@ -7,37 +7,61 @@ const positiveId = n => Number.isSafeInteger(n) && n > 0;
 const check = (value, reason) => { if (!value) throw Error(`Component release record stopped: ${reason}`); };
 export const componentTask = component => `shop-component-${component}`;
 const payload = (component, runId, jobId, source) => ({ schemaVersion: 1, component, runId, jobId, source });
+const publisherName = 'Record verified component release';
+const actionsCreator = value => value?.id === 41898282 && value.login === 'github-actions[bot]' && value.type === 'Bot';
+// Deployment timestamps have second precision. Compare the containing seconds
+// against authenticated job-step times, without adding a freshness grace period.
+const second = value => typeof value === 'string' ? Math.floor(Date.parse(value) / 1000) : NaN;
+const runtimeStepName = (target, component) => component === 'native' ? target === 'preview' ?
+    'Verify candidate and execute only the selected guarded Development operation' : 'Verify evidence and perform only the selected runtime operation' :
+    target === 'preview' ? 'Deploy storefront' : 'Stage, verify and promote storefront';
+
+function completedRuntime(job, target, component) {
+    const matches = job.steps?.filter(s => s.name === runtimeStepName(target, component));
+    const step = matches?.[0];
+    return matches?.length === 1 && step.status === 'completed' && step.conclusion === 'success' && positiveId(step.number) &&
+        Number.isFinite(second(step.started_at)) && second(step.started_at) <= second(step.completed_at) ? step : null;
+}
 
 // These records are written by the protected writer after its runtime operation
 // succeeds. Transient Preview and Production records are exempt from GitHub's
 // environment-wide automatic inactivation. Later writers are still fenced by
 // the job/run inventory.
 export async function corroborateComponentRecord({ api, target, component, run, job }) {
+    const runtime = completedRuntime(job, target, component);
+    const publishers = job.steps?.filter(s => s.name === publisherName), publisher = publishers?.[0];
+    if (!runtime || publishers?.length !== 1 || publisher.status !== 'completed' || publisher.conclusion !== 'success' ||
+        !positiveId(publisher.number) || runtime.number >= publisher.number || job.steps.indexOf(runtime) >= job.steps.indexOf(publisher) ||
+        job.status !== 'completed' || job.conclusion !== 'success' || !Number.isFinite(second(job.started_at)) ||
+        !(second(job.started_at) <= second(runtime.started_at) && second(runtime.completed_at) <= second(publisher.started_at) &&
+        second(publisher.started_at) <= second(publisher.completed_at) && second(publisher.completed_at) <= second(job.completed_at))) return false;
+    return readComponentRecord({ api, target, component, run, job, start: second(publisher.started_at), end: second(publisher.completed_at) });
+}
+
+async function readComponentRecord({ api, target, component, run, job, start, end, recordId }) {
     const environment = target === 'preview' ? 'Preview' : 'Production';
     const task = componentTask(component);
     const records = await api(`deployments?environment=${environment}&task=${task}&per_page=100`);
     if (!Array.isArray(records) || !records.length || records.length >= 100 ||
         new Set(records.map(r => r?.id)).size !== records.length || records.some(r => !positiveId(r?.id))) return false;
     const record = [...records].sort((a, b) => b.id - a.id)[0];
-    if (records.filter(r => r.payload?.runId === run.id).length !== 1 || record.environment !== environment || record.task !== task ||
+    if (recordId !== undefined && record.id !== recordId || records.filter(r => r.payload?.runId === run.id).length !== 1 || record.environment !== environment || record.task !== task ||
         record.sha !== run.head_sha || record.ref !== run.head_sha || record.transient_environment !== (target === 'preview') ||
         record.production_environment !== (target === 'production') ||
-        !equal(record.payload, payload(component, run.id, job.id, run.head_sha))) return false;
+        !equal(record.payload, payload(component, run.id, job.id, run.head_sha)) || !actionsCreator(record.creator) ||
+        !(start <= second(record.created_at) && second(record.created_at) <= end)) return false;
     const statuses = await api(`deployments/${record.id}/statuses?per_page=100`);
-    if (!Array.isArray(statuses) || !statuses.length || statuses.length >= 100 || statuses[0]?.state !== 'success') return false;
-    return statuses.every((status, i) => positiveId(status?.id) && status.environment === environment &&
+    if (!Array.isArray(statuses) || statuses.length !== 1 || statuses[0]?.state !== 'success') return false;
+    return statuses.every(status => positiveId(status?.id) && status.environment === environment && actionsCreator(status.creator) &&
         status.deployment_url === `https://api.github.com/repos/${repository}/deployments/${record.id}` &&
-        status.log_url === job.html_url && (i === 0 ? status.state === 'success' : ['pending', 'queued', 'in_progress'].includes(status.state)) &&
-        Number.isFinite(Date.parse(status.created_at)) && (i === 0 || status.id < statuses[i - 1].id && Date.parse(status.created_at) <= Date.parse(statuses[i - 1].created_at)));
+        status.log_url === job.html_url && second(record.created_at) <= second(status.created_at) && second(status.created_at) <= end);
 }
 
-export async function publishComponentRecord({ env = process.env, api, post }) {
+export async function publishComponentRecord({ env = process.env, api, post, now = Date.now }) {
     const component = env.SHOP_RELEASE_COMPONENT, target = env.SHOP_RELEASE_TARGET;
     check(['native', 'web'].includes(component) && ['preview', 'production'].includes(target), 'component and target required.');
     const workflow = component === 'native' ? `native-${target === 'preview' ? 'development' : 'production'}.yml` : target === 'preview' ? 'deploy.yml' : 'web-production.yml';
     const writer = component === 'native' ? target === 'preview' ? 'build' : 'verify' : target === 'preview' ? 'deploy' : 'release';
-    const completedStep = component === 'native' ? target === 'preview' ? 'Verify candidate and execute only the selected guarded Development operation' :
-        'Verify evidence and perform only the selected runtime operation' : target === 'preview' ? 'Deploy storefront' : 'Stage, verify and promote storefront';
     check(env.GITHUB_ACTIONS === 'true' && env.GITHUB_REPOSITORY === repository && env.GITHUB_REPOSITORY_ID === protectedConfig('githubRepositoryId') &&
         env.GITHUB_REPOSITORY_OWNER_ID === protectedConfig('githubOwnerId') && env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
         env.GITHUB_REF === 'refs/heads/main' && env.GITHUB_RUN_ATTEMPT === '1' && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') &&
@@ -54,16 +78,21 @@ export async function publishComponentRecord({ env = process.env, api, post }) {
     const job = matches[0];
     check(matches.length === 1 && positiveId(job?.id) && job.run_id === runId && job.run_attempt === 1 && job.head_sha === source &&
         job.html_url === `https://github.com/${repository}/actions/runs/${runId}/job/${job.id}` &&
-        job.steps?.filter(s => s.name === completedStep && s.status === 'completed' && s.conclusion === 'success').length === 1, 'successful runtime verification step required.');
+        completedRuntime(job, target, component), 'successful runtime verification step required.');
     const environment = target === 'preview' ? 'Preview' : 'Production', task = componentTask(component);
     const previous = await api(`deployments?environment=${environment}&task=${task}&per_page=100`);
     check(Array.isArray(previous) && previous.length < 100 && !previous.some(r => r.payload?.runId === runId), 'record exists or inventory is ambiguous; inspect rather than retry.');
+    const start = Math.floor(now() / 1000);
+    check(Number.isFinite(start) && second(completedRuntime(job, target, component).completed_at) <= start, 'publication clock precedes runtime verification.');
     const record = await post('deployments', { ref: source, task, environment, auto_merge: false, required_contexts: [],
         transient_environment: target === 'preview', production_environment: target === 'production', payload: payload(component, runId, job.id, source) });
     check(positiveId(record?.id), 'creation acknowledgement uncertain; inspect rather than retry.');
     await post(`deployments/${record.id}/statuses`, { state: 'success', environment, auto_inactive: false, log_url: job.html_url,
         description: `Verified Shop ${component} release` });
-    check(await corroborateComponentRecord({ api, target, component, run, job }), 'record readback differs; inspect rather than retry.');
+    // The publisher is still running. Its private readback uses this write's
+    // bounded clock interval; completed consumers require the authenticated
+    // successful publisher step as well.
+    check(await readComponentRecord({ api, target, component, run, job, start, end: Math.floor(now() / 1000), recordId: record.id }), 'record readback differs; inspect rather than retry.');
     return { component, source, runId, deploymentId: record.id };
 }
 
