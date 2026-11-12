@@ -128,10 +128,10 @@ for (const target of ['preview', 'production']) {
             assert.deepEqual(await discover(f), { web: null, native: null });
         });
     }
-    test(`${target}: inactive without a newer successful job cannot establish a baseline`, async () => {
+    test(`${target}: the active component record corroborates a writer after unrelated environment history is removed`, async () => {
         const f = componentHistory(target);
         f.deployments.splice(0, f.deployments.length, ...f.deployments.filter(d => d.id < 200));
-        assert.equal((await discover(f)).native, null);
+        assert.equal((await discover(f)).native.runId, 10);
     });
     test(`${target}: inactive without success and history rewritten after success cannot establish a writer`, async () => {
         for (const mutation of ['no-success', 'later-failure', 'second-success']) {
@@ -143,6 +143,40 @@ for (const target of ['preview', 'production']) {
             assert.equal((await discover(f)).native, null);
         }
     });
+}
+for (const target of ['preview', 'production']) {
+    for (const repeated of [false, true]) {
+        test(`${target}: ${repeated ? 'repeated' : 'delayed'} inactivity needs an authoritative component record through actual callers`, async () => {
+            const f = componentHistory(target), writer = target === 'preview' ? 101 : 100;
+            f.componentRecords.splice(0);
+            f.statuses[writer][0].created_at = '2026-01-02T00:00:00Z'; f.statuses[writer][0].id = 99990;
+            if (repeated) f.statuses[writer].unshift({ ...f.statuses[writer][0], id: 99991, created_at: '2026-01-03T00:00:00Z' });
+            const baselines = await componentBaselines({ api: f.api, target });
+            assert.deepEqual(baselines, { native: null, web: null });
+            const selection = componentReleasePlan({ source, target, baselines: { native: null, web: null }, changes: () => undefined });
+            const journal = createCoordinator({ source, target, mode: 'auto', selection });
+            for (const [i, stage] of journal.stages.entries()) {
+                stage.status = 'complete'; stage.runId = i === 0 ? 10 : 20;
+                f.runs[stage.runId].display_title = coordinatedRunTitle(journal, i);
+            }
+            await assert.rejects(advanceCoordinator(journal, { api: f.api, changes: () => undefined, save: () => assert.fail('No journal mutation'), preflight: () => assert.fail('No dispatch') }), /baseline changed/);
+            if (target === 'preview') assert.throws(() => componentReleasePlan({ source, target: 'qualification', baselines, changes: () => undefined }), /exact source/);
+        });
+    }
+    for (const problem of ['missing', 'inactive', 'failed', 'wrong-job', 'wrong-source', 'duplicate', 'unknown-schema', 'nontransient', 'newer-record']) {
+        test(`${target}: ${problem} component corroboration blocks the candidate`, async () => {
+            const f = componentHistory(target), record = f.componentRecords.find(r => r.payload.component === 'native');
+            if (problem === 'missing') f.componentRecords.splice(f.componentRecords.indexOf(record), 1);
+            if (problem === 'inactive' || problem === 'failed') f.statuses[record.id][0].state = problem === 'failed' ? 'failure' : 'inactive';
+            if (problem === 'wrong-job') record.payload.jobId++;
+            if (problem === 'wrong-source') record.payload.source = 'b'.repeat(40);
+            if (problem === 'duplicate') f.componentRecords.push({ ...record, id: record.id + 1 });
+            if (problem === 'unknown-schema') record.payload.schemaVersion = 2;
+            if (problem === 'nontransient') record.transient_environment = target !== 'preview';
+            if (problem === 'newer-record') f.componentRecords.push({ ...record, id: record.id + 1, payload: { ...record.payload, runId: 30 } });
+            assert.equal((await componentBaselines({ api: f.api, target })).native, null);
+        });
+    }
 }
 test('writer job inventories match the canonical workflows and run titles', async () => {
     const { readFile } = await import('node:fs/promises');

@@ -150,6 +150,13 @@ jobs:
           VERCEL_PROJECT_ID: ${{ inputs.operation == 'release-storefront' && secrets.VERCEL_PROJECT_ID || '' }}
           VERCEL_ORG_ID: ${{ inputs.operation == 'release-storefront' && secrets.VERCEL_ORG_ID || '' }}
         run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/native-production-provision.mjs
+      - name: Record verified component release
+        if: inputs.operation == 'release' || inputs.operation == 'promote'
+        env:
+          SHOP_RELEASE_COMPONENT: native
+          SHOP_RELEASE_TARGET: production
+          NATIVE_OPERATION: ${{ inputs.operation }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/release-component-record.mjs
       - name: Preserve release stage timings
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

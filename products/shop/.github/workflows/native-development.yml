@@ -165,6 +165,7 @@ jobs:
       contents: read
       id-token: write
       actions: read
+      deployments: write
     env:
       SHOP_PROTECTED_CONFIG_JSON: ${{ secrets.SHOP_PROTECTED_CONFIG_JSON }}
       SHOP_EVIDENCE_ENCRYPTION_KEY: ${{ secrets.SHOP_EVIDENCE_ENCRYPTION_KEY }}
@@ -230,6 +231,13 @@ jobs:
           NATIVE_SCHEDULED_QUALIFICATION: ${{ inputs.scheduled_qualification }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node --import ./scripts/decode-release-dispatch.mjs --import ./scripts/public-release-logging.mjs scripts/native-ci-development.mjs
+      - name: Record verified component release
+        if: inputs.operation == 'release' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+        env:
+          SHOP_RELEASE_COMPONENT: native
+          SHOP_RELEASE_TARGET: preview
+          NATIVE_OPERATION: ${{ inputs.operation }}
+        run: node --import ./scripts/public-release-logging.mjs scripts/release-component-record.mjs
       - name: Preserve sealed candidate pointer
         if: always() && (inputs.operation == 'build-candidate' || inputs.operation == 'release')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

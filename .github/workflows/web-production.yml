@@ -148,6 +148,11 @@ jobs:
         env:
           WEB_RELEASE_EVIDENCE_DIR: ${{ runner.temp }}/web-production-evidence
         run: node --import ./scripts/public-release-logging.mjs scripts/web-production-release.mjs
+      - name: Record verified component release
+        env:
+          SHOP_RELEASE_COMPONENT: web
+          SHOP_RELEASE_TARGET: production
+        run: node --import ./scripts/public-release-logging.mjs scripts/release-component-record.mjs
       - name: Seal private release evidence
         if: always()
         env:

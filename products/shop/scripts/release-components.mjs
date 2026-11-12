@@ -5,6 +5,7 @@ import { shippingOnlyPaths, commerceOnlyPaths, commerceBoundary, renderingInputM
 import { gitChanges } from './deployment-plan.mjs';
 import { apiOnlyPaths } from './native-api-image.mjs';
 import { isDeepStrictEqual } from 'node:util';
+import { corroborateComponentRecord } from './release-component-record.mjs';
 const all = () => ({ web: true, api: true, renderer: true, notifications: true });
 const metadata = path => path.startsWith('docs/') || ['README.md', 'CLAUDE.md',
     'infra/story-video-lambda/development-qualification.json', 'infra/story-video-lambda/production-promotion.json'].includes(path);
@@ -61,8 +62,8 @@ function baselineWorkflow(run, target) {
 // Read a complete bounded prefix through both newest component runs. Every status
 // must bind to one job in its authenticated first-attempt inventory. A later run
 // claims its component even when its writer has not completed, preventing fallback.
-// Inactive is environment bookkeeping only when the writer succeeded and each
-// inactivation is explained by a newer authenticated environment job's success.
+// Shared environment history identifies candidate writers. A separate active
+// component record corroborates them; timestamps never establish supersession.
 // Runtime and immutable release evidence remain separate admission requirements.
 export async function componentBaselines({ api, target }) {
     if (!['preview', 'production'].includes(target))
@@ -74,8 +75,8 @@ export async function componentBaselines({ api, target }) {
         new Set(deployments.map(d => d?.id)).size !== deployments.length ||
         deployments.some(d => !positiveId(d?.id) || d.environment !== environment))
         return empty();
-    const runs = new Map(), latest = new Map(), records = [];
-    for (const deployment of [...deployments].sort((a, b) => b.id - a.id)) {
+    const runs = new Map(), latest = new Map();
+    for (const deployment of deployments.filter(d => !['shop-component-native', 'shop-component-web'].includes(d.task)).sort((a, b) => b.id - a.id)) {
         const statuses = await api(`deployments/${deployment.id}/statuses?per_page=100`);
         if (!Array.isArray(statuses) || !statuses.length || statuses.length >= 100)
             return empty();
@@ -119,9 +120,7 @@ export async function componentBaselines({ api, target }) {
         const succeeded = terminal >= 0 && statuses[terminal].state === 'success' &&
             statuses.slice(terminal + 1).every(s => ['waiting', 'queued', 'pending', 'in_progress'].includes(s.state)) &&
             job.status === 'completed' && job.conclusion === 'success';
-        const record = { deployment, job, succeeded, successAt: succeeded ? Date.parse(statuses[terminal].created_at) : null,
-            inactive: terminal >= 0 ? statuses.slice(0, terminal) : statuses };
-        records.push(record); entry.records.push(record);
+        entry.records.push({ deployment, job, succeeded });
         if (latest.size === 2 && [...runs.values()].every(e => e.records.length === e.jobs.length))
             break;
     }
@@ -133,8 +132,8 @@ export async function componentBaselines({ api, target }) {
         const writer = entry.records.find(r => r.job.name === workflow.writer);
         if (entry.records.length !== jobs.length || run.status !== 'completed' || run.conclusion !== 'success' ||
             jobs.some(j => j.status !== 'completed' || j.conclusion !== 'success') || !writer?.succeeded ||
-            entry.records.some(r => !r.succeeded) || writer.inactive.some(s => !records.some(r => r.deployment.id > writer.deployment.id &&
-                r.succeeded && r.successAt > writer.successAt && r.successAt <= Date.parse(s.created_at))))
+            entry.records.some(r => !r.succeeded) ||
+            !await corroborateComponentRecord({ api, target, component, run, job: writer.job }))
             continue;
         baseline[component] = { source: run.head_sha, runId: run.id, deploymentId: writer.deployment.id };
     }
