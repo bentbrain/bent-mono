@@ -34,57 +34,109 @@ export function releaseComponents(paths) {
     }
     return result;
 }
-// Environment deployments, not the current main SHA, establish each component's
-// predecessor. Unknown operations and failed/incomplete deployments cannot prove
-// that an older successful source is still deployed.
+const positiveId = value => Number.isSafeInteger(value) && value > 0;
+const nonwriterOperations = new Set(['plan', 'verify-qualification', 'qualify', 'qualify-all', 'qualify-exhaustion', 'qualify-faults', 'qualify-termination', 'qualify-load', 'monitor', 'inspect-release', 'verify-candidate', 'inspect-image-plan', 'canary', 'cleanup-qualification', 'cleanup-failed-qualification', 'inspect-failed-qualification', 'qualify-components']);
+function baselineWorkflow(run, target) {
+    const suffix = `main · ${run.head_sha} · `;
+    const title = run.display_title ?? '';
+    const correlation = /\[(?:manual|release-[a-f0-9-]{36}-\d+)\]$/.exec(title)?.[0];
+    if (!correlation || !title.endsWith(suffix + correlation))
+        return null;
+    const prefix = title.slice(0, -suffix.length - correlation.length);
+    const nativeTarget = target === 'production' ? 'production' : 'development';
+    if (run.path === `.github/workflows/native-${nativeTarget}.yml`) {
+        const match = new RegExp(`^Native ${nativeTarget} · ([a-z-]+) · (?:full|api) · (?:-|native-[1-9][0-9]*) · (?:-|native-[1-9][0-9]*) · $`).exec(prefix);
+        if (!match || !(nonwriterOperations.has(match[1]) || ['release', 'promote'].includes(match[1])))
+            return null;
+        return { component: nonwriterOperations.has(match[1]) ? null : 'native', writer: target === 'production' ? 'verify' : 'build', names: target === 'production' ? ['verify'] : ['check', 'build'] };
+    }
+    if (target === 'production' && run.path === '.github/workflows/web-production.yml' && prefix === 'Storefront Production · ')
+        return { component: 'web', writer: 'release', names: ['validate', 'release'] };
+    if (target === 'preview' && run.path === '.github/workflows/deploy.yml' && prefix === 'Storefront · development · preview=true · full=false · ')
+        return { component: 'web', writer: 'deploy', names: ['validate', 'deploy', 'e2e'] };
+    if (target === 'preview' && run.path === '.github/workflows/preview-smoke.yml' && prefix === 'Preview smoke · ')
+        return { component: null, names: ['smoke'] };
+    return null;
+}
+// Read a complete bounded prefix through both newest component runs. Every status
+// must bind to one job in its authenticated first-attempt inventory. A later run
+// claims its component even when its writer has not completed, preventing fallback.
+// Inactive is environment bookkeeping only when the writer succeeded and each
+// inactivation is explained by a newer authenticated environment job's success.
+// Runtime and immutable release evidence remain separate admission requirements.
 export async function componentBaselines({ api, target }) {
     if (!['preview', 'production'].includes(target))
         throw Error('Choose preview or production.');
     const environment = target === 'production' ? 'Production' : 'Preview';
-    const baseline = { web: null, native: null };
-    const seen = new Set();
+    const empty = () => ({ web: null, native: null });
     const deployments = await api(`deployments?environment=${environment}&per_page=100`);
-    if (!Array.isArray(deployments))
-        return baseline;
+    if (!Array.isArray(deployments) || deployments.length >= 100 ||
+        new Set(deployments.map(d => d?.id)).size !== deployments.length ||
+        deployments.some(d => !positiveId(d?.id) || d.environment !== environment))
+        return empty();
+    const runs = new Map(), latest = new Map(), records = [];
     for (const deployment of [...deployments].sort((a, b) => b.id - a.id)) {
-        if (deployment.environment !== environment)
-            continue;
-        const statuses = await api(`deployments/${deployment.id}/statuses?per_page=1`);
-        const status = statuses[0];
-        const id = /^https:\/\/github.com\/bentbrain\/bent-mono\/actions\/runs\/(\d+)(?:\/|$)/.exec(status?.log_url ?? '')?.[1];
-        if (!id)
-            break;
-        const run = await api(`actions/runs/${id}`);
-        if (run.id !== Number(id) || run.repository?.id !== Number(protectedConfig("githubRepositoryId")) || run.repository?.owner?.id !== Number(protectedConfig("githubOwnerId")) || run.head_repository?.id !== Number(protectedConfig("githubRepositoryId")) ||
-            run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.head_sha !== deployment.sha || !/^[a-f0-9]{40}$/.test(run.head_sha))
-            break;
-        let components;
-        if (run.path === `.github/workflows/native-${target === 'production' ? 'production' : 'development'}.yml`) {
-            const operation = /^Native (?:development|production) · ([a-z-]+) ·/.exec(run.display_title ?? '')?.[1];
-            if (['plan', 'verify-qualification', 'qualify', 'qualify-all', 'qualify-exhaustion', 'qualify-faults', 'qualify-termination', 'qualify-load', 'monitor', 'inspect-release', 'verify-candidate', 'inspect-image-plan', 'canary', 'cleanup-qualification', 'cleanup-failed-qualification', 'inspect-failed-qualification', 'qualify-components'].includes(operation))
-                continue;
-            if (!['release', 'promote'].includes(operation))
-                break;
-            components = ['native'];
+        const statuses = await api(`deployments/${deployment.id}/statuses?per_page=100`);
+        if (!Array.isArray(statuses) || !statuses.length || statuses.length >= 100)
+            return empty();
+        const log = statuses[0]?.log_url;
+        const identity = /^https:\/\/github.com\/bentbrain\/bent-mono\/actions\/runs\/([1-9][0-9]*)\/job\/([1-9][0-9]*)$/.exec(log ?? '');
+        if (!identity)
+            return empty();
+        const runId = Number(identity[1]), jobId = Number(identity[2]);
+        if (!positiveId(runId) || !positiveId(jobId) || statuses.some((s, i) => !positiveId(s?.id) || s.log_url !== log ||
+            s.environment !== environment || s.deployment_url !== `https://api.github.com/repos/bentbrain/bent-mono/deployments/${deployment.id}` ||
+            !['waiting', 'queued', 'pending', 'in_progress', 'success', 'inactive', 'failure', 'error'].includes(s.state) ||
+            !Number.isFinite(Date.parse(s.created_at)) || i > 0 && (s.id >= statuses[i - 1].id || Date.parse(s.created_at) > Date.parse(statuses[i - 1].created_at))))
+            return empty();
+        if (!runs.has(runId)) {
+            const run = await api(`actions/runs/${runId}`);
+            const workflow = run && baselineWorkflow(run, target);
+            if (!workflow || run.id !== runId || run.repository?.id !== Number(protectedConfig('githubRepositoryId')) ||
+                run.repository?.owner?.id !== Number(protectedConfig('githubOwnerId')) || run.head_repository?.id !== Number(protectedConfig('githubRepositoryId')) ||
+                run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || !/^[a-f0-9]{40}$/.test(run.head_sha) || run.run_attempt !== 1)
+                return empty();
+            const inventory = await api(`actions/runs/${runId}/attempts/1/jobs?per_page=100`);
+            if (!Array.isArray(inventory?.jobs) || inventory.jobs.length >= 100 || inventory.total_count !== inventory.jobs.length ||
+                inventory.jobs.length !== workflow.names.length || new Set(inventory.jobs.map(j => j.name)).size !== workflow.names.length ||
+                new Set(inventory.jobs.map(j => j.id)).size !== inventory.jobs.length || inventory.jobs.some(j => !positiveId(j.id) || !workflow.names.includes(j.name) ||
+                    j.run_id !== runId || j.run_attempt !== 1 || j.head_sha !== run.head_sha || j.head_branch !== 'main' ||
+                    j.html_url !== `https://github.com/bentbrain/bent-mono/actions/runs/${runId}/job/${j.id}`))
+                return empty();
+            const entry = { run, workflow, jobs: inventory.jobs, records: [] };
+            runs.set(runId, entry);
+            if (workflow.component) {
+                if ((latest.get(workflow.component)?.run.id ?? runId) < runId)
+                    return empty();
+                if (!latest.has(workflow.component))
+                    latest.set(workflow.component, entry);
+            }
         }
-        else if (run.path === '.github/workflows/web-production.yml' && target === 'production')
-            components = ['web'];
-        else if (run.path === '.github/workflows/preview-smoke.yml' && target === 'preview')
+        const entry = runs.get(runId), job = entry.jobs.find(j => j.id === jobId);
+        if (!job || deployment.sha !== entry.run.head_sha || entry.records.some(r => r.job.id === jobId))
+            return empty();
+        const terminal = statuses.findIndex(s => s.state !== 'inactive');
+        const succeeded = terminal >= 0 && statuses[terminal].state === 'success' &&
+            statuses.slice(terminal + 1).every(s => ['waiting', 'queued', 'pending', 'in_progress'].includes(s.state)) &&
+            job.status === 'completed' && job.conclusion === 'success';
+        const record = { deployment, job, succeeded, successAt: succeeded ? Date.parse(statuses[terminal].created_at) : null,
+            inactive: terminal >= 0 ? statuses.slice(0, terminal) : statuses };
+        records.push(record); entry.records.push(record);
+        if (latest.size === 2 && [...runs.values()].every(e => e.records.length === e.jobs.length))
+            break;
+    }
+    if ([...runs.values()].some(e => e.records.length !== e.jobs.length))
+        return empty();
+    const baseline = empty();
+    for (const [component, entry] of latest) {
+        const { run, workflow, jobs } = entry;
+        const writer = entry.records.find(r => r.job.name === workflow.writer);
+        if (entry.records.length !== jobs.length || run.status !== 'completed' || run.conclusion !== 'success' ||
+            jobs.some(j => j.status !== 'completed' || j.conclusion !== 'success') || !writer?.succeeded ||
+            entry.records.some(r => !r.succeeded) || writer.inactive.some(s => !records.some(r => r.deployment.id > writer.deployment.id &&
+                r.succeeded && r.successAt > writer.successAt && r.successAt <= Date.parse(s.created_at))))
             continue;
-        else if (run.path === '.github/workflows/deploy.yml' && target === 'preview' &&
-            /^Storefront · development · preview=true ·/.test(run.display_title ?? ''))
-            components = ['web'];
-        else
-            break;
-        for (const component of components) {
-            if (seen.has(component))
-                continue;
-            seen.add(component);
-            if (status?.state === 'success' && run.status === 'completed' && run.conclusion === 'success' && run.run_attempt === 1)
-                baseline[component] = { source: run.head_sha, runId: run.id, deploymentId: deployment.id };
-        }
-        if (seen.size === 2)
-            break;
+        baseline[component] = { source: run.head_sha, runId: run.id, deploymentId: writer.deployment.id };
     }
     return baseline;
 }

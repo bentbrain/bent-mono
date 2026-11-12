@@ -1,7 +1,7 @@
-import { protectedConfig } from "./protected-config.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { componentBaselines, componentReleasePlan, releaseComponents } from './release-components.mjs';
+import { componentHistory } from './release-component-history.fixtures.mjs';
 import { apiOnlyPaths } from './native-api-image.mjs';
 const source = 'a'.repeat(40), old = 'b'.repeat(40);
 const bases = { web: { source: old, runId: 1, deploymentId: 1 }, native: { source: old, runId: 2, deploymentId: 2 } };
@@ -65,22 +65,19 @@ test('known print executor runtime inputs require full while test-only and histo
     }
 });
 function baselineFixture(mutate = () => { }) {
-    const deployments = [{ id: 3, environment: 'Production', sha: source }, { id: 2, environment: 'Production', sha: old }];
-    const runs = { 3: { id: 3, path: '.github/workflows/web-production.yml' }, 2: { id: 2, path: '.github/workflows/native-production.yml', display_title: 'Native production · promote · full · -' } };
-    for (const d of deployments)
-        Object.assign(runs[d.id], { head_sha: d.sha, head_branch: 'main', repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } }, head_repository: { id: Number(protectedConfig("githubRepositoryId")) }, run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' });
-    mutate(runs);
-    return async (path) => path.startsWith('deployments?') ? deployments : path.includes('/statuses?') ? [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1]}` }] : runs[path.split('/').at(-1)];
+    const f = componentHistory('production');
+    mutate(f.runs);
+    return f.api;
 }
 test('authenticated successful environment history identifies native and web sources separately', async () => {
-    assert.deepEqual(await componentBaselines({ api: baselineFixture(), target: 'production' }), { web: { source, runId: 3, deploymentId: 3 }, native: { source: old, runId: 2, deploymentId: 2 } });
+    assert.deepEqual(await componentBaselines({ api: baselineFixture(), target: 'production' }), { web: { source, runId: 20, deploymentId: 201 }, native: { source, runId: 10, deploymentId: 100 } });
 });
 test('failed, rerun, rollback and wrong-identity deployments never establish a skip baseline', async () => {
-    for (const mutate of [runs => runs[3].conclusion = 'failure', runs => runs[3].run_attempt = 2, runs => runs[3].repository.id = 1, runs => runs[3].path = 'unknown']) {
+    for (const mutate of [runs => runs[20].conclusion = 'failure', runs => runs[20].run_attempt = 2, runs => runs[20].repository.id = 1, runs => runs[20].path = 'unknown']) {
         const result = await componentBaselines({ api: baselineFixture(mutate), target: 'production' });
         assert.equal(result.web, null);
     }
-    assert.equal((await componentBaselines({ api: baselineFixture(r => r[2].display_title = 'Native production · rollback · full'), target: 'production' })).native, null);
+    assert.equal((await componentBaselines({ api: baselineFixture(r => r[10].display_title = r[10].display_title.replace('promote', 'rollback')), target: 'production' })).native, null);
 });
 test('resume rejects a changed baseline and accepts only its own verified deployment', async () => {
     const { verifyComponentBaselines } = await import('./release-components.mjs');
@@ -117,44 +114,24 @@ test('legacy policy: application contracts select web/API and reuse only the ima
     }
 });
 test('a running camera smoke never replaces or hides the underlying deployment baselines', async () => {
-    const source = 'a'.repeat(40), base = { repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } }, head_repository: { id: Number(protectedConfig("githubRepositoryId")) },
-        head_branch: 'main', head_sha: source, event: 'workflow_dispatch', run_attempt: 1, status: 'completed', conclusion: 'success' };
-    const runs = {
-        3: { ...base, id: 3, path: '.github/workflows/preview-smoke.yml', status: 'in_progress', conclusion: null },
-        2: { ...base, id: 2, path: '.github/workflows/native-development.yml', display_title: 'Native development · release · api · -' },
-        1: { ...base, id: 1, path: '.github/workflows/deploy.yml', display_title: 'Storefront · development · preview=true · full=false' },
-    };
-    const api = async (path) => path.startsWith('deployments?') ? [3, 2, 1].map(id => ({ id, environment: 'Preview', sha: source })) :
-        path.includes('/statuses?') ? [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1]}` }] : runs[path.split('/').at(-1)];
-    const baseline = await componentBaselines({ api, target: 'preview' });
-    assert.equal(baseline.native.runId, 2);
-    assert.equal(baseline.web.runId, 1);
+    const f = componentHistory();
+    f.addRun(30, 'smoke');
+    f.runs[30].status = 'in_progress'; f.runs[30].conclusion = null;
+    f.jobs[30].jobs[0].status = 'in_progress'; f.jobs[30].jobs[0].conclusion = null;
+    f.statuses[300].shift();
+    const baseline = await componentBaselines({ api: f.api, target: 'preview' });
+    assert.equal(baseline.native.runId, 10);
+    assert.equal(baseline.web.runId, 20);
 });
 test('failed-fixture cleanup is ignored while discovering actual deployment baselines', async () => {
-    const runs = { 4: { id: 4, path: '.github/workflows/native-development.yml', display_title: 'Native development · cleanup-failed-qualification · full · native-100' },
-        3: { id: 3, path: '.github/workflows/deploy.yml', display_title: 'Storefront · development · preview=true · main' },
-        2: { id: 2, path: '.github/workflows/native-development.yml', display_title: 'Native development · release · full · -' } };
-    const deployments = [4, 3, 2].map(id => ({ id, environment: 'Preview', sha: source }));
-    for (const run of Object.values(runs))
-        Object.assign(run, { head_sha: source, head_branch: 'main', repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } },
-            head_repository: { id: Number(protectedConfig("githubRepositoryId")) }, run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' });
-    const api = async (path) => path.startsWith('deployments?') ? deployments : path.includes('/statuses?') ? [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1]}` }] : runs[path.split('/').at(-1)];
-    const result = await componentBaselines({ api, target: 'preview' });
-    assert.equal(result.native.runId, 2);
-    assert.equal(result.web.runId, 3);
+    const f = componentHistory(); f.addRun(30, 'native', 'cleanup-failed-qualification'); f.inactivate();
+    const result = await componentBaselines({ api: f.api, target: 'preview' });
+    assert.equal(result.native.runId, 10); assert.equal(result.web.runId, 20);
 });
 test('retained qualification inspection is ignored while discovering actual deployment baselines', async () => {
-    const runs = { 4: { id: 4, path: '.github/workflows/native-development.yml', display_title: 'Native development · inspect-failed-qualification · full · native-100' },
-        3: { id: 3, path: '.github/workflows/deploy.yml', display_title: 'Storefront · development · preview=true · main' },
-        2: { id: 2, path: '.github/workflows/native-development.yml', display_title: 'Native development · release · full · -' } };
-    const deployments = [4, 3, 2].map(id => ({ id, environment: 'Preview', sha: source }));
-    for (const run of Object.values(runs))
-        Object.assign(run, { head_sha: source, head_branch: 'main', repository: { id: Number(protectedConfig("githubRepositoryId")), owner: { id: Number(protectedConfig("githubOwnerId")) } },
-            head_repository: { id: Number(protectedConfig("githubRepositoryId")) }, run_attempt: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' });
-    const api = async (path) => path.startsWith('deployments?') ? deployments : path.includes('/statuses?') ? [{ state: 'success', log_url: `https://github.com/bentbrain/bent-mono/actions/runs/${path.split('/')[1]}` }] : runs[path.split('/').at(-1)];
-    const result = await componentBaselines({ api, target: 'preview' });
-    assert.equal(result.native.runId, 2);
-    assert.equal(result.web.runId, 3);
+    const f = componentHistory(); f.addRun(30, 'native', 'inspect-failed-qualification'); f.inactivate();
+    const result = await componentBaselines({ api: f.api, target: 'preview' });
+    assert.equal(result.native.runId, 10); assert.equal(result.web.runId, 20);
 });
 test('routine provider-contract releases omit unchanged web and reuse only the proven renderer boundary', () => {
     const rendererBaseline = { sourceCommit: old, nodeVersion: 'v24.7.0', reference: { key: 'original' }, inputsDigest: 'd'.repeat(64), boundary: 'isolated-printify-contracts-v2' };
