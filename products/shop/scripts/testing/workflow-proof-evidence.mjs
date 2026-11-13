@@ -53,20 +53,38 @@ export async function collectProofObservations(root, output, identity) {
 }
 
 async function main() {
-  assert.equal(process.env.GITHUB_ACTIONS,'true'); assert.equal(process.env.GITHUB_REPOSITORY,'bentbrain/bent-mono');
-  const temporary = process.env.RUNNER_TEMP, job = process.env.GITHUB_JOB;
-  assert(typeof temporary==='string' && resolve(temporary)===temporary && /^[a-zA-Z0-9_-]+$/.test(job));
-  const root = join(temporary,`shop-workflow-proofs-${job}`), output = join(temporary,`shop-workflow-evidence-${job}`);
-  await mkdir(root,{recursive:true,mode:0o700}); await mkdir(output,{mode:0o700});
-  const {stdout}=await execute('git',['rev-parse','HEAD']); const sourceCommit=stdout.trim(); assert(/^[a-f0-9]{40}$/.test(sourceCommit));
-  const runId=process.env.GITHUB_RUN_ID,attempt=process.env.GITHUB_RUN_ATTEMPT;assert(/^[1-9][0-9]*$/.test(runId)&&/^[1-9][0-9]*$/.test(attempt));
-  await collectProofObservations(root,join(output,'observations'),{repository:process.env.GITHUB_REPOSITORY,sourceCommit,runId,attempt,job});
-  const archive=join(output,'observations.tar.gz'),sealed=join(output,'sealed');await mkdir(sealed,{mode:0o700});
+  const stages=new Set(['identity','directories','git-head','projection','archive','recipient','sealing','cleanup']);
+  let stage='identity',failedStage,archive;
   try {
+    assert.equal(process.env.GITHUB_ACTIONS,'true'); assert.equal(process.env.GITHUB_REPOSITORY,'bentbrain/bent-mono');
+    const temporary=process.env.RUNNER_TEMP,job=process.env.GITHUB_JOB,runId=process.env.GITHUB_RUN_ID,attempt=process.env.GITHUB_RUN_ATTEMPT;
+    assert(typeof temporary==='string' && resolve(temporary)===temporary && /^[a-zA-Z0-9_-]+$/.test(job));
+    assert(/^[1-9][0-9]*$/.test(runId)&&/^[1-9][0-9]*$/.test(attempt));
+    const root=join(temporary,`shop-workflow-proofs-${job}`),output=join(temporary,`shop-workflow-evidence-${job}`);
+    stage='directories';
+    await mkdir(root,{recursive:true,mode:0o700}); await mkdir(output,{mode:0o700});
+    stage='git-head';
+    const {stdout}=await execute('git',['rev-parse','HEAD'],{timeout:5000,maxBuffer:4096});
+    const sourceCommit=stdout.trim(); assert(/^[a-f0-9]{40}$/.test(sourceCommit));
+    stage='projection';
+    await collectProofObservations(root,join(output,'observations'),{repository:process.env.GITHUB_REPOSITORY,sourceCommit,runId,attempt,job});
+    archive=join(output,'observations.tar.gz');const sealed=join(output,'sealed');
+    stage='directories';await mkdir(sealed,{mode:0o700});
+    stage='archive';
     await execute('tar',['-czf',archive,'observations'],{cwd:output,timeout:60000,maxBuffer:65536});
+    stage='recipient';
     const recipient=JSON.parse(await readFile(new URL('./linux-evidence-recipient.json',import.meta.url),'utf8'));
+    stage='sealing';
     await sealLinuxEvidence(archive,join(sealed,'workflow-proof.tar.gz.enc'),{sourceCommit,runId,filename:'workflow-proof.json'},recipient);
-  } finally {await rm(archive,{force:true});}
+  } catch {failedStage=stage;}
+  finally {
+    if(archive)try {await rm(archive,{force:true});}catch {failedStage??='cleanup';}
+  }
+  if(failedStage){
+    const label=stages.has(failedStage)?failedStage:'initialization';
+    console.error(`Proof observation retention failed during ${label}. Preserve this run before another experiment.`);
+    process.exitCode=1;return;
+  }
   console.info('Structured proof observations sealed.');
 }
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(()=>{console.error('Proof observation retention failed. Preserve this run before another experiment.');process.exitCode=1;});
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(()=>{console.error('Proof observation retention failed during initialization. Preserve this run before another experiment.');process.exitCode=1;});

@@ -4,12 +4,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { recordedProcess } from './release-v2/testing/workflow-journey-fixture.mjs';
 import { validateProofObservation } from './release-v2/testing/proof-observations.mjs';
 import { collectProofObservations } from './testing/workflow-proof-evidence.mjs';
 
 async function root(t) { const path=await realpath(await mkdtemp(join(tmpdir(),'workflow-observations-')));t.after(()=>rm(path,{recursive:true,force:true}));return path; }
+const checkout=fileURLToPath(new URL('../../../',import.meta.url)).replace(/\/$/,'');
 const identity={repository:'bentbrain/bent-mono',sourceCommit:'a'.repeat(40),runId:'1',attempt:'1',job:'check'};
 
 // Exercise the original implementation through the identical exported callsite
@@ -81,7 +82,7 @@ test('hosted observation command seals only the validated projection with the pu
   const value={schema:'shop.workflow-proof-observation/v1',invocation:'source-proof',at:1,kind:'child',details:{step:'fixture-start',command:'',phase:'',metrics:{userCpuUs:1}}};
   await writeFile(join(invocation,'source-proof-profile.private.jsonl'),JSON.stringify(value)+'\n',{mode:0o600});
   await writeFile(join(invocation,'source.pem'),'SECRET_SENTINEL',{mode:0o600});
-  const result=await recordedProcess({output:directory,name:'seal-observations',args:[new URL('./testing/workflow-proof-evidence.mjs',import.meta.url).pathname],env:{PATH:'/usr/bin:/bin',GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:identity.repository,GITHUB_JOB:job,RUNNER_TEMP:directory,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1'}});
+  const result=await recordedProcess({output:directory,name:'seal-observations',args:[new URL('./testing/workflow-proof-evidence.mjs',import.meta.url).pathname],env:observationEnvironment(directory)});
   assert.equal(result.exitCode,0,result.stderrText);
   const archive=join(directory,`shop-workflow-evidence-${job}`,'sealed','workflow-proof.tar.gz.enc');
   const encrypted=await readFile(archive),envelope=JSON.parse(await readFile(`${archive}.envelope.json`,'utf8'));
@@ -89,4 +90,33 @@ test('hosted observation command seals only the validated projection with the pu
   assert.equal(envelope.identity.filename,'workflow-proof.json');assert.equal(envelope.identity.runId,'1');
   const manifest=JSON.parse(await readFile(join(directory,`shop-workflow-evidence-${job}`,'observations','observations.private.json'),'utf8'));
   assert.equal(manifest.files.length,1);assert.equal(manifest.files[0].records,1);assert.equal(manifest.keysIncluded,false);
+});
+
+function observationEnvironment(directory, { trusted=true, path='/usr/bin:/bin' }={}) {
+  return { PATH:path,GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:identity.repository,GITHUB_JOB:'diagnostic',RUNNER_TEMP:directory,GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',
+    GIT_TEST_ASSUME_DIFFERENT_OWNER:'1',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',
+    ...(trusted?{GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'safe.directory',GIT_CONFIG_VALUE_0:checkout}:{}) };
+}
+async function observationInput(t, malformed=false) {
+  const directory=await root(t),input=join(directory,'shop-workflow-proofs-diagnostic','source-integration-abcdef');
+  await mkdir(input,{recursive:true,mode:0o700});
+  const value={schema:'shop.workflow-proof-observation/v1',invocation:'source-proof',at:1,kind:'child',details:{step:'fixture-start',command:'',phase:'',metrics:{userCpuUs:1},...(malformed?{configuration:'SECRET_SENTINEL'}:{})}};
+  await writeFile(join(input,'source-proof-profile.private.jsonl'),JSON.stringify(value)+'\n',{mode:0o600});
+  return directory;
+}
+for (const [name,trusted,malformed,stage] of [['missing exact-checkout trust',false,false,'git-head'],['malformed observation',true,true,'projection']]) {
+  test(`observation command identifies ${name} without exposing rejected data`,async t=>{
+    const directory=await observationInput(t,malformed);
+    const result=await recordedProcess({output:directory,name:'seal-rejection',args:[new URL('./testing/workflow-proof-evidence.mjs',import.meta.url).pathname],env:observationEnvironment(directory,{trusted})});
+    assert.equal(result.exitCode,1);assert.equal(result.stdoutText,'');
+    assert.equal(result.stderrText,`Proof observation retention failed during ${stage}. Preserve this run before another experiment.\n`);
+    for(const secret of ['SECRET_SENTINEL',directory,checkout,'dubious ownership'])assert.equal(result.stderrText.includes(secret),false);
+  });
+}
+
+test('observation cleanup preserves the original archive failure stage',async t=>{
+  const directory=await observationInput(t),bin=join(directory,'bin');await mkdir(bin,{mode:0o700});
+  await writeFile(join(bin,'tar'),`#!${process.execPath}\nimport {mkdirSync} from 'node:fs';mkdirSync(process.argv[3]);process.exitCode=23;\n`,{mode:0o700});
+  const result=await recordedProcess({output:directory,name:'archive-rejection',args:[new URL('./testing/workflow-proof-evidence.mjs',import.meta.url).pathname],env:observationEnvironment(directory,{path:`${bin}:/usr/bin:/bin`})});
+  assert.equal(result.exitCode,1);assert.equal(result.stderrText,'Proof observation retention failed during archive. Preserve this run before another experiment.\n');
 });

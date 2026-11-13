@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "6d515776e2bd5d1a9be9e71fd611838e1364654229567615022a4a1dac25ee41",
+  "sourceManifestSha256": "9234f0c233bec05ea88c965473b0f2e8053372c8c089442dc32a15f923b1e45c",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -1575,7 +1575,7 @@
         "primaryLocationLineHash": "4c1fb64ae1c7ebdb:1",
         "primaryLocationStartColumnFingerprint": "54"
       },
-      "canonicalFlowSha256": "b4818765efd07b9037172ab792a4834768b565728524eecb243588fe51896916",
+      "canonicalFlowSha256": "1928d13a088dd847fc1bdadde1525a597b0fa5e2d2eae9ab5f46fb3353809e8a",
       "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
       "rationale": "The local integration proof deliberately sends a mismatched request to its freshly created loopback service and retains the rejection response in the private proof summary. The output directory is owner-supplied, outside the checkout, and created without recursive reuse at mode 0700. The output filename summary.private.json is fixed and written at mode 0600. Service response content is serialized as data and cannot select a path or command. The proof asserts that the rejected subject starts no service execution, later checks full source and artifact closure preservation, and explicitly marks the provider simulated and Production qualification false. Authentication, subject mismatch and nonce-reuse regressions exercise the same service boundary.",
       "guardPaths": [
@@ -1600,9 +1600,9 @@
         "primaryLocationLineHash": "39f97366e069bbd9:1",
         "primaryLocationStartColumnFingerprint": "29"
       },
-      "canonicalFlowSha256": "36a95cea4695584bfbe6074e680f7069f72a43ffcb5c7ca1cd4f0b623f7975e3",
+      "canonicalFlowSha256": "42cd7a0619478ff5838da5ac1093f9417fbf5cef0a5881c4a75b88247677efc7",
       "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
-      "rationale": "All four traces originate in the test-only workflow executable, which loads a private synthetic environment fixture. Production CLI configuration rejects env and provider-boundary overrides. The intentional token exchange sends only the Actions request credential to a validated HTTPS actions.githubusercontent.com subdomain, with an independently installed broker audience. The client validates the exact Actions repository IDs, source, workflow, run, attempt, subject and bounded token lifetime; TLS verification, response-size/completeness checks, a deadline and rejection of redirects constrain transport. The broker separately verifies the JWT signature and protected-environment authorization. The request is purpose-specific authentication, and neither file contents nor credentials are logged or sent to a caller-selected host.",
+      "rationale": "All four traces originate in the test-only workflow executable, which loads a private synthetic environment fixture. Production CLI configuration rejects env and provider-boundary overrides. The token exchange sends only the Actions request credential to an HTTPS host matching the literal /^[a-z0-9.-]+\\.actions\\.githubusercontent\\.com$/ guard, with an independently installed broker audience. The client validates the exact Actions repository IDs, source, workflow, run, attempt, subject and current nbf/exp validity. TLS verification, response-size/completeness checks, a deadline and rejection of redirects constrain transport. The broker verifies the JWT signature, protected-environment authorization and maximum one-hour token duration. The request is purpose-specific authentication; credentials remain confined to this validated transport.",
       "guardPaths": [
         "products/shop/scripts/release-v2/broker-transport.mjs",
         "products/shop/scripts/release-v2/hosted-admission.mjs",
