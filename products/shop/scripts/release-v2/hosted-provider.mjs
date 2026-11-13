@@ -3,7 +3,7 @@ import { conforms } from './composition.mjs';
 import { selectedVersion, verifyCodeIdentity } from './component-identity.mjs';
 import { verifyContent } from './artifact-transport.mjs';
 import { assertPolicy, cloudflareVersion, numberedVersion, protocolPageLimit, protocolItemLimit, requestBuilders, sourceMapDataDigest, assetManifest } from './provider-protocol-builders.mjs';
-import { ProtocolConflict, ProtocolFailure, UncertainWrite, responseBytes, verifyLambdaQualified } from './provider-protocol.mjs';
+import { ProtocolConflict, ProtocolFailure, UncertainWrite, responseBytes, verifyLambdaQualified, assertLambdaBinding, lambdaBindingProjection } from './provider-protocol.mjs';
 import { requestDigest } from './signing.mjs';
 import { assertCredentialBroker } from './hosted-writer.mjs';
 
@@ -94,6 +94,7 @@ export async function preflightHostedTargets({ policy, components, targets, load
       if (candidate.worker.assets.length) check(target.assetQualification?.complete === true && target.assetQualification.manifestDigest === digest(assetManifest(candidate.worker.assets).manifest) && /^[a-f0-9]{64}$/.test(target.assetQualification.receiptDigest), 'Admitted served asset qualification is required before any write');
     } else {
       check(target.kind === 'lambda' && policy.functions.some(item => item.name === target.resource && item.aliases.includes(target.alias)) && candidate.native?.awsImageQualified === true && /^[a-f0-9]{64}$/.test(candidate.native.imageDigest), 'Admitted qualified native target required before any write');
+      assertLambdaBinding(candidate.native.expectedBinding, policy);
     }
   }
   return { schema: 'shop.hosted-target-preflight/v1', components: components.map(selectedVersion), targetsDigest: digest(targets), providerWrites: 0 };
@@ -254,7 +255,9 @@ export function createHostedProvider({ policy, writer, broker, components, targe
         const uploaded = cf(await recordRequest(operation, 'stage', builders.workerUpload(target.resource, { ...candidate.worker, metadata }), { active, versions })); providerVersion = cloudflareVersion(uploaded.id);
       } else {
         check(candidate.native?.awsImageQualified === true, 'Admitted AWS image qualification required');
+        assertLambdaBinding(candidate.native.expectedBinding, policy);
         const latest = await json(builders.lambdaLatest(target.resource)); check(latest.Configuration?.RevisionId, 'Latest Lambda RevisionId missing');
+        check(same(lambdaBindingProjection(latest.Configuration), candidate.native.expectedBinding), 'Latest Lambda target bindings differ before upload');
         const uploaded = await recordRequest(operation, 'stage', builders.lambdaUpload(target.resource, candidate.native.imageDigest, latest.Configuration.RevisionId), { active, versions, revisionId: latest.Configuration.RevisionId }); providerVersion = numberedVersion(uploaded.Version);
       }
       const mapping = { selected, providerVersion, target: operation.target, component: operation.component, targetSeal: operation.targetSeal, candidateSeal: operation.candidateSeal }; await verifyMapping(mapping);

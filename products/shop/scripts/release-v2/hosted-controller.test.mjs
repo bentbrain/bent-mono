@@ -13,6 +13,8 @@ import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
 import { hostedProtocolFixture } from './testing/hosted-protocol-service.mjs';
 import { hostedEngineStep } from './testing/hosted-engine-step.mjs';
 import { reconcileHostedReport } from './hosted-reporting.mjs';
+import { codeIdentity } from './component-identity.mjs';
+import { lambdaBindingProjection } from './provider-protocol.mjs';
 
 async function setup(work, { bindings = [] } = {}) {
   const f = await fixture(), synthetic = protocolFixture(), targets = [];
@@ -204,5 +206,33 @@ test('reporting recovery holds an absent unknown acknowledgement without replayi
     for (let recovery = 0; recovery < 2; recovery++) assert.equal((await reconcileHostedReport({ writer: freshWriter, broker: service.broker, policy, authority })).phase, 'report-held');
     assert.equal(service.reports.length, 0); assert(service.transcript.slice(before).every(item => item.method === 'GET' || item.url.includes('.s3.')));
     assert.equal(service.transcript.filter(item => item.method === 'POST' && item.url.startsWith('https://api.github.com/')).length, 1);
+  });
+});
+
+
+test('malformed Lambda binding after a valid Worker is rejected before custody or journal access', async () => {
+  await setup(async ({ f, policy, service, targets }) => {
+    const component = structuredClone(f.payload.components[1]);
+    const old = JSON.parse(await readFile(join(f.bundle, component.artifact.path), 'utf8'));
+    const artifact = { schema: 'shop.artifact/v2', component: component.id, format: 'oci-layout', root: old.root,
+      entrypoint: old.entrypoint, files: old.files, originSourceCommit: old.originSourceCommit, inputsDigest: old.inputsDigest, runtimeDigest: digest('synthetic-native-runtime') };
+    artifact.codeDigest = codeIdentity(artifact); component.codeDigest = artifact.codeDigest;
+    component.artifact = await f.put('metadata/preflight-native-artifact.json', artifact);
+    const imageDigest = 'a'.repeat(64), expectedBinding = lambdaBindingProjection({ Architectures: ['x86_64'], MemorySize: 3008, Timeout: 120,
+      Role: `arn:aws:iam::${policy.awsAccountId}:role/protocol-synthetic-runtime`, EphemeralStorage: { Size: 1024 }, Environment: { Variables: {} } });
+    const native = { component: component.id, kind: 'lambda', resource: policy.functions[0].name, alias: 'active', imageDigest, expectedBinding,
+      qualification: { awsImageQualified: true, artifactDigest: component.artifact.sha256, codeDigest: component.codeDigest, runtimeDigest: artifact.runtimeDigest, imageDigest, receiptDigest: digest('synthetic-qualification') } };
+    const components = [f.payload.components[0], component];
+    const baseline = { transcript: service.transcript.length, broker: service.brokerCalls.length, objects: [...service.objects.keys()] };
+    const run = target => { const selected = [targets[0], target]; return preflightHostedTargets({ policy, components, targets: selected, load: retainedCandidateLoader({ bundle: f.bundle, targets: selected }) }); };
+    assert.equal((await run(native)).providerWrites, 0);
+    for (const binding of [undefined, null, [], {}, { ...expectedBinding, Timeout: '120' }, { ...expectedBinding, Environment: { Variables: { TEST: false } } },
+      { ...expectedBinding, MemorySize: 0 }, { ...expectedBinding, Role: 'arn:aws:iam::111111111111:role/unadmitted' }, { ...expectedBinding, ImageConfigResponse: { Error: { Message: 'unqualified' } } },
+      { ...expectedBinding, unrecognized: true }, { ...expectedBinding, VpcConfig: { SubnetIds: false } }]) {
+      const changed = { ...native }; if (binding === undefined) delete changed.expectedBinding; else changed.expectedBinding = binding;
+      await assert.rejects(run(changed), /Lambda target binding contract/);
+      assert.equal(service.transcript.length, baseline.transcript); assert.equal(service.brokerCalls.length, baseline.broker);
+      assert.deepEqual([...service.objects.keys()], baseline.objects);
+    }
   });
 });
