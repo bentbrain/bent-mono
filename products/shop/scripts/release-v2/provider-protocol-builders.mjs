@@ -171,6 +171,7 @@ export function requestBuilders(policy) {
       return wire(policy, 'lambda', 'lambda.upload', 'PUT', `${fn(name)}/code`, { ImageUri: `${repository}@sha256:${imageDigest}`, Publish: true, RevisionId: revision(revisionId) }, json);
     },
     lambdaActivate: (name, value, version, revisionId) => wire(policy, 'lambda', 'lambda.activate', 'PUT', alias(name, value), { FunctionVersion: numberedVersion(version), RevisionId: revision(revisionId), RoutingConfig: { AdditionalVersionWeights: {} } }, json),
+    lambdaCreateAlias: (name, value, version) => { alias(name, value); return wire(policy, 'lambda', 'lambda.create-alias', 'POST', `${fn(name)}/aliases`, { Name: value, FunctionVersion: numberedVersion(version), RoutingConfig: { AdditionalVersionWeights: {} } }, json); },
     storeGet: key => wire(policy, 's3', 'store.get', 'GET', storeKey(key), Buffer.alloc(0), { 'x-amz-expected-bucket-owner': policy.awsAccountId }),
     storePut: (key, bytes, etag) => {
       check(Buffer.isBuffer(bytes), 'Exact store bytes required');

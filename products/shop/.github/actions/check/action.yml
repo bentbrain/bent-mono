@@ -88,8 +88,22 @@ runs:
       if: inputs.suite != 'browser'
       env:
         CI_FRESH_VALIDATION: ${{ inputs.fresh }}
+        SHOP_WORKFLOW_PROOF_ROOT: ${{ runner.temp }}/shop-workflow-proofs-${{ github.job }}
       shell: bash
       working-directory: products/shop
+    - name: Seal structured source proof observations
+      if: always() && inputs.suite != 'browser'
+      run: node scripts/testing/workflow-proof-evidence.mjs
+      shell: bash
+      working-directory: products/shop
+    - name: Preserve encrypted source proof observations
+      if: always() && inputs.suite != 'browser'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: workflow-proof-${{ github.run_id }}-${{ github.job }}
+        path: ${{ runner.temp }}/shop-workflow-evidence-${{ github.job }}/sealed
+        if-no-files-found: error
+        retention-days: 14
     - name: Bound regenerable task cache snapshots
       run: node scripts/actions-cache.mjs --trim
       shell: bash

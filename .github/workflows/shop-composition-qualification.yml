@@ -1,0 +1,78 @@
+name: Shop composed qualification plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Retained Linux journey run
+        required: true
+        type: string
+      artifact_run_attempt:
+        description: Retained run attempt
+        required: true
+        default: '1'
+        type: string
+      artifact_id:
+        description: Encrypted Linux artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  statuses: read
+  pull-requests: read
+
+concurrency:
+  group: shop-composed-qualification-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Validate retained composition
+    if: github.repository == 'bentbrain/bent-mono' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: Preview
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Prepare protected installation
+        env:
+          SHOP_COMPOSITION_INSTALLATION_PACKAGE: ${{ secrets.SHOP_COMPOSITION_INSTALLATION_PACKAGE }}
+          SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256: ${{ vars.SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256 }}
+          SHOP_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          SHOP_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_attempt }}
+          SHOP_ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          umask 077
+          node products/shop/scripts/release-v2/workflow-ci.mjs prepare
+      - name: Validate the authenticated release
+        run: |
+          umask 077
+          node products/shop/scripts/release-v2/workflow-entrypoint.mjs \
+            --configuration "$RUNNER_TEMP/shop-composition-inputs/configuration.private.json" \
+            >"$RUNNER_TEMP/shop-composition-private/result.private.json" \
+            2>"$RUNNER_TEMP/shop-composition-private/transition.private.log"
+      - name: Seal private workflow evidence
+        if: always()
+        run: node products/shop/scripts/release-v2/workflow-ci.mjs seal
+      - name: Preserve encrypted workflow evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shop-composition-private-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/shop-composition-sealed
+          if-no-files-found: error
+          retention-days: 14

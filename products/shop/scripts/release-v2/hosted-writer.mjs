@@ -64,10 +64,11 @@ export function assertCredentialFence(admission) { check(fences.has(admission), 
 export function assertCredentialBroker(broker) { check(brokerBoundaries.has(broker), 'Verified exclusive credential custody broker required'); }
 
 const emptyProvider = () => ({ versions: [], operations: [], requests: [], reports: [] });
-export function createHostedWriter({ policy, store, broker, fenceAdmission }) {
+export function createHostedWriter({ policy, store, broker, fenceAdmission, eventCacheDirectory }) {
   assertCredentialBroker(broker); check(fences.has(fenceAdmission) && broker.fenceAdmission === fenceAdmission, 'Matching protected writer custody admission required');
   let active = null;
-  if (!store) { assertPolicy(policy); check(digest(policy) === fenceAdmission.payload.policyDigest, 'Writer policy differs'); store = protectedStore({ builders: requestBuilders(policy), send: async request => { const response = request.method === 'GET' ? await broker.read(request) : (await assertOwner(), await broker.journal(active.owner, request)); responseBytes(response); if ([409, 412].includes(response.status)) throw new ProtocolConflict(request.operation); if (response.status < 200 || response.status >= 300) throw new ProtocolFailure(request.operation, response.status); return response; } }, policy); }
+  if (!store) { assertPolicy(policy); check(digest(policy) === fenceAdmission.payload.policyDigest, 'Writer policy differs'); store = protectedStore({ builders: requestBuilders(policy), send: async request => { const response = request.method === 'GET' ? await broker.read(request) : (await assertOwner(), await broker.journal(active.owner, request)); responseBytes(response); if ([409, 412].includes(response.status)) throw new ProtocolConflict(request.operation); if (response.status < 200 || response.status >= 300) throw new ProtocolFailure(request.operation, response.status); return response; } }, policy,
+    { eventCacheDirectory, eventCacheNamespace: digest({ policyDigest: digest(policy), fenceDigest: fenceAdmission.digest }) }); }
   const readEnvelope = async () => {
     const current = await readProtectedJournal(store);
     if (current) {
@@ -90,6 +91,7 @@ export function createHostedWriter({ policy, store, broker, fenceAdmission }) {
   const readHead = async () => { const current = await readEnvelope(); return current?.state.controller ? { head: current.head, state: current.state.controller } : null; };
   const writer = {
     readHead, assertOwner,
+    cacheMeasurements: async () => typeof store.cacheMeasurements === 'function' ? store.cacheMeasurements() : null,
     readProviderState: async () => structuredClone((await readEnvelope())?.state.provider ?? emptyProvider()),
     recordProvider: async mutate => { const current = await update(envelope => mutate(envelope.provider)); return current.head.eventDigest; },
     readVerification: async eventDigest => { check(hash(eventDigest), 'Exact immutable runtime verification identity required'); const current = await readEnvelope(); const found = current?.events.find(item => item.digest === eventDigest && item.event.state.controller?.phase === 'runtime-verified'); check(found?.event.state.controller.verification && found.event.state.controller.lastVerified, 'Immutable verified runtime event is unavailable'); return structuredClone(found.event.state.controller); },

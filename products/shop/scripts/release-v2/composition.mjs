@@ -13,12 +13,34 @@ export const subject = payload => { const { proofRefs, ...selection } = payload;
 export const allInputs = payload => digest(payload.components.map(component => ({ id: component.id, inputsDigest: component.intentInputsDigest })).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 export async function implementationDigest() {
   const paths = (await filesUnder(directory)).filter(path => !path.startsWith('testing/') && !path.endsWith('.test.mjs'));
-  return digest(await Promise.all(paths.map(async path => ({ path, sha256: sha256(await readFile(`${directory}/${path}`)) }))));
+  const records = await Promise.all(paths.map(async path => ({ path: `products/shop/scripts/release-v2/${path}`, sha256: sha256(await readFile(`${directory}/${path}`)) })));
+  // These production imports live outside the controller directory. Keep their
+  // bytes under the same independently installed verifier pin.
+  for (const [path, relative] of [
+    ['scripts/require-release-checks.mjs', '../../../../scripts/require-release-checks.mjs'],
+    ['products/shop/scripts/testing/linux-evidence.mjs', '../testing/linux-evidence.mjs'],
+    ['products/shop/scripts/testing/linux-evidence-recipient.json', '../testing/linux-evidence-recipient.json'],
+    ['products/shop/scripts/release-evidence.mjs', '../release-evidence.mjs'],
+    ['products/shop/scripts/read-regular-file.mjs', '../read-regular-file.mjs'],
+  ]) records.push({ path, sha256: sha256(await readFile(new URL(relative, import.meta.url))) });
+  return digest(records.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 const unique = (items, key, reason) => check(new Set(items.map(key)).size === items.length, reason);
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const sorted = items => [...items].sort((a, b) => compare(a.path, b.path));
 const orderedSet = (items, key, reason) => check(same(items.map(key), items.map(key).sort(compare)), reason);
+function orderedArtifactFiles(artifact) {
+  const paths = artifact.files.map(item => item.path), recursive = [...paths].sort((a, b) => {
+    const left = a.split('/'), right = b.split('/');
+    for (let index = 0; index < Math.min(left.length, right.length); index++) {
+      const difference = compare(left[index], right[index]); if (difference) return difference;
+    }
+    return left.length - right.length;
+  });
+  // Retained portable producers inventory sorted directory entries recursively.
+  // Preserve their original ordered bytes, code identity and provenance seal.
+  check(same(paths, [...paths].sort(compare)) || artifact.schema === 'shop.artifact/v2' && same(paths, recursive), 'Artifact file set must use canonical path or directory order');
+}
 
 export async function admit({ bundle, manifest, trustPath }) {
   const trustFile = await lstat(trustPath), bundleRoot = await realpath(bundle), trustedPath = await realpath(trustPath);
@@ -106,7 +128,7 @@ export async function admitComposition({ bundle, manifest, trust, domain }) {
     const provenance = parseJSON(await readRef(bundle, component.provenance)); conforms(provenance, domain === 'inactive-loopback' ? 'provenance' : 'hostedProvenance');
     unique(artifact.files, item => item.path, 'Conflicting artifact file identities');
     unique(config.bindings, item => item.name, 'Conflicting binding identities');
-    orderedSet(artifact.files, item => item.path, 'Artifact file set must be sorted');
+    orderedArtifactFiles(artifact);
     orderedSet(config.bindings, item => item.name, 'Binding set must be sorted');
     check(artifact.component === component.id && config.component === component.id && provenance.component === component.id &&
       artifact.originSourceCommit === component.originSourceCommit && provenance.originSourceCommit === component.originSourceCommit &&
