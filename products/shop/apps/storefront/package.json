@@ -1,0 +1,52 @@
+{
+  "name": "@forever-tee/storefront",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "node": "24.x",
+    "bun": "1.4.4"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "test": "node --import tsx --test src/server/*.test.ts",
+    "proof:local": "node scripts/local-proof.mjs",
+    "lint": "eslint src --max-warnings=0"
+  },
+  "dependencies": {
+    "@bent/design-tokens": "workspace:*",
+    "@forever-tee/contracts": "workspace:*",
+    "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-start": "1.169.5",
+    "@tanstack/react-query": "5.106.0",
+    "@shopify/hydrogen": "0.0.0-preview-116d5d7-20260730141607",
+    "effect": "3.22.1",
+    "lucide-react": "1.68.0",
+    "nuqs": "2.10.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/workers-types": "5.20261013.1",
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/vite": "4.3.4",
+    "@types/node": "24.10.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "miniflare": "4.20260515.0",
+    "tailwindcss": "4.3.4",
+    "tw-animate-css": "1.4.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.6",
+    "wrangler": "4.92.0",
+    "@forever-tee/product-image-renderer": "workspace:*",
+    "sharp": "0.35.5",
+    "tsx": "4.22.4",
+    "undici": "7.30.1",
+    "eslint-plugin-react-hooks": "7.1.1"
+  }
+}

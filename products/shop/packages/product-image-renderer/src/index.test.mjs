@@ -34,6 +34,24 @@ test("rejects unsupported variants, paths and excessive allocations before rende
   ])
     assert.throws(() => parseImageRecipe(invalid));
 });
+test("renders the full 50 MP upload boundary and rejects larger sources", async () => {
+  for (const format of ["jpeg", "png"]) {
+    const source = await sharp({
+      create: { width: 10000, height: 5000, channels: 4, background: "#126acc" },
+    }).toFormat(format).toBuffer();
+    const output = await renderProductDisplay(source, recipe("White", "flat"), directory);
+    const metadata = await sharp(output).metadata();
+    assert.equal(metadata.width, 768);
+    assert.equal(metadata.height, 768);
+  }
+  const oversized = await sharp({
+    create: { width: 10000, height: 5001, channels: 3, background: "#126acc" },
+  }).jpeg().toBuffer();
+  await assert.rejects(
+    renderProductDisplay(oversized, recipe("White", "flat"), directory),
+    /pixel limit/,
+  );
+});
 test("compiled displacement matches its checked-in source and binary hashes", async () => {
   const manifest = JSON.parse(
     await readFile(

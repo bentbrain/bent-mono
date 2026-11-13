@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.mjs"
+    },
+    "./execution": {
+      "types": "./src/execution.d.ts",
+      "default": "./src/execution.mjs"
     }
   },
   "scripts": {

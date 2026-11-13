@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "bent-shop-storefront-candidate",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "assets": {
+    "binding": "ASSETS"
+  }
+}

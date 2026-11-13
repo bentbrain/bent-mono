@@ -9,6 +9,12 @@
         "scripts/featured-composition-release.mjs",
         "scripts/decode-operational-dispatch.mjs",
         "scripts/artwork-preview-benchmark/player.mjs",
+        "scripts/release-v2/controller.mjs",
+        "scripts/release-v2/testing/fixture-journey.mjs",
+        "scripts/release-v2/testing/real-journey-proof.mjs",
+        "scripts/release-v2/testing/real-journey-runner.mjs",
+        "scripts/release-v2/*.test.mjs",
+        "scripts/testing/product-image-v5-smoke.mjs",
         "scripts/*.test.mjs"
       ],
       // The diagnostic runner uses the API workspace's Wrangler, the web
@@ -26,6 +32,10 @@
       },
       "entry": ["scripts/check-cold-create-navigation.mjs"]
     },
+    "apps/storefront": {
+      "entry": ["src/routes/**/*.{ts,tsx}", "scripts/fixture-api-worker.mjs", "scripts/source-boundary.mjs"],
+      "project": ["src/**/*.{ts,tsx,css}", "scripts/**/*.mjs"]
+    },
     "packages/product-image-renderer": {"ignoreBinaries": ["rustc"]},
     "workers/api": {
       // Protected workflow commands load these consumers through a shell block.
@@ -39,6 +49,8 @@
         "aws-lambda/configure-app-secrets.mjs",
         "aws-lambda/entry.mjs",
         "aws-lambda/failure-entry.mjs",
+        "aws-lambda/product-image-v5-entry.mjs",
+        "aws-lambda/product-image-v5-handler.d.mts",
         "aws-lambda/rotate-development-service-secret.mjs",
         "aws-lambda/runtime-smoke.mjs",
         "aws-lambda/sequential-smoke.mjs",

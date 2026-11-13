@@ -73,4 +73,22 @@ The first full Development release requires a fresh candidate. If a separate can
 
 The Lambda runtime image retains its own frozen `package-lock.json` and `npm ci` installation. Those files are sealed cloud build inputs for its existing Node/native-addon image. Bun manages the monorepo developer workspace; changing this isolated image dependency format requires a separate qualified image change. Source bundles use explicit allowlists and never include developer credentials or customer files.
 
+## Local release controller proof
+
+Run `bun run release:v2:proof --output /absolute/private-proof-directory` to exercise release composition, artifact verification and controller recovery against local HTTP provider fixtures. Use a new private directory outside the checkout. The proof runs the actual controller executable, retains its journal and invocation evidence, and reports its local fixture scope. Reporting recovery uses the saved outbox without staging or activating runtime code.
+
+The customer-journey proof connects that controller to the built Cloudflare storefront, business Worker, isolated D1/R2 and Durable Objects, native image rendering and FFmpeg. Supply the verified local native capsule, a retained business-Worker proof and the storage guard:
+
+```sh
+node scripts/release-v2/testing/real-journey-proof.mjs \
+  --output /absolute/private/new-run \
+  --capsule /absolute/private/native-capsule \
+  --prior-proof /absolute/private/business-proof \
+  --storage-guard /absolute/path/to/mac-mini-storage
+```
+
+Each run verifies artifact and input identities, exercises candidate and active customer journeys, and retains browser, service and controller evidence. Provider staging and activation use local HTTP fixtures.
+
+Controller failures retain the original error and stack in a private `failure-*.json` file beside the journal. Terminal output identifies that file and its checksum. An invalid or unwritable private destination reports that diagnostic capture is unavailable and keeps the operation stopped.
+
 Read `AGENTS.md` and `docs/ui-ux-principles.md` before changing shop behaviour. Keep customer incident records and private acceptance evidence outside this public repository.

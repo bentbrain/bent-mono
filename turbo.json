@@ -491,6 +491,46 @@
     "@tesla-bridge/mcp-server#dev": {
       "cache": false,
       "persistent": true
+    },
+    "@forever-tee/storefront#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/products/shop/apps/web/src/**",
+        "$TURBO_ROOT$/products/shop/apps/web/public/**",
+        "$TURBO_ROOT$/products/shop/apps/web/package.json"
+      ],
+      "outputs": [
+        "dist/**",
+        "src/routeTree.gen.ts"
+      ],
+      "cache": false
+    },
+    "@forever-tee/storefront#typecheck": {
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/products/shop/apps/web/src/**",
+        "$TURBO_ROOT$/products/shop/apps/web/public/**",
+        "$TURBO_ROOT$/products/shop/apps/web/package.json"
+      ],
+      "cache": false
+    },
+    "@forever-tee/storefront#lint": {
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/products/shop/apps/web/src/**",
+        "$TURBO_ROOT$/products/shop/apps/web/public/**",
+        "$TURBO_ROOT$/products/shop/apps/web/package.json"
+      ],
+      "cache": false
     }
   },
   "globalPassThroughEnv": [
