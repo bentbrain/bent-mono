@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "8051da01612c2ebfdf18252baaa5a0ed48fa8dbe78b66401f888e0c0a6d76924",
+  "sourceManifestSha256": "319a8404991f157e6702dde4e7eb3386e8a8b7a53987a52ee5d72f1c8619ec93",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -521,31 +521,6 @@
         "products/shop/scripts/backup-renderer-policy.test.mjs",
         "products/shop/scripts/editorial-source.test.mjs",
         "products/shop/scripts/editorial-worker-probe.test.mjs"
-      ],
-      "reviewReference": {
-        "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/2 — final-head/current-base review venue; this reference grants no approval."
-      }
-    },
-    {
-      "id": "shop-script-http-file-featured-composition-release-119",
-      "disposition": "intentional-safe-flow",
-      "ruleId": "js/http-to-file-access",
-      "fingerprint": {
-        "primaryLocationLineHash": "3b99463e41ae10d0:1",
-        "primaryLocationStartColumnFingerprint": "55"
-      },
-      "canonicalFlowSha256": "72608ac6a4acb3295d6f875d677313cc7a1596afcaac3ff3d393937e2cd558e1",
-      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
-      "rationale": "Catalogue rows read from the authenticated fixed-account D1 API are converted into fixed print-resolution.json only after verifyCompositionPrintResolution requires every current geometry to meet the application print-source PPI limit. The rows are bounded in number and must stay equal to the saved intent before creation. Exact owner/workflow/account/release context and composition identity guards apply. Tests demonstrate the approved portrait passes all geometries and an enlarged crop fails the largest. This is intended preflight evidence; JSON metadata is not executable.",
-      "guardPaths": [
-        "products/shop/scripts/featured-composition-release.mjs",
-        "products/shop/scripts/featured-composition-policy.mjs",
-        "products/shop/scripts/featured-composition-records.mjs"
-      ],
-      "testPaths": [
-        "products/shop/scripts/featured-composition-policy.test.mjs",
-        "products/shop/scripts/featured-composition-records.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
@@ -1499,6 +1474,136 @@
       "reviewReference": {
         "requiredStatus": "Independent review",
         "evidence": "https://github.com/bentbrain/bent-mono/pull/18 final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-release-v2-loopback-artifact-request",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/file-access-to-http",
+      "fingerprint": {
+        "primaryLocationLineHash": "c7b88a0ccb80e1cc:1",
+        "primaryLocationStartColumnFingerprint": "30"
+      },
+      "canonicalFlowSha256": "5c730386f6bdd4a2e4ca0107f5be1d2e3fa877073771c0ad1bf286a08dcc2d3e",
+      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
+      "rationale": "Both manifest and journal trace branches contribute component/version identifiers to the fixed content endpoint. The manifest is admitted against a separate pinned P-256 trust policy and complete source/artifact closure. The provider accepts only an exact anchored endpoint grammar, opens native HTTP to the literal IPv4 address 127.0.0.1 and validated port, disables connection pooling, rejects non-2xx responses and bounds responses and time. DNS, proxies and redirects cannot choose another destination. Live credential configuration is refused. Tests exercise hostile origins, redirects, credentials, wrong content, truncated inventories and denied runner egress.",
+      "guardPaths": [
+        "products/shop/scripts/release-v2/provider.mjs",
+        "products/shop/scripts/release-v2/composition.mjs",
+        "products/shop/scripts/release-v2/controller.mjs",
+        "products/shop/scripts/release-v2/data.mjs",
+        "products/shop/scripts/release-v2/artifact-transport.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/release-v2/controller.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/38 final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-release-v2-fixture-identity-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4233b18c0149b728:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "641d003ffecc164a8a2ec83aa0ef6dccad13a8d45823c622889d8b09be4b44ad",
+      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
+      "rationale": "The runner intentionally retains the loopback simulator inventory as JSON evidence. The destination filename is the constant identity-readback.json under the controller-created private per-nonce evidence directory, opened exclusively with mode 0600. Remote bytes never select the path and are not executed. The separately pinned runner executes under Node filesystem permissions restricted to that evidence root, and network-deny admits only the signed literal loopback origins. The controller requires the exact observation set, matching nonce/composition/phase and independently re-reads each evidence file by length and digest. Process failure or forged success cannot activate or complete.",
+      "guardPaths": [
+        "products/shop/scripts/release-v2/testing/fixture-journey.mjs",
+        "products/shop/scripts/release-v2/journey.mjs",
+        "products/shop/scripts/release-v2/network-deny.mjs",
+        "products/shop/scripts/release-v2/data.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/release-v2/controller.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/38 final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-release-v2-real-journey-retained-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "1b1eeced9950bd0c:1",
+        "primaryLocationStartColumnFingerprint": "69"
+      },
+      "canonicalFlowSha256": "976903eee046abd78e4bc9692ef73edb172efe67ae36d303473c4ae53f51baac",
+      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
+      "rationale": "The pinned restricted runner intentionally downloads observations from the authenticated local journey service. Each response must have the receipt-declared length and SHA-256 before retention. The path is generated solely from a local array index under the private evidenceRoot, uses exclusive creation and mode 0600, and Node filesystem permissions confine writes to that root. The runner and controller bind the composition, phase, nonce and service identity; the controller independently verifies every retained file. The trusted service verifies full source, built storefront, native capsule, runtime and root-lock closures before and after executing the actual journey. These retained binary observations are data and are never executed.",
+      "guardPaths": [
+        "products/shop/scripts/release-v2/testing/real-journey-runner.mjs",
+        "products/shop/scripts/release-v2/testing/real-journey-service.mjs",
+        "products/shop/scripts/release-v2/journey.mjs",
+        "products/shop/scripts/release-v2/network-deny.mjs",
+        "products/shop/scripts/release-v2/data.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/release-v2/real-journey.test.mjs",
+        "products/shop/scripts/release-v2/controller.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/38 final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-release-v2-real-journey-receipt-evidence",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "45e3706368aab382:1",
+        "primaryLocationStartColumnFingerprint": "50"
+      },
+      "canonicalFlowSha256": "bff73239b5aa3ccbffc123f4c88ade7b4feca4ceb743558dd13c430a42bf0865",
+      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
+      "rationale": "Both simulator-inventory and authenticated service-receipt trace branches are intentionally serialized into actual-journey.json. This constant filename is exclusively created with mode 0600 under the controller-created nonce directory; remote strings cannot choose it. The runner validates the exact composition, phase, nonce, service identity and zero exit status, then returns a digest-bound observation for the controller to re-read. Its Node permission and network-deny configuration confines writes and outbound requests. The local service authenticates requests, verifies complete runtime/source/artifact closures and refuses nonce reuse and wrong subjects. Retained JSON is diagnostic evidence and is not executed.",
+      "guardPaths": [
+        "products/shop/scripts/release-v2/testing/real-journey-runner.mjs",
+        "products/shop/scripts/release-v2/testing/real-journey-service.mjs",
+        "products/shop/scripts/release-v2/journey.mjs",
+        "products/shop/scripts/release-v2/network-deny.mjs",
+        "products/shop/scripts/release-v2/data.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/release-v2/real-journey.test.mjs",
+        "products/shop/scripts/release-v2/controller.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/38 final-head/current-base review venue; this reference grants no approval."
+      }
+    },
+    {
+      "id": "shop-release-v2-local-proof-failure-observation",
+      "disposition": "intentional-safe-flow",
+      "ruleId": "js/http-to-file-access",
+      "fingerprint": {
+        "primaryLocationLineHash": "4c1fb64ae1c7ebdb:1",
+        "primaryLocationStartColumnFingerprint": "54"
+      },
+      "canonicalFlowSha256": "273d5a9dad663097632b8a88c68c720ebcb9d65395587a2d97afa3204463cf7a",
+      "analysisSha256": "2e2fb79e9129c104fd2601bbf9cb7397bf1c7f1f6cbbdc43b1ad8e2c46ba0ea3",
+      "rationale": "The local integration proof deliberately sends a mismatched request to its freshly created loopback service and retains the rejection response in the private proof summary. The output directory is owner-supplied, outside the checkout, and created without recursive reuse at mode 0700. The output filename summary.private.json is fixed and written at mode 0600. Service response content is serialized as data and cannot select a path or command. The proof asserts that the rejected subject starts no service execution, later checks full source and artifact closure preservation, and explicitly marks the provider simulated and Production qualification false. Authentication, subject mismatch and nonce-reuse regressions exercise the same service boundary.",
+      "guardPaths": [
+        "products/shop/scripts/release-v2/testing/real-journey-proof.mjs",
+        "products/shop/scripts/release-v2/testing/real-journey-service.mjs",
+        "products/shop/scripts/release-v2/data.mjs"
+      ],
+      "testPaths": [
+        "products/shop/scripts/release-v2/real-journey.test.mjs",
+        "products/shop/scripts/release-v2/controller.test.mjs"
+      ],
+      "reviewReference": {
+        "requiredStatus": "Independent review",
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/38 final-head/current-base review venue; this reference grants no approval."
       }
     }
   ]
