@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { closeSync, fsyncSync, openSync, writeSync } from 'node:fs';
+import { processGroupSnapshot, validateProofObservation } from './proof-observations.mjs';
 import { createServer, request as httpRequest } from 'node:http';
 import { lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { generateKeyPairSync, sign } from 'node:crypto';
@@ -343,32 +345,84 @@ export async function privateProofDirectory(path) {
 
 // Each controller invocation gets a new executable process. Preserve the exact
 // argv and the original streams, including failed and uncertain writes.
-export async function recordedProcess({ output, name, executable = process.execPath, args, env = {}, cwd = checkout, timeoutMs = 30000, maxBytes = 8 * 1024 * 1024 }) {
+export async function recordedProcess({ output, name, executable = process.execPath, args, env = {}, cwd = checkout, timeoutMs = 30000, maxBytes = 8 * 1024 * 1024, signal: cancellation }) {
   check(/^[a-z0-9][a-z0-9-]{0,127}$/.test(name) && Array.isArray(args) && args.every(value => typeof value === 'string'), 'Exact bounded process identity required');
   check(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 420000 && Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= 16 * 1024 * 1024, 'Bounded proof process required');
-  await privateProofDirectory(output);
-  const startedAt = Date.now();
-  const result = await new Promise((accept, reject) => {
-    const child = spawn(executable, args, { cwd, detached: true, env: { PATH: dirname(process.execPath), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), overflow = false, timedOut = false;
-    const stop = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } };
-    const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
-    const capture = stream => bytes => {
-      if (stdout.length + stderr.length + bytes.length > maxBytes) { overflow = true; stop(); return; }
-      if (stream === 'stdout') stdout = Buffer.concat([stdout, bytes]); else stderr = Buffer.concat([stderr, bytes]);
+  cancellation?.throwIfAborted(); await privateProofDirectory(output);
+  const startedAt = Date.now(), executableSha256 = sha256(await readFile(executable));
+  const stdoutPath = `${name}-stdout.private.bin`, stderrPath = `${name}-stderr.private.bin`, profilePath = `${name}-profile.private.jsonl`;
+  const handles = [], openPrivate = path => { const fd = openSync(join(output, path), 'wx', 0o600); handles.push(fd); return fd; };
+  let profileBytes = 0;
+  try {
+    const stdoutFd = openPrivate(stdoutPath), stderrFd = openPrivate(stderrPath), profileFd = openPrivate(profilePath);
+    const observe = (kind, details) => {
+      const record = validateProofObservation({ schema:'shop.workflow-proof-observation/v1',invocation:name,at:Date.now(),kind,details });
+      const bytes = Buffer.from(JSON.stringify(record) + '\n');
+      check(profileBytes + bytes.length <= 2 * 1024 * 1024, 'Proof profile exceeds bound');
+      writeSync(profileFd, bytes); profileBytes += bytes.length;
+      if (kind !== 'child' && kind !== 'processes') fsyncSync(profileFd);
     };
-    child.stdout.on('data', capture('stdout')); child.stderr.on('data', capture('stderr'));
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', (exitCode, signal) => { clearTimeout(timer); accept({ stdout, stderr, exitCode, signal, overflow, timedOut, pid: child.pid }); });
-  });
-  const stdoutPath = `${name}-stdout.private.bin`, stderrPath = `${name}-stderr.private.bin`;
-  await writeFile(join(output, stdoutPath), result.stdout, { flag: 'wx', mode: 0o600 });
-  await writeFile(join(output, stderrPath), result.stderr, { flag: 'wx', mode: 0o600 });
-  const record = { schema: 'shop.workflow-proof-process/v1', executable, executableSha256: sha256(await readFile(executable)), args, cwd,
-    pid: result.pid, startedAt, finishedAt: Date.now(), exitCode: result.exitCode, signal: result.signal, overflow: result.overflow, timedOut: result.timedOut,
-    stdout: { path: stdoutPath, bytes: result.stdout.length, sha256: sha256(result.stdout) }, stderr: { path: stderrPath, bytes: result.stderr.length, sha256: sha256(result.stderr) } };
-  await writeFile(join(output, `${name}-invocation.private.json`), canonical(record), { flag: 'wx', mode: 0o600 });
-  return { ...record, stdoutText: result.stdout.toString('utf8'), stderrText: result.stderr.toString('utf8') };
+    const result = await new Promise((accept, reject) => {
+      const child = spawn(executable, args, { cwd, detached:true, env:{ PATH:dirname(process.execPath),...env,SHOP_WORKFLOW_DIAGNOSTICS:'1' },stdio:['ignore','pipe','pipe','ipc'] });
+      let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), overflow = false, timedOut = false, aborted = false, spawnError, streamError, invalidMessages = 0;
+      let sampling = Promise.resolve(), samplingBusy = false, sampleErrors = 0;
+      const stop = reason => {
+        if (!child.pid) return;
+        try { observe('stop', { pid:child.pid, reason }); process.kill(-child.pid, 'SIGKILL'); }
+        catch (error) { if (error.code !== 'ESRCH') streamError ??= error; }
+      };
+      const abort = () => { aborted = true; stop('abort'); };
+      cancellation?.addEventListener('abort', abort, { once:true });
+      const timer = setTimeout(() => { timedOut = true; stop('timeout'); }, timeoutMs);
+      const sample = () => {
+        if (!child.pid || samplingBusy) return;
+        samplingBusy = true;
+        sampling = processGroupSnapshot(child.pid).then(processes => observe('processes', { pid:child.pid, processes }))
+          .catch(() => { sampleErrors++; }).finally(() => { samplingBusy = false; });
+      };
+      const interval = setInterval(sample, 1000); interval.unref();
+      if (child.pid) { observe('start', { pid:child.pid,timeoutMs }); sample(); }
+      if (cancellation?.aborted) abort();
+      const capture = (stream, fd) => bytes => {
+        if (stdout.length + stderr.length + bytes.length > maxBytes) { overflow = true; stop('overflow'); return; }
+        try { let offset = 0; while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset); }
+        catch (error) { streamError ??= error; stop('stream-error'); return; }
+        if (stream === 'stdout') stdout = Buffer.concat([stdout, bytes]); else stderr = Buffer.concat([stderr, bytes]);
+      };
+      child.stdout.on('data', capture('stdout', stdoutFd)); child.stderr.on('data', capture('stderr', stderrFd));
+      child.on('message', value => {
+        try {
+          check(value?.schema === 'shop.workflow-proof-child/v1' && Object.keys(value).sort().join(',') === 'command,metrics,phase,schema,step', 'Fixed child measurement required');
+          const { schema:_schema,...details } = value; observe('child', details);
+        } catch { invalidMessages++; }
+      });
+      child.once('error', error => { spawnError = error; });
+      child.once('close', async (exitCode, signal) => {
+        clearTimeout(timer); clearInterval(interval); cancellation?.removeEventListener('abort', abort);
+        try {
+          await sampling;
+          let remaining = child.pid ? await processGroupSnapshot(child.pid) : [];
+          if (remaining.length) {
+            try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+            for (let attempt = 0; attempt < 15 && remaining.length; attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 20)); remaining = await processGroupSnapshot(child.pid);
+            }
+          }
+          observe('close', { pid:child.pid ?? 0,exitCode:spawnError ? null : exitCode,signal,aborted,timedOut,overflow,reaped:remaining.length === 0,
+            remainingPids:remaining.map(item => item.pid),metrics:{ stdoutBytes:stdout.length,stderrBytes:stderr.length,elapsedMs:Date.now()-startedAt,invalidMessages,sampleErrors } });
+          fsyncSync(stdoutFd); fsyncSync(stderrFd); fsyncSync(profileFd);
+          check(remaining.length === 0, 'Proof process group did not exit');
+          if (spawnError || streamError) throw spawnError ?? streamError;
+          accept({ stdout,stderr,exitCode,signal,overflow,timedOut,aborted,pid:child.pid,reaped:true });
+        } catch (error) { reject(error); }
+      });
+    });
+    const record = { schema:'shop.workflow-proof-process/v1',executable,executableSha256,args,cwd,pid:result.pid,startedAt,finishedAt:Date.now(),
+      exitCode:result.exitCode,signal:result.signal,overflow:result.overflow,timedOut:result.timedOut,aborted:result.aborted,reaped:result.reaped,profile:profilePath,
+      stdout:{path:stdoutPath,bytes:result.stdout.length,sha256:sha256(result.stdout)},stderr:{path:stderrPath,bytes:result.stderr.length,sha256:sha256(result.stderr)} };
+    await writeFile(join(output, `${name}-invocation.private.json`), canonical(record), { flag:'wx',mode:0o600 });
+    return { ...record,stdoutText:result.stdout.toString('utf8'),stderrText:result.stderr.toString('utf8') };
+  } finally { for (const fd of handles.reverse()) closeSync(fd); }
 }
 
 export function syntheticRetainedRunner() {

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sha256 } from './data.mjs';
+import { recordProofBoundary } from './testing/proof-observations.mjs';
 import { journey } from './journey.mjs';
 import { scopedFixture } from './testing/scoped-fixtures.mjs';
 import { createWorkflowJourneyFixture, privateProofDirectory, recordedProcess, syntheticRetainedRunner, workflowApiBridge, workflowFixtureBoundaries } from './testing/workflow-journey-fixture.mjs';
@@ -97,18 +98,30 @@ test('complete source entrypoint rejects a malformed native target after a valid
 });
 
 test('fresh source entrypoints complete an initial release and update only storefront while retaining accepted work', { timeout: 180000 }, async t => {
-  const output = await realpath(await mkdtemp(join(tmpdir(), 'shop-workflow-source-integration-')));
-  const fixture = await createWorkflowJourneyFixture({ after() {} }, { output });
+  const base = process.env.SHOP_WORKFLOW_PROOF_ROOT ?? tmpdir();
+  await mkdir(base, { recursive:true,mode:0o700 });
+  const output = await realpath(await mkdtemp(join(base, 'source-integration-')));
   let passed = false;
-  t.after(async () => { await fixture.bridge.close(); await fixture.service.close(); if (passed) await rm(output, { recursive: true }); });
+  const activeProofs = [];
+  const track = promise => { activeProofs.push(promise); return promise; };
+  const onAbort=()=>{if(!passed)recordProofBoundary(output,'outer-cancelled');};
+  recordProofBoundary(output,'fixture-start');
+  t.signal.addEventListener('abort',onAbort,{once:true});
+  const fixture = await createWorkflowJourneyFixture({ after() {} }, { output });
+  recordProofBoundary(output,'fixture-complete');
+  t.after(async () => { t.signal.removeEventListener('abort',onAbort); await Promise.allSettled(activeProofs); await fixture.bridge.close(); await fixture.service.close(); if (passed && !process.env.SHOP_WORKFLOW_PROOF_ROOT) await rm(output, { recursive: true }); });
   const configuration = { ...fixture.configuration, options: { ...fixture.configuration.options, command: 'deliver' } };
-  const first = await runWorkflowJourney({ output, configuration, service: fixture.service, apiBridge: fixture.bridge, timeoutMs: 90000 });
+  recordProofBoundary(output,'source-a-start');
+  const first = await track(runWorkflowJourney({ output, configuration, service: fixture.service, apiBridge: fixture.bridge, timeoutMs: 90000, signal:t.signal }));
+  recordProofBoundary(output,'source-a-complete');
   assert.equal(first.summary.complete, true, first.summary.failure?.message);
   assert.equal(first.invocations.length, 1);
   assert(first.final.transitions.some(item => item.phase === 'runtime-verified'));
   assert(first.final.transitions.some(item => item.phase === 'staged-verified'));
   assert(first.final.transitions.length > 10);
-  const updated = await runWorkflowUpdate({ fixture, first, output });
+  recordProofBoundary(output,'source-b-start');
+  const updated = await track(runWorkflowUpdate({ fixture, first, output, signal:t.signal }));
+  recordProofBoundary(output,'source-b-complete');
   assert(updated.update.invocations.every(item => item.pid !== first.invocations[0].pid));
   assert.equal(new Set(updated.update.invocations.map(item => item.pid)).size, updated.update.invocations.length);
   assert.equal(updated.evidence.nativeAndBusinessMutations, 0);

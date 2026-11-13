@@ -1,10 +1,17 @@
 import { createHash } from 'node:crypto';
+import { channel } from 'node:diagnostics_channel';
 import { constants } from 'node:fs';
 import { lstat, open, readFile, readdir, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 export const check = (condition, reason) => { if (!condition) throw Error(reason); };
-export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const costs = channel('shop.release-v2.cost');
+export const sha256 = bytes => {
+  const start = costs.hasSubscribers ? process.hrtime.bigint() : null;
+  const result = createHash('sha256').update(bytes).digest('hex');
+  if (start !== null) costs.publish({ kind: 'hash', bytes: typeof bytes === 'string' ? Buffer.byteLength(bytes) : bytes.byteLength, ns: Number(process.hrtime.bigint() - start) });
+  return result;
+};
 export const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
   : value !== null && typeof value === 'object'
     ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
@@ -61,6 +68,7 @@ export function parseJSON(bytes, maximumBytes = 1024 * 1024) {
 
 export const readJSON = async (path, maximumBytes) => parseJSON(await readFile(path), maximumBytes);
 export async function readRegularFile(path, maximumBytes, privateFile = false) {
+  const start = costs.hasSubscribers ? process.hrtime.bigint() : null;
   check(Number.isSafeInteger(maximumBytes) && maximumBytes > 0, 'Explicit file byte bound required');
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -69,6 +77,7 @@ export async function readRegularFile(path, maximumBytes, privateFile = false) {
     const bytes = await handle.readFile(), after = await handle.stat();
     check(bytes.length <= maximumBytes && before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs &&
       before.nlink === after.nlink, 'Input changed during inspection');
+    if (start !== null) costs.publish({ kind: 'regular-read', bytes: bytes.length, ns: Number(process.hrtime.bigint() - start) });
     return bytes;
   } finally { await handle.close(); }
 }
@@ -90,6 +99,7 @@ export async function confined(root, path) {
   return target;
 }
 export async function readRef(root, ref) {
+  const start = costs.hasSubscribers ? process.hrtime.bigint() : null;
   const path = await confined(root, ref.path);
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -100,6 +110,7 @@ export async function readRef(root, ref) {
     check(before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs && before.nlink === after.nlink,
       'Referenced object changed during inspection');
     check(bytes.length === ref.bytes && sha256(bytes) === ref.sha256, 'Referenced bytes differ');
+    if (start !== null) costs.publish({ kind: 'regular-read', bytes: bytes.length, ns: Number(process.hrtime.bigint() - start) });
     return bytes;
   } finally { await handle.close(); }
 }

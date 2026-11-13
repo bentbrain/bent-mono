@@ -2,6 +2,7 @@ import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { channel } from 'node:diagnostics_channel';
 import { githubApi } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, readRegularFile, same } from './data.mjs';
 import { actionsIdentity } from './hosted-admission.mjs';
@@ -13,6 +14,7 @@ import { saveHostedFailure } from './hosted-diagnostics.mjs';
 
 const checkout = resolve(fileURLToPath(new URL('../../../../', import.meta.url)));
 const commands = new Set(['plan', 'advance', 'begin', 'rollback', 'recover-report']);
+const trace = channel('shop.release-v2.workflow');
 async function privateDirectory(path) {
   check(typeof path === 'string' && path === resolve(path) && path !== checkout && !path.startsWith(`${checkout}${sep}`), 'Absolute private workflow directory outside source required');
   await mkdir(path, { recursive: true, mode: 0o700 });
@@ -26,6 +28,7 @@ export async function workflowEntrypoint(options, boundaries = {}) {
   if (options.command === 'deliver') return deliverWorkflow(options, boundaries);
   const { installationPath, installationDigest, request, directory, command = 'plan', acceptedAt, env = process.env } = options;
   check(commands.has(command), 'Unsupported workflow transition');
+  trace.publish({ step: 'entrypoint-start', command });
   const identity = actionsIdentity(env), planOnly = command === 'plan', evidenceDirectory = join(directory, planOnly ? 'plan-evidence' : 'controller-evidence');
   const installedOptions = { path: installationPath, digest: installationDigest, identity, artifactDirectories: [directory] };
   if (command === 'recover-report') {
@@ -58,15 +61,21 @@ export async function workflowEntrypoint(options, boundaries = {}) {
       assembled = { options: state.options, readiness: state.readiness, evidence: state.evidence };
     } else {
       await privateDirectory(evidenceDirectory);
+      trace.publish({ step: 'intake-start', command });
       const imported = await importHostedPortable({ request, installation: installation.artifactIntake, destination: intakeDirectory,
         privateKeyFile: installation.artifactPrivateKeyFile, ...(boundaries.intakeApi ? { api: boundaries.intakeApi } : env.GH_TOKEN ? { githubToken: env.GH_TOKEN } : {}) });
+      trace.publish({ step: 'intake-complete', command });
+      trace.publish({ step: 'assembly-start', command });
       assembled = await assembleHostedRelease({ installation, identity, imported, destination: bundle, evidenceDirectory,
         qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, command, env, boundaries });
+      trace.publish({ step: 'assembly-complete', command });
       state = { schema: 'shop.workflow-state/v1', subject, subjectDigest: digest(subject), options: assembled.options,
         readiness: assembled.readiness, evidence: assembled.evidence };
       await writeFile(statePath, canonical(state), { flag: 'wx', mode: 0o600 });
     }
+    trace.publish({ step: 'controller-start', command });
     const controller = await hostedController({ ...assembled.options, command, env }, boundaries);
+    trace.publish({ step: 'controller-complete', command, phase: controller.phase });
     return { controller, paths: assembled.options, readiness: assembled.readiness, evidence: assembled.evidence };
   } finally { await rm(lock, { recursive: true }); }
 }

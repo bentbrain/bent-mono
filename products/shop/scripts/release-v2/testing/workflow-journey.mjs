@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { installProofTelemetry } from './proof-observations.mjs';
 import { canonical, check, digest, parseJSON } from '../data.mjs';
 import { verifyPortableBundle } from '../portable-bundle.mjs';
 import { createBootstrapFixture } from './bootstrap-fixture.mjs';
@@ -22,11 +23,11 @@ export async function workflowChild(configuration) {
   return workflowEntrypoint(configuration.options, boundaries);
 }
 
-export async function workflowInvocation({ output, name, configuration, timeoutMs = 30000 }) {
+export async function workflowInvocation({ output, name, configuration, timeoutMs = 30000, signal }) {
   await privateProofDirectory(output);
   const config = join(output, `${name}-configuration.private.json`);
   await writeFile(config, canonical(configuration), { flag: 'wx', mode: 0o600 });
-  const process = await recordedProcess({ output, name, args: [executable, '--child', config], timeoutMs });
+  const process = await recordedProcess({ output, name, args: [executable, '--child', config], timeoutMs, signal });
   return { ...process, result: process.exitCode === 0 ? parseJSON(Buffer.from(process.stdoutText), 16 * 1024 * 1024) : null };
 }
 
@@ -47,13 +48,13 @@ export function workflowIdentityProbes(configuration) {
 // The fixture supplies only the external protocol endpoints and installed
 // inputs. The executable source entrypoint owns intake, assembly and issuance.
 export async function runWorkflowJourney({ output, configuration, service, apiBridge, negativeCases = [], stopAt = 'complete', timeoutMs = 30000,
-  exerciseRecovery = false, prepareReportingRecovery, postAdmissionProbes }) {
+  exerciseRecovery = false, prepareReportingRecovery, postAdmissionProbes, signal }) {
   await privateProofDirectory(output);
   const startedAt = Date.now(), invocations = [], findings = {}, initialProviderCalls = service?.transcript.length ?? 0;
   const initialReports = service?.reports.length ?? 0;
   let currentConfiguration = configuration;
   const invoke = async (name, next = currentConfiguration) => {
-    const result = await workflowInvocation({ output, name, configuration: next, timeoutMs }); invocations.push(result);
+    const result = await workflowInvocation({ output, name, configuration: next, timeoutMs, signal }); invocations.push(result);
     return result;
   };
   let failure = null, final = null;
@@ -146,7 +147,7 @@ export async function runWorkflowJourney({ output, configuration, service, apiBr
   return { summary, invocations, final };
 }
 
-export async function runWorkflowUpdate({ fixture, first, output }) {
+export async function runWorkflowUpdate({ fixture, first, output, signal }) {
   check(first.summary.complete && phase(first.final) === 'complete', 'A complete first source release is required');
   const jobs = ['business', 'native'].map(component => ({ component, artifactDigest: fixture.portable.verified.components.get(component).artifact.codeDigest, format: 'job-v1' }));
   for (const job of jobs) fixture.service.workDb.prepare('INSERT INTO accepted_jobs(component,artifact_digest,format,status) VALUES(?,?,?,?)').run(job.component, job.artifactDigest, job.format, 'accepted');
@@ -154,7 +155,7 @@ export async function runWorkflowUpdate({ fixture, first, output }) {
   const next = await createWorkflowUpdateFixture({ after() {} }, { fixture, output: join(output, 'source-B') });
   try {
     const update = await runWorkflowJourney({ output: join(output, 'source-B'), configuration: next.configuration,
-      service: fixture.service, apiBridge: next.bridge });
+      service: fixture.service, apiBridge: next.bridge, signal });
     check(update.summary.complete, `Source B workflow did not complete: ${update.summary.failure?.message ?? 'unknown'}; ${update.invocations.at(-1)?.stderrText ?? ''}`);
     const mutations = fixture.service.transcript.slice(before).filter(item => item.method !== 'GET' &&
       ['api.cloudflare.com', `lambda.${fixture.policy.region}.amazonaws.com`].includes(new URL(item.url).hostname));
@@ -220,7 +221,7 @@ export async function runRetainedWorkflowPlan({ output, input, portableDirectory
 async function main() {
   const { values } = parseArgs({ strict: true, options: { child: { type: 'string' }, config: { type: 'string' }, output: { type: 'string' }, update: { type: 'boolean' } } });
   check(values.child || values.output, 'Provide a private --output directory or one private --child configuration');
-  if (values.child) return workflowChild(parseJSON(await readFile(resolve(values.child)), 16 * 1024 * 1024));
+  if (values.child) { const stop = installProofTelemetry(); try { return await workflowChild(parseJSON(await readFile(resolve(values.child)), 16 * 1024 * 1024)); } finally { stop(); } }
   const output = resolve(values.output);
   if (values.config) {
     const configuration = parseJSON(await readFile(resolve(values.config)), 16 * 1024 * 1024);

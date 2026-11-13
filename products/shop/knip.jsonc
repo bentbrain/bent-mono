@@ -24,6 +24,7 @@
         "scripts/release-v2/*.test.mjs",
         "scripts/testing/product-image-v5-smoke.mjs",
         "scripts/testing/linux-hosted-validation.mjs",
+        "scripts/testing/workflow-proof-evidence.mjs",
         "scripts/testing/linux-journey.mjs",
         "scripts/*.test.mjs"
       ],
