@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execute = promisify(execFile);
 import { standardActionsFixture } from "./standard-actions-fixture.mjs";
+import { verifyDuplicatePrintDelivery } from "./print-delivery-proof.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
@@ -659,16 +660,7 @@ export async function browserJourney({
       ).count,
       before.count,
     );
-    const stablePrints = await db
-      .prepare("SELECT id,status,sha256 FROM print_assets ORDER BY id")
-      .all();
-    await deliverPrint(true);
-    assert.deepEqual(
-      await db
-        .prepare("SELECT id,status,sha256 FROM print_assets ORDER BY id")
-        .all(),
-      stablePrints,
-    );
+    await verifyDuplicatePrintDelivery(db, deliverPrint);
     const scheduled = await api.scheduled({
       scheduledTime: Date.UTC(2026, 10, 13, 0, 1),
       cron: "* * * * *",
