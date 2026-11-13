@@ -25,9 +25,9 @@ export function protectedStore(client, policy, { eventCacheDirectory, eventCache
     const identity = /^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];
     if (!identity || !eventCacheDirectory) return remoteGet(key);
     const current = await getCache(), cached = await current.read(identity);
-    if (cached) { eventData(cached.bytes, identity); return cached; }
+    if (cached) return validateRead(cached, identity);
     const found = await remoteGet(key); if (!found) return null;
-    eventData(found.bytes, identity); await current.write(identity, found.bytes); return found;
+    validateRead(found, identity); await current.write(identity, found.bytes); return found;
   };
   const put = async (key, bytes, expectedETag) => {
     // Each call sends at most one PUT. An uncertain acknowledgement permits
@@ -68,7 +68,7 @@ export async function readProtectedJournal(store) {
   while (next !== null) {
     check(!seen.has(next) && events.length < protocolItemLimit, 'Protected journal contains a cycle or exceeds replay bound'); seen.add(next);
     const found = await store.get(`events/${next}.json`); check(found, 'Protected immutable event is missing');
-    const event = eventData(found.bytes, next); check(event.generation === generation, 'Protected journal generation gap');
+    const event = consumeEvent(found, next); check(event.generation === generation, 'Protected journal generation gap');
     events.push({ digest: next, event }); generation--; next = event.previous;
   }
   check(generation === 0, 'Protected journal history is incomplete');
@@ -112,4 +112,18 @@ export async function recoverReportingOnly({ client, store, deploymentId }) {
   const matches = inventory.records.filter(record => record.state === 'success' && record.environment === client.policyEnvironment && record.description === `Verified release event ${eventDigest}`);
   check(matches.length <= 1, 'Ambiguous reporting acknowledgement');
   return { status: matches.length === 1 ? 'confirmed' : 'held', eventDigest, complete: inventory.complete };
+}
+
+const validatedReads = new WeakMap();
+function validateRead(object, identity) {
+  const bytes = Buffer.from(object.bytes), event = eventData(bytes, identity);
+  validatedReads.set(object, { bytes, identity, event });
+  return object;
+}
+function consumeEvent(object, identity) {
+  const validated = validatedReads.get(object); validatedReads.delete(object);
+  // The parsed object stays private until this single use. Reused objects and
+  // changed bytes must pass complete validation again.
+  if (validated?.identity === identity && Buffer.isBuffer(object.bytes) && object.bytes.equals(validated.bytes)) return validated.event;
+  return eventData(object.bytes, identity);
 }

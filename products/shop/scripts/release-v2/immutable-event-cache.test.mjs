@@ -49,6 +49,38 @@ test('fresh store instances keep head live and fetch each immutable event once a
   assert.equal(f.calls.filter(call => call.key.startsWith('events/')).length, 5, 'Repeated full-chain provider GET amplification');
 });
 
+test('each fetched immutable event is strictly parsed once before journal replay', async t => {
+  const f = await fixture(t), store = protectedStore(f.client, f.policy, { eventCacheDirectory: f.directory });
+  await readProtectedJournal(store);
+  const original = JSON.parse; let parsedEvents = 0;
+  JSON.parse = function (text, ...arguments_) {
+    const value = original(text, ...arguments_);
+    if (value?.schema === 'shop.protected-journal-event/v1') parsedEvents++;
+    return value;
+  };
+  try { assert.equal((await readProtectedJournal(store)).events.length, 5); }
+  finally { JSON.parse = original; }
+  assert.equal(parsedEvents, 5, 'Duplicate full event parsing during one replay');
+});
+
+test('validation handoff rejects changed bytes and never reuses caller-mutated event state', async t => {
+  const f = await fixture(t), store = protectedStore(f.client, f.policy, { eventCacheDirectory: f.directory });
+  const retained = new Map();
+  const replay = { get: async key => {
+    if (key === 'head.json') return store.get(key);
+    if (!retained.has(key)) retained.set(key, await store.get(key));
+    return retained.get(key);
+  } };
+  const first = await readProtectedJournal(replay); first.state.counter = 999;
+  assert.equal((await readProtectedJournal(replay)).state.counter, 5);
+  const altered = { get: async key => {
+    const found = await store.get(key);
+    if (key.startsWith('events/')) found.bytes[0] ^= 1;
+    return found;
+  } };
+  await assert.rejects(readProtectedJournal(altered), /Protected immutable event bytes differ/);
+});
+
 test('fresh authenticated head advances fetch only its new event and validate the full cached predecessor chain', async t => {
   const f = await fixture(t), store = protectedStore(f.client, f.policy, { eventCacheDirectory: f.directory });
   const prior = await readProtectedJournal(store);
