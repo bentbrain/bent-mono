@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceManifestSha256": "bfa04c4ba7cfaf44b8788527b5ec3bf8272d30dd0cc353287dfa00aabb7a188e",
+  "sourceManifestSha256": "3f76f81180972c49d382c1a460f7f91686a10a3289a3e8c10657d9b1b233e96c",
   "records": [
     {
       "id": "shop-runtime-purchase-readiness-origin",
@@ -22,7 +22,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -45,7 +45,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -68,7 +68,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -91,7 +91,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -114,7 +114,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -139,7 +139,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -164,7 +164,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -190,7 +190,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -216,7 +216,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -241,7 +241,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -266,7 +266,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -291,7 +291,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -317,7 +317,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -342,7 +342,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -367,7 +367,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -393,7 +393,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -418,7 +418,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -443,7 +443,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -470,7 +470,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -497,7 +497,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -524,7 +524,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -549,7 +549,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -574,7 +574,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -601,7 +601,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -626,7 +626,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -651,7 +651,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -676,7 +676,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -701,7 +701,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -726,7 +726,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -751,7 +751,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -776,7 +776,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -799,7 +799,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -829,7 +829,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -861,7 +861,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -888,7 +888,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -918,7 +918,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -945,7 +945,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -967,7 +967,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -989,7 +989,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1011,7 +1011,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1033,7 +1033,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1059,7 +1059,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1084,7 +1084,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1109,7 +1109,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1133,7 +1133,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1158,7 +1158,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1183,7 +1183,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1208,7 +1208,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1233,7 +1233,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1261,7 +1261,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1289,7 +1289,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1317,7 +1317,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1345,7 +1345,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1370,7 +1370,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1395,7 +1395,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1420,7 +1420,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1445,7 +1445,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1473,38 +1473,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
-      }
-    },
-    {
-      "id": "shop-release-v2-loopback-artifact-request",
-      "disposition": "intentional-safe-flow",
-      "ruleId": "js/file-access-to-http",
-      "fingerprint": {
-        "primaryLocationLineHash": "c7b88a0ccb80e1cc:1",
-        "primaryLocationStartColumnFingerprint": "30"
-      },
-      "canonicalFlowSha256": "707959532353d84dce5f94f36b206a4b05e24eca42e7acef0ab41616efbaed92",
-      "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
-      "rationale": "All four trace branches pass component/version data from the separately signed composition or private durable journal to the fixed loopback content endpoint. V2 derives the installed version from complete code and binding digests while preserving origin and signed component proof admission; the schema and selectedVersion produce only fixed prefix and SHA-256 identifiers. The client enforces an anchored endpoint grammar, opens native HTTP to literal 127.0.0.1 at the validated port, disables pooling, rejects redirects/non-2xx responses, and bounds bytes and time. Request data cannot change hostname, credentials or socket destination. Actual CLI, hostile-origin, malformed-content, crash recovery and scoped stale/forged/revoked proof regressions cover the boundary.",
-      "guardPaths": [
-        "products/shop/scripts/release-v2/provider.mjs",
-        "products/shop/scripts/release-v2/composition.mjs",
-        "products/shop/scripts/release-v2/controller.mjs",
-        "products/shop/scripts/release-v2/data.mjs",
-        "products/shop/scripts/release-v2/artifact-transport.mjs",
-        "products/shop/scripts/release-v2/component-identity.mjs",
-        "products/shop/scripts/release-v2/scoped-inputs.mjs",
-        "products/shop/scripts/release-v2/composition.schema.json"
-      ],
-      "testPaths": [
-        "products/shop/scripts/release-v2/controller.test.mjs",
-        "products/shop/scripts/release-v2/scoped-controller.test.mjs",
-        "products/shop/scripts/release-v2/scoped-inputs.test.mjs"
-      ],
-      "reviewReference": {
-        "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1517,19 +1486,23 @@
       },
       "canonicalFlowSha256": "a7a97801c71521bc7bb80cddc05f641044fe56bd2fa0b853b77f370164a01479",
       "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
-      "rationale": "The runner intentionally retains the loopback simulator inventory as JSON evidence. The destination filename is the constant identity-readback.json under the controller-created private per-nonce evidence directory, opened exclusively with mode 0600. Remote bytes never select the path and are not executed. The separately pinned runner executes under Node filesystem permissions restricted to that evidence root, and network-deny admits only the signed literal loopback origins. The controller requires the exact observation set, matching nonce/composition/phase and independently re-reads each evidence file by length and digest. Process failure or forged success cannot activate or complete.",
+      "rationale": "The runner intentionally retains the loopback simulator inventory as JSON evidence. The destination filename is the constant identity-readback.json under the controller-created private per-nonce evidence directory, opened exclusively with mode 0600. Remote bytes never select the path and are not executed. The separately pinned runner executes under Node filesystem permissions restricted to that evidence root, and network-deny admits only the signed literal loopback origins. The controller requires the exact observation set, matching nonce/composition/phase and independently re-reads each evidence file by length and digest. Process failure or forged success cannot activate or complete. The journey also admits a separately root-authorized isolated HTTPS qualification scope. Its child keeps the nonce-specific private evidence directory, exclusive file creation, filesystem permissions, digest re-read, and byte limits. Network policy and the source-authorized runner constrain that scope separately; response bytes do not choose filesystem destinations.",
       "guardPaths": [
         "products/shop/scripts/release-v2/testing/fixture-journey.mjs",
         "products/shop/scripts/release-v2/journey.mjs",
         "products/shop/scripts/release-v2/network-deny.mjs",
-        "products/shop/scripts/release-v2/data.mjs"
+        "products/shop/scripts/release-v2/data.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.mjs",
+        "products/shop/scripts/release-v2/qualification-network.mjs"
       ],
       "testPaths": [
-        "products/shop/scripts/release-v2/controller.test.mjs"
+        "products/shop/scripts/release-v2/controller.test.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.test.mjs",
+        "products/shop/scripts/release-v2/hosted-controller.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1542,21 +1515,25 @@
       },
       "canonicalFlowSha256": "d043ea49dac519c97ae0aaddf07f357a97d7f9ff4d66b74143ae38033053a30c",
       "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
-      "rationale": "The pinned restricted runner intentionally downloads observations from the authenticated local journey service. Each response must have the receipt-declared length and SHA-256 before retention. The path is generated solely from a local array index under the private evidenceRoot, uses exclusive creation and mode 0600, and Node filesystem permissions confine writes to that root. The runner and controller bind the composition, phase, nonce and service identity; the controller independently verifies every retained file. The trusted service verifies full source, built storefront, native capsule, runtime and root-lock closures before and after executing the actual journey. These retained binary observations are data and are never executed.",
+      "rationale": "The pinned restricted runner intentionally downloads observations from the authenticated local journey service. Each response must have the receipt-declared length and SHA-256 before retention. The path is generated solely from a local array index under the private evidenceRoot, uses exclusive creation and mode 0600, and Node filesystem permissions confine writes to that root. The runner and controller bind the composition, phase, nonce and service identity; the controller independently verifies every retained file. The trusted service verifies full source, built storefront, native capsule, runtime and root-lock closures before and after executing the actual journey. These retained binary observations are data and are never executed. The journey also admits a separately root-authorized isolated HTTPS qualification scope. Its child keeps the nonce-specific private evidence directory, exclusive file creation, filesystem permissions, digest re-read, and byte limits. Network policy and the source-authorized runner constrain that scope separately; response bytes do not choose filesystem destinations.",
       "guardPaths": [
         "products/shop/scripts/release-v2/testing/real-journey-runner.mjs",
         "products/shop/scripts/release-v2/testing/real-journey-service.mjs",
         "products/shop/scripts/release-v2/journey.mjs",
         "products/shop/scripts/release-v2/network-deny.mjs",
-        "products/shop/scripts/release-v2/data.mjs"
+        "products/shop/scripts/release-v2/data.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.mjs",
+        "products/shop/scripts/release-v2/qualification-network.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/release-v2/real-journey.test.mjs",
-        "products/shop/scripts/release-v2/controller.test.mjs"
+        "products/shop/scripts/release-v2/controller.test.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.test.mjs",
+        "products/shop/scripts/release-v2/hosted-controller.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1569,21 +1546,25 @@
       },
       "canonicalFlowSha256": "ce745b99e1233363667c19308f0d996540aadd15cdd62408f1e6cf8647784ec0",
       "analysisSha256": "f2a4d47785a5296e25d824bd89f0f888ae7264b390a153d3f37284a4f449f08c",
-      "rationale": "Both simulator-inventory and authenticated service-receipt trace branches are intentionally serialized into actual-journey.json. This constant filename is exclusively created with mode 0600 under the controller-created nonce directory; remote strings cannot choose it. The runner validates the exact composition, phase, nonce, service identity and zero exit status, then returns a digest-bound observation for the controller to re-read. Its Node permission and network-deny configuration confines writes and outbound requests. The local service authenticates requests, verifies complete runtime/source/artifact closures and refuses nonce reuse and wrong subjects. Retained JSON is diagnostic evidence and is not executed.",
+      "rationale": "Both simulator-inventory and authenticated service-receipt trace branches are intentionally serialized into actual-journey.json. This constant filename is exclusively created with mode 0600 under the controller-created nonce directory; remote strings cannot choose it. The runner validates the exact composition, phase, nonce, service identity and zero exit status, then returns a digest-bound observation for the controller to re-read. Its Node permission and network-deny configuration confines writes and outbound requests. The local service authenticates requests, verifies complete runtime/source/artifact closures and refuses nonce reuse and wrong subjects. Retained JSON is diagnostic evidence and is not executed. The journey also admits a separately root-authorized isolated HTTPS qualification scope. Its child keeps the nonce-specific private evidence directory, exclusive file creation, filesystem permissions, digest re-read, and byte limits. Network policy and the source-authorized runner constrain that scope separately; response bytes do not choose filesystem destinations.",
       "guardPaths": [
         "products/shop/scripts/release-v2/testing/real-journey-runner.mjs",
         "products/shop/scripts/release-v2/testing/real-journey-service.mjs",
         "products/shop/scripts/release-v2/journey.mjs",
         "products/shop/scripts/release-v2/network-deny.mjs",
-        "products/shop/scripts/release-v2/data.mjs"
+        "products/shop/scripts/release-v2/data.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.mjs",
+        "products/shop/scripts/release-v2/qualification-network.mjs"
       ],
       "testPaths": [
         "products/shop/scripts/release-v2/real-journey.test.mjs",
-        "products/shop/scripts/release-v2/controller.test.mjs"
+        "products/shop/scripts/release-v2/controller.test.mjs",
+        "products/shop/scripts/release-v2/hosted-admission.test.mjs",
+        "products/shop/scripts/release-v2/hosted-controller.test.mjs"
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     },
     {
@@ -1608,7 +1589,7 @@
       ],
       "reviewReference": {
         "requiredStatus": "Independent review",
-        "evidence": "https://github.com/bentbrain/bent-mono/pull/39 requires final-head/current-base independent review before merge."
+        "evidence": "https://github.com/bentbrain/bent-mono/pull/40 requires final-head/current-base independent review before merge."
       }
     }
   ]
