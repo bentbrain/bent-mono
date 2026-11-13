@@ -19,7 +19,7 @@ export function validateDispatchTarget(request, policy) {
     check(url.origin === `https://lambda.${policy.region}.amazonaws.com`, 'Lambda origin differs');
     check(policy.functions.some(fn => {
       const path = `/2015-03-31/functions/${fn.name}`;
-      return [path, `${path}/code`, `${path}/versions`].includes(url.pathname) || fn.aliases.some(alias => url.pathname === `${path}/aliases/${alias}`);
+      return [path, `${path}/code`, `${path}/versions`, `${path}/aliases`].includes(url.pathname) || fn.aliases.some(alias => url.pathname === `${path}/aliases/${alias}`);
     }) && [...url.searchParams.keys()].every(key => ['Qualifier', 'MaxItems', 'Marker'].includes(key)), 'Lambda resource or query differs');
   } else if (request.service === 's3') {
     check(url.origin === `https://${policy.store.bucket}.s3.${policy.region}.amazonaws.com` &&
@@ -47,6 +47,7 @@ export function validateDispatchTarget(request, policy) {
     'lambda.alias': request.method === 'GET' && url.pathname.includes('/aliases/') && !url.search,
     'lambda.upload': request.method === 'PUT' && url.pathname.endsWith('/code') && !url.search,
     'lambda.activate': request.method === 'PUT' && url.pathname.includes('/aliases/') && !url.search,
+    'lambda.create-alias': request.method === 'POST' && url.pathname.endsWith('/aliases') && !url.search,
     'store.get': request.method === 'GET' && !url.search,
     'store.put': request.method === 'PUT' && !url.search && (request.headers['if-none-match'] === '*' || /^"[A-Za-z0-9-]{1,128}"$/.test(request.headers['if-match'] ?? '')),
     'report.statuses': request.method === 'GET' && numericPage && query.per_page === '100' && Object.keys(query).length === 2,

@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, rm, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonical, digest } from './data.mjs';
+import { canonical, digest, sha256 } from './data.mjs';
 import { protocolPolicy } from './provider-protocol-builders.mjs';
 import { createHostedWriter } from './hosted-writer.mjs';
 import { createHostedProvider, retainedCandidateLoader, preflightHostedTargets } from './hosted-provider.mjs';
@@ -214,11 +214,22 @@ test('malformed Lambda binding after a valid Worker is rejected before custody o
   await setup(async ({ f, policy, service, targets }) => {
     const component = structuredClone(f.payload.components[1]);
     const old = JSON.parse(await readFile(join(f.bundle, component.artifact.path), 'utf8'));
+    component.id = 'native';
+    const config = JSON.parse(await readFile(join(f.bundle, component.config.path), 'utf8')); config.component = component.id;
+    component.config = await f.put(component.config.path, config);
+    const files = [];
+    const blob = async (mediaType, value) => { const bytes = Buffer.from(canonical(value)), hash = sha256(bytes); files.push({ ...await f.put(`${old.root}/blobs/sha256/${hash}`, bytes), mediaType: 'application/octet-stream' }); return { mediaType, digest: `sha256:${hash}`, size: bytes.length }; };
+    const configuration = await blob('application/vnd.oci.image.config.v1+json', { architecture: 'amd64', os: 'linux', rootfs: { type: 'layers', diff_ids: [] } });
+    const image = await blob('application/vnd.oci.image.manifest.v1+json', { schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: configuration, layers: [] });
+    files.push({ ...await f.put(`${old.root}/oci-layout`, { imageLayoutVersion: '1.0.0' }), mediaType: 'application/json' },
+      { ...await f.put(`${old.root}/index.json`, { schemaVersion: 2, manifests: [{ ...image, platform: { architecture: 'amd64', os: 'linux' } }] }), mediaType: 'application/json' });
     const artifact = { schema: 'shop.artifact/v2', component: component.id, format: 'oci-layout', root: old.root,
-      entrypoint: old.entrypoint, files: old.files, originSourceCommit: old.originSourceCommit, inputsDigest: old.inputsDigest, runtimeDigest: digest('synthetic-native-runtime') };
+      entrypoint: `${old.root}/index.json`, files, originSourceCommit: old.originSourceCommit, inputsDigest: old.inputsDigest, runtimeDigest: digest('synthetic-native-runtime') };
     artifact.codeDigest = codeIdentity(artifact); component.codeDigest = artifact.codeDigest;
     component.artifact = await f.put('metadata/preflight-native-artifact.json', artifact);
-    const imageDigest = 'a'.repeat(64), expectedBinding = lambdaBindingProjection({ Architectures: ['x86_64'], MemorySize: 3008, Timeout: 120,
+    const provenance = JSON.parse(await readFile(join(f.bundle, component.provenance.path), 'utf8')); provenance.component = component.id; provenance.artifactFilesDigest = digest(artifact.files);
+    component.provenance = await f.put(component.provenance.path, provenance);
+    const imageDigest = image.digest.slice(7), expectedBinding = lambdaBindingProjection({ Architectures: ['x86_64'], MemorySize: 3008, Timeout: 120,
       Role: `arn:aws:iam::${policy.awsAccountId}:role/protocol-synthetic-runtime`, EphemeralStorage: { Size: 1024 }, Environment: { Variables: {} } });
     const native = { component: component.id, kind: 'lambda', resource: policy.functions[0].name, alias: 'active', imageDigest, expectedBinding,
       qualification: { awsImageQualified: true, artifactDigest: component.artifact.sha256, codeDigest: component.codeDigest, runtimeDigest: artifact.runtimeDigest, imageDigest, receiptDigest: digest('synthetic-qualification') } };
@@ -226,11 +237,13 @@ test('malformed Lambda binding after a valid Worker is rejected before custody o
     const baseline = { transcript: service.transcript.length, broker: service.brokerCalls.length, objects: [...service.objects.keys()] };
     const run = target => { const selected = [targets[0], target]; return preflightHostedTargets({ policy, components, targets: selected, load: retainedCandidateLoader({ bundle: f.bundle, targets: selected }) }); };
     assert.equal((await run(native)).providerWrites, 0);
+    await assert.rejects(run({ ...native, imageDigest: 'a'.repeat(64) }), /OCI image digest/);
+    await assert.rejects(run({ ...native, expectedBinding: { ...expectedBinding, Architectures: ['arm64'] } }), /architecture/);
     for (const binding of [undefined, null, [], {}, { ...expectedBinding, Timeout: '120' }, { ...expectedBinding, Environment: { Variables: { TEST: false } } },
       { ...expectedBinding, MemorySize: 0 }, { ...expectedBinding, Role: 'arn:aws:iam::111111111111:role/unadmitted' }, { ...expectedBinding, ImageConfigResponse: { Error: { Message: 'unqualified' } } },
       { ...expectedBinding, unrecognized: true }, { ...expectedBinding, VpcConfig: { SubnetIds: false } }]) {
       const changed = { ...native }; if (binding === undefined) delete changed.expectedBinding; else changed.expectedBinding = binding;
-      await assert.rejects(run(changed), /Lambda target binding contract/);
+      await assert.rejects(run(changed), /Lambda target binding contract|Lambda architecture/);
       assert.equal(service.transcript.length, baseline.transcript); assert.equal(service.brokerCalls.length, baseline.broker);
       assert.deepEqual([...service.objects.keys()], baseline.objects);
     }

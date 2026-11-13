@@ -5,6 +5,7 @@ import { check, canonical, digest, sha256, same, pathName, readRef, parseJSON, c
 import { codeIdentity } from './component-identity.mjs';
 import { componentClosure, parseLock, validateInventory } from './scoped-inputs.mjs';
 import { shopClosurePolicy } from './source-inventory.mjs';
+import { verifyOciLayout } from './oci-layout.mjs';
 
 const manifestName = 'portable-bundle.json';
 const exact = (value, keys) => check(value && typeof value === 'object' && !Array.isArray(value) && same(Object.keys(value).sort(), [...keys].sort()), 'Unexpected portable bundle fields');
@@ -103,6 +104,7 @@ export async function packagePortableBundle({ destination, originSourceCommit, l
   check(snapshots.has(originSourceCommit), 'Bundle intent source snapshot is missing');
   const retained = [], runtimes = {};
   for (const component of [...components].sort((a, b) => a.id < b.id ? -1 : 1)) {
+    check(component.format === undefined || component.format === 'module-bundle' || component.id === 'native' && component.format === 'oci-layout', 'Unsupported portable component format');
     commit(component.originSourceCommit); check(snapshots.has(component.originSourceCommit), 'Component origin snapshot missing'); pathName(component.entrypoint);
     if (component.identityFiles?.length) check(component.runtime.identityDirectory === `metadata/${component.id}-candidate`, 'Portable identity metadata root differs');
     const prefix = `payload/${component.id}`, files = await copyPayload(component.directory, root, prefix, component.identityFiles, component.runtime.identityDirectory);
@@ -120,7 +122,7 @@ export async function packagePortableBundle({ destination, originSourceCommit, l
     const snapshot = snapshots.get(input.originSourceCommit);
     const closure = componentClosure({ files: snapshot.files, lock: snapshot.lock, policy, component: input.id });
     const closureRef = await document(root, `metadata/${input.id}-closure.json`, closure);
-    const artifact = { schema: 'shop.artifact/v2', component: input.id, format: 'module-bundle', root: prefix, entrypoint: `${prefix}/${input.entrypoint}`,
+    const artifact = { schema: 'shop.artifact/v2', component: input.id, format: input.format ?? 'module-bundle', root: prefix, entrypoint: `${prefix}/${input.entrypoint}`,
       files: files.map(file => ({ path: `${prefix}/${file.path}`, bytes: file.bytes, sha256: file.sha256, mediaType: mediaType(file.path) })),
       originSourceCommit: input.originSourceCommit, inputsDigest: closure.buildDigest, runtimeDigest: runtimes[input.id] };
     artifact.codeDigest = codeIdentity(artifact);
@@ -180,6 +182,8 @@ export async function verifyPortableBundle(directory, expected) {
     const payload = (await tree(await confined(root, artifact.root))).files;
     check(same(payload.map(file => ({ path: `${artifact.root}/${file.path}`, bytes: file.bytes, sha256: file.sha256, mediaType: mediaType(file.path) })), artifact.files), 'Portable component has extra or missing payload');
     check(payload.some(file => `${artifact.root}/${file.path}` === artifact.entrypoint) && same(payload.map(({ path, mode }) => ({ path, mode })), runtime.modes), 'Portable entrypoint or runtime modes differ');
+    check(artifact.format === 'module-bundle' || record.id === 'native' && artifact.format === 'oci-layout', 'Unsupported portable artifact format');
+    if (artifact.format === 'oci-layout') await verifyOciLayout({ artifact, readFile: ref => readRef(root, ref) });
     check(runtime.schema === 'shop.portable-runtime/v1' && runtime.awsImageQualified === false && runtime.definition?.awsImageQualified !== true && digest(runtime) === artifact.runtimeDigest && artifact.runtimeDigest === policy.runtime[record.id], 'Portable runtime identity differs');
     if (runtime.definition.identityDirectory !== undefined) check(runtime.definition.identityDirectory === `metadata/${record.id}-candidate` &&
       actualFiles.some(file => file.path.startsWith(`${runtime.definition.identityDirectory}/`)), 'Portable runtime identity directory differs');

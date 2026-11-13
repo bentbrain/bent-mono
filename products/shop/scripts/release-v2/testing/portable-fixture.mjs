@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { sha256 } from '../data.mjs';
 import { packagePortableBundle } from '../portable-bundle.mjs';
 
-export async function createPortableFixture(t, { lineage = { kind: 'local-source-build', sourceCommit: '1'.repeat(40), dirtySnapshot: true } } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'shop-portable-bundle-')); t.after(() => rm(root, { recursive: true, force: true }));
+export async function createPortableFixture(t, { lineage = { kind: 'local-source-build', sourceCommit: '1'.repeat(40), dirtySnapshot: true }, rootDirectory = tmpdir() } = {}) {
+  const root = await mkdtemp(join(rootDirectory, 'shop-portable-bundle-')); t.after(() => rm(root, { recursive: true, force: true }));
   const source = join(root, 'source'); await mkdir(source, { mode: 0o700 });
   const workspaceRoots = ['products/shop/workers/api', 'products/shop/packages/product-image-renderer', 'products/shop/workers/video-renderer', 'products/shop/apps/storefront', 'products/shop/apps/web', 'packages/ui', 'packages/design-tokens'];
   const lock = { lockfileVersion: 3, configVersion: 1, packages: {}, workspaces: { '': { name: 'root' }, ...Object.fromEntries(workspaceRoots.map((path, index) => [path, { name: `workspace-${index}` }])) } };
@@ -28,4 +28,3 @@ export async function createPortableFixture(t, { lineage = { kind: 'local-source
   const verified = await packagePortableBundle({ destination: join(root, 'bundle'), originSourceCommit, lineage, sourceInventory: { files }, sourceDirectory: source, components });
   return { root, verified, source, components };
 }
-

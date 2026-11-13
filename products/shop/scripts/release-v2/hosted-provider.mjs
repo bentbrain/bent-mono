@@ -6,6 +6,7 @@ import { assertPolicy, cloudflareVersion, numberedVersion, protocolPageLimit, pr
 import { ProtocolConflict, ProtocolFailure, UncertainWrite, responseBytes, verifyLambdaQualified, assertLambdaBinding, lambdaBindingProjection } from './provider-protocol.mjs';
 import { requestDigest } from './signing.mjs';
 import { assertCredentialBroker } from './hosted-writer.mjs';
+import { verifyOciLayout } from './oci-layout.mjs';
 
 const candidateLoaders = new WeakSet();
 const cf = value => { check(value?.success === true && value.result && (!value.errors || value.errors.length === 0), 'Cloudflare provider response failed'); return value.result; };
@@ -43,6 +44,8 @@ export function retainedCandidateLoader({ bundle, targets }) {
       const expectedInventory = modules.map(part => ({ name: part.name, type: part.type, bytes: part.bytes.length, sha256: sha256(part.bytes), ...(part.name.endsWith('.map') ? { sourceMapDataSha256: sourceMapDataDigest(part.bytes) } : {}) })).sort((a, b) => a.name.localeCompare(b.name));
       candidate.worker = { entrypoint: target.entrypoint, metadata: target.metadata, modules, assets, expectedInventory };
     } else {
+      const image = await verifyOciLayout({ artifact, readFile: ref => readRef(bundle, ref) });
+      check(image.imageDigest === target.imageDigest && same(target.expectedBinding?.Architectures, [image.architecture === 'amd64' ? 'x86_64' : 'arm64']), 'Retained OCI image digest or Lambda architecture differs');
       check(target.kind === 'lambda' && target.qualification?.awsImageQualified === true && target.qualification.artifactDigest === component.artifact.sha256 && target.qualification.codeDigest === component.codeDigest &&
         target.qualification.runtimeDigest === artifact.runtimeDigest && target.qualification.imageDigest === target.imageDigest && /^[a-f0-9]{64}$/.test(target.qualification.receiptDigest), 'Admitted AWS image qualification is required');
       candidate.native = { imageDigest: target.imageDigest, expectedBinding: target.expectedBinding, qualificationDigest: target.qualification.receiptDigest, awsImageQualified: true };
@@ -140,15 +143,20 @@ export function createHostedProvider({ policy, writer, broker, components, targe
     }
     throw Error('Provider version inventory pagination exceeds bound');
   }
+  async function readAlias(target) {
+    let alias;
+    try { alias = await json(builders.lambdaAlias(target.resource, target.alias)); }
+    catch (error) { if (error instanceof ProtocolFailure && error.operation === 'lambda.alias' && error.status === 404) return null; throw error; }
+    check(alias.Name === target.alias && alias.AliasArn === `arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${target.resource}:${target.alias}` && (!alias.RoutingConfig || same(alias.RoutingConfig, { AdditionalVersionWeights: {} })), 'Lambda alias authority differs');
+    numberedVersion(alias.FunctionVersion); return alias;
+  }
   async function activeVersion(target) {
     if (target.kind === 'worker') {
       const deployments = cf(await json(builders.workerDeployments(target.resource))).deployments;
       check(Array.isArray(deployments) && deployments.length <= 4096, 'Incomplete Worker deployments'); if (!deployments.length) return null;
       const active = deployments[0].versions; check(Array.isArray(active) && active.length === 1 && active[0].percentage === 100, 'Worker deployment is not one exact active version'); return cloudflareVersion(active[0].version_id);
     }
-    const alias = await json(builders.lambdaAlias(target.resource, target.alias));
-    check(alias.Name === target.alias && alias.AliasArn === `arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${target.resource}:${target.alias}` && (!alias.RoutingConfig || same(alias.RoutingConfig, { AdditionalVersionWeights: {} })), 'Lambda alias authority differs');
-    numberedVersion(alias.FunctionVersion); return alias.FunctionVersion;
+    return (await readAlias(target))?.FunctionVersion ?? null;
   }
   async function verifyMapping(mapping) {
     const admittedTarget = targetFor(mapping.selected.component), target = mapping.targetSeal ?? admittedTarget; check(target.kind === admittedTarget.kind && target.resource === admittedTarget.resource && target.alias === admittedTarget.alias, 'Retained provider target moved outside admitted resource'); const candidate = await candidateFor(mapping.selected.component, mapping.selected.version);
@@ -265,7 +273,12 @@ export function createHostedProvider({ policy, writer, broker, components, targe
     } else {
       const mapping = currentMappings.find(item => same(item.selected, selected)); check(mapping, 'Admitted staged provider version missing'); await verifyMapping(mapping);
       if (target.kind === 'worker') await recordRequest(operation, 'activate', builders.workerActivate(target.resource, mapping.providerVersion), { active });
-      else { const alias = await json(builders.lambdaAlias(target.resource, target.alias)); await recordRequest(operation, 'activate', builders.lambdaActivate(target.resource, target.alias, mapping.providerVersion, alias.RevisionId), { active, revisionId: alias.RevisionId }); }
+      else {
+        const alias = await readAlias(target);
+        check((alias?.FunctionVersion ?? null) === active, 'Lambda alias changed before activation');
+        await recordRequest(operation, 'activate', alias === null ? builders.lambdaCreateAlias(target.resource, target.alias, mapping.providerVersion)
+          : builders.lambdaActivate(target.resource, target.alias, mapping.providerVersion, alias.RevisionId), { active, revisionId: alias?.RevisionId ?? null });
+      }
       if (!currentMappings.some(item => same(item, mapping))) await writer.recordProvider(provider => { provider.versions.push(mapping); });
     }
   }

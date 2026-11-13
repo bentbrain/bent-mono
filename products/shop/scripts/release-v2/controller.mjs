@@ -89,8 +89,9 @@ export async function advanceWithPorts(options, ports) {
       check(command !== 'recover-report', 'No pending report');
       return initialise();
     }
-    check(initial.schema === context.stateSchema && initial.providerOrigin === context.id && initial.policyDigest === payload.policyDigest, 'Journal authority differs');
+    check(initial.schema === context.stateSchema && initial.providerOrigin === context.id, 'Journal authority differs');
     if (command === 'begin' || command === 'rollback') return initialise(initial);
+    check(initial.policyDigest === payload.policyDigest, 'Journal policy differs');
     check(initial.compositionDigest === compositionDigest && same(initial.desired, payload), 'Desired composition differs from durable journal');
     const state = structuredClone(initial);
     check(state.phase !== 'complete' || state.lastVerified && digest(state.lastVerified) === compositionDigest && state.report?.status === 'confirmed', 'Invalid complete state');

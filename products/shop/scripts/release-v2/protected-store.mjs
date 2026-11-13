@@ -1,18 +1,33 @@
 import { canonical, check, digest, parseJSON, same, sha256 } from './data.mjs';
 import { exactFields, protocolItemLimit } from './provider-protocol-builders.mjs';
 import { ProtocolConflict, ProtocolFailure, UncertainWrite, responseBytes } from './provider-protocol.mjs';
+import { createImmutableEventCache } from './immutable-event-cache.mjs';
 
 const etag = value => { check(typeof value === 'string' && /^"[A-Za-z0-9-]{1,128}"$/.test(value), 'Missing exact protected store ETag'); return value; };
 const encoded = value => Buffer.from(canonical(value));
-export function protectedStore(client, policy) {
-  const get = async key => {
+export function protectedStore(client, policy, { eventCacheDirectory, eventCacheNamespace = digest(policy), eventCacheLimits = {} } = {}) {
+  let cache = null;
+  const getCache = async () => {
+    if (!eventCacheDirectory) return null;
+    cache ??= createImmutableEventCache({ directory: eventCacheDirectory, namespace: eventCacheNamespace, ...eventCacheLimits });
+    return cache;
+  };
+  const remoteGet = async key => {
     let response;
     try { response = await client.send(client.builders.storeGet(key)); }
     catch (error) { if (error instanceof ProtocolFailure && error.status === 404) return null; throw error; }
     const bytes = responseBytes(response);
     check(response.headers['x-amz-server-side-encryption'] === 'aws:kms' && response.headers['x-amz-server-side-encryption-aws-kms-key-id'] === policy.store.kmsKeyArn &&
       typeof response.headers['x-amz-version-id'] === 'string' && response.headers['x-amz-version-id'] !== 'null' && response.headers['x-amz-version-id'].length > 0, 'Protected encrypted versioned store readback required');
-    return { bytes, etag: etag(response.headers.etag), versionId: response.headers['x-amz-version-id'] };
+    return { bytes, etag: etag(response.headers.etag), versionId: response.headers['x-amz-version-id'], provenance: { kind: 'authenticated-provider' } };
+  };
+  const get = async key => {
+    const identity = /^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];
+    if (!identity || !eventCacheDirectory) return remoteGet(key);
+    const current = await getCache(), cached = await current.read(identity);
+    if (cached) { eventData(cached.bytes, identity); return cached; }
+    const found = await remoteGet(key); if (!found) return null;
+    eventData(found.bytes, identity); await current.write(identity, found.bytes); return found;
   };
   const put = async (key, bytes, expectedETag) => {
     // Each call sends at most one PUT. An uncertain acknowledgement permits
@@ -20,14 +35,17 @@ export function protectedStore(client, policy) {
     let uncertain = null;
     try { await client.send(client.builders.storePut(key, bytes, expectedETag)); }
     catch (error) { if (!(error instanceof UncertainWrite)) throw error; uncertain = error; }
-    const observed = await get(key);
+    // A cached event cannot confirm a PUT, including an uncertain acknowledgement.
+    const observed = await remoteGet(key);
     if (!observed || !observed.bytes.equals(bytes)) {
       if (uncertain) throw uncertain;
       throw new ProtocolConflict('store.readback');
     }
+    const identity = /^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];
+    if (identity && eventCacheDirectory) { eventData(observed.bytes, identity); await (await getCache()).write(identity, observed.bytes); }
     return { ...observed, acknowledgement: uncertain ? 'reconciled' : 'confirmed' };
   };
-  return Object.freeze({ get, put });
+  return Object.freeze({ get, put, cacheMeasurements: async () => cache ? (await cache).measurements() : null });
 }
 function headData(bytes) {
   const head = parseJSON(bytes);

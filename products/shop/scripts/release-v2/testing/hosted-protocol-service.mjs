@@ -36,6 +36,8 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
   const custodyPolicy = protocolPolicy({ ...policy, store: { ...policy.store, prefix: `${policy.store.prefix}-custody` } });
   const custodyObjects = new Map();
   const objects = new Map(), workers = new Map(policy.workers.map(item => [item.name, { versions: [], active: null }])), reports = [], transcript = [], brokerCalls = [];
+  const functions = new Map(targets.filter(target => target.kind === 'lambda').map(target => [target.resource,
+    { target, versions: [], active: null, latestRevision: 'latest-revision-1', aliasRevision: null }]));
   let versionCounter = 0, objectCounter = 0;
   const cloud = await loopbackServer(async (request, response, bytes) => {
     const url = new URL(request.url, `https://${request.headers.host}`), record = { method: request.method, url: url.href, sha256: sha256(bytes), bytes: bytes.length }; transcript.push(record);
@@ -62,6 +64,45 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
         cf({ id }); return;
       }
       if (request.method === 'POST' && url.pathname.endsWith('/deployments')) { const value = parseJSON(bytes); check(state.versions.some(item => item.id === value.versions[0].version_id), 'Cannot activate missing version'); state.active = value.versions[0].version_id; cf({ id: randomUUID(), versions: value.versions }); return; }
+    }
+    if (request.headers.host === `lambda.${policy.region}.amazonaws.com`) {
+      const name = [...functions.keys()].find(item => url.pathname === `/2015-03-31/functions/${item}` || url.pathname.startsWith(`/2015-03-31/functions/${item}/`));
+      const lambda = functions.get(name); check(lambda, 'Synthetic Lambda target is outside the installed map');
+      const root = `/2015-03-31/functions/${name}`, target = lambda.target;
+      const configuration = (version, revision) => ({ ...target.expectedBinding, FunctionName: name,
+        FunctionArn: `arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${name}${version === '$LATEST' ? '' : `:${version}`}`,
+        Version: version, PackageType: 'Image', State: 'Active', LastUpdateStatus: 'Successful', RevisionId: revision });
+      if (request.method === 'GET' && url.pathname === `${root}/versions`) {
+        send(200, { Versions: lambda.versions.map(item => configuration(item.version, item.revision)) }); return;
+      }
+      if (request.method === 'GET' && url.pathname === root) {
+        const qualifier = url.searchParams.get('Qualifier');
+        if (!qualifier) { send(200, { Configuration: configuration('$LATEST', lambda.latestRevision) }); return; }
+        const version = lambda.versions.find(item => item.version === qualifier); check(version, 'Unknown immutable synthetic Lambda version');
+        send(200, { Configuration: configuration(version.version, version.revision), Code: { ImageUri: version.imageUri, ResolvedImageUri: version.imageUri } }); return;
+      }
+      if (request.method === 'PUT' && url.pathname === `${root}/code`) {
+        const value = parseJSON(bytes), resource = policy.functions.find(item => item.name === name);
+        check(value.Publish === true && value.RevisionId === lambda.latestRevision && new RegExp(`^${resource.imageRepository.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@sha256:[a-f0-9]{64}$`).test(value.ImageUri), 'Synthetic Lambda upload identity differs');
+        const version = String(lambda.versions.length + 1), revision = `version-revision-${version}`;
+        lambda.versions.push({ version, revision, imageUri: value.ImageUri }); lambda.latestRevision = `latest-revision-${lambda.versions.length + 1}`;
+        if (faults.dropLambdaUploadAfter) { faults.dropLambdaUploadAfter = false; request.socket.destroy(); return; }
+        send(200, configuration(version, revision)); return;
+      }
+      if (request.method === 'GET' && url.pathname === `${root}/aliases/${target.alias}`) {
+        if (lambda.active === null) { send(404, { Type: 'ResourceNotFoundException' }); return; }
+        send(200, { Name: target.alias, AliasArn: `arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${name}:${target.alias}`,
+          FunctionVersion: lambda.active, RevisionId: lambda.aliasRevision, RoutingConfig: { AdditionalVersionWeights: {} } }); return;
+      }
+      if ((request.method === 'PUT' && url.pathname === `${root}/aliases/${target.alias}`) || (request.method === 'POST' && url.pathname === `${root}/aliases`)) {
+        const value = parseJSON(bytes);
+        if (request.method === 'POST') check(lambda.active === null && value.Name === target.alias, 'Synthetic Lambda alias already exists or differs');
+        else if (lambda.aliasRevision !== value.RevisionId) { send(412, { Type: 'PreconditionFailedException' }); return; }
+        check(lambda.versions.some(item => item.version === value.FunctionVersion), 'Cannot activate missing synthetic Lambda version');
+        lambda.active = value.FunctionVersion; lambda.aliasRevision = `alias-revision-${randomUUID()}`;
+        send(request.method === 'POST' ? 201 : 200, { Name: target.alias, AliasArn: `arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${name}:${target.alias}`,
+          FunctionVersion: lambda.active, RevisionId: lambda.aliasRevision, RoutingConfig: { AdditionalVersionWeights: {} } }); return;
+      }
     }
     if (request.headers.host === `${policy.store.bucket}.s3.${policy.region}.amazonaws.com`) {
       const custodyRequest = url.pathname.startsWith(`/${custodyPolicy.store.prefix}/`), activePolicy = custodyRequest ? custodyPolicy : policy, activeObjects = custodyRequest ? custodyObjects : objects;
@@ -100,7 +141,7 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
     response.writeHead(200, { 'content-type': 'application/json' }); response.end(canonical(reply));
   });
   const boundary = input => literalJSON(custody.origin, input), broker = credentialBrokerBoundary({ fenceAdmission, boundary });
-  return { policy, targets, custodyOrigin: custody.origin, receipt, publicKeys, fenceAdmission, broker, boundary, cloudOrigin: cloud.origin, factoryOptions, signRoot: envelope, workDb, objects, custodyObjects, executor, custodyStore, custodyPolicy, installation, workers, reports, transcript, brokerCalls, faults,
+  return { policy, targets, custodyOrigin: custody.origin, receipt, publicKeys, fenceAdmission, broker, boundary, cloudOrigin: cloud.origin, factoryOptions, signRoot: envelope, workDb, objects, custodyObjects, executor, custodyStore, custodyPolicy, installation, workers, functions, reports, transcript, brokerCalls, faults,
     workInventory: broker.workInventory,
     stopDrainRevoke: async () => { const state = await executor.readState(); return executor.recoverOwner(envelope({ schema: 'shop.custody-owner-recovery/v1', fenceDigest: fenceAdmission.digest, installationId: installation.payload.installationId, owner: state.owner.id, controllerStopped: true, issuedAt: Date.now(), expiresAt: Date.now() + 60000 })); },
     close: async () => { await custody.close(); await cloud.close(); workDb.close(); } };

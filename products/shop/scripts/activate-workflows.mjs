@@ -7,6 +7,7 @@ import { PRODUCT_ROOT, REPOSITORY_ROOT } from "./monorepo-source.mjs";
 export const releaseWorkflowNames = Object.freeze([
   "native-ci-identity.yml", "native-production-identity.yml", "native-development.yml", "native-production.yml",
   "native-production-foundation.yml", "deploy.yml", "web-production.yml", "preview-smoke.yml",
+  "shop-composition-qualification.yml",
 ]);
 export const operationalWorkflowNames = Object.freeze([
   "operations.yml", "product-lifecycle.yml", "configure-printify-webhooks.yml", "featured-products.yml",

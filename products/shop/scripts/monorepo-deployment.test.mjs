@@ -114,7 +114,8 @@ test("workflow activation excludes incident recoveries and detects drift without
   const directory = await mkdtemp(join(tmpdir(), "shop-workflows-"));
   try {
     const files = await activateShopWorkflows({ check: false, destination: directory });
-    assert.equal(files.length, 8);
+    assert.equal(files.length, 9);
+    assert.ok(files.some(file => file.name === "shop-composition-qualification.yml"));
     assert.ok(releaseWorkflowNames.every(name => !name.includes("recovery") && !name.includes("schedule")));
     await activateShopWorkflows({ destination: directory });
     await assert.rejects(activateShopWorkflows({ check: false, destination: directory }), { code: "EEXIST" });

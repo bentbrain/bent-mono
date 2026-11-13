@@ -43,6 +43,7 @@ export async function rehydrateProviderRequest(input, { policy, assets = null })
     case 'lambda.alias': request = builders.lambdaAlias(fn?.name, url.pathname.split('/').at(-1)); break;
     case 'lambda.upload': { const value = parseJSON(body); request = builders.lambdaUpload(fn?.name, value.ImageUri?.split('@sha256:')[1], value.RevisionId); break; }
     case 'lambda.activate': { const value = parseJSON(body); request = builders.lambdaActivate(fn?.name, url.pathname.split('/').at(-1), value.FunctionVersion, value.RevisionId); break; }
+    case 'lambda.create-alias': { const value = parseJSON(body); request = builders.lambdaCreateAlias(fn?.name, value.Name, value.FunctionVersion); break; }
     case 'report.statuses': request = builders.reportStatuses(url.pathname.split('/').at(-2), Number(url.searchParams.get('page'))); break;
     case 'report.success': request = builders.reportSuccess(url.pathname.split('/').at(-2), parseJSON(body).description?.slice('Verified release event '.length)); break;
     default: throw Error('Unsupported custody provider operation');

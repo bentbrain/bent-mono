@@ -1,5 +1,5 @@
 import { lstat, realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { canonical, check, digest, parseJSON, readRef, readRegularFile, same, sha256 } from './data.mjs';
@@ -73,7 +73,7 @@ export async function hostedController(options, boundaries = {}) {
   const transport = boundaries.broker ?? createBrokerTransport({ root: admission.root,
     token: await requestBrokerIdentity({ root: admission.root, env: options.env ?? process.env }) });
   const broker = credentialBrokerBoundary({ fenceAdmission: fence, boundary: transport });
-  const writer = createHostedWriter({ policy, broker, fenceAdmission: fence });
+  const writer = createHostedWriter({ policy, broker, fenceAdmission: fence, eventCacheDirectory: join(options.evidenceDirectory, 'immutable-journal-cache') });
   const provider = createHostedProvider({ policy, writer, broker, components: admission.payload.components, targets: plan.targets,
     load, deploymentId: plan.deploymentId,
     workInventory: () => broker.workInventory() });

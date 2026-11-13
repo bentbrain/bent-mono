@@ -52,6 +52,9 @@ test('protocol policies have exact origins, resource allowlists and no endpoint 
   assert.throws(() => builders.storePut('events/' + 'a'.repeat(64) + '.json', Buffer.from('{}'), '"previous"'), /create-only/);
   assert.throws(() => builders.lambdaActivate(fixture.functionName, 'active', '$LATEST', 'revision'), /qualified numbered/);
   assert.throws(() => builders.lambdaActivate(fixture.functionName, 'other', '7', 'revision'), /allowlist/);
+  assert.throws(() => builders.lambdaCreateAlias(fixture.functionName, 'other', '7'), /allowlist/);
+  assert.throws(() => builders.lambdaCreateAlias(fixture.functionName, 'active', '$LATEST'), /qualified numbered/);
+  assert.deepEqual(parseJSON(Buffer.from(builders.lambdaCreateAlias(fixture.functionName, 'active', '7').bodyBase64, 'base64')), { Name: 'active', FunctionVersion: '7', RoutingConfig: { AdditionalVersionWeights: {} } });
   const request = builders.lambdaUpload(fixture.functionName, 'a'.repeat(64), 'revision');
   assert.equal(new URL(request.url).origin, 'https://lambda.ap-southeast-2.amazonaws.com');
   assert.deepEqual(parseJSON(Buffer.from(request.bodyBase64, 'base64')), { ImageUri: `${changed.functions[0].imageRepository}@sha256:${'a'.repeat(64)}`, Publish: true, RevisionId: 'revision' });
