@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PRODUCT_MOCKUP_GEOMETRY } from "@forever-tee/contracts/product-mockup-geometry";
+import { MAX_DESIGN_SOURCE_PIXELS } from "@forever-tee/contracts/limits";
 export const RENDERER_VERSION = "product-images-v5";
 export function parseImageRecipe(v) {
   if (
@@ -89,7 +90,7 @@ async function template(directory, color, kind) {
   return templates.get(key);
 }
 async function place(source, s, width, height, depth) {
-  const image = sharp(source, { limitInputPixels: 40_000_000 }),
+  const image = sharp(source, { limitInputPixels: MAX_DESIGN_SOURCE_PIXELS }),
     meta = await image.metadata();
   if (!meta.width || !meta.height)
     throw new Error("Missing artwork dimensions.");

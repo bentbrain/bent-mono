@@ -1,0 +1,209 @@
+@import "@bent/design-tokens/tokens.css";
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "../../web/src";
+@source "./";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--bent-font-mono);
+  --font-mono: var(--bent-font-mono);
+  --font-heading: var(--bent-font-mono);
+  --color-ring: var(--blue);
+  --color-input: var(--blue);
+  --color-border: var(--blue);
+  --color-destructive: var(--blue);
+  --color-accent-foreground: var(--background);
+  --color-accent: var(--blue);
+  --color-muted-foreground: var(--blue);
+  --color-muted: var(--background);
+  --color-secondary-foreground: var(--blue);
+  --color-secondary: var(--background);
+  --color-primary-foreground: var(--background);
+  --color-primary: var(--blue);
+  --color-popover-foreground: var(--foreground);
+  --color-popover: var(--background);
+  --color-card-foreground: var(--foreground);
+  --color-card: var(--background);
+  --radius-sm: var(--bent-radius);
+  --radius-md: var(--bent-radius);
+  --radius-lg: var(--bent-radius);
+  --radius-xl: var(--bent-radius);
+}
+
+:root {
+  color-scheme: light;
+  --background: var(--bent-color-background-light);
+  --foreground: var(--bent-color-accent-light);
+  --blue: var(--bent-color-accent-light);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: var(--bent-color-background-dark);
+    --foreground: var(--bent-color-accent-dark);
+    --blue: var(--bent-color-accent-dark);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--blue);
+    outline-color: var(--blue);
+  }
+
+  html,
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    font-family: var(--bent-font-mono);
+  }
+
+  body {
+    position: relative;
+    color: var(--foreground);
+    background: var(--background);
+    text-transform: lowercase;
+  }
+
+  button,
+  [data-slot="button"],
+  input[type="button"],
+  input[type="reset"],
+  input[type="submit"] {
+    text-transform: uppercase;
+  }
+
+  input:not([type="button"]):not([type="reset"]):not([type="submit"]),
+  textarea,
+  [contenteditable="true"] {
+    text-transform: none;
+  }
+
+  html {
+    scroll-padding-top: 3rem;
+  }
+}
+
+.palette-spinner {
+  animation: palette-spinner-turn 800ms linear infinite;
+  mask: conic-gradient(
+    from var(--spinner-angle),
+    #000 0 78%,
+    transparent 78% 100%
+  );
+}
+
+.palette-spinner-ring {
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 0.22rem),
+    #000 calc(100% - 0.2rem)
+  );
+}
+
+@property --spinner-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes palette-spinner-turn {
+  to {
+    --spinner-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-spinner {
+    animation: none;
+  }
+}
+
+.monochrome-noise {
+  animation: noise-shift 240ms steps(2, jump-none) infinite;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-.7'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 11.25rem 11.25rem;
+  mix-blend-mode: overlay;
+  will-change: transform;
+}
+
+@keyframes noise-shift {
+  0% {
+    transform: translate3d(-2%, -1%, 0);
+  }
+
+  50% {
+    transform: translate3d(1%, 2%, 0);
+  }
+
+  100% {
+    transform: translate3d(2%, -2%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monochrome-noise {
+    animation: none;
+  }
+}
+
+.editor-direct-manipulation-cue {
+  animation: editor-direct-manipulation-cue 760ms 180ms ease-out both;
+}
+
+@keyframes editor-direct-manipulation-cue {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  32% {
+    transform: translate3d(0.2rem, -0.1rem, 0) scale(1.006);
+  }
+
+  62% {
+    transform: translate3d(-0.14rem, 0.08rem, 0) scale(0.998);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-direct-manipulation-cue {
+    animation: none;
+  }
+}
+
+img[data-fill="true"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../web/assets/fonts/geist-mono/GeistMono-Regular.ttf")
+    format("truetype");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../../web/assets/fonts/geist-mono/GeistMono-Bold.ttf")
+    format("truetype");
+}
+:root {
+  --font-geist-mono: "Geist Mono";
+}
