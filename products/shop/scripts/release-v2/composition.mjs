@@ -3,6 +3,8 @@ import { readFile, lstat, realpath } from 'node:fs/promises';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { check, canonical, digest, sha256, same, readJSON, parseJSON, readRef, confined, filesUnder, pathName, validate } from './data.mjs';
+import { componentClosure, closurePolicy, validateInventory, parseLock } from './scoped-inputs.mjs';
+import { verifyCodeIdentity, verifyComponentProof } from './component-identity.mjs';
 
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const schema = await readJSON(new URL('./composition.schema.json', import.meta.url));
@@ -24,6 +26,8 @@ export async function admit({ bundle, manifest, trustPath }) {
     trustedPath !== await realpath(manifest) && !trustedPath.startsWith(`${bundleRoot}${sep}`), 'Separate private fixture trust required');
   const trust = await readJSON(trustPath, 16 * 1024 * 1024);
   conforms(trust, 'trust');
+  const scoped = trust.schema === 'shop.fixture-trust/v2';
+  if (scoped) closurePolicy(trust.closurePolicy, trust.closurePolicy.components);
   check(trust.implementationDigest === await implementationDigest(), 'Verifier implementation changed');
   check(trust.inputPaths.includes('bun.lock') && trust.inputPaths.includes('package.json'), 'Full dependency closure required');
   trust.inputPaths.forEach(pathName);
@@ -34,6 +38,9 @@ export async function admit({ bundle, manifest, trustPath }) {
   const envelope = await readJSON(manifest);
   conforms(envelope, 'envelope');
   const { payload, signature } = envelope;
+  check(payload.schema === (scoped ? 'shop.release-composition/v2' : 'shop.release-composition/v1') && signature.payloadType === payload.schema,
+    'Source admission schema differs');
+  if (scoped) closurePolicy(trust.closurePolicy, payload.components.map(component => component.id));
   check(signature.keyId === trust.keyId && signature.payloadDigest === digest(payload) &&
     verify('sha256', Buffer.from(canonical(payload)), key, Buffer.from(signature.signature, 'base64')), 'Composition signature differs');
   check(payload.policyDigest === digest(trust) && same(payload.repository, trust.repository) && payload.baseCommit === trust.baseCommit &&
@@ -51,11 +58,18 @@ export async function admit({ bundle, manifest, trustPath }) {
   for (const snapshot of trust.snapshots) {
     const root = await confined(bundle, snapshot.root);
     const paths = await filesUnder(root);
-    check(same(paths, [...trust.inputPaths].sort()), 'Unknown or missing source path invalidates full closure');
-    const inputs = sorted(await Promise.all(paths.map(async path => ({ path, sha256: sha256(await readFile(await confined(root, path))) }))));
+    const expected = scoped ? snapshot.files.map(file => file.path) : [...trust.inputPaths].sort();
+    if (scoped) validateInventory(snapshot.files);
+    check(same(paths, expected), 'Unknown or missing source path invalidates full closure');
+    const inputs = sorted(await Promise.all(paths.map(async path => {
+      const target = await confined(root, path), bytes = await readFile(target);
+      return { path, sha256: sha256(bytes), ...(scoped ? { mode: (await lstat(target)).mode & 0o111 ? '100755' : '100644' } : {}) };
+    })));
     check(digest(inputs) === snapshot.treeDigest, 'Source snapshot changed');
-    snapshots.set(snapshot.commit, inputs);
+    if (scoped) check(same(inputs, snapshot.files), 'Source mode or inventory differs');
+    snapshots.set(snapshot.commit, { inputs, ...(scoped ? { lock: parseLock(await readFile(await confined(root, 'bun.lock'))) } : {}) });
   }
+  if (scoped) check(same([...new Set([...snapshots.values()].flatMap(snapshot => snapshot.inputs.map(file => file.path)))].sort(), [...trust.inputPaths].sort()), 'Root inventory accounting differs');
   const artifacts = new Map();
   for (const component of payload.components) {
     for (const [name, values] of Object.entries(component.contract)) if (Array.isArray(values)) orderedSet(values, item => item, `Contract ${name} set must be sorted`);
@@ -63,11 +77,21 @@ export async function admit({ bundle, manifest, trustPath }) {
     const intentInputs = parseJSON(await readRef(bundle, component.intentInputsRef), 16 * 1024 * 1024); conforms(intentInputs, 'inputs');
     orderedSet(inputs.files, item => item.path, 'Origin input set must be sorted');
     orderedSet(intentInputs.files, item => item.path, 'Intent input set must be sorted');
-    const origin = snapshots.get(component.originSourceCommit), intended = snapshots.get(payload.intentSourceCommit);
+    const originSnapshot = snapshots.get(component.originSourceCommit), intentSnapshot = snapshots.get(payload.intentSourceCommit);
+    const origin = originSnapshot?.inputs, intended = intentSnapshot?.inputs;
     check(origin && intended && same(inputs.files, origin) && same(intentInputs.files, intended), 'Exact full input closure differs');
-    check(component.sourceTreeDigest === digest(origin) && component.inputsDigest === digest(origin) &&
-      component.intentInputsDigest === digest(intended), 'Input digest differs');
-    check(same(origin, intended), 'Changed source or dependency requires a fresh artifact and full qualification');
+    check(inputs.schema === (scoped ? 'shop.root-inputs/v2' : 'shop.full-inputs/v1') && intentInputs.schema === inputs.schema, 'Input inventory schema differs');
+    if (scoped) {
+      const a = componentClosure({ files: origin, lock: originSnapshot.lock, policy: trust.closurePolicy, component: component.id });
+      const b = componentClosure({ files: intended, lock: intentSnapshot.lock, policy: trust.closurePolicy, component: component.id });
+      check(component.sourceTreeDigest === digest(origin) && component.inputsDigest === a.buildDigest && component.intentInputsDigest === b.buildDigest &&
+        component.proofInputsDigest === a.proofDigest && component.intentProofInputsDigest === b.proofDigest, 'Scoped build or proof digest differs');
+      check(a.buildDigest === b.buildDigest && a.proofDigest === b.proofDigest, 'Changed component source, dependency or proof requires fresh qualification');
+    } else {
+      check(!component.codeDigest && component.sourceTreeDigest === digest(origin) && component.inputsDigest === digest(origin) &&
+        component.intentInputsDigest === digest(intended), 'Input digest differs');
+      check(same(origin, intended), 'Changed source or dependency requires a fresh artifact and full qualification');
+    }
     const artifact = parseJSON(await readRef(bundle, component.artifact)); conforms(artifact, 'artifact');
     const config = parseJSON(await readRef(bundle, component.config)); conforms(config, 'config');
     const provenance = parseJSON(await readRef(bundle, component.provenance)); conforms(provenance, 'provenance');
@@ -78,9 +102,22 @@ export async function admit({ bundle, manifest, trustPath }) {
     check(artifact.component === component.id && config.component === component.id && provenance.component === component.id &&
       artifact.originSourceCommit === component.originSourceCommit && provenance.originSourceCommit === component.originSourceCommit &&
       artifact.inputsDigest === component.inputsDigest && provenance.inputsDigest === component.inputsDigest &&
-      provenance.sourceTreeDigest === component.sourceTreeDigest && artifact.configDigest === component.config.sha256 &&
-      artifact.provenanceDigest === component.provenance.sha256 && provenance.artifactFilesDigest === digest(artifact.files) &&
+      provenance.sourceTreeDigest === component.sourceTreeDigest && (scoped || artifact.configDigest === component.config.sha256 &&
+      artifact.provenanceDigest === component.provenance.sha256) && provenance.artifactFilesDigest === digest(artifact.files) &&
       provenance.dependencyLockDigest === origin.find(item => item.path === 'bun.lock')?.sha256, 'Artifact provenance or config subject differs');
+    check(artifact.schema === (scoped ? 'shop.artifact/v2' : 'shop.artifact/v1'), 'Artifact admission schema differs');
+    verifyCodeIdentity(artifact, component);
+    if (scoped) {
+      check(artifact.runtimeDigest === trust.closurePolicy.runtime[component.id] && provenance.toolchainDigest === artifact.runtimeDigest, 'Native/runtime qualification differs');
+      const kinds = [];
+      for (const ref of component.componentProofs) {
+        const receipt = parseJSON(await readRef(bundle, ref));
+        const proof = verifyComponentProof(receipt, { component, artifact, trust, now: Date.now(),
+          verifySignature: (value, signature) => verify('sha256', Buffer.from(canonical(value)), key, Buffer.from(signature, 'base64')) });
+        conforms(proof.evidence, 'ref'); await readRef(bundle, proof.evidence); kinds.push(proof.kind);
+      }
+      check(same(kinds.sort(), ['artifact', 'qualification']), 'Complete component proof set required');
+    }
     check(artifact.files.some(file => file.path === artifact.entrypoint), 'Artifact entrypoint missing');
     const artifactRoot = await confined(bundle, artifact.root);
     check(artifact.files.every(file => file.path.startsWith(`${artifact.root}/`)) &&
@@ -150,7 +187,7 @@ export function compatible(candidate, previous, inventory) {
     check(job && Object.keys(job).sort().join(',') === 'artifactDigest,component,format' && /^[a-f0-9]{64}$/.test(job.artifactDigest), 'Malformed outstanding job identity');
     const versions = variants.get(job.component);
     check(versions && versions.every(component => component.contract.jobHandlers.includes(job.format)) &&
-      versions.some(component => component.artifact.sha256 === job.artifactDigest), 'Outstanding job requires an incompatible or unretained version');
+      versions.some(component => (component.codeDigest ?? component.artifact.sha256) === job.artifactDigest), 'Outstanding job requires an incompatible or unretained version');
     check(Array.isArray(inventory.versions) && inventory.versions.some(version => version.component === job.component && version.artifactDigest === job.artifactDigest), 'Outstanding job artifact has no retained provider version');
   }
   return activationOrder(candidate);

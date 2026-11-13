@@ -12,6 +12,7 @@ import { seedCatalogue } from "./seed-fixture.mjs";
 import { browserJourney } from "./browser-journey.mjs";
 import { imageService } from "./image-service-fixture.mjs";
 import { createShopifyFixture } from "./shopify-fixture.mjs";
+import { verifyLinuxCandidate } from "../../../scripts/testing/linux-candidate.mjs";
 import {
   fixtureBinding,
   fixtureContext,
@@ -29,6 +30,14 @@ if (!capsule)
   throw new Error("Supply the verified native v5 capsule directory.");
 const manifest = await readFile(resolve(capsule, "capsule-manifest.json"));
 const nativeBuildId = createHash("sha256").update(manifest).digest("hex");
+const linuxCandidate = process.argv[5] ? resolve(process.argv[5]) : null;
+let linuxCandidateReceipt;
+if (linuxCandidate) {
+  linuxCandidateReceipt = await verifyLinuxCandidate(linuxCandidate);
+  assert.equal(resolve(capsule), resolve(linuxCandidate, "native-image"));
+  assert.equal(nativeBuildId, linuxCandidateReceipt.capsuleManifestSha256);
+  process.env.PATH = `${resolve(linuxCandidate, "runtime/bin")}:${process.env.PATH}`;
+}
 let nativeHandler;
 process.umask(0o077);
 await mkdir(artifact, { recursive: true, mode: 0o700 });
@@ -162,9 +171,13 @@ const outbound = async (request) => {
     const event = await request.json();
     if (!videoHandler) {
       const { createAppHandler } =
-        await import("../../../workers/video-renderer/aws-lambda/app-handler.mjs");
+        await import(linuxCandidate
+          ? pathToFileURL(resolve(linuxCandidate, "runtime/products/shop/workers/video-renderer/aws-lambda/app-handler.mjs")).href
+          : "../../../workers/video-renderer/aws-lambda/app-handler.mjs");
       const { renderStoryVideo } =
-        await import("../../../workers/video-renderer/src/renderer.mjs");
+        await import(linuxCandidate
+          ? pathToFileURL(resolve(linuxCandidate, "runtime/products/shop/workers/video-renderer/src/renderer.mjs")).href
+          : "../../../workers/video-renderer/src/renderer.mjs");
       const apiOrigin =
         "https://forever-tee-api-development.socialqueue.workers.dev";
       videoHandler = createAppHandler({
@@ -173,7 +186,9 @@ const outbound = async (request) => {
         render: renderStoryVideo,
         readMockup: (file) =>
           readFile(
-            resolve(root, "products/shop/apps/web/public/mockups", file),
+            linuxCandidate
+              ? resolve(linuxCandidate, "runtime/assets", file)
+              : resolve(root, "products/shop/apps/web/public/mockups", file),
           ),
         send: async (input, init) => {
           try {
@@ -434,6 +449,11 @@ try {
         businessOrigin: origin,
         nativeCapsule: capsule,
         nativeBuildId,
+        ...(linuxCandidateReceipt ? {
+          linuxCandidateManifestSha256: createHash("sha256").update(await readFile(resolve(linuxCandidate, "linux-candidate.json"))).digest("hex"),
+          nativeVideoRuntimeSha256: linuxCandidateReceipt.runtimeFilesSha256,
+          awsImageQualified: false,
+        } : {}),
         lockSha256: createHash("sha256")
           .update(await readFile(resolve(root, "bun.lock")))
           .digest("hex"),

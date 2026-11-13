@@ -36,6 +36,7 @@ export async function simulator(options = {}) {
       const wire = Buffer.concat(chunks), body = parseJSON(wire, fixtureTransportByteLimit);
       call.request = { bytes: wire.length, sha256: sha256(wire) };
       const kind = url.pathname.slice(1);
+      await controls.beforeMutation?.(kind);
       if (controls.dropBefore === kind) { request.socket.destroy(); return; }
       if (kind === 'reports') {
         if (controls.reportOutage) return send(503, { error: 'report-outage' });

@@ -13,8 +13,12 @@
         "scripts/release-v2/testing/fixture-journey.mjs",
         "scripts/release-v2/testing/real-journey-proof.mjs",
         "scripts/release-v2/testing/real-journey-runner.mjs",
+        "scripts/release-v2/testing/scoped-source-proof.mjs",
+        "scripts/release-v2/testing/provider-protocol-transcript.mjs",
         "scripts/release-v2/*.test.mjs",
         "scripts/testing/product-image-v5-smoke.mjs",
+        "scripts/testing/linux-hosted-validation.mjs",
+        "scripts/testing/linux-journey.mjs",
         "scripts/*.test.mjs"
       ],
       // The diagnostic runner uses the API workspace's Wrangler, the web

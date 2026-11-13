@@ -91,4 +91,10 @@ Each run verifies artifact and input identities, exercises candidate and active 
 
 Controller failures retain the original error and stack in a private `failure-*.json` file beside the journal. Terminal output identifies that file and its checksum. An invalid or unwritable private destination reports that diagnostic capture is unavailable and keeps the operation stopped.
 
+Scoped composition admission records each artifact's original source, resolved dependencies, runtime and proof inputs. A storefront update can retain a native artifact whose inputs match. Every composition receives fresh source, security, review and compatibility admission. Unknown files and unsupported dependency graphs require broader validation.
+
+Run `node scripts/release-v2/testing/scoped-source-proof.mjs /absolute/private/new-run` to check proposed source changes against the current repository inventory. Run `node scripts/release-v2/testing/provider-protocol-transcript.mjs --output /absolute/private/new-run` to exercise Cloudflare, Lambda, conditional storage and reporting request construction through local HTTP protocol fixtures. Both commands retain their evidence privately.
+
+The `Shop Linux customer journey` workflow packages a pinned Linux runtime and runs the built storefront, business Worker, native image and video rendering, print assets, cart and checkout fixtures. It encrypts its evidence with a fresh archive key wrapped for the public recipient in `scripts/testing/linux-evidence-recipient.json`. The corresponding private key stays with the authorized recipient. Provider deployment and Production qualification use the guarded release route.
+
 Read `AGENTS.md` and `docs/ui-ux-principles.md` before changing shop behaviour. Keep customer incident records and private acceptance evidence outside this public repository.

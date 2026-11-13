@@ -184,56 +184,14 @@
       }
     },
     "component": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "originSourceCommit",
-        "sourceTreeDigest",
-        "inputsDigest",
-        "intentInputsDigest",
-        "inputsRef",
-        "intentInputsRef",
-        "artifact",
-        "config",
-        "provenance",
-        "contract"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/id"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/componentV1"
         },
-        "originSourceCommit": {
-          "$ref": "#/$defs/commit"
-        },
-        "sourceTreeDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "inputsDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "intentInputsDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "artifact": {
-          "$ref": "#/$defs/ref"
-        },
-        "config": {
-          "$ref": "#/$defs/ref"
-        },
-        "provenance": {
-          "$ref": "#/$defs/ref"
-        },
-        "contract": {
-          "$ref": "#/$defs/contract"
-        },
-        "inputsRef": {
-          "$ref": "#/$defs/ref"
-        },
-        "intentInputsRef": {
-          "$ref": "#/$defs/ref"
+        {
+          "$ref": "#/$defs/componentV2"
         }
-      }
+      ]
     },
     "edge": {
       "type": "object",
@@ -316,7 +274,10 @@
       ],
       "properties": {
         "schema": {
-          "const": "shop.release-composition/v1"
+          "enum": [
+            "shop.release-composition/v1",
+            "shop.release-composition/v2"
+          ]
         },
         "repository": {
           "$ref": "#/$defs/repository"
@@ -432,7 +393,10 @@
       ],
       "properties": {
         "payloadType": {
-          "const": "shop.release-composition/v1"
+          "enum": [
+            "shop.release-composition/v1",
+            "shop.release-composition/v2"
+          ]
         },
         "payloadDigest": {
           "$ref": "#/$defs/digest"
@@ -497,61 +461,14 @@
       }
     },
     "artifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema",
-        "component",
-        "format",
-        "entrypoint",
-        "files",
-        "originSourceCommit",
-        "inputsDigest",
-        "configDigest",
-        "provenanceDigest",
-        "root"
-      ],
-      "properties": {
-        "schema": {
-          "const": "shop.artifact/v1"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/artifactV1"
         },
-        "component": {
-          "$ref": "#/$defs/id"
-        },
-        "format": {
-          "enum": [
-            "module-bundle",
-            "oci-layout"
-          ]
-        },
-        "entrypoint": {
-          "$ref": "#/$defs/path"
-        },
-        "files": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/artifactFile"
-          },
-          "maxItems": 4096,
-          "minItems": 1,
-          "uniqueItems": true
-        },
-        "originSourceCommit": {
-          "$ref": "#/$defs/commit"
-        },
-        "inputsDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "configDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "provenanceDigest": {
-          "$ref": "#/$defs/digest"
-        },
-        "root": {
-          "$ref": "#/$defs/path"
+        {
+          "$ref": "#/$defs/artifactV2"
         }
-      }
+      ]
     },
     "config": {
       "type": "object",
@@ -747,6 +664,135 @@
       }
     },
     "trust": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/trustV1"
+        },
+        {
+          "$ref": "#/$defs/trustV2"
+        }
+      ]
+    },
+    "inputs": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/inputsV1"
+        },
+        {
+          "$ref": "#/$defs/inputsV2"
+        }
+      ]
+    },
+    "componentV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "originSourceCommit",
+        "sourceTreeDigest",
+        "inputsDigest",
+        "intentInputsDigest",
+        "inputsRef",
+        "intentInputsRef",
+        "artifact",
+        "config",
+        "provenance",
+        "contract"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "originSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "sourceTreeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "intentInputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ref"
+        },
+        "config": {
+          "$ref": "#/$defs/ref"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ref"
+        },
+        "contract": {
+          "$ref": "#/$defs/contract"
+        },
+        "inputsRef": {
+          "$ref": "#/$defs/ref"
+        },
+        "intentInputsRef": {
+          "$ref": "#/$defs/ref"
+        }
+      }
+    },
+    "artifactV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "component",
+        "format",
+        "entrypoint",
+        "files",
+        "originSourceCommit",
+        "inputsDigest",
+        "configDigest",
+        "provenanceDigest",
+        "root"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.artifact/v1"
+        },
+        "component": {
+          "$ref": "#/$defs/id"
+        },
+        "format": {
+          "enum": [
+            "module-bundle",
+            "oci-layout"
+          ]
+        },
+        "entrypoint": {
+          "$ref": "#/$defs/path"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactFile"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "originSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "configDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "provenanceDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "root": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "trustV1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -840,7 +886,7 @@
         }
       }
     },
-    "inputs": {
+    "inputsV1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -860,6 +906,388 @@
           "maxItems": 16384,
           "uniqueItems": true
         }
+      }
+    },
+    "componentV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "originSourceCommit",
+        "sourceTreeDigest",
+        "inputsDigest",
+        "intentInputsDigest",
+        "inputsRef",
+        "intentInputsRef",
+        "artifact",
+        "config",
+        "provenance",
+        "contract",
+        "codeDigest",
+        "proofInputsDigest",
+        "intentProofInputsDigest",
+        "componentProofs"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "originSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "sourceTreeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "intentInputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ref"
+        },
+        "config": {
+          "$ref": "#/$defs/ref"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ref"
+        },
+        "contract": {
+          "$ref": "#/$defs/contract"
+        },
+        "inputsRef": {
+          "$ref": "#/$defs/ref"
+        },
+        "intentInputsRef": {
+          "$ref": "#/$defs/ref"
+        },
+        "codeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "proofInputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "intentProofInputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "componentProofs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/ref"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "artifactV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "component",
+        "format",
+        "entrypoint",
+        "files",
+        "originSourceCommit",
+        "inputsDigest",
+        "root",
+        "codeDigest",
+        "runtimeDigest"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.artifact/v2"
+        },
+        "component": {
+          "$ref": "#/$defs/id"
+        },
+        "format": {
+          "enum": [
+            "module-bundle",
+            "oci-layout"
+          ]
+        },
+        "entrypoint": {
+          "$ref": "#/$defs/path"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactFile"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "originSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "root": {
+          "$ref": "#/$defs/path"
+        },
+        "codeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "runtimeDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "trustV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "scope",
+        "repository",
+        "intentCommits",
+        "baseCommit",
+        "keyId",
+        "publicKeyPem",
+        "keyFingerprint",
+        "implementationDigest",
+        "inputPaths",
+        "snapshots",
+        "runner",
+        "budgetMs",
+        "requiredProofKinds",
+        "closurePolicy",
+        "revokedReceipts"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.fixture-trust/v2"
+        },
+        "scope": {
+          "const": "inactive-loopback"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "intentCommits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/commit"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "baseCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "keyId": {
+          "$ref": "#/$defs/id"
+        },
+        "publicKeyPem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "keyFingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "implementationDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "maxItems": 16384,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/snapshotV2"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "runner": {
+          "$ref": "#/$defs/runner"
+        },
+        "budgetMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "requiredProofKinds": {
+          "const": [
+            "source",
+            "security",
+            "review",
+            "artifact",
+            "compatibility",
+            "qualification",
+            "owner"
+          ]
+        },
+        "closurePolicy": {
+          "$ref": "#/$defs/closurePolicy"
+        },
+        "revokedReceipts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "inputsV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "files"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.root-inputs/v2"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inputV2"
+          },
+          "minItems": 1,
+          "maxItems": 16384,
+          "uniqueItems": true
+        }
+      }
+    },
+    "snapshotV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "root",
+        "treeDigest",
+        "files"
+      ],
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "root": {
+          "$ref": "#/$defs/path"
+        },
+        "treeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16384,
+          "items": {
+            "$ref": "#/$defs/inputV2"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "inputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "mode"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "mode": {
+          "enum": [
+            "100644",
+            "100755"
+          ]
+        }
+      }
+    },
+    "closurePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "components",
+        "rules",
+        "workspaces",
+        "runtime"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.scoped-input-policy/v1"
+        },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "subtree",
+              "build",
+              "proof"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/path"
+              },
+              "subtree": {
+                "type": "boolean"
+              },
+              "build": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 32,
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "uniqueItems": true
+              },
+              "proof": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 32,
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "workspaces": {},
+        "runtime": {}
       }
     }
   }

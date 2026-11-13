@@ -8,8 +8,9 @@ import { withWriter, recoverWriter, readHead, recordFailure } from './journal.mj
 import { client, fixtureEnvironment, loopbackOrigin } from './provider.mjs';
 import { journey } from './journey.mjs';
 import { stageRequest, verifyContent } from './artifact-transport.mjs';
+import { selectedVersion } from './component-identity.mjs';
 
-const wanted = component => ({ component: component.id, artifactDigest: component.artifact.sha256, configDigest: component.config.sha256, version: `v-${component.artifact.sha256}` });
+const wanted = selectedVersion;
 const ordered = states => [...states].sort((a, b) => a.component < b.component ? -1 : a.component > b.component ? 1 : 0);
 const exact = (states, expected) => check(same(ordered(states), ordered(expected)), 'Observed active component composition differs');
 const checkpoint = (point, crashAt) => { if (point === crashAt) process.exit(86); };

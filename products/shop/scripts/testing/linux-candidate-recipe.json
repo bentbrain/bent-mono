@@ -1,0 +1,32 @@
+{
+  "schema": "shop.linux-candidate-recipe/v1",
+  "baseImage": "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac",
+  "baseConfigDigest": "sha256:fee853fafa59550d162cef52bca02d907694b44ebf6ef9fb075bcc0c65d8dedb",
+  "platform": "linux",
+  "arch": "x64",
+  "ociArchitecture": "amd64",
+  "node": "v24.18.0",
+  "nodeAbi": "137",
+  "bun": "1.4.4",
+  "install": [
+    "bun",
+    "install",
+    "--frozen-lockfile"
+  ],
+  "sharp": "0.35.5",
+  "libvips": "8.18.7",
+  "sharpNativePackage": "@img/sharp-linux-x64",
+  "libvipsPackage": "@img/sharp-libvips-linux-x64",
+  "libvipsPackageVersion": "1.3.4",
+  "canvas": "0.1.80",
+  "ffmpeg": {
+    "packageVersion": "7:6.1.1-3ubuntu5",
+    "archive": "https://archive.ubuntu.com/ubuntu/pool/universe/f/ffmpeg/ffmpeg_6.1.1-3ubuntu5_amd64.deb",
+    "sha256": "1a23baace5f2688a47e28119aedae6993cd638e6279a7227dfc52d9a337a1c17"
+  },
+  "qualification": "linux-native-candidate",
+  "awsImageQualified": false,
+  "lockSha256": "3f8969acfda71bc00cdd90a074ef64cb3129d34e864aa1002ccbbc8aaf6ad11c",
+  "lifestyleAssetsSha256": "83b0c1c27f1b97dd659eb53c9498e6d1346982e326870f7a32c1d62843cae2c0",
+  "wasmSha256": "80fb4b4250a32ad0f6bfe9476effbc8a53cafade17a9ee28a09228ce548c933a"
+}

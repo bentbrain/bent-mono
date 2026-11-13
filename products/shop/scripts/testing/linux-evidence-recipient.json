@@ -1,0 +1,6 @@
+{
+  "schema": "shop.linux-evidence-recipient/v1",
+  "algorithm": "RSA-OAEP-SHA256",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA0E92ylyW9vd4RQdpn+Q+\nd/yu1iGeTLgkWQ/fWkNSQS3oYofFwfMsNFi5mgA4XGZyexGyN51b6TPlCrnoplWT\nMVehKw1lEC1W9PNkfEc/VFc9PMIhpDRulfWvmED0ipqsgFMFjnrSmLirXpOGsvBM\n5qTej7cOo4mOm4f5wUjKJd6809VVxa+OFuDxJ/3ohDqZKwJhSeap4wcIA+yIJrqq\nL3tKZppZ5/qZiHHwvM+Zt4lG+uYYwsQdnu2OXib3ekbXoxkUk8xfCP1PJ3TBf2BZ\nNNPWYLBYJBjWcvezkN8Os1mAXPcMU6pc36PiuWdBzbBwiA+gY2tu5X455ldR11gT\nySJtdlNGq4HuVDK6CUlx98CWBSezYkk3NFOcImDmDYC/m9+xl//GhWRFyJw3g/WW\nVCHi5r6zUATCLtb004mkLjAiLT78wivucxUZ3qoD/Q6FGxIpFu/7utI2vqpeHfsQ\n+GKJoTFWHD9hoAu5NREL97/XWmSwsLJRUUCMg4vGbapRAgMBAAE=\n-----END PUBLIC KEY-----\n",
+  "spkiSha256": "db2753b06cd3a8076ae91faa21a95181aeb17b80ecc6b451cbbfe70e9a3bfcc6"
+}
