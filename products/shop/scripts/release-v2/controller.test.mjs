@@ -122,14 +122,31 @@ test('actual default Node CLI stages, runs pinned executable, activates consumer
 
 test('two actual concurrent CLI processes permit one writer while mutation is pending and reject live recovery', async t => {
   const f = await makeFixture(), p = await simulator(); t.after(() => p.close());
-  await until(f, p, 'stage-intent'); p.controls.delayMs = 150;
+  await until(f, p, 'stage-intent');
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  p.controls.beforeMutation = async kind => {
+    assert.equal(kind, 'stage');
+    entered.resolve();
+    await release.promise;
+  };
   const first = cli(f, p.origin);
-  await new Promise(accept => setTimeout(accept, 70));
-  const second = await cli(f, p.origin);
-  assert.equal(second.code, 1);
-  const lockDigest = sha256(await readFile(join(f.journal, 'writer.json')));
-  const recovery = await cli(f, p.origin, { command: 'recover-writer', extra: ['--lock-digest', lockDigest] });
-  assert.equal(recovery.code, 1); ok(await first);
+  let firstResult;
+  try {
+    assert.equal(await Promise.race([entered.promise.then(() => true), first.then(() => false)]), true,
+      'The first CLI must reach the pending mutation before a competing writer starts');
+    const lockDigest = sha256(await readFile(join(f.journal, 'writer.json')));
+    const [second, recovery] = await Promise.all([
+      cli(f, p.origin),
+      cli(f, p.origin, { command: 'recover-writer', extra: ['--lock-digest', lockDigest] })
+    ]);
+    assert.equal(second.code, 1);
+    assert.equal(recovery.code, 1);
+    assert.equal(p.state.operations.length, 0, 'The first mutation remains pending during both rejection checks');
+  } finally {
+    release.resolve();
+    firstResult = await first;
+  }
+  ok(firstResult);
   assert.equal(mutationCalls(p).length, 1);
 });
 
