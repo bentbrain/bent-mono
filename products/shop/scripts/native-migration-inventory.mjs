@@ -1,8 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
 
-export const NATIVE_MIGRATION_COUNT = 45;
+export const NATIVE_MIGRATION_COUNT = 46;
 export const NATIVE_MIGRATION_LATEST =
-  "0044_video_preview_revisions.sql";
+  "0045_native_v5_dispatches.sql";
 
 export function isReviewedMigrationInventory(expected) {
   return Array.isArray(expected) &&

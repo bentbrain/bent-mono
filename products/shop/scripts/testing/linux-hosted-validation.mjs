@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { checkout, fileInventory, recipe, sha256 } from "./linux-candidate.mjs";
+import { checkout, fileInventory, packageShopPortableBundle, recipe, sha256 } from "./linux-candidate.mjs";
 import { sealLinuxEvidence } from "./linux-evidence.mjs";
 
 const execute = promisify(execFile);
@@ -37,14 +37,25 @@ async function encoder() {
 
 async function journey() {
   await privateCommand(process.execPath, [join(checkout, "products/shop/scripts/testing/linux-candidate.mjs"), join(env.PRIVATE_EVIDENCE, "candidate")], "package.private.log");
-  await privateCommand(join(env.PRIVATE_EVIDENCE, "candidate/runtime/bin/node"), [join(checkout, "products/shop/scripts/testing/linux-journey.mjs"),
-    join(env.PRIVATE_EVIDENCE, "candidate"), join(env.PRIVATE_EVIDENCE, "journey")], "journey.private.log");
+  await writeFile(join(env.PRIVATE_EVIDENCE, "generated-storefront-routeTree.private.ts"),
+    await readFile(join(checkout, "products/shop/apps/storefront/src/routeTree.gen.ts")), { flag: "wx", mode: 0o600 });
+  const lineage = { kind: "github-actions", repository: env.GITHUB_REPOSITORY, sourceCommit: env.SOURCE_COMMIT,
+    runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT, workflowRef: env.GITHUB_WORKFLOW_REF, jobId: env.GITHUB_JOB };
+  const portable = await packageShopPortableBundle({ candidate: join(env.PRIVATE_EVIDENCE, "candidate"),
+    destination: join(env.PRIVATE_EVIDENCE, "portable-release"), originSourceCommit: env.SOURCE_COMMIT, lineage });
+  const expectedPath = join(env.PRIVATE_EVIDENCE, "portable-release-identity.private.json");
+  await writeFile(expectedPath, JSON.stringify({ manifestSha256: portable.manifestSha256, originSourceCommit: env.SOURCE_COMMIT,
+    lineage, requireHostedLineage: true }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+  const native = join(portable.root, "payload/native");
+  await privateCommand(join(native, "runtime/bin/node"), [join(checkout, "products/shop/scripts/testing/linux-journey.mjs"),
+    native, join(env.PRIVATE_EVIDENCE, "journey"), portable.root, expectedPath], "journey.private.log");
   const receipt = JSON.parse(await readFile(join(env.PRIVATE_EVIDENCE, "journey/linux-j01.private.json"), "utf8"));
   assert.equal(receipt.complete, true);
+  assert.equal(receipt.portableManifestSha256, portable.manifestSha256);
   assert.equal(receipt.dirtySnapshot, false);
   assert.equal(receipt.sourceCommit, env.SOURCE_COMMIT);
   assert.equal(receipt.awsImageQualified, false);
-  console.info(JSON.stringify({ sourceCommit: env.SOURCE_COMMIT, complete: true, awsImageQualified: false, candidateSha256: receipt.candidateSha256 }));
+  console.info(JSON.stringify({ sourceCommit: env.SOURCE_COMMIT, complete: true, awsImageQualified: false, candidateSha256: receipt.candidateSha256, portableManifestSha256: portable.manifestSha256 }));
 }
 
 async function seal() {

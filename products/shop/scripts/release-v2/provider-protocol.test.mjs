@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canonical, digest, parseJSON, sha256 } from './data.mjs';
-import { protocolPolicy, assetManifest, requestBuilders, protocolClient, ProtocolConflict, UncertainWrite, verifyWorkerReadback, responseBytes, verifyLambdaQualified, lambdaBindingProjection, verifyWorkerBindings } from './provider-protocol.mjs';
+import { protocolPolicy, assetManifest, requestBuilders, protocolClient, ProtocolConflict, UncertainWrite, verifyWorkerReadback, responseBytes, verifyLambdaQualified, lambdaBindingProjection, assertLambdaBinding, verifyWorkerBindings } from './provider-protocol.mjs';
 import { requestDigest } from './signing.mjs';
 import { appendProtectedJournal, readProtectedJournal, protectedStore, recoverReportingOnly } from './protected-store.mjs';
 import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
@@ -260,4 +260,18 @@ test('Worker binding order is immaterial while duplicates, changed targets and n
   assert.throws(() => verifyWorkerBindings(readback([bindings[0], bindings[0]]), { version, bindings, runtime }), /Duplicate/);
   assert.throws(() => verifyWorkerBindings(readback([bindings[0], { ...bindings[1], service: 'different' }]), { version, bindings, runtime }), /bindings differ/);
   assert.throws(() => verifyWorkerBindings(readback([bindings[0], { ...bindings[1], extra: 'changed' }]), { version, bindings, runtime }), /bindings differ/);
+});
+
+
+test('qualified Lambda bindings require every field and typed nested values before readback', () => {
+  const { policy } = protocolFixture();
+  const binding = lambdaBindingProjection({ Architectures: ['arm64'], MemorySize: 1024, Timeout: 60,
+    Role: `arn:aws:iam::${policy.awsAccountId}:role/path/runtime`, EphemeralStorage: { Size: 1024 },
+    Environment: { Variables: { MODE: 'synthetic' } }, ImageConfigResponse: { ImageConfig: { Command: ['index.handler'], EntryPoint: [], WorkingDirectory: '/var/task' } },
+    VpcConfig: { SubnetIds: [], SecurityGroupIds: [], VpcId: '', Ipv6AllowedForDualStack: false }, FileSystemConfigs: [], Layers: [],
+    DeadLetterConfig: {}, LoggingConfig: { LogFormat: 'JSON', SystemLogLevel: 'INFO' }, TracingConfig: { Mode: 'Active' }, SnapStart: { ApplyOn: 'None', OptimizationStatus: 'Off' } });
+  assert.deepEqual(assertLambdaBinding(binding, policy), binding);
+  for (const key of Object.keys(binding)) { const missing = { ...binding }; delete missing[key]; assert.throws(() => assertLambdaBinding(missing, policy), /binding contract/); }
+  for (const patch of [{ Architectures: [] }, { EphemeralStorage: { Size: 0 } }, { Layers: [{ Arn: false }] }, { TracingConfig: { Mode: 'unknown' } },
+    { ImageConfigResponse: { ImageConfig: { Command: 'index.handler' } } }, { Runtime: {} }, { Environment: { Error: {} } }]) assert.throws(() => assertLambdaBinding({ ...binding, ...patch }, policy), /binding contract/);
 });

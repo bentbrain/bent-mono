@@ -3,11 +3,13 @@ import { artworkPreviewKey } from "./artwork-preview";
 import { baseProductSlugForId, productProjectionSpecification } from "@forever-tee/contracts";
 import { AwsClient } from "aws4fetch";
 import { createStoryVideoGrant, verifyStoryVideoGrant } from "./story-video-grants";
-import { validateLambdaStoryVideoEnv, type LambdaStoryVideoEnv } from "./story-video-lambda";
+import { invokeQualifiedNativeV5, validateLambdaStoryVideoEnv, type LambdaStoryVideoEnv } from "./story-video-lambda";
+import { acceptedNativeV5Grant, admittedNativeV5Target, canonicalNativeIdentity, hasNativeV5Schema, nativeIdentityDigest,
+    nativeV5AcceptanceStatement, prepareNativeV5Acceptance, retainedNativeV5Dispatch, type NativeV5Acceptance, type NativeV5Target, type NativeV5TargetEnv } from "./native-v5-target";
 import { isAuthenticatedServiceRequest } from "./service-auth";
 const PRODUCT_IMAGE_VERSION = "product-images-v4";
 const VERCEL_IMAGE_VERSION = "product-images-v5";
-function imageVersion(env: ProductImageEnv) { return env.PRODUCT_IMAGE_PROVIDER === "vercel" ? VERCEL_IMAGE_VERSION : PRODUCT_IMAGE_VERSION; }
+function imageVersion(env: ProductImageEnv) { return env.SHOP_NATIVE_V5_TARGET_JSON !== undefined || env.PRODUCT_IMAGE_PROVIDER === "vercel" ? VERCEL_IMAGE_VERSION : PRODUCT_IMAGE_VERSION; }
 function rendererOrigin(env: ProductImageEnv) {
     if (env.STORY_VIDEO_ENVIRONMENT !== "development" || !env.PRODUCT_IMAGE_RENDERER_BYPASS_SECRET || !env.FOREVER_TEE_API_SHARED_SECRET)
         throw new Error("Vercel image renderer is not configured for Preview.");
@@ -30,7 +32,7 @@ function vercelHeaders(env: ProductImageEnv) { return { "content-type": "applica
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const LEASE = 200000;
 const HOLD = 40000;
-export interface ProductImageEnv extends LambdaStoryVideoEnv {
+export interface ProductImageEnv extends LambdaStoryVideoEnv, NativeV5TargetEnv {
     readonly DB: D1Database;
     readonly DESIGN_ARTWORK: R2Bucket;
     readonly IMAGES?: ImagesBinding;
@@ -85,12 +87,128 @@ const JOB_SELECT = `SELECT jobs.id AS job_id, jobs.colour, jobs.view, jobs.stora
     AND products.status = 'active' AND products.design_revision_id = jobs.design_revision_id
   JOIN designs ON designs.id = products.design_id AND designs.status = 'ready'
   JOIN design_revisions revisions ON revisions.id = jobs.design_revision_id AND revisions.design_id = products.design_id`;
+function nativeJobIdentity(job: Job) {
+    return { jobId: job.job_id, productId: job.id, designId: job.design_id, revisionId: job.design_revision_id,
+        baseProductId: job.base_product_id, colour: job.colour, view: job.view, storageKey: job.storage_key, rendererVersion: job.renderer_version,
+        artworkKey: job.artwork_key, sourceSha256: job.source_sha256, sourceSize: job.source_size,
+        cropX: job.crop_x, cropY: job.crop_y, cropZoom: job.crop_zoom, placementX: job.placement_x,
+        placementY: job.placement_y, placementWidth: job.placement_width, depth: job.placement_depth, printMode: job.print_mode };
+}
+interface NativeImageSource { readonly key: string; readonly size: number; readonly sha256: string; readonly contentType: string }
+const UNRETAINED_LEGACY_WORK = `NOT EXISTS(SELECT 1 FROM native_v5_dispatches accepted WHERE accepted.job_id=legacy.id)
+  AND (legacy.status='rendering' OR (legacy.status IN ('queued','failed') AND legacy.attempt_count<3
+    AND (legacy.dispatch_provider IS NULL OR legacy.attempt_count>0))
+    OR (legacy.execution_id IS NOT NULL AND legacy.updated_at>?))`;
+async function assertNativeImageAdmission(env: ProductImageEnv) {
+    if (!await hasNativeV5Schema(env.DB)) throw new Error("Install the additive native dispatch schema before admitting its target.");
+    if (await env.DB.prepare(`SELECT id FROM product_image_jobs legacy WHERE ${UNRETAINED_LEGACY_WORK} LIMIT 1`).bind(Date.now() - HOLD).first())
+        throw new Error("Legacy image work lacks retained historical transport and grant identity. Resume its original configured runtime before native target admission.");
+}
+async function nativeImageSource(env: ProductImageEnv, job: Job): Promise<NativeImageSource> {
+    const previewKey = artworkPreviewKey(job.design_id, job.source_sha256), preview = await env.DESIGN_ARTWORK.get(previewKey);
+    const object = preview ?? await env.DESIGN_ARTWORK.get(job.artwork_key);
+    if (!object || object.size < 1 || object.size > 25000000 || (!preview && object.size !== job.source_size)) throw new Error("Native image source is unavailable.");
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    const sha256 = await nativeIdentityDigest(bytes), storedDigest = preview?.customMetadata?.["sha256"];
+    if (bytes.length !== object.size || (!preview && sha256 !== job.source_sha256) || (storedDigest !== undefined && sha256 !== storedDigest)) throw new Error("Native image source checksum changed before acceptance.");
+    return { key: preview ? previewKey : job.artwork_key, size: bytes.length, sha256, contentType: preview ? "image/webp" : "image/png" };
+}
+function acceptedNativeImageInput(acceptance: NativeV5Acceptance, job: Job): NativeImageSource | undefined {
+    const value: unknown = JSON.parse(acceptance.input_json);
+    if (typeof value !== "object" || value === null || !("job" in value) || canonicalNativeIdentity(value.job) !== canonicalNativeIdentity(nativeJobIdentity(job)) ||
+        !("source" in value) || typeof value.source !== "object" || value.source === null) return undefined;
+    const source = value.source;
+    if (!("key" in source) || typeof source.key !== "string" || !("size" in source) || typeof source.size !== "number" || !Number.isSafeInteger(source.size) || source.size < 1 || source.size > 25000000 ||
+        !("sha256" in source) || typeof source.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(source.sha256) ||
+        !("contentType" in source) || (source.contentType !== "image/png" && source.contentType !== "image/webp")) return undefined;
+    return { key: source.key, size: source.size, sha256: source.sha256, contentType: source.contentType };
+}
+async function retainedNativeSourceResponse(env: ProductImageEnv, source: NativeImageSource, status = 200, recipe?: object) {
+    const object = await env.DESIGN_ARTWORK.get(source.key);
+    if (object?.size !== source.size) return new Response(null, { status: 409 });
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    if (await nativeIdentityDigest(bytes) !== source.sha256) return new Response(null, { status: 409 });
+    const headers = new Headers({ "content-type": source.contentType, "content-length": String(bytes.length), "cache-control": "no-store", "x-image-source-sha256": source.sha256 });
+    if (recipe) headers.set("x-image-recipe", JSON.stringify(recipe));
+    return new Response(bytes, { status, headers });
+}
+async function dispatchNativeV5Images(env: ProductImageEnv, revision: string, current: NativeV5Target | undefined, send: typeof fetch) {
+    const now = Date.now();
+    await env.DB.prepare(`UPDATE product_image_jobs SET status=CASE WHEN attempt_count<3 THEN 'queued' ELSE 'failed' END,updated_at=?
+      WHERE status='rendering' AND updated_at<? AND EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id)`)
+        .bind(now, now - LEASE).run();
+    const pending = await env.DB.prepare(`${JOB_SELECT} WHERE jobs.design_revision_id=? AND jobs.renderer_version='product-images-v5'
+      AND jobs.status IN ('queued','failed') AND jobs.attempt_count<3
+      AND (jobs.attempt_count=0 OR EXISTS(SELECT 1 FROM native_v5_dispatches accepted WHERE accepted.job_id=jobs.id))
+      ${current ? "" : "AND EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=jobs.id)"}
+      ORDER BY jobs.created_at,jobs.view LIMIT 6`).bind(revision).all<Job>();
+    if (!pending.results.length) return;
+    if (!env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID || !env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY) throw new Error("Install the protected native invocation credentials.");
+    const capacity = Number(env.STORY_VIDEO_MAX_INFLIGHT ?? 8);
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8) throw new Error("Invalid native image admission capacity.");
+    const plans = [], sources = new Map<string, NativeImageSource>();
+    for (const job of pending.results) {
+        const previous = await retainedNativeV5Dispatch(env.DB, job.job_id), target = previous?.target ?? current;
+        if (!target) continue;
+        const sourceKey = `${job.artwork_key}:${job.source_sha256}`;
+        let source = previous ? acceptedNativeImageInput(previous.acceptance, job) : sources.get(sourceKey);
+        if (previous) {
+            if (!source) throw new Error("Retained native job input changed before retry.");
+            const verified = await retainedNativeSourceResponse(env, source);
+            await verified.body?.cancel();
+            if (verified.status !== 200) throw new Error("Retained native source bytes changed before retry.");
+        }
+        if (!source) { source = await nativeImageSource(env, job); sources.set(sourceKey, source); }
+        const acceptance = await prepareNativeV5Acceptance(env, target, current, job.job_id, job.attempt_count + 1,
+            { job: nativeJobIdentity(job), source }, now);
+        plans.push({ job, acceptance });
+    }
+    const occupancy = `((SELECT count(*) FROM product_image_jobs WHERE
+      (renderer_version<>'product-images-v5' OR dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id))
+      AND (status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at>?)))
+      +(SELECT count(*) FROM story_video_jobs WHERE status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at>?)))`;
+    const statements = plans.flatMap(({ job, acceptance }) => [env.DB.prepare(`UPDATE product_image_jobs SET status='rendering',attempt_count=attempt_count+1,execution_id=NULL,updated_at=?,dispatch_provider='native-v5'
+      WHERE id=? AND status IN ('queued','failed') AND attempt_count=? AND (execution_id IS NULL OR updated_at<=?)
+      AND NOT EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id AND native.attempt=?)
+      ${current ? `AND NOT EXISTS(SELECT 1 FROM product_image_jobs legacy WHERE ${UNRETAINED_LEGACY_WORK})` : ""} AND ${occupancy}<?`)
+        .bind(now, job.job_id, job.attempt_count, now - HOLD, acceptance.attempt, ...(current ? [now - HOLD] : []), now - HOLD, now - HOLD, capacity), nativeV5AcceptanceStatement(env.DB, acceptance)]);
+    // D1 batch is transactional. The claim and immutable target/input/grant row
+    // commit together before any signed AWS request can leave this process.
+    const claims = await env.DB.batch(statements);
+    await Promise.allSettled(plans.map(async ({ job, acceptance }, index) => {
+        if (claims[index * 2]?.meta.changes !== 1 || claims[index * 2 + 1]?.meta.changes !== 1) return;
+        const retained = await acceptedNativeV5Grant(env.DB, acceptance.grant, job.job_id, Date.now());
+        if (retained?.acceptance.request_sha256 !== acceptance.requestDigest || retained.acceptance.target_digest !== acceptance.targetDigest) throw new Error("Native dispatch acceptance readback differs.");
+        const response = await invokeQualifiedNativeV5(env, acceptance.target, acceptance.body, send).catch(() => undefined);
+        const uncertain = !response || response.status >= 500 || response.status === 202;
+        const accepted = response?.status === 200;
+        await env.DB.prepare("UPDATE native_v5_dispatches SET dispatch_state=? WHERE job_id=? AND attempt=? AND dispatch_state='prepared'")
+            .bind(uncertain ? "uncertain" : accepted ? "accepted" : "rejected", job.job_id, acceptance.attempt).run();
+        if (!accepted) {
+            await response?.body?.cancel();
+            if (!uncertain) await env.DB.prepare("UPDATE product_image_jobs SET status='failed',updated_at=? WHERE id=? AND attempt_count=? AND status='rendering' AND execution_id IS NULL").bind(Date.now(), job.job_id, acceptance.attempt).run();
+            return;
+        }
+        // FunctionError describes an accepted handler execution. Its retained
+        // grant must still authorize a late fenced completion/failure callback.
+        if (response.headers.has("x-amz-function-error")) { await response.body?.cancel(); return; }
+        const result: unknown = await response.json().catch(() => undefined);
+        if (typeof result !== "object" || result === null || !("jobId" in result) || result.jobId !== job.job_id ||
+            !("executionId" in result) || typeof result.executionId !== "string" || !UUID.test(result.executionId) ||
+            !("key" in result) || result.key !== job.storage_key || !("sha256" in result) || typeof result.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(result.sha256) ||
+            !("size" in result) || typeof result.size !== "number" || !Number.isSafeInteger(result.size)) return;
+        await env.DB.prepare("UPDATE product_image_jobs SET execution_id=NULL WHERE id=? AND attempt_count=? AND execution_id=? AND status='ready' AND storage_key=? AND sha256=? AND byte_size=?")
+            .bind(job.job_id, acceptance.attempt, result.executionId, result.key, result.sha256, result.size).run();
+    }));
+}
 export async function ensureProductImages(env: ProductImageEnv, ids: string | readonly string[], context?: Pick<ExecutionContext, "waitUntil">) {
     if (env.STORY_VIDEO_PROVIDER !== "lambda")
         return;
     const products = typeof ids === "string" ? [ids] : [...new Set(ids)];
     if (products.length < 1 || products.length > 2 || products.some(id => !UUID.test(id)))
         return;
+    const nativeTarget = await admittedNativeV5Target(env);
+    if (nativeTarget) await assertNativeImageAdmission(env);
     const rows = await env.DB.prepare(`SELECT id, design_id, design_revision_id, base_product_id FROM products
     WHERE id IN (${products.map(() => "?").join(",")}) AND status = 'active' AND design_revision_id IS NOT NULL`)
         .bind(...products).all<Product>();
@@ -102,7 +220,7 @@ export async function ensureProductImages(env: ProductImageEnv, ids: string | re
         return productProjectionSpecification(slug).colors.flatMap(colour => (slug === "staple-tee" ? ["flat", "lifestyle"] : ["flat"]).map(view => {
             const key = `designs/${product.design_id}/product-images/${version === VERCEL_IMAGE_VERSION ? "v5" : "v4"}/${product.id}/${product.design_revision_id}/${colour.toLowerCase()}-${view}.webp`;
             return env.DB.prepare(`INSERT INTO product_image_jobs(id, product_id, design_revision_id, colour, view, renderer_version,
-        storage_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        storage_key, created_at, updated_at${nativeTarget ? ", dispatch_provider" : ""}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?${nativeTarget ? ", 'native-v5'" : ""})
         ON CONFLICT(product_id, colour, view, renderer_version) DO NOTHING`)
                 .bind(crypto.randomUUID(), product.id, product.design_revision_id, colour, view, version, key, now, now);
         }));
@@ -122,6 +240,10 @@ export async function ensureProductImages(env: ProductImageEnv, ids: string | re
 async function dispatchProductImages(env: ProductImageEnv, revision: string, send: typeof fetch = fetch) {
     if (env.STORY_VIDEO_PROVIDER !== "lambda")
         return;
+    const nativeTarget = await admittedNativeV5Target(env), nativeSchema = await hasNativeV5Schema(env.DB);
+    if (nativeTarget) await assertNativeImageAdmission(env);
+    if (nativeSchema) await dispatchNativeV5Images(env, revision, nativeTarget, send);
+    if (nativeTarget) return;
     const vercel = env.PRODUCT_IMAGE_PROVIDER === "vercel", version = imageVersion(env);
     const config = vercel ? undefined : validateLambdaStoryVideoEnv(env);
     const grantSecret = vercel ? env.STORY_VIDEO_GRANT_SECRET : config?.grantSecret;
@@ -132,8 +254,10 @@ async function dispatchProductImages(env: ProductImageEnv, revision: string, sen
         return;
     const now = Date.now();
     await env.DB.prepare(`UPDATE product_image_jobs SET status = CASE WHEN attempt_count < 3 THEN 'queued' ELSE 'failed' END,
-    updated_at = ? WHERE status = 'rendering' AND updated_at < ?`).bind(now, now - LEASE).run();
+    updated_at = ? WHERE status = 'rendering' AND updated_at < ?
+    ${nativeSchema ? "AND dispatch_provider IS NULL AND NOT EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id)" : ""}`).bind(now, now - LEASE).run();
     const pending = await env.DB.prepare(`${JOB_SELECT} WHERE jobs.design_revision_id = ? AND jobs.renderer_version = ?
+    ${nativeSchema ? "AND jobs.dispatch_provider IS NULL AND NOT EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=jobs.id)" : ""}
     AND jobs.status IN ('queued','failed') AND jobs.attempt_count < 3 ORDER BY jobs.created_at, jobs.view LIMIT 6`)
         .bind(revision, version).all<Job>();
     if (!pending.results.length)
@@ -141,9 +265,10 @@ async function dispatchProductImages(env: ProductImageEnv, revision: string, sen
     const capacity = Number(vercel ? env.PRODUCT_IMAGE_MAX_INFLIGHT ?? 32 : env.STORY_VIDEO_MAX_INFLIGHT ?? 8);
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > (vercel ? 64 : 8))
         throw new Error("Invalid image render capacity.");
-    const occupancy = vercel ? `(SELECT count(*) FROM product_image_jobs WHERE renderer_version='product-images-v5' AND
+    const nativePredicate = nativeSchema ? "(dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id))" : "0";
+    const occupancy = vercel ? `(SELECT count(*) FROM product_image_jobs WHERE renderer_version='product-images-v5' AND NOT (${nativePredicate}) AND
     (status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ?)))` :
-        `((SELECT count(*) FROM product_image_jobs WHERE renderer_version<>'product-images-v5' AND (status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ?)))
+        `((SELECT count(*) FROM product_image_jobs WHERE (renderer_version<>'product-images-v5' OR ${nativePredicate}) AND (status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ?)))
     + (SELECT count(*) FROM story_video_jobs WHERE status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ?)))`;
     // D1 serializes conditional claims. Vercel has its own bounded lane; Lambda
     // images and videos retain their original shared reserved-concurrency limit.
@@ -223,8 +348,10 @@ export async function reconcileProductImages(env: ProductImageEnv) {
         await env.DESIGN_ARTWORK.delete(job.storage_key);
         await env.DB.prepare("DELETE FROM product_image_jobs WHERE id=?").bind(job.id).run();
     }
+    const nativeSchema = await hasNativeV5Schema(env.DB);
     const rows = await env.DB.prepare(`SELECT DISTINCT design_revision_id FROM product_image_jobs
-    WHERE renderer_version=? AND status IN ('queued','rendering','failed') AND (attempt_count<3 OR status='rendering') LIMIT 40`).bind(imageVersion(env)).all<{
+    WHERE (renderer_version=? ${nativeSchema ? "OR dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id)" : ""})
+    AND status IN ('queued','rendering','failed') AND (attempt_count<3 OR status='rendering') LIMIT 40`).bind(imageVersion(env)).all<{
         design_revision_id: string;
     }>();
     // Each dispatcher is bounded by the shared D1 admission ceiling.
@@ -241,8 +368,10 @@ export async function consumeProductImageMessage(message: Message, env: ProductI
     }
     try {
         await dispatchProductImages(env, body.designRevisionId);
+        const nativeSchema = await hasNativeV5Schema(env.DB);
         const remaining = await env.DB.prepare(`SELECT id FROM product_image_jobs WHERE design_revision_id=?
-      AND renderer_version=? AND (status='rendering' OR (status IN ('queued','failed') AND attempt_count<3)) LIMIT 1`).bind(body.designRevisionId, imageVersion(env)).first();
+      AND (renderer_version=? ${nativeSchema ? "OR dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id)" : ""})
+      AND (status='rendering' OR (status IN ('queued','failed') AND attempt_count<3)) LIMIT 1`).bind(body.designRevisionId, imageVersion(env)).first();
         if (remaining)
             message.retry({ delaySeconds: 5 });
         else
@@ -266,7 +395,9 @@ export async function productImageResponse(request: Request, env: ProductImageEn
     const [, id, view, colour] = match;
     if (!id || !view || !colour)
         return new Response(null, { status: 404 });
-    const readJob = () => env.DB.prepare(`${JOB_SELECT} WHERE jobs.product_id=? AND lower(jobs.colour)=? AND jobs.view=? AND jobs.renderer_version=?`)
+    const nativeSchema = await hasNativeV5Schema(env.DB);
+    const nativeJob = nativeSchema ? "(jobs.dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=jobs.id))" : "0";
+    const readJob = () => env.DB.prepare(`${JOB_SELECT} WHERE jobs.product_id=? AND lower(jobs.colour)=? AND jobs.view=? AND (jobs.renderer_version=? OR ${nativeJob}) ${nativeSchema ? `ORDER BY ${nativeJob} DESC` : ""} LIMIT 1`)
         .bind(id, colour, view, imageVersion(env)).first<Job>();
     let job = await readJob();
     // An existing job already joins the current active product/revision/design.
@@ -387,10 +518,15 @@ export async function productImageTransfer(request: Request, env: ProductImageEn
     if (!match)
         return;
     const [, id, action] = match;
-    if (!id || !UUID.test(id) || !env.STORY_VIDEO_GRANT_SECRET)
+    if (!id || !UUID.test(id))
         return new Response(null, { status: 403 });
-    const grant = await verifyStoryVideoGrant(env.STORY_VIDEO_GRANT_SECRET, request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "", id, Date.now(), action === "failure" ? 15 * 60000 : 0);
+    const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+    const native = token.startsWith("nv5_") ? await acceptedNativeV5Grant(env.DB, token, id, Date.now(), action === "failure" ? 15 * 60000 : 0) : undefined;
+    const grant = token.startsWith("nv5_") ? native : env.STORY_VIDEO_GRANT_SECRET ? await verifyStoryVideoGrant(env.STORY_VIDEO_GRANT_SECRET, token, id, Date.now(), action === "failure" ? 15 * 60000 : 0) : undefined;
     if (!grant)
+        return new Response(null, { status: 403 });
+    if (!native && await hasNativeV5Schema(env.DB) && await env.DB.prepare(`SELECT id FROM product_image_jobs WHERE id=? AND attempt_count=?
+      AND (dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id AND native.attempt=product_image_jobs.attempt_count))`).bind(id, grant.attempt).first())
         return new Response(null, { status: 403 });
     const execution = request.headers.get("x-image-execution-id");
     if (execution !== null && !UUID.test(execution))
@@ -399,6 +535,8 @@ export async function productImageTransfer(request: Request, env: ProductImageEn
     AND (jobs.status='rendering' OR (jobs.status='ready' AND ?='image'))`).bind(id, grant.attempt, action).first<Job>();
     if (!job)
         return new Response(null, { status: action === "claim" || action === "failure" ? 204 : 409 });
+    const nativeSource = native ? acceptedNativeImageInput(native.acceptance, job) : undefined;
+    if (native && !nativeSource) return new Response(null, { status: 409 });
     if (request.headers.has("x-image-renderer-version") && request.headers.get("x-image-renderer-version") !== job.renderer_version)
         return new Response(null, { status: 409 });
     if (action === "claim") {
@@ -412,7 +550,7 @@ export async function productImageTransfer(request: Request, env: ProductImageEn
             const recipe = { baseProductSlug: baseProductSlugForId(job.base_product_id), color: job.colour, view: job.view, printMode: job.print_mode, storageKey: job.storage_key,
                 settings: { cropX: job.crop_x, cropY: job.crop_y, cropZoom: job.crop_zoom, depth: job.placement_depth, placementX: job.placement_x, placementY: job.placement_y, placementWidth: job.placement_width } };
             if (request.headers.get("accept") === "application/vnd.bent.product-image-source")
-                return vercelSourceResponse(env, job, 201, recipe);
+                return nativeSource ? retainedNativeSourceResponse(env, nativeSource, 201, recipe) : vercelSourceResponse(env, job, 201, recipe);
             return Response.json(recipe, { status: 201, headers: { "cache-control": "no-store" } });
         }
         return new Response(null, { status: 201 });
@@ -430,7 +568,7 @@ export async function productImageTransfer(request: Request, env: ProductImageEn
         if (request.method !== "GET")
             return new Response(null, { status: 405 });
         if (job.renderer_version === VERCEL_IMAGE_VERSION)
-            return vercelSourceResponse(env, job);
+            return nativeSource ? retainedNativeSourceResponse(env, nativeSource) : vercelSourceResponse(env, job);
         const object = await env.DESIGN_ARTWORK.get(job.artwork_key);
         if (object?.size !== job.source_size)
             return new Response(null, { status: 404 });

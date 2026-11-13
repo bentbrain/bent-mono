@@ -10,6 +10,8 @@ import { promisify } from "node:util";
 import { readRegularFile as readFile } from "../read-regular-file.mjs";
 import { verifyProductImageV5Capsule } from "./product-image-v5-capsule.mjs";
 import { assertNoIgnoredBuildInputs } from "../release-v2/source-inventory.mjs";
+import { sourceInventory as captureRootSource } from "../release-v2/source-inventory.mjs";
+import { packagePortableBundle } from "../release-v2/portable-bundle.mjs";
 
 const execute = promisify(execFile);
 export const checkout = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
@@ -140,9 +142,9 @@ async function packageExecutables(runtime) {
   return { executables, libraries: [...libraries].map(([name, hash]) => ({ name, sha256: hash })) };
 }
 
-export async function verifyLinuxCandidate(directory) {
+export async function verifyLinuxCandidate(directory, { identityDirectory = directory } = {}) {
   assertLinuxRuntime();
-  const root = await realpath(directory), receipt = JSON.parse((await readFile(join(root, "linux-candidate.json"))).toString("utf8"));
+  const root = await realpath(directory), receipt = JSON.parse((await readFile(join(identityDirectory, "linux-candidate.json"))).toString("utf8"));
   assert.equal(receipt.schema, "shop.linux-candidate/v1");
   assert.equal(receipt.qualification, recipe.qualification);
   assert.equal(receipt.awsImageQualified, false);
@@ -164,10 +166,61 @@ export async function verifyLinuxCandidate(directory) {
   const assets = capsule.files.filter(file => file.path.startsWith("assets/lifestyle-v4/")).map(file => ({ ...file, path: file.path.slice("assets/lifestyle-v4/".length) }));
   assert.equal(sha256(JSON.stringify(assets)), recipe.lifestyleAssetsSha256);
   assert.equal(capsule.files.find(file => file.path.endsWith("/assets/displacement.wasm"))?.sha256, recipe.wasmSha256);
-  const inputs = await readFile(join(root, "source-inventory.json"));
+  const inputs = await readFile(join(identityDirectory, "source-inventory.json"));
   assert.equal(sha256(inputs), receipt.sourceInventorySha256);
   assert.deepEqual(JSON.parse(inputs.toString("utf8")), await sourceInventory());
   return receipt;
+}
+
+// Inspect retained Linux bytes on the importing host without executing them.
+async function inspectLinuxCandidate(directory) {
+  const root = await realpath(directory), bytes = await readFile(join(root, "linux-candidate.json")), receipt = JSON.parse(bytes.toString("utf8"));
+  assert.equal(receipt.schema, "shop.linux-candidate/v1"); assert.equal(receipt.awsImageQualified, false); assertLinuxRuntime(receipt.runtime);
+  assert.deepEqual(receipt.recipe, recipe); assert.equal(receipt.recipeSha256, sha256(await readFile(recipePath)));
+  assert.deepEqual(await fileInventory(join(root, "runtime")), receipt.runtimeFiles);
+  assert.equal(sha256(json(receipt.runtimeFiles)), receipt.runtimeFilesSha256);
+  const capsuleBytes = await readFile(join(root, "native-image/capsule-manifest.json"));
+  assert.equal(sha256(capsuleBytes), receipt.capsuleManifestSha256);
+  const capsule = JSON.parse(capsuleBytes.toString("utf8"));
+  const files = (await fileInventory(join(root, "native-image"))).filter(file => file.path !== "capsule-manifest.json")
+    .map(({ path, bytes, sha256 }) => ({ path, size: bytes, sha256 }));
+  assert.deepEqual(files, capsule.files); assert.equal(sha256(JSON.stringify(files)), capsule.filesSha256);
+  assert.equal(capsule.runtime.sharp.sharp, recipe.sharp); assert.equal(capsule.runtime.sharp.vips, recipe.libvips);
+  assert.equal(capsule.awsImageQualified, false); assertLinuxRuntime(capsule.runtime);
+  const sourceBytes = await readFile(join(root, "source-inventory.json")); assert.equal(sha256(sourceBytes), receipt.sourceInventorySha256);
+  const source = JSON.parse(sourceBytes.toString("utf8"));
+  assert.equal(sha256(json(source.files)), source.sha256);
+  return { root, receipt, manifestSha256: sha256(bytes), source };
+}
+
+export async function packageShopPortableBundle({ candidate, destination, lineage, originSourceCommit,
+    storefront = join(checkout, "products/shop/apps/storefront/dist"), business = join(checkout, "products/shop/workers/api/dist/local") }) {
+  const native = await inspectLinuxCandidate(candidate), source = await captureRootSource(checkout);
+  assert.equal((await execute("git", ["rev-parse", "HEAD"], { cwd: checkout })).stdout.trim(), originSourceCommit);
+  const sources = [{ originSourceCommit, inventory: source, directory: checkout }];
+  if (native.receipt.sourceCommit !== originSourceCommit) sources.push({ originSourceCommit: native.receipt.sourceCommit,
+    inventory: { files: native.source.files }, readSource: async path => (await execute("git", ["show", `${native.receipt.sourceCommit}:${path}`],
+      { cwd: checkout, encoding: "buffer", maxBuffer: 512 * 1024 * 1024 })).stdout });
+  else assert.deepEqual(native.source.files.map(({ path, sha256, mode }) => ({ path, sha256, mode })), source.files);
+  const startConfig = JSON.parse((await readFile(join(storefront, "server/wrangler.json"))).toString("utf8"));
+  const apiConfigText = (await readFile(join(checkout, "products/shop/workers/api/wrangler.jsonc"))).toString("utf8");
+  const apiConfig = JSON.parse(apiConfigText.replace(/^\s*\/\/.*$/gm, ""));
+  const workerRuntime = config => ({ kind: "cloudflare-module-worker", compatibilityDate: config.compatibility_date,
+    compatibilityFlags: config.compatibility_flags, awsImageQualified: false });
+  const bundle = await packagePortableBundle({ destination, originSourceCommit, lineage, sources, components: [
+    { id: "business", directory: business, entrypoint: "index.js", originSourceCommit,
+      runtime: { ...workerRuntime(apiConfig), sourceEntry: "products/shop/workers/api/src/index.ts" } },
+    { id: "storefront", directory: storefront, entrypoint: "server/index.js", originSourceCommit,
+      runtime: { ...workerRuntime(startConfig), assetsDirectory: "client", noBundle: true } },
+    { id: "native", directory: native.root, identityFiles: ["linux-candidate.json", "source-inventory.json"], entrypoint: "native-image/product-image-v5-entry.mjs", originSourceCommit: native.receipt.sourceCommit,
+      runtime: { kind: "linux-native-payload", ...native.receipt.runtime, identityDirectory: "metadata/native-candidate",
+        capsuleManifestSha256: native.receipt.capsuleManifestSha256, runtimeFilesSha256: native.receipt.runtimeFilesSha256, awsImageQualified: false } },
+  ] });
+  if (lineage.kind === "github-actions") {
+    assert.deepEqual(await captureRootSource(checkout), source, "Source changed during portable bundle retention");
+    assert.equal((await execute("git", ["status", "--porcelain"], { cwd: checkout })).stdout.trim(), "", "Hosted artifact requires clean exact source");
+  }
+  return bundle;
 }
 
 export async function packageLinuxCandidate(destination) {
@@ -223,7 +276,18 @@ export async function packageLinuxCandidate(destination) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 3, "Usage: node linux-candidate.mjs <new-private-directory>");
-  const receipt = await packageLinuxCandidate(process.argv[2]);
-  console.info(JSON.stringify({ schema: receipt.schema, sourceCommit: receipt.sourceCommit, runtimeFilesSha256: receipt.runtimeFilesSha256, awsImageQualified: false }));
+  if (process.argv[2] === "--portable") {
+    assert.equal(process.argv.length, 5, "Usage: node linux-candidate.mjs --portable <candidate> <new-private-directory>");
+    const originSourceCommit = (await execute("git", ["rev-parse", "HEAD"], { cwd: checkout })).stdout.trim();
+    const lineage = process.env.GITHUB_ACTIONS === "true" ? { kind: "github-actions", repository: process.env.GITHUB_REPOSITORY,
+      sourceCommit: originSourceCommit, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+      workflowRef: process.env.GITHUB_WORKFLOW_REF, jobId: process.env.GITHUB_JOB } : { kind: "local-source-build", sourceCommit: originSourceCommit,
+      dirtySnapshot: Boolean((await execute("git", ["status", "--porcelain"], { cwd: checkout })).stdout.trim()) };
+    const bundle = await packageShopPortableBundle({ candidate: process.argv[3], destination: process.argv[4], lineage, originSourceCommit });
+    console.info(JSON.stringify({ manifestSha256: bundle.manifestSha256, originSourceCommit, lineage, awsImageQualified: false }));
+  } else {
+    assert.equal(process.argv.length, 3, "Usage: node linux-candidate.mjs <new-private-directory>");
+    const receipt = await packageLinuxCandidate(process.argv[2]);
+    console.info(JSON.stringify({ schema: receipt.schema, sourceCommit: receipt.sourceCommit, runtimeFilesSha256: receipt.runtimeFilesSha256, awsImageQualified: false }));
+  }
 }

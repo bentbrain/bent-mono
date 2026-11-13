@@ -19,17 +19,48 @@ const processStartedAt = Math.floor(Date.now() - process.uptime() * 1000);
 
 export async function advance(options) {
   fixtureEnvironment(process.env);
-  const { bundle, manifest, trustPath, directory, origin, command = 'advance', crashAt } = options;
+  const { directory, origin } = options;
   loopbackOrigin(origin);
+  return advanceWithPorts(options, {
+    admit,
+    withWriter: work => withWriter(directory, work),
+    readHead: () => readHead(directory),
+    provider: client(origin),
+    journey,
+    context: { id: origin, scope: 'inactive-local', stateSchema: 'shop.local-release/v1',
+      verificationSchema: 'shop.local-verification/v1', budgetScope: 'inactive-local-controller',
+      startedAt: processStartedAt, verificationEvent: false }
+  });
+}
+
+// Admission and credential custody belong to the caller's protected boundary.
+// The transition engine receives the same ports in fixture and hosted callers.
+export async function advanceWithPorts(options, ports) {
+  const { bundle, directory, origin, command = 'advance', crashAt } = options;
+  const { context, provider } = ports;
+  const prepareStage = ports.stageRequest ?? stageRequest;
+  const verifyObservedContent = ports.verifyContent ?? verifyContent;
+  check(typeof verifyObservedContent === 'function', 'Complete content verification port required');
+  check(typeof prepareStage === 'function', 'Exact artifact transport port required');
+  check(context && ['inactive-local', 'isolated-qualification'].includes(context.scope) &&
+    typeof context.id === 'string' && context.id.length > 0 && context.id.length <= 512 &&
+    Number.isSafeInteger(context.startedAt) && context.startedAt > 0 && context.startedAt <= Date.now(), 'Exact controller context required');
+  check(context.stateSchema === (context.scope === 'inactive-local' ? 'shop.local-release/v1' : 'shop.hosted-release/v1') &&
+    context.verificationSchema === (context.scope === 'inactive-local' ? 'shop.local-verification/v1' : 'shop.hosted-verification/v1') &&
+    context.verificationEvent === (context.scope === 'isolated-qualification'), 'Controller journal domain differs');
+  for (const name of ['admit', 'withWriter', 'readHead', 'journey']) check(typeof ports[name] === 'function', `Controller port missing: ${name}`);
+  for (const name of ['inventory', 'content', 'runtime', 'operations', 'write', 'reports']) check(typeof provider?.[name] === 'function', `Provider port missing: ${name}`);
+  if (context.verificationEvent) check(typeof ports.verificationRef === 'function', 'Immutable runtime verification reference required');
   check(['advance', 'begin', 'rollback', 'recover-report'].includes(command), 'Unknown controller operation');
   if (crashAt) check(/^[a-z-]+:[a-z-]+$/.test(crashAt) && faults.has(crashAt.split(':')[1]), 'Unknown fixture crash boundary');
-  return withWriter(directory, async ({ initial, commit, assertOwner }) => {
-    const admission = await admit({ bundle, manifest, trustPath });
+  check(!crashAt || context.scope === 'inactive-local', 'Crash injection is restricted to the fixture caller');
+  return ports.withWriter(async ({ initial, commit, assertOwner }) => {
+    const admission = await ports.admit(options);
     const { payload, compositionDigest, trust } = admission;
-    const provider = client(origin);
+    check(trust.scope === (context.scope === 'inactive-local' ? 'inactive-loopback' : 'isolated-qualification'), 'Admission and journal trust domains differ');
     const persist = async state => {
       state.elapsedMs = Date.now() - state.startedAt;
-      state.budget = { scope: 'inactive-local-controller', limitMs: trust.budgetMs, elapsedMs: state.elapsedMs, exceeded: state.elapsedMs >= trust.budgetMs,
+      state.budget = { scope: context.budgetScope, limitMs: trust.budgetMs, elapsedMs: state.elapsedMs, exceeded: state.elapsedMs >= trust.budgetMs,
         productionDeliveryMeasured: false };
       return commit(state, point => checkpoint(`${state.phase}:${point}`, crashAt));
     };
@@ -43,34 +74,45 @@ export async function advance(options) {
           check(previous.history.some(item => digest(item) === compositionDigest), 'Rollback requires a previously verified composition');
           check(previous.desired.rollbackCompositionDigest === compositionDigest && payload.schemaState.rollbackEpochs.includes(previous.lastVerified.schemaState.epoch), 'Rollback target or schema constraint differs');
         } else check(payload.parentCompositionDigest === digest(previous.lastVerified), 'Parent composition differs');
-        for (const component of previous.lastVerified.components) verifyContent(await provider.content(component.id, wanted(component).version), component);
+        for (const component of previous.lastVerified.components) verifyObservedContent(await provider.content(component.id, wanted(component).version), component);
       } else check(command !== 'rollback' && payload.parentCompositionDigest === null, 'Initial composition requires an empty verified history');
       const staged = payload.components.map(wanted).filter(candidate => observed.versions.some(version => same(version, candidate)));
       for (const candidate of staged) {
         const component = payload.components.find(item => item.id === candidate.component);
-        verifyContent(await provider.content(candidate.component, candidate.version), component);
+        verifyObservedContent(await provider.content(candidate.component, candidate.version), component);
       }
-      return persist({ schema: 'shop.local-release/v1', generation: 0, id: randomUUID(), compositionDigest, desired: payload, observed: observed.active, observedAt: Date.now(),
+      return persist({ schema: context.stateSchema, generation: 0, id: randomUUID(), compositionDigest, desired: payload, observed: observed.active, observedAt: Date.now(),
         lastVerified: previous?.lastVerified ?? null, history: previous?.history ?? [], phase: 'prepared', staged, order, operation: null,
-        startedAt: processStartedAt, candidateJourney: null, verification: null, report: null, providerOrigin: origin, policyDigest: payload.policyDigest });
+        startedAt: context.startedAt, candidateJourney: null, verification: null, report: null, providerOrigin: context.id, policyDigest: payload.policyDigest });
     };
     if (!initial) {
       check(command !== 'recover-report', 'No pending report');
       return initialise();
     }
-    check(initial.schema === 'shop.local-release/v1' && initial.providerOrigin === origin && initial.policyDigest === payload.policyDigest, 'Journal fixture authority differs');
+    check(initial.schema === context.stateSchema && initial.providerOrigin === context.id && initial.policyDigest === payload.policyDigest, 'Journal authority differs');
     if (command === 'begin' || command === 'rollback') return initialise(initial);
     check(initial.compositionDigest === compositionDigest && same(initial.desired, payload), 'Desired composition differs from durable journal');
     const state = structuredClone(initial);
     check(state.phase !== 'complete' || state.lastVerified && digest(state.lastVerified) === compositionDigest && state.report?.status === 'confirmed', 'Invalid complete state');
     if (state.phase === 'complete') return state;
+    if (state.phase === 'runtime-verified') {
+      check(context.verificationEvent && state.verification && state.lastVerified && digest(state.lastVerified) === compositionDigest &&
+        state.report?.verificationDigest === digest(state.verification), 'Immutable runtime verification subject differs');
+      const eventDigest = await ports.verificationRef();
+      check(typeof eventDigest === 'string' && /^[a-f0-9]{64}$/.test(eventDigest), 'Immutable runtime verification event required');
+      state.report.eventDigest = eventDigest;
+      state.report.compositionDigest = compositionDigest;
+      state.phase = 'reporting-pending';
+      return persist(state);
+    }
     const reporting = state.phase.startsWith('report');
     check(command !== 'recover-report' || reporting, 'Reporting recovery requires a verified pending outbox');
     if (reporting) {
       check(state.verification && state.lastVerified && digest(state.lastVerified) === compositionDigest && state.report?.verificationDigest === digest(state.verification), 'Verified outbox subject differs');
       if (state.phase === 'reporting-pending') {
         state.phase = 'report-intent';
-        state.operation = { id: state.report.eventId, kind: 'reports', body: { eventId: state.report.eventId, compositionDigest, verificationDigest: state.report.verificationDigest, status: 'success' } };
+        state.operation = { id: state.report.eventId, kind: 'reports', body: { eventId: state.report.eventId, compositionDigest, verificationDigest: state.report.verificationDigest, status: 'success',
+          ...(context.verificationEvent ? { eventDigest: state.report.eventDigest } : {}) } };
         state.operation.bodyDigest = digest(state.operation.body);
         return persist(state);
       }
@@ -90,7 +132,7 @@ export async function advance(options) {
     for (const active of observed.active) {
       const component = [...payload.components, ...(state.lastVerified?.components ?? [])].find(item => same(wanted(item), active));
       check(component, 'Active component has no admitted artifact subject');
-      verifyContent(await provider.content(component.id, active.version), component);
+      verifyObservedContent(await provider.content(component.id, active.version), component);
     }
     const expected = state.observed;
     if (!state.phase.endsWith('-reconcile')) { exact(observed.active, expected); state.observedAt = Date.now(); }
@@ -101,12 +143,12 @@ export async function advance(options) {
         const before = observed.active.find(item => item.component === component.id)?.version ?? null;
         state.operation = { id: randomUUID(), kind: 'stage', body: { id: '', ...wanted(component), expectedActiveVersion: before,
           artifact: component.artifact, config: component.config, provenance: component.provenance } };
-        state.operation.body.id = state.operation.id; state.operation.bodyDigest = digest(await stageRequest(bundle, state.operation.body));
+        state.operation.body.id = state.operation.id; state.operation.bodyDigest = digest(await prepareStage(bundle, state.operation.body));
       } else {
         exact(state.staged, payload.components.map(wanted));
         for (const staged of state.staged) check(observed.versions.some(item => same(item, staged)), 'Staged immutable version is missing');
-        for (const component of payload.components) verifyContent(await provider.content(component.id, wanted(component).version), component);
-        state.candidateJourney = await journey({ bundle, directory, admission, origin, phase: 'candidate' });
+        for (const component of payload.components) verifyObservedContent(await provider.content(component.id, wanted(component).version), component);
+        state.candidateJourney = await ports.journey({ bundle, directory, admission, origin, phase: 'candidate' });
         state.phase = 'staged-verified';
       }
       return persist(state);
@@ -120,7 +162,7 @@ export async function advance(options) {
       const component = payload.components.find(item => item.id === state.operation.body.component);
       check(component && same(record.result, wanted(component)), 'Operation result differs from exact desired artifact');
       check(observed.versions.some(item => same(item, record.result)), 'Version inventory does not contain acknowledged version');
-      verifyContent(await provider.content(component.id, record.result.version), component);
+      verifyObservedContent(await provider.content(component.id, record.result.version), component);
       if (record.kind === 'stage') {
         exact(observed.active, expected);
         state.staged.push(record.result); state.phase = 'staging';
@@ -144,17 +186,17 @@ export async function advance(options) {
         return persist(state);
       }
       exact(await provider.runtime(), payload.components.map(wanted));
-      for (const component of payload.components) verifyContent(await provider.content(component.id, wanted(component).version), component);
-      const smoke = await journey({ bundle, directory, admission, origin, phase: 'active' });
+      for (const component of payload.components) verifyObservedContent(await provider.content(component.id, wanted(component).version), component);
+      const smoke = await ports.journey({ bundle, directory, admission, origin, phase: 'active' });
       const finalInventory = await provider.inventory(); exact(finalInventory.active, payload.components.map(wanted));
       exact(await provider.runtime(), payload.components.map(wanted));
       state.observed = finalInventory.active; state.observedAt = Date.now();
-      state.verification = { schema: 'shop.local-verification/v1', scope: 'inactive-local', compositionDigest, observed: finalInventory.active,
+      state.verification = { schema: context.verificationSchema, scope: context.scope, compositionDigest, observed: finalInventory.active,
         candidateJourneyDigest: digest(state.candidateJourney), activeJourney: smoke, verifiedAt: Date.now() };
       state.lastVerified = payload;
       if (!state.history.some(item => digest(item) === compositionDigest)) state.history.push(payload);
       state.report = { eventId: randomUUID(), verificationDigest: digest(state.verification), status: 'pending' };
-      state.phase = 'reporting-pending';
+      state.phase = context.verificationEvent ? 'runtime-verified' : 'reporting-pending';
       return persist(state);
     }
     throw Error('Unknown runtime journal state');
@@ -162,19 +204,19 @@ export async function advance(options) {
     async function send(next) {
       check(next.operation, 'Saved mutation intent missing');
       const kind = next.operation.kind;
-      const request = kind === 'stage' ? await stageRequest(bundle, next.operation.body) : next.operation.body;
+      const request = kind === 'stage' ? await prepareStage(bundle, next.operation.body) : next.operation.body;
       check(next.operation.bodyDigest === digest(request), 'Saved mutation intent differs');
       if (kind === 'activate') {
         const component = payload.components.find(item => item.id === next.operation.body.component);
         check(component, 'Unknown activation component');
-        verifyContent(await provider.content(component.id, next.operation.body.version), component);
+        verifyObservedContent(await provider.content(component.id, next.operation.body.version), component);
       }
       next.phase = kind === 'reports' ? 'report-reconcile' : `${kind}-reconcile`;
       await persist(next);
       // Intent and uncertain acknowledgement are committed and read back before
       // writing. Any failure from this point leaves a GET-only reconciliation.
       await assertOwner();
-      const saved = await readHead(directory);
+      const saved = await ports.readHead();
       check(saved.state.generation === next.generation && same(saved.state.operation, next.operation), 'Saved intent readback differs');
       checkpoint(`${kind}:before-post`, crashAt);
       await provider.write(kind, request);

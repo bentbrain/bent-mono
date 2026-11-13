@@ -4,6 +4,7 @@ import { baseProductSlugForId, productProjectionSpecification, type BaseProductS
 import { consumeRenderResults } from "./story-video-results";
 import { notifyStoryVideoReady, type StoryVideoNotificationEnv } from "./story-video-notifications";
 import { renderLambdaVideo, validateLambdaStoryVideoEnv, type LambdaStoryVideoEnv } from "./story-video-lambda";
+import { hasNativeV5Schema } from "./native-v5-target";
 import { serialLegacyVideoReads } from "./story-video-legacy-cache";
 import { qualificationLambdaSend, takeQualificationEnqueueFault, takeQualificationFault } from "./story-video-qualification";
 export const STORY_VIDEO_RENDERER_VERSION = "story-video-renderer-v7";
@@ -247,6 +248,8 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8) {
         throw new Error("Invalid video admission capacity.");
     }
+    const nativeSchema = env.STORY_VIDEO_PROVIDER === "lambda" && await hasNativeV5Schema(env.DB);
+    const lambdaImage = nativeSchema ? "(renderer_version<>'product-images-v5' OR dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id))" : "renderer_version<>'product-images-v5'";
     const claims = await env.DB.batch(pending.map((job) => env.DB.prepare(`
     UPDATE story_video_jobs
     SET status = 'rendering', attempt_count = attempt_count + 1,
@@ -258,7 +261,7 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
         WHERE status = 'rendering' OR
           (status IN ('ready', 'failed') AND execution_id IS NOT NULL AND updated_at > ?)
         LIMIT ?
-      )) + (SELECT count(*) FROM (SELECT id FROM product_image_jobs WHERE renderer_version<>'product-images-v5' AND status='rendering' UNION ALL SELECT id FROM product_image_jobs WHERE renderer_version<>'product-images-v5' AND status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ? LIMIT 8)) < ?)
+      )) + (SELECT count(*) FROM (SELECT id FROM product_image_jobs WHERE ${lambdaImage} AND status='rendering' UNION ALL SELECT id FROM product_image_jobs WHERE ${lambdaImage} AND status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ? LIMIT 8)) < ?)
   `).bind(now, job.job_id, job.attempt_count, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, capacity, now - LAMBDA_COMPLETION_HOLD_MS, capacity)));
     const jobs = pending.filter((_job, index) => claims[index]?.meta.changes === 1);
     const artworkMetadata = jobs[0];

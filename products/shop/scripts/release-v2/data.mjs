@@ -60,6 +60,18 @@ export function parseJSON(bytes, maximumBytes = 1024 * 1024) {
 }
 
 export const readJSON = async (path, maximumBytes) => parseJSON(await readFile(path), maximumBytes);
+export async function readRegularFile(path, maximumBytes, privateFile = false) {
+  check(Number.isSafeInteger(maximumBytes) && maximumBytes > 0, 'Explicit file byte bound required');
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = await handle.stat();
+    check(before.isFile() && before.size <= maximumBytes && (!privateFile || (before.mode & 0o077) === 0), 'Bounded regular private input required');
+    const bytes = await handle.readFile(), after = await handle.stat();
+    check(bytes.length <= maximumBytes && before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs &&
+      before.nlink === after.nlink, 'Input changed during inspection');
+    return bytes;
+  } finally { await handle.close(); }
+}
 export function pathName(path) {
   check(typeof path === 'string' && path.isWellFormed() && path.length <= 512 && /^[^\x00-\x1f\x7f\\:?#%]+$/u.test(path) &&
     !path.startsWith('/') && path.split('/').every(part => part && part !== '.' && part !== '..'), 'Malformed relative path');

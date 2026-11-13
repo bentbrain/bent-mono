@@ -11,7 +11,7 @@ export function responseBytes(response) {
   check(typeof response.bodyBase64 === 'string' && response.bodyBase64.length <= Math.ceil(protocolByteLimit / 3) * 4 && /^[A-Za-z0-9+/]*={0,2}$/.test(response.bodyBase64), 'Malformed or oversized provider response');
   const bytes = Buffer.from(response.bodyBase64, 'base64');
   check(bytes.length <= protocolByteLimit && bytes.toString('base64') === response.bodyBase64, 'Ambiguous provider response bytes');
-  for (const [name, value] of Object.entries(response.headers)) check(/^[a-z0-9-]+$/.test(name) && typeof value === 'string' && value.length <= 16384 && !/[\x00-\x1f\x7f]/.test(value), 'Malformed response headers');
+  for (const [name, value] of Object.entries(response.headers)) { const values = Array.isArray(value) && name === 'set-cookie' ? value : [value]; check(/^[a-z0-9-]+$/.test(name) && values.length > 0 && values.length <= 16 && values.every(item => typeof item === 'string' && item.length <= 16384 && !/[\x00-\x1f\x7f]/.test(item)), 'Malformed response headers'); }
   if (response.headers['content-length'] !== undefined) check(/^(0|[1-9][0-9]*)$/.test(response.headers['content-length']) && Number(response.headers['content-length']) === bytes.length, 'Truncated provider response');
   return bytes;
 }
@@ -144,6 +144,36 @@ export function lambdaBindingProjection(configuration) {
   check(configuration && typeof configuration === 'object' && !Array.isArray(configuration), 'Complete Lambda configuration required');
   return Object.fromEntries(lambdaBindingFields.map(field => [field, configuration[field] ?? null]));
 }
+export function assertLambdaBinding(binding, policy) {
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const string = value => typeof value === 'string' && value.length <= 16384;
+  const integer = (minimum, maximum) => value => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
+  const list = test => value => Array.isArray(value) && value.length <= 4096 && value.every(test);
+  const fields = (value, definitions, required = []) => object(value) && required.every(key => Object.hasOwn(value, key)) &&
+    Object.keys(value).every(key => Object.hasOwn(definitions, key) && definitions[key](value[key]));
+  const nullable = test => value => value === null || test(value);
+  const strings = list(string);
+  const definitions = {
+    Architectures: value => Array.isArray(value) && value.length === 1 && ['x86_64', 'arm64'].includes(value[0]),
+    MemorySize: integer(128, 10240), Timeout: integer(1, 900),
+    Role: value => string(value) && new RegExp(`^arn:aws:iam::${policy.awsAccountId}:role/[A-Za-z0-9+=,.@_/-]+$`).test(value),
+    EphemeralStorage: value => fields(value, { Size: integer(512, 10240) }, ['Size']),
+    Environment: nullable(value => fields(value, { Variables: variables => object(variables) && Object.keys(variables).length <= 4096 && Object.entries(variables).every(([key, entry]) => string(key) && string(entry)) })),
+    ImageConfigResponse: nullable(value => fields(value, { ImageConfig: config => fields(config, { EntryPoint: strings, Command: strings, WorkingDirectory: string }) })),
+    DeadLetterConfig: nullable(value => fields(value, { TargetArn: string })),
+    VpcConfig: nullable(value => fields(value, { SubnetIds: strings, SecurityGroupIds: strings, VpcId: string, Ipv6AllowedForDualStack: entry => typeof entry === 'boolean' })),
+    FileSystemConfigs: nullable(list(value => fields(value, { Arn: string, LocalMountPath: string }, ['Arn', 'LocalMountPath']))),
+    Layers: nullable(list(value => fields(value, { Arn: string, CodeSize: integer(0, Number.MAX_SAFE_INTEGER), SigningProfileVersionArn: string, SigningJobArn: string }, ['Arn']))),
+    KMSKeyArn: nullable(string), CodeSigningConfigArn: nullable(string),
+    LoggingConfig: nullable(value => fields(value, { LogFormat: string, ApplicationLogLevel: string, SystemLogLevel: string, LogGroup: string })),
+    TracingConfig: nullable(value => fields(value, { Mode: entry => ['Active', 'PassThrough'].includes(entry) }, ['Mode'])),
+    SnapStart: nullable(value => fields(value, { ApplyOn: entry => ['PublishedVersions', 'None'].includes(entry), OptimizationStatus: entry => ['On', 'Off'].includes(entry) })),
+    Runtime: nullable(string), Handler: nullable(string),
+  };
+  check(object(binding) && same(Object.keys(binding).sort(), [...lambdaBindingFields].sort()) &&
+    fields(binding, definitions, lambdaBindingFields), 'Complete qualified Lambda target binding contract required');
+  return binding;
+}
 export function verifyLambdaQualified(response, { policy, name, version, imageDigest, expectedBinding }) {
   assertPolicy(policy); numberedVersion(version);
   check(typeof imageDigest === 'string' && /^[a-f0-9]{64}$/.test(imageDigest), 'Exact Lambda image digest required');
@@ -152,7 +182,8 @@ export function verifyLambdaQualified(response, { policy, name, version, imageDi
   check(configuration?.FunctionName === name && configuration.FunctionArn === arn && configuration.Version === version && configuration.PackageType === 'Image' && configuration.State === 'Active' && configuration.LastUpdateStatus === 'Successful', 'Qualified active Lambda code identity differs');
   const imageUri = `${resource.imageRepository}@sha256:${imageDigest}`;
   check(response.Code?.ImageUri === imageUri && response.Code.ResolvedImageUri === imageUri, 'Qualified Lambda resolved image differs');
-  check(expectedBinding && same(Object.keys(expectedBinding).sort(), [...lambdaBindingFields].sort()) && same(lambdaBindingProjection(configuration), expectedBinding), 'Qualified Lambda target bindings differ');
+  assertLambdaBinding(expectedBinding, policy);
+  check(same(lambdaBindingProjection(configuration), expectedBinding), 'Qualified Lambda target bindings differ');
   revision(configuration.RevisionId);
   return { functionArn: arn, version, imageDigest, bindingDigest: sha256(Buffer.from(canonical(expectedBinding))), revisionId: configuration.RevisionId };
 }

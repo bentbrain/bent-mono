@@ -1289,6 +1289,464 @@
         "workspaces": {},
         "runtime": {}
       }
+    },
+    "hostedTrust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "scope",
+        "repository",
+        "intentCommits",
+        "baseCommit",
+        "keyId",
+        "publicKeyPem",
+        "keyFingerprint",
+        "implementationDigest",
+        "inputPaths",
+        "snapshots",
+        "runner",
+        "budgetMs",
+        "requiredProofKinds",
+        "closurePolicy",
+        "revokedReceipts"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.hosted-composition-policy/v1"
+        },
+        "scope": {
+          "const": "isolated-qualification"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "intentCommits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/commit"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "baseCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "keyId": {
+          "$ref": "#/$defs/id"
+        },
+        "publicKeyPem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "keyFingerprint": {
+          "$ref": "#/$defs/digest"
+        },
+        "implementationDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "maxItems": 16384,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/snapshotV2"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "runner": {
+          "$ref": "#/$defs/hostedRunner"
+        },
+        "budgetMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "requiredProofKinds": {
+          "const": [
+            "source",
+            "security",
+            "review",
+            "artifact",
+            "compatibility",
+            "qualification",
+            "owner"
+          ]
+        },
+        "closurePolicy": {
+          "$ref": "#/$defs/closurePolicy"
+        },
+        "revokedReceipts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hostedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "repository",
+        "target",
+        "intentSourceCommit",
+        "baseCommit",
+        "createdAt",
+        "policyDigest",
+        "parentCompositionDigest",
+        "rollbackCompositionDigest",
+        "changeClass",
+        "schemaState",
+        "components",
+        "dependencies",
+        "proofRefs"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.release-composition/v2"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "target": {
+          "const": "isolated-qualification"
+        },
+        "intentSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "baseCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "policyDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "parentCompositionDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rollbackCompositionDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changeClass": {
+          "enum": [
+            "compatible",
+            "migration"
+          ]
+        },
+        "schemaState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "epoch",
+            "ledgerDigest",
+            "rollbackEpochs"
+          ],
+          "properties": {
+            "epoch": {
+              "$ref": "#/$defs/integer"
+            },
+            "ledgerDigest": {
+              "$ref": "#/$defs/digest"
+            },
+            "rollbackEpochs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/integer"
+              },
+              "maxItems": 128,
+              "minItems": 0,
+              "uniqueItems": true
+            }
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          },
+          "maxItems": 1024,
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "proofRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/proof"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "hostedSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payloadType",
+        "payloadDigest",
+        "keyId",
+        "algorithm",
+        "signer",
+        "signature"
+      ],
+      "properties": {
+        "payloadType": {
+          "const": "shop.release-composition/v2"
+        },
+        "payloadDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "keyId": {
+          "$ref": "#/$defs/id"
+        },
+        "algorithm": {
+          "const": "ECDSA_SHA_256"
+        },
+        "signer": {
+          "const": "protected-ci"
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        }
+      }
+    },
+    "hostedEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/hostedPayload"
+        },
+        "signature": {
+          "$ref": "#/$defs/hostedSignature"
+        }
+      }
+    },
+    "hostedConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "component",
+        "bindings",
+        "scope"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.binding-installation/v1"
+        },
+        "component": {
+          "$ref": "#/$defs/id"
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "valueDigest"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/id"
+              },
+              "valueDigest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          },
+          "maxItems": 128,
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "scope": {
+          "const": "isolated-qualification"
+        }
+      }
+    },
+    "hostedProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "component",
+        "originSourceCommit",
+        "sourceTreeDigest",
+        "inputsDigest",
+        "artifactFilesDigest",
+        "recipeDigest",
+        "toolchainDigest",
+        "dependencyLockDigest"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.build-provenance/v1"
+        },
+        "component": {
+          "$ref": "#/$defs/id"
+        },
+        "originSourceCommit": {
+          "$ref": "#/$defs/commit"
+        },
+        "sourceTreeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifactFilesDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "recipeDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "toolchainDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "dependencyLockDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "hostedReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "scope",
+        "kind",
+        "subjectDigest",
+        "inputsDigest",
+        "policyDigest",
+        "verifierDigest",
+        "evidence"
+      ],
+      "properties": {
+        "schema": {
+          "const": "shop.hosted-receipt/v1"
+        },
+        "scope": {
+          "const": "isolated-qualification"
+        },
+        "kind": {
+          "$ref": "#/$defs/id"
+        },
+        "subjectDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputsDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "policyDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "verifierDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "evidence": {
+          "$ref": "#/$defs/ref"
+        }
+      }
+    },
+    "hostedRunner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "script",
+        "executableDigest",
+        "timeoutMs",
+        "requiredObservations",
+        "origins",
+        "id"
+      ],
+      "properties": {
+        "script": {
+          "$ref": "#/$defs/ref"
+        },
+        "executableDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120000
+        },
+        "requiredObservations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 512,
+            "pattern": "^https://[a-z0-9][a-z0-9.-]+$"
+          },
+          "uniqueItems": true,
+          "maxItems": 16
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
     }
   }
 }
