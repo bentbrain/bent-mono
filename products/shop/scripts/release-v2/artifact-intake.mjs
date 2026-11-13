@@ -177,15 +177,23 @@ async function hashFile(path, maximum) {
 }
 
 async function verifyRetainedEvidence(root, expected, wantedDirectories, prefix = '', actual = [], directories = []) {
-  const names = (await readdir(join(root, prefix))).sort();
-  for (const name of names) {
+  const entries = (await readdir(join(root, prefix), { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const names = entries.map(entry => entry.name);
+  for (const entry of entries) {
+    const name = entry.name;
     const path = prefix ? `${prefix}/${name}` : name; pathName(path);
-    const target = join(root, path), info = await lstat(target);
-    if (info.isDirectory()) { check((info.mode & 0o777) === 0o700, 'Retained evidence directory mode changed'); directories.push(path); await verifyRetainedEvidence(root, expected, wantedDirectories, path, actual, directories); }
+    const target = join(root, path);
+    if (entry.isDirectory()) { const info = await lstat(target); check(info.isDirectory() && (info.mode & 0o777) === 0o700, 'Retained evidence directory mode changed'); directories.push(path); await verifyRetainedEvidence(root, expected, wantedDirectories, path, actual, directories); }
     else {
-      check(info.isFile() && info.nlink === 1 && [0o600, 0o700].includes(info.mode & 0o777), 'Retained evidence file type or mode changed');
+      check(entry.isFile(), 'Retained evidence file type or mode changed');
       const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK), hash = createHash('sha256'); let size = 0;
-      try { for await (const bytes of handle.createReadStream({ autoClose: false })) { size += bytes.length; check(size <= info.size, 'Retained evidence length changed'); hash.update(bytes); } check(size === info.size && sameFile(info, await handle.stat()) && sameFile(info, await lstat(target)), 'Retained evidence changed during refresh'); }
+      let info;
+      try {
+        info = await handle.stat();
+        check(info.isFile() && info.nlink === 1 && [0o600, 0o700].includes(info.mode & 0o777), 'Retained evidence file type or mode changed');
+        for await (const bytes of handle.createReadStream({ autoClose: false })) { size += bytes.length; check(size <= info.size, 'Retained evidence length changed'); hash.update(bytes); }
+        check(size === info.size && sameFile(info, await handle.stat()) && sameFile(info, await lstat(target)), 'Retained evidence changed during refresh');
+      }
       finally { await handle.close(); }
       actual.push({ path, bytes: size, sha256: hash.digest('hex'), executable: Boolean(info.mode & 0o111) });
     }

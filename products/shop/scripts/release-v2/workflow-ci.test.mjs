@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonical, parseJSON } from './data.mjs';
@@ -23,7 +24,7 @@ test('plan workflow grants the canonical source guard read access and preserves 
 });
 
 async function setup(t) {
-  const fixture = await createBootstrapFixture(t, { root: process.env.TMPDIR });
+  const fixture = await createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir() });
   const packed = await createProtectedPackageFixture(fixture);
   const env = { ...fixture.env, RUNNER_TEMP: fixture.directory, SHOP_COMPOSITION_INSTALLATION_PACKAGE: canonical(packed.packed),
     SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256: packed.digest, SHOP_ARTIFACT_RUN_ID: fixture.intake.request.runId,

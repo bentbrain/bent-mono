@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonical, digest } from './data.mjs';
 import { protectedStore, readProtectedJournal } from './protected-store.mjs';
@@ -10,10 +11,10 @@ import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
 import { ProtocolConflict, ProtocolFailure, UncertainWrite } from './provider-protocol.mjs';
 
 async function fixture(t) {
-  const base = process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? process.env.TMPDIR;
+  const base = process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir();
   assert.equal(typeof base, 'string', 'Set a private test root');
   await mkdir(base, { mode: 0o700, recursive: true });
-  const root = await mkdtemp(join(base, 'immutable-cache-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await realpath(await mkdtemp(join(base, 'immutable-cache-'))); t.after(() => rm(root, { recursive: true, force: true }));
   const policy = protocolFixture().policy, objects = new Map(), calls = [], faults = {};
   let previous = null;
   for (let generation = 1; generation <= 5; generation++) {

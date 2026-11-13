@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
 import { chmod, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonical, digest, sha256 } from './data.mjs';
@@ -9,7 +10,7 @@ import { importHostedPortable } from './artifact-intake.mjs';
 import { assembleHostedRelease } from './source-issuance.mjs';
 import { hostedController } from './hosted-controller.mjs';
 
-const fixture = t => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? process.env.TMPDIR });
+const fixture = t => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir() });
 const options = f => ({ path: f.installationPath, digest: f.installationDigest, identity: f.identity, artifactDirectories: [f.portable.root, f.destination] });
 async function updateInstallation(f, change) {
   const contract = structuredClone(f.installationContract); await change(contract);

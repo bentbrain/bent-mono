@@ -1,6 +1,6 @@
 // Independently installed synthetic keys and API records exercise the real issuer.
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonical, check, digest, sha256 } from '../data.mjs';
 import { implementationDigest } from '../composition.mjs';
@@ -47,7 +47,7 @@ export async function createBootstrapFixture(t, { root, providerPolicy: supplied
   intakeFixture: suppliedIntakeFixture, acceptedAt = Date.now() - 2000, maximumLifetimeMs = 600000, runId = 10, attempt = 1, keys, sourceBase = 'c'.repeat(40) } = {}) {
   check(typeof root === 'string', 'Explicit private synthetic fixture directory required');
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const directory = await mkdtemp(join(root, 'bootstrap-')); t.after(() => rm(directory, { force: true, recursive: true }));
+  const directory = await realpath(await mkdtemp(join(root, 'bootstrap-'))); t.after(() => rm(directory, { force: true, recursive: true }));
   const privateRoot = join(directory, 'installed'); await mkdir(privateRoot, { mode: 0o700 });
   const intake = suppliedIntakeFixture ?? await createArtifactIntakeFixture(t, { root: directory, sourceCommit });
   const imported = suppliedImported ?? await importHostedPortable({ ...intake, destination: join(directory, 'imported') });

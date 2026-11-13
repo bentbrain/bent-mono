@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -133,7 +133,7 @@ test('original seal requires complete session, context and AES tail authenticati
     ['AES tag altered', entries => { const item = entries.find(entry => entry.name.endsWith('.enc.json')), data = JSON.parse(item.data); data.tag = Buffer.alloc(16).toString('base64'); item.data = Buffer.from(JSON.stringify(data)); }],
     ['envelope context altered', entries => { const item = entries.find(entry => entry.name.endsWith('.envelope.json')), data = JSON.parse(item.data); data.identity.runId = '999'; item.data = Buffer.from(JSON.stringify(data)); }],
     ['wrapped session altered', entries => { const item = entries.find(entry => entry.name.endsWith('.envelope.json')), data = JSON.parse(item.data); data.wrappedKey = Buffer.alloc(384).toString('base64'); item.data = Buffer.from(JSON.stringify(data)); }],
-    ['duplicate envelope JSON key', entries => { const item = entries.find(entry => entry.name.endsWith('.envelope.json')); item.data = Buffer.from(item.data.toString().replace('{', '{"algorithm":"RSA-OAEP-SHA256",')); }],
+    ['duplicate envelope JSON key', entries => { const item = entries.find(entry => entry.name.endsWith('.envelope.json')), original = item.data.toString(); assert.equal(original[0], '{'); item.data = Buffer.from('{"algorithm":"RSA-OAEP-SHA256",' + original.slice(1)); }],
     ['unknown seal field', entries => { const item = entries.find(entry => entry.name.endsWith('.enc.json')), data = JSON.parse(item.data); data.extra = true; item.data = Buffer.from(JSON.stringify(data)); }],
   ];
   for (const [name, mutate] of cases) await t.test(name, async () => { const entries = fixture.initial.sealedEntries.map(entry => ({ ...entry, data: Buffer.from(entry.data) })); mutate(entries); fixture.setArchive(fixtureZip(entries)); await assert.rejects(run(fixture)); });
@@ -227,10 +227,27 @@ test('metadata rerun or retained evidence mutation invalidates admission before 
   result.metadata.run.run_attempt++; await assert.rejects(assertHostedPortableImport(result), /evidence changed/);
 });
 
+test('retained ancillary files require private single-link regular descriptors during refresh', async t => {
+  const fixture = await fixtureFor(t), result = await run(fixture);
+  const target = join(result.portable.root, '../portable-release-identity.private.json');
+  await chmod(target, 0o644);
+  await assert.rejects(assertHostedPortableImport(result), /file type or mode/);
+  await chmod(target, 0o600);
+  const duplicate = join(fixture.root, 'identity-hard-link');
+  await link(target, duplicate);
+  await assert.rejects(assertHostedPortableImport(result), /file type or mode/);
+  await unlink(duplicate);
+  const original = join(fixture.root, 'original-identity');
+  await rename(target, original); await symlink(original, target);
+  await assert.rejects(assertHostedPortableImport(result), /file type or mode/);
+  await unlink(target); await rename(original, target);
+  assert.equal((await assertHostedPortableImport(result)).portable.manifestSha256, result.portable.manifestSha256);
+});
+
 test('default GitHub adapter requires protected external configuration before any subprocess', async t => {
   const fixture = await fixtureFor(t);
   await assert.rejects(createGithubArtifactApi(fixture.installation));
-  const directory = join(fixture.root, 'gh'); await mkdir(directory, { mode: 0o755 }); await assert.rejects(createGithubArtifactApi({ ...fixture.installation, githubConfigDirectory: directory }), /private directory/);
+  const directory = join(fixture.root, 'gh'); await mkdir(directory, { mode: 0o700 }); await chmod(directory, 0o755); await assert.rejects(createGithubArtifactApi({ ...fixture.installation, githubConfigDirectory: directory }), /private directory/);
   await chmod(directory, 0o700); const api = await createGithubArtifactApi({ ...fixture.installation, githubConfigDirectory: directory });
   await assert.rejects(api.getJSON('https://example.invalid/'), /metadata unavailable/);
   await assert.rejects(api.getJSON('/repos/bentbrain/bent-mono/'), /metadata unavailable/);

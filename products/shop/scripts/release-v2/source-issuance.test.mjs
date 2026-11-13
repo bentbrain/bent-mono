@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { digest, parseJSON, sha256 } from './data.mjs';
 import { assembleHostedRelease, issueHostedAuthority, qualifyHostedSource } from './source-issuance.mjs';
@@ -7,7 +8,7 @@ import { hostedController } from './hosted-controller.mjs';
 import { verifyHostedAuthority } from './hosted-admission.mjs';
 import { createBootstrapFixture } from './testing/bootstrap-fixture.mjs';
 
-const fixture = (t, overrides = {}) => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? process.env.TMPDIR, ...overrides });
+const fixture = (t, overrides = {}) => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir(), ...overrides });
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 
 test('real importer, guard, installed signers and default controller share one source-bound plan route', async t => {
