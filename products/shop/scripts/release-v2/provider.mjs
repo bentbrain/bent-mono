@@ -1,4 +1,4 @@
-import { check, canonical, parseJSON, same } from './data.mjs';
+import { check, canonical, parseJSON, same, digest } from './data.mjs';
 import { fixtureTransportByteLimit } from './artifact-transport.mjs';
 import { request as httpRequest } from 'node:http';
 
@@ -19,7 +19,7 @@ function version(value) {
   keys(value, ['component', 'artifactDigest', 'configDigest', 'version']);
   check(typeof value.component === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(value.component) && typeof value.version === 'string' && /^v-[a-f0-9]{64}$/.test(value.version), 'Malformed provider version');
   hash(value.artifactDigest); hash(value.configDigest);
-  check(value.version === `v-${value.artifactDigest}`, 'Fixture immutable version digest differs');
+  check(value.version === `v-${value.artifactDigest}` || value.version === `v-${digest({ artifactDigest: value.artifactDigest, configDigest: value.configDigest })}`, 'Fixture immutable version digest differs');
   return value;
 }
 function inventory(value) {

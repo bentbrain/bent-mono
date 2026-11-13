@@ -1,5 +1,6 @@
 import { check, parseJSON, readRef, sha256, same } from './data.mjs';
 import { conforms } from './composition.mjs';
+import { codeIdentity } from './component-identity.mjs';
 
 export const fixtureTransportByteLimit = 256 * 1024 * 1024;
 export async function stageRequest(bundle, intent) {
@@ -30,6 +31,7 @@ export function verifyContent(upload, component) {
     documents[kind] = parseJSON(bytes); conforms(documents[kind], kind);
   }
   const manifest = documents.artifact;
+  if (manifest.schema === 'shop.artifact/v2') check(manifest.codeDigest === codeIdentity(manifest), 'Provider code identity differs');
   check(Array.isArray(upload.files) && upload.files.length === manifest.files.length, 'Provider file inventory is incomplete');
   const found = new Set();
   for (const file of upload.files) {

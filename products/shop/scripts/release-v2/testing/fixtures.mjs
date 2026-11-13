@@ -78,5 +78,6 @@ export async function fixture({ root, runnerSource, budgetMs = 600000 } = {}) {
     return signManifest(value, name);
   };
   const manifest = await seal();
-  return { directory, bundle, journal, trust, trustPath, payload, manifest, seal, signManifest, put };
+  const signComponentProof = value => ({ ...value, signature: sign('sha256', Buffer.from(canonical(value)), privateKey).toString('base64') });
+  return { directory, bundle, journal, trust, trustPath, payload, manifest, seal, signManifest, signComponentProof, put };
 }

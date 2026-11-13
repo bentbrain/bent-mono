@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { canonical, check, digest, parseJSON, readRef, confined, sha256 } from './data.mjs';
 import { loopbackOrigin } from './provider.mjs';
 import { subject, allInputs } from './composition.mjs';
+import { selectedVersion } from './component-identity.mjs';
 
 export async function journey({ bundle, directory, admission, origin, phase }) {
   const { trust, compositionDigest, payload } = admission, runner = trust.runner;
@@ -17,7 +18,7 @@ export async function journey({ bundle, directory, admission, origin, phase }) {
   const request = { schema: 'shop.fixture-journey-request/v1', journeyId: runner.id, phase, compositionDigest, subjectDigest: subject(payload),
     inputsDigest: allInputs(payload), intentSourceCommit: payload.intentSourceCommit, baseCommit: payload.baseCommit, nonce, origin, evidenceRoot,
     allowedOrigins: [...new Set([origin, ...runner.origins.map(loopbackOrigin)])],
-    components: payload.components.map(component => ({ component: component.id, artifactDigest: component.artifact.sha256, configDigest: component.config.sha256,
+    components: payload.components.map(component => ({ component: component.id, artifactDigest: selectedVersion(component).artifactDigest, configDigest: component.config.sha256,
       artifact: component.artifact, config: component.config, provenance: component.provenance, originSourceCommit: component.originSourceCommit,
       inputsDigest: component.inputsDigest, intentInputsDigest: component.intentInputsDigest })) };
   const startedAt = Date.now();
