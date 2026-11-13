@@ -33,7 +33,7 @@ let nativeHandler;
 process.umask(0o077);
 await mkdir(artifact, { recursive: true, mode: 0o700 });
 await chmod(artifact, 0o700);
-const inputManifest = await captureInputs(root, artifact);
+await captureInputs(root, artifact);
 for (const key of Object.keys(process.env))
   if (/^(AWS_|CLOUDFLARE_|CF_API_|VERCEL_|SHOP_)/.test(key))
     delete process.env[key];

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readFile, readdir, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 export const check = (condition, reason) => { if (!condition) throw Error(reason); };
@@ -78,10 +79,17 @@ export async function confined(root, path) {
 }
 export async function readRef(root, ref) {
   const path = await confined(root, ref.path);
-  check((await lstat(path)).isFile(), 'Referenced object must be a regular file');
-  const bytes = await readFile(path);
-  check(bytes.length === ref.bytes && sha256(bytes) === ref.sha256, 'Referenced bytes differ');
-  return bytes;
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = await handle.stat();
+    check(before.isFile(), 'Referenced object must be a regular file');
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    check(before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs && before.nlink === after.nlink,
+      'Referenced object changed during inspection');
+    check(bytes.length === ref.bytes && sha256(bytes) === ref.sha256, 'Referenced bytes differ');
+    return bytes;
+  } finally { await handle.close(); }
 }
 export async function filesUnder(root, prefix = '') {
   const result = [];

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fixture } from './testing/fixtures.mjs';
@@ -8,13 +8,27 @@ import { simulator } from './testing/provider-fixtures.mjs';
 import { cli } from './testing/cli.mjs';
 import { readHead } from './journal.mjs';
 import { admit, compatible, activationOrder } from './composition.mjs';
-import { parseJSON, canonical, digest, sha256, pathName } from './data.mjs';
+import { parseJSON, canonical, digest, sha256, pathName, readRef } from './data.mjs';
 
 const proofRoot = process.env.SHOP_RELEASE_V2_PROOF_DIR ?? tmpdir();
 await mkdir(proofRoot, { recursive: true, mode: 0o700 });
 const makeFixture = async options => fixture({ root: await mkdtemp(join(proofRoot, 'controller-')), ...options });
 const head = async fixture => (await readHead(fixture.journal))?.state;
 const ok = result => assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+
+test('referenced objects require regular files, rejects symlinks and verifies exact pinned bytes', async () => {
+  const root = await mkdtemp(join(proofRoot, 'reference-'));
+  const bytes = Buffer.from('signed artifact');
+  await writeFile(join(root, 'artifact'), bytes);
+  const ref = { path: 'artifact', bytes: bytes.length, sha256: sha256(bytes) };
+  assert.deepEqual(await readRef(root, ref), bytes);
+  await symlink(join(root, 'artifact'), join(root, 'alias'));
+  await assert.rejects(readRef(root, { ...ref, path: 'alias' }), /Symlinks/);
+  await mkdir(join(root, 'directory'));
+  await assert.rejects(readRef(root, { ...ref, path: 'directory' }), /regular file/);
+  await writeFile(join(root, 'artifact'), 'replaced bytes');
+  await assert.rejects(readRef(root, ref), /Referenced bytes differ/);
+});
 
 test('actual CLI retains the original admission failure in a private diagnostic', async t => {
   const f = await makeFixture(), p = await simulator(); t.after(() => p.close());

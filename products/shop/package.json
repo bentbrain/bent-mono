@@ -21,7 +21,7 @@
     "test:pipeline": "node --import ./scripts/test-protected-config.mjs --test scripts/*.test.mjs scripts/release-v2/*.test.mjs",
     "release:v2:proof": "node scripts/release-v2/testing/entrypoint-proof.mjs",
     "dev:api": "node scripts/task-runtime.mjs run dev --filter=@forever-tee/api",
-    "knip": "knip",
+    "knip": "bun run --filter @forever-tee/storefront build && knip",
     "test:e2e:local": "bun run --filter @forever-tee/web test:e2e:local",
     "test:e2e:ci": "node scripts/check-browser.mjs",
     "release:status": "node scripts/release-status.mjs",
