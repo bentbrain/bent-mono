@@ -22,7 +22,8 @@ export function protocolPolicy(input) {
   bounded(value.awsAccountId, /^[0-9]{12}$/, 'Exact AWS account required');
   bounded(value.cloudflareAccountId, /^[a-f0-9]{32}$/, 'Exact Cloudflare account required');
   list(value.workers, item => {
-    exactFields(item, ['name', 'metadataDigest']);
+    exactFields(item, ['name', 'metadataDigest', ...(Object.hasOwn(item, 'versionContentApi') ? ['versionContentApi'] : [])]);
+    check(item.versionContentApi === undefined || item.versionContentApi === 'workers-beta/v1', 'Unsupported immutable Worker content API');
     bounded(item.name, /^[a-z][a-z0-9-]{0,62}$/, 'Exact Worker name required');
     bounded(item.metadataDigest, /^[a-f0-9]{64}$/, 'Protected Worker metadata digest required');
   });
@@ -134,6 +135,7 @@ export function requestBuilders(policy) {
   const deployment = id => { check(policy.github.deploymentIds.includes(id), 'Reporting deployment outside protected allowlist'); return id; };
   return Object.freeze({
     workerVersions: (name, currentPage = 1) => wire(policy, 'cloudflare', 'worker.versions', 'GET', `${worker(name)}/versions?page=${page(currentPage)}&per_page=100`),
+    workerVersionContent: (name, id) => { check(policy.workers.find(item => item.name === name)?.versionContentApi === 'workers-beta/v1', 'Admitted workers-beta/v1 content API required'); return wire(policy, 'cloudflare', 'worker.version-content', 'GET', `${cfOrigin}/workers/workers/${name}/versions/${cloudflareVersion(id)}?include=modules,sourcemaps`); },
     workerVersion: (name, id) => wire(policy, 'cloudflare', 'worker.version', 'GET', `${worker(name)}/versions/${cloudflareVersion(id)}`),
     workerDeployments: name => wire(policy, 'cloudflare', 'worker.deployments', 'GET', `${worker(name)}/deployments`),
     workerSettings: name => wire(policy, 'cloudflare', 'worker.settings', 'GET', `${worker(name)}/settings`),

@@ -72,6 +72,15 @@ jobs:
             echo 'Start build failed. Inspect the encrypted Linux evidence.'
             exit 1
           fi
+      - name: Build the default business Worker
+        env:
+          CI: 'true'
+        run: |
+          umask 077
+          if ! bun run --filter @forever-tee/api build:local >"$PRIVATE_EVIDENCE/business-build.private.log" 2>&1; then
+            echo 'Business Worker build failed. Inspect the encrypted Linux evidence.'
+            exit 1
+          fi
       - name: Package and execute the actual Linux journey
         run: node products/shop/scripts/testing/linux-hosted-validation.mjs journey
       - name: Seal private Linux evidence

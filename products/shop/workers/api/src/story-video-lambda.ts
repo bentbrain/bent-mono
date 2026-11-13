@@ -2,14 +2,27 @@ import { protectedConfig } from "./protected-config";
 import { AwsClient } from "aws4fetch";
 import { createStoryVideoGrant } from "./story-video-grants";
 import { legacyStoredVideo } from "./story-video-legacy-cache";
+import type { NativeV5Target } from "./native-v5-target";
 export interface LambdaStoryVideoEnv {
     readonly STORY_VIDEO_PROVIDER?: string;
     readonly STORY_VIDEO_ENVIRONMENT?: string;
     readonly STORY_VIDEO_LAMBDA_FUNCTION?: string;
     readonly STORY_VIDEO_LAMBDA_ACCESS_KEY_ID?: string;
     readonly STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY?: string;
+    readonly STORY_VIDEO_LAMBDA_SESSION_TOKEN?: string;
     readonly STORY_VIDEO_GRANT_SECRET?: string;
     readonly STORY_VIDEOS?: R2Bucket;
+}
+export async function invokeQualifiedNativeV5(env: LambdaStoryVideoEnv, target: NativeV5Target, body: string, send: typeof fetch = fetch) {
+    if (!env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID || !env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY)
+        throw new Error("Install the protected native invocation credentials.");
+    const signer = new AwsClient({ accessKeyId: env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID, secretAccessKey: env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY,
+        ...(env.STORY_VIDEO_LAMBDA_SESSION_TOKEN ? { sessionToken: env.STORY_VIDEO_LAMBDA_SESSION_TOKEN } : {}),
+        service: "lambda", region: "ap-southeast-2", retries: 0 });
+    const request = await signer.sign(`https://lambda.ap-southeast-2.amazonaws.com/2015-03-31/functions/${encodeURIComponent(target.functionArn)}/invocations`, {
+        method: "POST", headers: { "content-type": "application/json", "x-amz-invocation-type": "RequestResponse" }, body,
+    });
+    return send(request, { redirect: "manual", signal: AbortSignal.timeout(25000) });
 }
 export interface LambdaVideoJob {
     readonly jobId: string;

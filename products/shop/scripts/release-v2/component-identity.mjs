@@ -20,7 +20,8 @@ export function verifyCodeIdentity(artifact, component) {
 export function verifyComponentProof(receipt, { component, artifact, trust, verifySignature, now }) {
   const { signature, ...payload } = receipt;
   const expected = ['schema', 'scope', 'kind', 'component', 'originSourceCommit', 'codeDigest', 'inputsDigest', 'proofInputsDigest', 'runtimeDigest', 'bindingDigest', 'policyDigest', 'verifierDigest', 'createdAt', 'expiresAt', 'evidence'];
-  check(same(Object.keys(payload).sort(), expected.sort()) && payload.schema === 'shop.component-proof/v1' && payload.scope === 'inactive-local', 'Component proof fields differ');
+  const scope = trust.schema === 'shop.hosted-composition-policy/v1' && trust.scope === 'isolated-qualification' ? 'isolated-qualification' : 'inactive-local';
+  check(same(Object.keys(payload).sort(), expected.sort()) && payload.schema === 'shop.component-proof/v1' && payload.scope === scope, 'Component proof fields differ');
   check(['artifact', 'qualification'].includes(payload.kind) && payload.component === component.id && payload.originSourceCommit === component.originSourceCommit &&
     payload.codeDigest === component.codeDigest && payload.inputsDigest === component.inputsDigest && payload.proofInputsDigest === component.proofInputsDigest &&
     payload.runtimeDigest === artifact.runtimeDigest && payload.policyDigest === digest(trust.closurePolicy) && payload.verifierDigest === trust.implementationDigest &&

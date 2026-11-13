@@ -22,13 +22,14 @@ const decode = data => {
   check(bytes.toString('base64') === data, 'Ambiguous base64 content');
   return bytes;
 };
-export function verifyContent(upload, component) {
+export function verifyContent(upload, component, domain = 'inactive-loopback') {
+  check(['inactive-loopback', 'isolated-qualification'].includes(domain), 'Artifact content trust domain differs');
   exactKeys(upload, ['artifact', 'config', 'provenance', 'files']);
   const documents = {};
   for (const kind of ['artifact', 'config', 'provenance']) {
     const bytes = decode(upload[kind]), expected = component[kind];
     check(bytes.length === expected.bytes && sha256(bytes) === expected.sha256, 'Provider artifact/config/provenance bytes differ');
-    documents[kind] = parseJSON(bytes); conforms(documents[kind], kind);
+    documents[kind] = parseJSON(bytes); conforms(documents[kind], kind === 'config' && domain === 'isolated-qualification' ? 'hostedConfig' : kind === 'provenance' && domain === 'isolated-qualification' ? 'hostedProvenance' : kind);
   }
   const manifest = documents.artifact;
   if (manifest.schema === 'shop.artifact/v2') check(manifest.codeDigest === codeIdentity(manifest), 'Provider code identity differs');

@@ -26,17 +26,26 @@ export async function admit({ bundle, manifest, trustPath }) {
     trustedPath !== await realpath(manifest) && !trustedPath.startsWith(`${bundleRoot}${sep}`), 'Separate private fixture trust required');
   const trust = await readJSON(trustPath, 16 * 1024 * 1024);
   conforms(trust, 'trust');
-  const scoped = trust.schema === 'shop.fixture-trust/v2';
+  return admitComposition({ bundle, manifest, trust, domain: 'inactive-loopback' });
+}
+
+// The caller authenticates its policy before reaching this shared content
+// verifier. Hosted and fixture policies retain distinct schema and domains.
+export async function admitComposition({ bundle, manifest, trust, domain }) {
+  check(['inactive-loopback', 'isolated-qualification'].includes(domain), 'Unknown composition trust domain');
+  conforms(trust, domain === 'inactive-loopback' ? 'trust' : 'hostedTrust');
+  check(trust.scope === domain, 'Composition trust domain differs');
+  const scoped = trust.schema !== 'shop.fixture-trust/v1';
   if (scoped) closurePolicy(trust.closurePolicy, trust.closurePolicy.components);
   check(trust.implementationDigest === await implementationDigest(), 'Verifier implementation changed');
   check(trust.inputPaths.includes('bun.lock') && trust.inputPaths.includes('package.json'), 'Full dependency closure required');
   trust.inputPaths.forEach(pathName);
   unique(trust.snapshots, item => item.commit, 'Conflicting snapshot identities');
   const key = createPublicKey(trust.publicKeyPem);
-  check(key.asymmetricKeyType === 'ec' && key.asymmetricKeyDetails?.namedCurve === 'prime256v1', 'Fixture P-256 key required');
+  check(key.asymmetricKeyType === 'ec' && key.asymmetricKeyDetails?.namedCurve === 'prime256v1', 'P-256 composition key required');
   check(sha256(key.export({ type: 'spki', format: 'der' })) === trust.keyFingerprint, 'Public key fingerprint differs');
   const envelope = await readJSON(manifest);
-  conforms(envelope, 'envelope');
+  conforms(envelope, domain === 'inactive-loopback' ? 'envelope' : 'hostedEnvelope');
   const { payload, signature } = envelope;
   check(payload.schema === (scoped ? 'shop.release-composition/v2' : 'shop.release-composition/v1') && signature.payloadType === payload.schema,
     'Source admission schema differs');
@@ -93,8 +102,8 @@ export async function admit({ bundle, manifest, trustPath }) {
       check(same(origin, intended), 'Changed source or dependency requires a fresh artifact and full qualification');
     }
     const artifact = parseJSON(await readRef(bundle, component.artifact)); conforms(artifact, 'artifact');
-    const config = parseJSON(await readRef(bundle, component.config)); conforms(config, 'config');
-    const provenance = parseJSON(await readRef(bundle, component.provenance)); conforms(provenance, 'provenance');
+    const config = parseJSON(await readRef(bundle, component.config)); conforms(config, domain === 'inactive-loopback' ? 'config' : 'hostedConfig');
+    const provenance = parseJSON(await readRef(bundle, component.provenance)); conforms(provenance, domain === 'inactive-loopback' ? 'provenance' : 'hostedProvenance');
     unique(artifact.files, item => item.path, 'Conflicting artifact file identities');
     unique(config.bindings, item => item.name, 'Conflicting binding identities');
     orderedSet(artifact.files, item => item.path, 'Artifact file set must be sorted');
@@ -129,7 +138,7 @@ export async function admit({ bundle, manifest, trustPath }) {
   }
   check(same([...trust.requiredProofKinds].sort(), payload.proofRefs.map(item => item.kind).sort()), 'Required full proof set differs');
   for (const proof of payload.proofRefs) {
-    const receipt = parseJSON(await readRef(bundle, proof.receipt)); conforms(receipt, 'receipt');
+    const receipt = parseJSON(await readRef(bundle, proof.receipt)); conforms(receipt, domain === 'inactive-loopback' ? 'receipt' : 'hostedReceipt');
     check(receipt.kind === proof.kind && receipt.subjectDigest === subject(payload) && receipt.inputsDigest === allInputs(payload) &&
       receipt.policyDigest === payload.policyDigest && receipt.verifierDigest === trust.implementationDigest, 'Exact proof subject differs');
     await readRef(bundle, receipt.evidence);

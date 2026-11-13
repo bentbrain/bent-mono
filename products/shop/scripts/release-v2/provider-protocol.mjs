@@ -11,7 +11,7 @@ export function responseBytes(response) {
   check(typeof response.bodyBase64 === 'string' && response.bodyBase64.length <= Math.ceil(protocolByteLimit / 3) * 4 && /^[A-Za-z0-9+/]*={0,2}$/.test(response.bodyBase64), 'Malformed or oversized provider response');
   const bytes = Buffer.from(response.bodyBase64, 'base64');
   check(bytes.length <= protocolByteLimit && bytes.toString('base64') === response.bodyBase64, 'Ambiguous provider response bytes');
-  for (const [name, value] of Object.entries(response.headers)) check(/^[a-z0-9-]+$/.test(name) && typeof value === 'string' && value.length <= 16384 && !/[\x00-\x1f\x7f]/.test(value), 'Malformed response headers');
+  for (const [name, value] of Object.entries(response.headers)) { const values = Array.isArray(value) && name === 'set-cookie' ? value : [value]; check(/^[a-z0-9-]+$/.test(name) && values.length > 0 && values.length <= 16 && values.every(item => typeof item === 'string' && item.length <= 16384 && !/[\x00-\x1f\x7f]/.test(item)), 'Malformed response headers'); }
   if (response.headers['content-length'] !== undefined) check(/^(0|[1-9][0-9]*)$/.test(response.headers['content-length']) && Number(response.headers['content-length']) === bytes.length, 'Truncated provider response');
   return bytes;
 }

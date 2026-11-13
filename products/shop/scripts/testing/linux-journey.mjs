@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkout, fileInventory, sha256, sourceInventory, verifyLinuxCandidate } from "./linux-candidate.mjs";
+import { verifyPortableBundle } from "../release-v2/portable-bundle.mjs";
 import { createProductImageV5Fixture, fixtureBinding, fixtureContext, fixtureEvent } from "./product-image-v5-fixtures.mjs";
 
 const json = value => JSON.stringify(value, null, 2) + "\n";
@@ -32,8 +33,34 @@ export function verifyJourneyEvents(value) {
   return operations;
 }
 
-export async function nativeLimits(candidate) {
-  const receipt = await verifyLinuxCandidate(candidate), capsule = join(candidate, "native-image");
+// Deliver follow-up fixture messages through the actual business handlers.
+// Failed deliveries remain pending; exhausting the bound fails the proof.
+export async function drainJourneyWork({ queues, videoTasks, deliver, maxRounds = 8, maxMessages = 512 }) {
+  let settled = 0, messages = 0;
+  for (let round = 0; round < maxRounds; round++) {
+    const pending = videoTasks.slice(settled);
+    const results = await Promise.allSettled(pending);
+    settled += pending.length;
+    assert.ok(results.every(result => result.status === "fulfilled"), "Native task failed during journey cleanup");
+    for (const [name, queue] of queues) {
+      const batch = queue.splice(0, 64);
+      if (!batch.length) continue;
+      try {
+        assert.ok(messages + batch.length <= maxMessages, "Journey cleanup message bound exceeded");
+        const result = await deliver(name, batch);
+        assert.equal(result.outcome, "ok");
+        assert.ok(result.retryBatch?.retry !== true && !result.retryMessages?.length, "Journey cleanup delivery requires retry");
+        messages += batch.length;
+      } catch (error) { queue.unshift(...batch); throw error; }
+    }
+    if (queues.every(([, queue]) => queue.length === 0) && settled === videoTasks.length)
+      return { rounds: round + 1, messages, videoTasks: settled };
+  }
+  throw new Error("Journey cleanup round bound exceeded; pending work is retained");
+}
+
+export async function nativeLimits(candidate, identityDirectory = candidate) {
+  const receipt = await verifyLinuxCandidate(candidate, { identityDirectory }), capsule = join(candidate, "native-image");
   const sharp = createRequire(join(capsule, "package.json"))("sharp");
   const { renderProductDisplay } = await import(pathToFileURL(join(capsule, "node_modules/@forever-tee/product-image-renderer/src/index.mjs")).href);
   const { fixtureRecipe } = await import("./product-image-v5-fixtures.mjs");
@@ -66,7 +93,7 @@ export async function nativeLimits(candidate) {
   return { accepted, rejected: { sourceWidth: 10000, sourceHeight: 5001, sourceSha256: sha256(oversized), publications: 0, ownedFailureCallbacks: 1 } };
 }
 
-async function runActual(candidate, directory) {
+async function runActual(candidate, directory, portableRoot, expectedPath) {
   const stdout = await open(join(directory, "stdout.private.log"), "wx", 0o600);
   const stderr = await open(join(directory, "stderr.private.log"), "wx", 0o600);
   try {
@@ -74,7 +101,7 @@ async function runActual(candidate, directory) {
       const env = { PATH: `${join(candidate, "runtime/bin")}:${process.env.PATH}`, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR ?? "/tmp",
         CI: "true", PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? "/ms-playwright" };
       const child = spawn(join(candidate, "runtime/bin/node"), [join(checkout, "products/shop/apps/storefront/scripts/local-proof.mjs"),
-        directory, join(candidate, "native-image"), "jpeg", candidate], { cwd: checkout, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+        directory, join(candidate, "native-image"), "jpeg", candidate, ...(portableRoot ? [portableRoot, expectedPath] : [])], { cwd: checkout, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
       const buffers = { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
       let overflow = false;
       const stop = () => { try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") reject(error); } };
@@ -93,35 +120,59 @@ async function runActual(candidate, directory) {
   } finally { await stdout.close(); await stderr.close(); }
 }
 
-export async function linuxJourney(candidatePath, outputPath) {
+export async function linuxJourney(candidatePath, outputPath, portablePath, expectedPath) {
   process.umask(0o077);
   const candidate = resolve(candidatePath), output = resolve(outputPath);
   assert.ok(output !== checkout && !output.startsWith(`${checkout}/`), "Use a new private journey directory outside checkout");
   await mkdir(output, { mode: 0o700 });
-  const startedAt = new Date().toISOString(), before = await sourceInventory(), receipt = await verifyLinuxCandidate(candidate);
-  const candidateSha256 = sha256(await readFile(join(candidate, "linux-candidate.json")));
+  const portable = portablePath ? await verifyPortableBundle(portablePath, JSON.parse(await readFile(expectedPath, "utf8"))) : null;
+  if (portable) assert.equal(candidate, resolve(portable.root, "payload/native"));
+  const identityDirectory = portable?.components.get("native").runtime.definition.identityDirectory
+    ? join(portable.root, portable.components.get("native").runtime.definition.identityDirectory) : candidate;
+  const startedAt = new Date().toISOString(), before = await sourceInventory(), receipt = await verifyLinuxCandidate(candidate, { identityDirectory });
+  const candidateSha256 = sha256(await readFile(join(identityDirectory, "linux-candidate.json")));
   const summary = { schema: "shop.linux-j01/v1", qualification: "linux-candidate-execution", awsImageQualified: false, productionQualified: false,
     providerScope: "inactive-local-fixtures", actualBusinessRuntime: "workerd-d1-r2-durable-objects", candidateSha256,
     sourceCommit: receipt.sourceCommit, dirtySnapshot: receipt.dirtySnapshot, startedAt, complete: false };
   try {
-    const storefront = join(checkout, "products/shop/apps/storefront/dist");
+    const storefront = portable ? join(portable.root, "payload/storefront") : join(checkout, "products/shop/apps/storefront/dist");
+    if (portable) {
+      summary.portableManifestSha256 = portable.manifestSha256;
+      summary.retainedPayload = { storefront: portable.components.get("storefront").artifactRef,
+        business: portable.components.get("business").artifactRef, native: portable.components.get("native").artifactRef };
+    }
     summary.storefrontFiles = await fileInventory(storefront);
     summary.storefrontFilesSha256 = sha256(json(summary.storefrontFiles));
-    summary.nativeLimits = await nativeLimits(candidate);
-    const execution = await runActual(candidate, output);
+    summary.nativeLimits = await nativeLimits(candidate, identityDirectory);
+    const execution = await runActual(candidate, output, portable?.root, expectedPath);
     summary.execution = execution;
     assert.deepEqual(execution, { code: 0, signal: null, overflow: false }, "Actual built Linux J01 failed; inspect encrypted diagnostics");
     const events = JSON.parse(await readFile(join(output, "events.json"), "utf8"));
     summary.operations = verifyJourneyEvents(events);
     const services = JSON.parse(await readFile(join(output, "service-identity.json"), "utf8"));
     assert.equal(services.nativeBuildId, receipt.capsuleManifestSha256);
+    if (portable) {
+      assert.equal(services.portableManifestSha256, portable.manifestSha256);
+      assert.equal(services.businessCodeOrigin, "retained-default-entry-bundle");
+      assert.equal(services.businessDefaultArtifactSha256, portable.components.get("business").artifactRef.sha256);
+      assert.equal(services.storefrontArtifactSha256, portable.components.get("storefront").artifactRef.sha256);
+      for (const event of events.events.filter(event => event.operation === "native-v5"))
+        assert.equal(event.route, "admitted-numbered-native-target");
+      const cleanup = JSON.parse(await readFile(join(output, "portable-cleanup.private.json"), "utf8"));
+      assert.equal(cleanup.portableManifestSha256, portable.manifestSha256);
+      assert.equal(cleanup.printQueueRemaining, 0); assert.equal(cleanup.videoQueueRemaining, 0);
+      assert.ok(cleanup.videoTasks.length > 0 && cleanup.videoTasks.every(status => status === "fulfilled"));
+      for (const key of ["storefrontDisposed", "businessDisposed", "platformDisposed", "mockAgentClosed"]) assert.equal(cleanup[key], true);
+      summary.cleanup = cleanup;
+      await verifyPortableBundle(portable.root, portable.expected);
+    }
     assert.equal(services.nativeVideoRuntimeSha256, receipt.runtimeFilesSha256);
     assert.equal(services.linuxCandidateManifestSha256, candidateSha256);
     assert.equal(services.lockSha256, receipt.lockSha256);
     assert.equal(services.nodeVersion, receipt.runtime.node);
     assert.deepEqual(before, await sourceInventory(), "Source changed during Linux J01");
     assert.deepEqual(summary.storefrontFiles, await fileInventory(storefront), "Built Start files changed during Linux J01");
-    await verifyLinuxCandidate(candidate);
+    await verifyLinuxCandidate(candidate, { identityDirectory });
     summary.businessWorkerSha256 = sha256(await readFile(join(output, "business-worker.mjs")));
     summary.eventsSha256 = sha256(await readFile(join(output, "events.json")));
     summary.sourceInventorySha256 = receipt.sourceInventorySha256;
@@ -138,7 +189,7 @@ export async function linuxJourney(candidatePath, outputPath) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 4, "Usage: node linux-journey.mjs <verified-candidate> <new-private-output>");
-  const summary = await linuxJourney(process.argv[2], process.argv[3]);
+  assert.ok([4, 6].includes(process.argv.length), "Usage: node linux-journey.mjs <verified-candidate> <new-private-output> [<portable-root> <externally-pinned-expected-json>]");
+  const summary = await linuxJourney(process.argv[2], process.argv[3], process.argv[4], process.argv[5]);
   console.info(JSON.stringify({ schema: summary.schema, sourceCommit: summary.sourceCommit, candidateSha256: summary.candidateSha256, complete: summary.complete, awsImageQualified: false }));
 }

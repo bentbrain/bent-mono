@@ -12,6 +12,8 @@ import { seedCatalogue } from "./seed-fixture.mjs";
 import { browserJourney } from "./browser-journey.mjs";
 import { imageService } from "./image-service-fixture.mjs";
 import { createShopifyFixture } from "./shopify-fixture.mjs";
+import { drainJourneyWork } from "../../../scripts/testing/linux-journey.mjs";
+import { verifyPortableBundle } from "../../../scripts/release-v2/portable-bundle.mjs";
 import { verifyLinuxCandidate } from "../../../scripts/testing/linux-candidate.mjs";
 import {
   fixtureBinding,
@@ -30,10 +32,18 @@ if (!capsule)
   throw new Error("Supply the verified native v5 capsule directory.");
 const manifest = await readFile(resolve(capsule, "capsule-manifest.json"));
 const nativeBuildId = createHash("sha256").update(manifest).digest("hex");
+const portableRoot = process.argv[6] ? resolve(process.argv[6]) : null;
+const portable = portableRoot ? await verifyPortableBundle(portableRoot,
+  JSON.parse(await readFile(process.argv[7], "utf8"))) : null;
+const storefrontDist = portable ? resolve(portableRoot, "payload/storefront") : resolve(app, "dist");
+const portableBusiness = portable ? resolve(portableRoot, portable.components.get("business").artifact.entrypoint) : null;
 const linuxCandidate = process.argv[5] ? resolve(process.argv[5]) : null;
 let linuxCandidateReceipt;
 if (linuxCandidate) {
-  linuxCandidateReceipt = await verifyLinuxCandidate(linuxCandidate);
+  linuxCandidateReceipt = await verifyLinuxCandidate(linuxCandidate, { identityDirectory:
+    portable?.components.get("native").runtime.definition.identityDirectory
+      ? resolve(portableRoot, portable.components.get("native").runtime.definition.identityDirectory) : linuxCandidate });
+  if (portable) assert.equal(linuxCandidate, resolve(portableRoot, "payload/native"));
   assert.equal(resolve(capsule), resolve(linuxCandidate, "native-image"));
   assert.equal(nativeBuildId, linuxCandidateReceipt.capsuleManifestSha256);
   process.env.PATH = `${resolve(linuxCandidate, "runtime/bin")}:${process.env.PATH}`;
@@ -52,6 +62,17 @@ const protectedFixtures = JSON.parse(
     "utf8",
   ),
 );
+const nativeFixtureArn = `arn:aws:lambda:ap-southeast-2:${protectedFixtures.awsAccountId}:function:synthetic-native-v5-qualification`;
+const nativeTarget = portable ? {
+  schemaVersion: 1, environment: "qualification", functionArn: `${nativeFixtureArn}:7`, codeDigest: nativeBuildId,
+  inputsDigest: createHash("sha256").update(JSON.stringify(JSON.parse(manifest).sourceInputs)).digest("hex"),
+  qualificationDigest: createHash("sha256").update(`local-fixture-only:${nativeBuildId}`).digest("hex"), grantKeyId: "local-fixture-key",
+} : null;
+const canonicalNativeTarget = nativeTarget ? JSON.stringify(nativeTarget, Object.keys(nativeTarget).sort()) : null;
+if (portable) {
+  protectedFixtures.nativeV5QualificationFunctionArn = nativeFixtureArn;
+  protectedFixtures.nativeV5QualificationTargetDigest = createHash("sha256").update(canonicalNativeTarget).digest("hex");
+}
 process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(protectedFixtures);
 process.env.TMPDIR = resolve(artifact, "tmp");
 await mkdir(process.env.TMPDIR, { mode: 0o700 });
@@ -132,7 +153,7 @@ const outbound = async (request) => {
   )
     return shopify.fetch(request);
   if (
-    url.origin === protectedFixtures.previewRendererOrigin &&
+    !portable && url.origin === protectedFixtures.previewRendererOrigin &&
     url.pathname === "/api/internal/product-image-render"
   ) {
     if (request.method === "GET")
@@ -159,6 +180,27 @@ const outbound = async (request) => {
       status: result.status,
     });
     return Response.json(result, { status: 200 });
+  }
+  if (portable && url.origin === "https://lambda.ap-southeast-2.amazonaws.com" &&
+    url.pathname === `/2015-03-31/functions/${encodeURIComponent(nativeTarget.functionArn)}/invocations`) {
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers.get("x-amz-invocation-type"), "RequestResponse");
+    const payload = await request.json();
+    assert.equal(payload.kind, "product-image-v5");
+    assert.match(payload.grant, /^nv5_/);
+    await imageGate;
+    if (!nativeHandler) {
+      process.env.SHOP_PRODUCT_IMAGE_V5_BINDING_JSON = JSON.stringify({
+        ...fixtureBinding((await api.url).origin, nativeBuildId), functionArn: nativeFixtureArn,
+        qualifiedFunctionArns: [`${nativeFixtureArn}:7`, `${nativeFixtureArn}:8`],
+      });
+      nativeHandler = (await import(pathToFileURL(resolve(capsule, "product-image-v5-entry.mjs")).href)).handler;
+    }
+    const result = await nativeHandler(payload, { invokedFunctionArn: nativeTarget.functionArn,
+      awsRequestId: crypto.randomUUID(), getRemainingTimeInMillis: () => 120000 });
+    events.push({ operation: "native-v5", jobId: payload.jobId, status: result.status,
+      route: "admitted-numbered-native-target", functionArn: nativeTarget.functionArn });
+    return Response.json(result);
   }
   if (
     url.origin === "https://lambda.ap-southeast-2.amazonaws.com" &&
@@ -307,6 +349,8 @@ try {
       STORY_VIDEO_LAMBDA_ACCESS_KEY_ID: "synthetic-key-id",
       STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY: "synthetic-lambda-secret",
       PRODUCT_IMAGE_PROVIDER: "vercel",
+      ...(portable ? { SHOP_NATIVE_V5_TARGET_JSON: canonicalNativeTarget,
+        SHOP_NATIVE_V5_GRANT_SECRET: "synthetic-native-v5-grant-secret-00001" } : {}),
       PRODUCT_IMAGE_RENDERER_BYPASS_SECRET: "synthetic-bypass",
       PRINT_EXECUTION_RELEASE_ID: "native-123",
       PRINT_EXECUTION_MODE: "durable-object",
@@ -325,8 +369,16 @@ try {
     },
   });
   const apiBundle = resolve(artifact, "business-worker.mjs");
+  const fixtureEntry = portable ? resolve(portableRoot, portable.sourceInventory.root,
+    "products/shop/apps/storefront/scripts/fixture-api-worker.mjs") : resolve(app, "scripts/fixture-api-worker.mjs");
   await build({
-    entryPoints: [resolve(app, "scripts/fixture-api-worker.mjs")],
+    entryPoints: [fixtureEntry],
+    ...(portable ? { nodePaths: [resolve(root, "node_modules")], plugins: [{
+      name: "retained-default-business-boundary",
+      setup(builder) {
+        builder.onResolve({ filter: /workers\/api\/src\/(index\.ts|story-video-notifications\.ts)$/ }, () => ({ path: portableBusiness }));
+      },
+    }] } : {}),
     outfile: apiBundle,
     bundle: true,
     format: "esm",
@@ -399,10 +451,10 @@ try {
   });
   const origin = (await api.url).origin;
   const built = JSON.parse(
-    await readFile(resolve(app, "dist/server/wrangler.json"), "utf8"),
+    await readFile(resolve(storefrontDist, "server/wrangler.json"), "utf8"),
   );
-  built.main = resolve(app, "dist/server/index.js");
-  built.assets.directory = resolve(app, "dist/client");
+  built.main = resolve(storefrontDist, "server/index.js");
+  built.assets.directory = resolve(storefrontDist, "client");
   built.vars = {
     FOREVER_TEE_API_URL: origin,
     FOREVER_TEE_API_SHARED_SECRET: secret,
@@ -421,7 +473,7 @@ try {
     name: "storefront",
     modules: true,
     scriptPath: built.main,
-    modulesRoot: resolve(app, "dist/server"),
+    modulesRoot: resolve(storefrontDist, "server"),
     outboundService: outbound,
     host: "localhost",
     port: 4517,
@@ -449,8 +501,13 @@ try {
         businessOrigin: origin,
         nativeCapsule: capsule,
         nativeBuildId,
+        ...(portable ? { portableManifestSha256: portable.manifestSha256,
+          businessDefaultArtifactSha256: portable.components.get("business").artifactRef.sha256,
+          storefrontArtifactSha256: portable.components.get("storefront").artifactRef.sha256,
+          businessCodeOrigin: "retained-default-entry-bundle", fixtureAdapters: "local-journey-boundaries", nativeTarget,
+          nativeTargetAdmissionScope: "synthetic-local-fixture" } : {}),
         ...(linuxCandidateReceipt ? {
-          linuxCandidateManifestSha256: createHash("sha256").update(await readFile(resolve(linuxCandidate, "linux-candidate.json"))).digest("hex"),
+          linuxCandidateManifestSha256: createHash("sha256").update(await readFile(resolve(portable?.components.get("native").runtime.definition.identityDirectory ? resolve(portableRoot, portable.components.get("native").runtime.definition.identityDirectory) : linuxCandidate, "linux-candidate.json"))).digest("hex"),
           nativeVideoRuntimeSha256: linuxCandidateReceipt.runtimeFilesSha256,
           awsImageQualified: false,
         } : {}),
@@ -511,14 +568,31 @@ try {
   );
 } finally {
   releaseImages();
-  await Promise.allSettled(videoTasks);
-  await storefront?.dispose();
-  await api?.dispose();
-  await platform?.dispose();
-  await agent.close();
-  await writeFile(
-    resolve(artifact, "events.json"),
-    JSON.stringify({ events, blocked }, null, 2),
-    { mode: 0o600 },
-  );
+  let drain, drainFailure;
+  try {
+    if (portable) drain = await drainJourneyWork({
+      queues: [["forever-tee-print-assets-development", queue], ["forever-tee-story-video-development", videoQueue]], videoTasks,
+      deliver: async (name, batch) => {
+        const result = await api.queue(name, batch.map(body => ({ id: crypto.randomUUID(), timestamp: new Date(), attempts: 1, body })));
+        events.push({ operation: "portable-cleanup-queue-delivery", queue: name, count: batch.length, result });
+        return result;
+      },
+    });
+  } catch (error) { drainFailure = error.message; throw error; }
+  finally {
+    const videoSettlements = await Promise.allSettled(videoTasks);
+    await storefront?.dispose();
+    await api?.dispose();
+    await platform?.dispose();
+    await agent.close();
+    if (portable) {
+      await writeFile(resolve(artifact, "portable-cleanup.private.json"), JSON.stringify({
+        schema: "shop.portable-journey-cleanup/v1", portableManifestSha256: portable.manifestSha256,
+        printQueueRemaining: queue.length, videoQueueRemaining: videoQueue.length, drain, drainFailure,
+        videoTasks: videoSettlements.map(item => item.status), storefrontDisposed: Boolean(storefront),
+        businessDisposed: Boolean(api), platformDisposed: Boolean(platform), mockAgentClosed: true,
+      }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    }
+    await writeFile(resolve(artifact, "events.json"), JSON.stringify({ events, blocked }, null, 2), { mode: 0o600 });
+  }
 }
