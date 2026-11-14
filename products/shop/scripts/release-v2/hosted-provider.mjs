@@ -1,14 +1,18 @@
-import { check, digest, parseJSON, readRef, same, sha256 } from './data.mjs';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { canonical, check, digest, parseJSON, readRef, readRegularFile, same, sha256 } from './data.mjs';
 import { conforms } from './composition.mjs';
 import { selectedVersion, verifyCodeIdentity } from './component-identity.mjs';
 import { verifyContent } from './artifact-transport.mjs';
-import { assertPolicy, cloudflareVersion, numberedVersion, protocolPageLimit, protocolItemLimit, requestBuilders, sourceMapDataDigest, assetManifest } from './provider-protocol-builders.mjs';
+import { assertPolicy, protocolByteLimit, cloudflareVersion, numberedVersion, protocolPageLimit, protocolItemLimit, requestBuilders, sourceMapDataDigest, assetManifest } from './provider-protocol-builders.mjs';
 import { ProtocolConflict, ProtocolFailure, UncertainWrite, responseBytes, verifyLambdaQualified, assertLambdaBinding, lambdaBindingProjection } from './provider-protocol.mjs';
 import { requestDigest } from './signing.mjs';
 import { assertCredentialBroker } from './hosted-writer.mjs';
+import { ensureHostedDeployment } from './hosted-reporting.mjs';
+import { preflightImageRegistration } from './image-registration.mjs';
 import { verifyOciLayout } from './oci-layout.mjs';
 
-const candidateLoaders = new WeakSet();
+const candidateLoaders = new WeakSet(), loaderFiles = new WeakMap(), preflightGraphs = new WeakMap();
 const cf = value => { check(value?.success === true && value.result && (!value.errors || value.errors.length === 0), 'Cloudflare provider response failed'); return value.result; };
 async function checkedBrokerResponse(response, request) {
   responseBytes(response);
@@ -52,7 +56,7 @@ export function retainedCandidateLoader({ bundle, targets }) {
     }
     return candidate;
   };
-  const loader = component => { const key = digest(component); if (!cache.has(key)) cache.set(key, read(component)); return cache.get(key); }; candidateLoaders.add(loader); return loader;
+  const loader = component => { const key = digest(component); if (!cache.has(key)) cache.set(key, read(component)); return cache.get(key); }; candidateLoaders.add(loader); loaderFiles.set(loader, ref => readRef(bundle, ref)); return loader;
 }
 function namedBindings(bindings) {
   check(Array.isArray(bindings) && bindings.length <= 128 && bindings.every(binding => binding && typeof binding.name === 'string' && binding.name.length > 0) && new Set(bindings.map(binding => binding.name)).size === bindings.length, 'Unique named Worker bindings required');
@@ -85,27 +89,71 @@ function verifyWorkerVersion(response, candidate, target, providerVersion) {
   return { providerVersion: version.id, modulesDigest: digest(actual), bindingDigest: digest({ bindings: namedBindings(version.bindings), compatibility_date: version.compatibility_date, compatibility_flags: version.compatibility_flags ?? [], assets: version.assets?.config ?? null }) };
 }
 
-export async function preflightHostedTargets({ policy, components, targets, load }) {
+export async function preflightHostedTargets({ policy, components, targets, load, release }) {
   assertPolicy(policy); check(candidateLoaders.has(load), 'Verified retained candidate loader required');
   check(Array.isArray(components) && Array.isArray(targets) && components.length === targets.length && new Set(targets.map(target => target.component)).size === targets.length && same(components.map(component => component.id).sort(), targets.map(target => target.component).sort()), 'Complete hosted target component preflight required');
-  const builders = requestBuilders(policy);
+  const builders = requestBuilders(policy), requests = [], uuid = '00000000-0000-4000-8000-000000000000', eventDigest = '0'.repeat(64), deferred = 'custody.preflight.capability';
+  const add = (request, fields = [], component = null) => {
+    const { bodyBase64, ...framing } = request;
+    requests.push({ component, request: framing, requestDigest: requestDigest(request), bodyBytes: Buffer.from(bodyBase64, 'base64').length, deferred: fields, immutableSubject: component ? { component: structuredClone(components.find(item => item.id === component)), targetDigest: digest(targets.find(item => item.component === component)) } : null });
+  };
+  add(builders.storeGet('head.json')); add(builders.storeGet(`events/${eventDigest}.json`), ['eventDigest']);
+  add(builders.storePut('head.json', Buffer.from(canonical({ schema: 'shop.protected-journal-head/v1', generation: 1, eventDigest })), null), ['generation', 'eventDigest', 'if-match']);
+  add(builders.storePut(`events/${eventDigest}.json`, Buffer.from(canonical({ schema: 'shop.protected-journal-event/v1', generation: 1, previous: null, state: { components: components.map(selectedVersion) } })), null), ['eventDigest', 'journalState']);
+  if (policy.workInventory) for (let index = 0; index < policy.workInventory.queries.length; index++) add(builders.workQuery(index));
   for (const component of components) {
     const target = targets.find(item => item.component === component.id), candidate = await load(component);
     if (target.kind === 'worker') {
       check(policy.workers.some(item => item.name === target.resource && item.versionContentApi === 'workers-beta/v1'), 'Admitted immutable Worker content API required');
-      builders.workerUpload(target.resource, candidate.worker);
+      add(builders.workerVersions(target.resource), ['page'], component.id); add(builders.workerDeployments(target.resource), [], component.id);
+      add(builders.workerVersionContent(target.resource, uuid), ['versionUUID'], component.id);
+      let upload = candidate.worker;
+      if (candidate.worker.assets.length) {
+        add(builders.assetSession(target.resource, candidate.worker.assets), [], component.id);
+        const hashes = [...new Set(assetManifest(candidate.worker.assets).inventory.map(asset => asset.hash))];
+        add(builders.assetUpload(candidate.worker.assets, hashes, deferred), ['providerBucketSubset', 'privateAssetCapability'], component.id);
+        upload = { ...candidate.worker, metadata: { ...candidate.worker.metadata, assets: { ...candidate.worker.metadata.assets, jwt: deferred } } };
+      }
+      add(builders.workerUpload(target.resource, upload), candidate.worker.assets.length ? ['privateCompletionCapability'] : [], component.id);
+      add(builders.workerActivate(target.resource, uuid), ['versionUUID'], component.id);
       if (candidate.worker.assets.length) check(target.assetQualification?.complete === true && target.assetQualification.manifestDigest === digest(assetManifest(candidate.worker.assets).manifest) && /^[a-f0-9]{64}$/.test(target.assetQualification.receiptDigest), 'Admitted served asset qualification is required before any write');
     } else {
       check(target.kind === 'lambda' && policy.functions.some(item => item.name === target.resource && item.aliases.includes(target.alias)) && candidate.native?.awsImageQualified === true && /^[a-f0-9]{64}$/.test(candidate.native.imageDigest), 'Admitted qualified native target required before any write');
       assertLambdaBinding(candidate.native.expectedBinding, policy);
+      const registration = await preflightImageRegistration({ policy, resource: target.resource, artifact: candidate.artifact, readFile: loaderFiles.get(load) });
+      requests.push(...registration.requests.map(item => ({ component: component.id, ...item })));
+      add(builders.lambdaVersions(target.resource), ['marker'], component.id); add(builders.lambdaLatest(target.resource), [], component.id);
+      add(builders.lambdaFunction(target.resource, '1'), ['numberedVersion'], component.id); add(builders.lambdaAlias(target.resource, target.alias), [], component.id);
+      add(builders.lambdaUpload(target.resource, candidate.native.imageDigest, 'preflight-revision'), ['liveRevisionId'], component.id);
+      add(builders.lambdaActivate(target.resource, target.alias, '1', 'preflight-revision'), ['numberedVersion', 'liveAliasRevisionId'], component.id);
+      add(builders.lambdaCreateAlias(target.resource, target.alias, '1'), ['numberedVersion', 'aliasAbsent'], component.id);
     }
   }
-  return { schema: 'shop.hosted-target-preflight/v1', components: components.map(selectedVersion), targetsDigest: digest(targets), providerWrites: 0 };
+  if (policy.github.reporting === 'per-release') {
+    check(release && /^[a-f0-9]{40}$/.test(release.head) && /^[a-f0-9]{64}$/.test(release.compositionDigest), 'Exact per-release reporting subject required');
+    add(builders.deploymentInventory(release.head), ['page']); add(builders.deploymentCreate({ ...release, eventDigest }), ['runtimeVerificationEvent']);
+    add(builders.reportStatuses('1'), ['durableDeploymentId', 'page']); add(builders.reportSuccess('1', eventDigest), ['durableDeploymentId', 'runtimeVerificationEvent']);
+  } else for (const id of policy.github.deploymentIds) { add(builders.reportStatuses(id), ['page']); add(builders.reportSuccess(id, eventDigest), ['runtimeVerificationEvent']); }
+  const requestGraph = { schema: 'shop.provider-request-graph/v1', requests, digest: digest(requests), providerWrites: 0 };
+  const result = { schema: 'shop.hosted-target-preflight/v1', components: components.map(selectedVersion), targetsDigest: digest(targets), providerWrites: 0, requestGraph };
+  preflightGraphs.set(result, { policyDigest: digest(policy), targetsDigest: digest(targets), componentsDigest: digest(components), releaseDigest: release ? digest(release) : null, load }); return result;
 }
 
-export function createHostedProvider({ policy, writer, broker, components, targets, load, deploymentId, workInventory = () => broker.workInventory() }) {
+export async function retainHostedRequestGraph({ directory, preflight }) {
+  check(preflightGraphs.has(preflight) && typeof directory === 'string', 'Branded complete hosted request graph required');
+  const graph = preflight.requestGraph; check(graph.schema === 'shop.provider-request-graph/v1' && graph.digest === digest(graph.requests), 'Hosted request graph changed');
+  const bytes = Buffer.from(canonical(graph)); check(bytes.length <= protocolByteLimit, 'Bounded hosted request graph required');
+  const path = join(directory, `request-graph-${graph.digest}.private.json`);
+  try { await writeFile(path, bytes, { flag: 'wx', mode: 0o600 }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const observed = await readRegularFile(path, protocolByteLimit, true);
+  check(observed.equals(bytes) && same(parseJSON(observed, protocolByteLimit), graph), 'Retained request graph changed'); return { path, sha256: sha256(observed), bytes: observed.length, requestGraphDigest: graph.digest };
+}
+
+export function createHostedProvider({ policy, writer, broker, components, targets, load, deploymentId, release, preflight, workInventory = () => broker.workInventory() }) {
   assertPolicy(policy); assertCredentialBroker(broker);
   check(Array.isArray(components) && components.length > 0 && Array.isArray(targets) && targets.length > 0 && candidateLoaders.has(load) && typeof workInventory === 'function', 'Admitted component/artifact/work inventory ports required');
+  if (policy.github.reporting === 'per-release') check(preflightGraphs.get(preflight)?.policyDigest === digest(policy) && preflightGraphs.get(preflight)?.targetsDigest === digest(targets) && preflightGraphs.get(preflight)?.componentsDigest === digest(components) && preflightGraphs.get(preflight)?.releaseDigest === digest(release) && preflightGraphs.get(preflight)?.load === load && release && /^[a-f0-9]{40}$/.test(release.head), 'Complete provider request graph required before writer');
   const builders = requestBuilders(policy), verifiedContents = new WeakSet();
   const targetFor = id => { const target = targets.find(item => item.component === id); check(target, 'Hosted component target missing');
     check(target.kind === 'worker' ? policy.workers.some(item => item.name === target.resource && item.versionContentApi === 'workers-beta/v1') : target.kind === 'lambda' && policy.functions.some(item => item.name === target.resource && item.aliases.includes(target.alias)), 'Hosted target is outside admitted provider policy'); return target; };
@@ -220,26 +268,38 @@ export function createHostedProvider({ policy, writer, broker, components, targe
     return [{ id, kind: operation.kind, bodyDigest: operation.bodyDigest, result: operation.selected }];
   }
   async function reports(id) {
-    const state = await writer.readProviderState(), saved = state.reports.find(item => item.body.eventId === id); if (!saved) return [];
+    let state = await writer.readProviderState();
+    if (policy.github.reporting === 'per-release' && state.reports.some(item => item.kind === 'deployment') && !state.requests.some(item => item.operationId === id && item.step === 'report')) {
+      const head = await writer.readHead();
+      if (head?.state.phase === 'report-reconcile' && head.state.operation?.body?.eventId === id) { await sendSuccess(head.state.operation.body, head.state.report.eventDigest); state = await writer.readProviderState(); }
+    }
+    const saved = state.reports.find(item => item.kind !== 'deployment' && item.body.eventId === id); if (!saved) return [];
     const records = [];
     for (let page = 1; page <= protocolPageLimit; page++) {
-      const response = await read(builders.reportStatuses(deploymentId, page)), items = parseJSON(responseBytes(response)); check(Array.isArray(items) && items.length <= 100, 'Incomplete reporting inventory'); records.push(...items);
+      const reportingId = policy.github.reporting === 'per-release' ? state.reports.find(item => item.kind === 'deployment' && item.eventDigest === saved.eventDigest)?.deploymentId : deploymentId; check(reportingId, 'Durable reporting deployment is missing');
+      const response = await read(builders.reportStatuses(reportingId, page)), items = parseJSON(responseBytes(response)); check(Array.isArray(items) && items.length <= 100, 'Incomplete reporting inventory'); records.push(...items);
       check(records.length <= 4096, 'Reporting inventory exceeds bound');
       const link = response.headers.link;
       if (!link) { check(items.length < 100, 'Reporting continuation evidence missing'); break; }
       const next = [...link.matchAll(/<([^>]+)>; rel="next"/g)]; check(next.length <= 1, 'Ambiguous reporting continuation');
-      if (!next.length) break; check(page < protocolPageLimit && next[0][1] === builders.reportStatuses(deploymentId, page + 1).url, 'Reporting continuation resource differs');
+      if (!next.length) break; check(page < protocolPageLimit && next[0][1] === builders.reportStatuses(policy.github.reporting === 'per-release' ? state.reports.find(item => item.kind === 'deployment' && item.eventDigest === saved.eventDigest)?.deploymentId : deploymentId, page + 1).url, 'Reporting continuation resource differs');
     }
     const found = records.filter(item => item.state === 'success' && item.environment === policy.github.environment && item.description === `Verified release event ${saved.eventDigest}`);
     check(found.length <= 1, 'Duplicate reporting acknowledgement'); return found.length ? [saved.body] : [];
+  }
+  async function sendSuccess(body, eventDigest) {
+    const reportingId = policy.github.reporting === 'per-release' ? await ensureHostedDeployment({ writer, broker, policy, release, eventDigest }) : deploymentId;
+    const saved = (await writer.readProviderState()).reports.find(item => item.kind !== 'deployment' && item.body.eventId === body.eventId);
+    if (!saved) await writer.recordProvider(provider => provider.reports.push({ body, eventDigest }));
+    else check(same(saved.body, body) && saved.eventDigest === eventDigest, 'Durable report body differs');
+    await recordRequest({ id: body.eventId, target: { kind: 'github', deploymentId: reportingId } }, 'report', builders.reportSuccess(reportingId, eventDigest), { eventDigest });
   }
   async function write(kind, body) {
     await writer.assertOwner();
     if (kind === 'reports') {
       const head = await writer.readHead(), eventDigest = await writer.verificationRef();
       check(head?.state.phase === 'report-reconcile' && same(head.state.operation?.body, body) && head.state.report?.eventDigest === eventDigest && head.state.report.verificationDigest === digest(head.state.verification), 'Durable verified reporting outbox required');
-      await writer.recordProvider(provider => { check(!provider.reports.some(item => item.body.eventId === body.eventId), 'Saved reporting intent requires GET-only reconciliation'); provider.reports.push({ body, eventDigest }); });
-      await recordRequest({ id: body.eventId, target: { kind: 'github', deploymentId } }, 'report', builders.reportSuccess(deploymentId, eventDigest), { eventDigest }); return;
+      await sendSuccess(body, eventDigest); return;
     }
     check(['stage', 'activate'].includes(kind), 'Unsupported hosted provider mutation');
     const component = componentFor(body.component, body.version), selected = selectedVersion(component), target = targetFor(body.component), candidate = await candidateFor(body.component, body.version);

@@ -69,8 +69,11 @@ async function collect(root, prefix = '', entries = []) {
 
 export async function createArtifactIntakeFixture(t, options = {}) {
   const sourceCommit = options.sourceCommit ?? '1'.repeat(40), request = { runId: options.runId ?? 123, runAttempt: options.runAttempt ?? 1, artifactId: options.artifactId ?? 789, sourceCommit }, jobId = options.jobId ?? 987;
-  const workflowRef = `bentbrain/bent-mono/.github/workflows/shop-linux-journey.yml@${options.pullRequestNumber ? `refs/pull/${options.pullRequestNumber}/merge` : 'refs/heads/main'}`;
-  const lineage = { kind: 'github-actions', repository: 'bentbrain/bent-mono', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef, jobId: 'journey' };
+  const producer = options.producer === 'native-oci'
+    ? { path: '.github/workflows/shop-native-oci-producer.yml', jobName: 'Built native OCI candidate', jobId: 'producer', artifactPrefix: 'shop-native-oci-private' }
+    : { path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey', artifactPrefix: 'shop-linux-private' };
+  const workflowRef = `bentbrain/bent-mono/${producer.path}@${options.pullRequestNumber ? `refs/pull/${options.pullRequestNumber}/merge` : 'refs/heads/main'}`;
+  const lineage = { kind: 'github-actions', repository: 'bentbrain/bent-mono', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef, jobId: producer.jobId };
   const fixture = options.portableFixture ?? await createPortableFixture(t, { lineage, ...(options.root ? { rootDirectory: options.root } : {}) }), { root, verified } = fixture;
   const original = options.originalDirectory ?? join(root, 'original');
   if (!options.originalDirectory) {
@@ -94,7 +97,7 @@ export async function createArtifactIntakeFixture(t, options = {}) {
   const files = entries.filter(entry => entry.type !== '5').map(entry => ({ path: entry.path.slice('shop-linux-private/'.length), bytes: entry.data.length, sha256: sha256(entry.data), executable: entry.mode === 0o700 }));
   entries.push({ path: 'shop-linux-private/evidence-inventory.private.json', mode: 0o600, data: Buffer.from(JSON.stringify({ schema: 'shop.hosted-linux-evidence/v1', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef: lineage.workflowRef, repository: lineage.repository, recipe: { synthetic: true }, files, filesSha256: sha256(JSON.stringify(files)) })) });
   const state = { archive: undefined };
-  const installation = { repository: { name: 'bentbrain/bent-mono', id: 101, ownerId: 102 }, workflow: { id: 456, path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey' }, recipientFingerprint,
+  const installation = { repository: { name: 'bentbrain/bent-mono', id: 101, ownerId: 102 }, workflow: { id: 456, path: producer.path, jobName: producer.jobName, jobId: producer.jobId }, recipientFingerprint,
     limits: { archiveBytes: 16 * 1024 ** 2, expandedBytes: 32 * 1024 ** 2, files: 4096 } };
   const repo = { id: 101, full_name: 'bentbrain/bent-mono', owner: { id: 102, login: 'bentbrain' } }, prefix = '/repos/bentbrain/bent-mono';
   const documents = {
@@ -102,8 +105,8 @@ export async function createArtifactIntakeFixture(t, options = {}) {
     [`${prefix}/actions/workflows/456`]: { id: 456, path: installation.workflow.path, state: 'active' },
     [`${prefix}/actions/runs/${request.runId}`]: { id: request.runId, run_attempt: request.runAttempt, workflow_id: 456, path: installation.workflow.path, status: 'completed', conclusion: 'success', head_sha: sourceCommit,
       event: options.pullRequestNumber ? 'pull_request' : 'workflow_dispatch', head_branch: 'main', ...(options.pullRequestNumber ? { pull_requests: [{ number: options.pullRequestNumber, head: { sha: sourceCommit, repo: { id: 101 } } }] } : {}), repository: repo, head_repository: repo, updated_at: '2026-11-12T00:10:00Z' },
-    [`${prefix}/actions/runs/${request.runId}/attempts/${request.runAttempt}/jobs?per_page=100`]: { total_count: 1, jobs: [{ id: jobId, run_id: request.runId, run_attempt: request.runAttempt, head_sha: sourceCommit, name: 'Built Linux J01', status: 'completed', conclusion: 'success', started_at: '2026-11-12T00:00:00Z', completed_at: '2026-11-12T00:09:00Z' }] },
-    [`${prefix}/actions/artifacts/${request.artifactId}`]: { id: request.artifactId, name: `shop-linux-private-${request.runId}-${request.runAttempt}`, expired: false, created_at: '2026-11-12T00:08:00Z', updated_at: '2026-11-12T00:08:30Z', workflow_run: { id: request.runId, repository_id: 101, head_repository_id: 101, head_sha: sourceCommit } },
+    [`${prefix}/actions/runs/${request.runId}/attempts/${request.runAttempt}/jobs?per_page=100`]: { total_count: 1, jobs: [{ id: jobId, run_id: request.runId, run_attempt: request.runAttempt, head_sha: sourceCommit, name: producer.jobName, status: 'completed', conclusion: 'success', started_at: '2026-11-12T00:00:00Z', completed_at: '2026-11-12T00:09:00Z' }] },
+    [`${prefix}/actions/artifacts/${request.artifactId}`]: { id: request.artifactId, name: `${producer.artifactPrefix}-${request.runId}-${request.runAttempt}`, expired: false, created_at: '2026-11-12T00:08:00Z', updated_at: '2026-11-12T00:08:30Z', workflow_run: { id: request.runId, repository_id: 101, head_repository_id: 101, head_sha: sourceCommit } },
   };
   let count = 0;
   async function sealEntries(nextEntries = entries, { gzip, zipEntries } = {}) {

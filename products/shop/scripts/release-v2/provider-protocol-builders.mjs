@@ -17,7 +17,7 @@ const list = (items, test) => { check(Array.isArray(items) && items.length > 0 &
 // validates a supplied contract; it does not discover credentials or grant trust.
 export function protocolPolicy(input) {
   const value = structuredClone(input);
-  exactFields(value, ['schema', 'awsAccountId', 'region', 'cloudflareAccountId', 'workers', 'functions', 'store', 'github']);
+  exactFields(value, ['schema', 'awsAccountId', 'region', 'cloudflareAccountId', 'workers', 'functions', 'store', 'github', ...(Object.hasOwn(value, 'workInventory') ? ['workInventory'] : [])]);
   check(value.schema === 'shop.provider-protocol-policy/v1' && value.region === 'ap-southeast-2', 'Unsupported provider policy');
   bounded(value.awsAccountId, /^[0-9]{12}$/, 'Exact AWS account required');
   bounded(value.cloudflareAccountId, /^[a-f0-9]{32}$/, 'Exact Cloudflare account required');
@@ -39,12 +39,18 @@ export function protocolPolicy(input) {
   bounded(value.store.bucket, /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, 'Exact S3 bucket required');
   bounded(value.store.prefix, /^[A-Za-z0-9][A-Za-z0-9_/-]{0,255}$/, 'Exact URL-safe S3 prefix required'); pathName(value.store.prefix);
   check(value.store.kmsKeyArn.startsWith(`arn:aws:kms:${value.region}:${value.awsAccountId}:key/`) && /^arn:aws:kms:ap-southeast-2:[0-9]{12}:key\/[a-f0-9-]{36}$/.test(value.store.kmsKeyArn), 'Exact same-account KMS key required');
-  exactFields(value.github, ['repository', 'environment', 'deploymentIds']);
-  list(value.github.deploymentIds, id => bounded(id, /^[1-9][0-9]{0,19}$/, 'Exact protected reporting deployment ID required'));
+  exactFields(value.github, ['repository', 'environment', ...(value.github.reporting === 'per-release' ? ['reporting'] : ['deploymentIds'])]);
+  if (value.github.reporting !== 'per-release') list(value.github.deploymentIds, id => bounded(id, /^[1-9][0-9]{0,19}$/, 'Exact protected reporting deployment ID required'));
   check(value.github.repository === 'bentbrain/bent-mono', 'Protected repository differs');
   bounded(value.github.environment, /^[A-Za-z][A-Za-z0-9 -]{0,63}$/, 'Exact reporting environment required');
+  if (value.workInventory) {
+    exactFields(value.workInventory, ['databaseId', 'queries']); bounded(value.workInventory.databaseId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/, 'Exact protected work database required');
+    check(Array.isArray(value.workInventory.queries) && value.workInventory.queries.length === 3 && same(value.workInventory.queries.map(query => query.family).sort(), ['print-assets', 'product-images', 'story-video']), 'Complete accepted-work family inventory required');
+    for (const query of value.workInventory.queries) { exactFields(query, ['family', 'component', 'sql']); bounded(query.component, /^[a-z][a-z0-9-]{0,63}$/, 'Exact work component required'); check(typeof query.sql === 'string' && query.sql.length <= 16384 && /^SELECT\s/i.test(query.sql) && !/;|--|\/\*|\*\/|\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX|ANALYZE|load_extension|writefile|readfile|eval)\b/i.test(query.sql) && /\bFROM\s+[A-Za-z_][A-Za-z0-9_]*/i.test(query.sql) && /\bartifactDigest\b/.test(query.sql) && /\bformat\b/.test(query.sql) && !/\bLIMIT\b/i.test(query.sql), 'Complete conservative read-only accepted-work SELECT required'); }
+  }
   deepFreeze(value); issuedPolicies.add(value); return value;
 }
+export const isReadRequest = request => request.method === 'GET' || ['work.query', 'ecr.check-layers', 'ecr.get-image'].includes(request.operation);
 export function assertPolicy(policy) { check(issuedPolicies.has(policy), 'Validated protected protocol policy required'); }
 export function assertProtocolRequest(request, policy) {
   assertPolicy(policy);
@@ -132,8 +138,17 @@ export function requestBuilders(policy) {
   const page = value => { check(Number.isInteger(value) && value > 0 && value <= protocolPageLimit, 'Provider pagination exceeds bound'); return value; };
   const marker = value => { bounded(value, /^[A-Za-z0-9_+=/.-]{1,1024}$/, 'Malformed pagination marker'); return encodeURIComponent(value); };
   const storeKey = key => { pathName(key); check(key === 'head.json' || /^events\/[a-f0-9]{64}\.json$/.test(key), 'Store key outside protected journal'); return `${s3Origin}/${policy.store.prefix}/${key}`; };
-  const deployment = id => { check(policy.github.deploymentIds.includes(id), 'Reporting deployment outside protected allowlist'); return id; };
+  const deployment = id => { check(typeof id === 'string' && /^[1-9][0-9]{0,19}$/.test(id) && (policy.github.reporting === 'per-release' || policy.github.deploymentIds.includes(id)), 'Reporting deployment outside protected allowlist'); return id; };
+  const repository = name => { const item = policy.functions.find(item => item.name === name); check(item, 'ECR repository outside protected allowlist'); return item.imageRepository.split('.amazonaws.com/')[1]; };
+  const image = value => { bounded(value, /^[a-f0-9]{64}$/, 'Exact immutable ECR image/blob digest required'); return `sha256:${value}`; };
+  const ecr = (name, operation, target, body) => wire(policy, 'ecr', operation, 'POST', `https://api.ecr.${policy.region}.amazonaws.com/`, { registryId: policy.awsAccountId, repositoryName: repository(name), ...body }, { 'content-type': 'application/x-amz-json-1.1', 'x-amz-target': `AmazonEC2ContainerRegistry_V20150921.${target}` });
   return Object.freeze({
+    ecrCheckLayers: (name, digests) => { check(Array.isArray(digests) && digests.length > 0 && digests.length <= 100 && new Set(digests).size === digests.length, 'Complete unique ECR blob inventory required'); return ecr(name, 'ecr.check-layers', 'BatchCheckLayerAvailability', { layerDigests: digests.map(image) }); },
+    ecrInitiateLayer: name => ecr(name, 'ecr.initiate-layer', 'InitiateLayerUpload', {}),
+    ecrUploadPart: (name, uploadId, bytes, offset) => { cloudflareVersion(uploadId); check(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 20971520 && Number.isSafeInteger(offset) && offset >= 0, 'Bounded exact ECR upload part required'); return ecr(name, 'ecr.upload-part', 'UploadLayerPart', { uploadId, layerPartBlob: bytes.toString('base64'), partFirstByte: offset, partLastByte: offset + bytes.length - 1 }); },
+    ecrCompleteLayer: (name, uploadId, blobDigest) => { cloudflareVersion(uploadId); return ecr(name, 'ecr.complete-layer', 'CompleteLayerUpload', { uploadId, layerDigests: [image(blobDigest)] }); },
+    ecrPutImage: (name, manifest, imageDigest) => { check(Buffer.isBuffer(manifest) && manifest.length > 0 && manifest.length <= 4194304 && sha256(manifest) === imageDigest, 'Exact retained ECR manifest bytes required'); const value = parseJSON(manifest); check(value.schemaVersion === 2 && value.mediaType === 'application/vnd.oci.image.manifest.v1+json', 'OCI manifest schema required'); return ecr(name, 'ecr.put-image', 'PutImage', { imageManifest: manifest.toString('utf8'), imageManifestMediaType: value.mediaType, imageDigest: image(imageDigest) }); },
+    ecrGetImage: (name, imageDigest) => ecr(name, 'ecr.get-image', 'BatchGetImage', { imageIds: [{ imageDigest: image(imageDigest) }], acceptedMediaTypes: ['application/vnd.oci.image.manifest.v1+json'] }),
     workerVersions: (name, currentPage = 1) => wire(policy, 'cloudflare', 'worker.versions', 'GET', `${worker(name)}/versions?page=${page(currentPage)}&per_page=100`),
     workerVersionContent: (name, id) => { check(policy.workers.find(item => item.name === name)?.versionContentApi === 'workers-beta/v1', 'Admitted workers-beta/v1 content API required'); return wire(policy, 'cloudflare', 'worker.version-content', 'GET', `${cfOrigin}/workers/workers/${name}/versions/${cloudflareVersion(id)}?include=modules,sourcemaps`); },
     workerVersion: (name, id) => wire(policy, 'cloudflare', 'worker.version', 'GET', `${worker(name)}/versions/${cloudflareVersion(id)}`),
@@ -181,6 +196,9 @@ export function requestBuilders(policy) {
         'x-amz-server-side-encryption': 'aws:kms', 'x-amz-server-side-encryption-aws-kms-key-id': policy.store.kmsKeyArn,
         'x-amz-checksum-sha256': Buffer.from(sha256(bytes), 'hex').toString('base64'), ...(etag === null ? { 'if-none-match': '*' } : { 'if-match': etag }) });
     },
+    workQuery: index => { check(policy.workInventory && Number.isSafeInteger(index) && index >= 0 && index < policy.workInventory.queries.length, 'Admitted accepted-work query required'); return wire(policy, 'cloudflare', 'work.query', 'POST', `${cfOrigin}/d1/database/${policy.workInventory.databaseId}/query`, { sql: policy.workInventory.queries[index].sql, params: [] }, json); },
+    deploymentInventory: (head, currentPage = 1) => { check(policy.github.reporting === 'per-release', 'Per-release reporting policy required'); bounded(head, /^[a-f0-9]{40}$/, 'Exact reporting source head required'); return wire(policy, 'github', 'report.deployments', 'GET', `https://api.github.com/repos/${policy.github.repository}/deployments?sha=${head}&environment=${encodeURIComponent(policy.github.environment)}&per_page=100&page=${page(currentPage)}`, Buffer.alloc(0), { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }); },
+    deploymentCreate: ({ head, compositionDigest, eventDigest }) => { check(policy.github.reporting === 'per-release', 'Per-release reporting policy required'); bounded(head, /^[a-f0-9]{40}$/, 'Exact reporting source head required'); bounded(compositionDigest, /^[a-f0-9]{64}$/, 'Exact reporting composition required'); bounded(eventDigest, /^[a-f0-9]{64}$/, 'Exact verification event required'); return wire(policy, 'github', 'report.create-deployment', 'POST', `https://api.github.com/repos/${policy.github.repository}/deployments`, { ref: head, task: 'deploy', auto_merge: false, required_contexts: [], environment: policy.github.environment, payload: { schema: 'shop.release-deployment/v1', compositionDigest, eventDigest }, transient_environment: false, production_environment: false }, { ...json, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }); },
     reportStatuses: (deploymentId, currentPage = 1) => wire(policy, 'github', 'report.statuses', 'GET', `https://api.github.com/repos/${policy.github.repository}/deployments/${deployment(deploymentId)}/statuses?per_page=100&page=${page(currentPage)}`, Buffer.alloc(0), { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }),
     reportSuccess: (deploymentId, eventDigest) => {
       bounded(eventDigest, /^[a-f0-9]{64}$/, 'Verified durable event digest required');

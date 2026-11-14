@@ -13,7 +13,7 @@ export function validateDispatchTarget(request, policy) {
     for (const worker of policy.workers) paths.push(`${root}/scripts/${worker.name}`);
     const oldPath = paths.some(path => url.pathname === `${path}/versions` || new RegExp(`^${path}/versions/[a-f0-9-]{36}$`).test(url.pathname) || ['deployments', 'settings', 'content/v2', 'assets-upload-session'].some(suffix => url.pathname === `${path}/${suffix}`));
     const versionContent = policy.workers.some(worker => new RegExp(`^${root}/workers/${worker.name}/versions/[a-f0-9-]{36}$`).test(url.pathname));
-    check(oldPath || versionContent || url.pathname === `${root}/assets/upload`, 'Cloudflare resource differs');
+    check(oldPath || versionContent || url.pathname === `${root}/assets/upload` || request.operation === 'work.query' && policy.workInventory && url.pathname === `/client/v4/accounts/${policy.cloudflareAccountId}/d1/database/${policy.workInventory.databaseId}/query`, 'Cloudflare resource differs');
     check([...url.searchParams.keys()].every(key => ['page', 'per_page', 'base64', 'include'].includes(key)), 'Cloudflare query differs');
   } else if (request.service === 'lambda') {
     check(url.origin === `https://lambda.${policy.region}.amazonaws.com`, 'Lambda origin differs');
@@ -21,16 +21,20 @@ export function validateDispatchTarget(request, policy) {
       const path = `/2015-03-31/functions/${fn.name}`;
       return [path, `${path}/code`, `${path}/versions`, `${path}/aliases`].includes(url.pathname) || fn.aliases.some(alias => url.pathname === `${path}/aliases/${alias}`);
     }) && [...url.searchParams.keys()].every(key => ['Qualifier', 'MaxItems', 'Marker'].includes(key)), 'Lambda resource or query differs');
+  } else if (request.service === 'ecr') {
+    check(url.origin === `https://api.ecr.${policy.region}.amazonaws.com` && url.pathname === '/' && !url.search && request.method === 'POST' && /^AmazonEC2ContainerRegistry_V20150921\.(?:BatchCheckLayerAvailability|InitiateLayerUpload|UploadLayerPart|CompleteLayerUpload|PutImage|BatchGetImage)$/.test(request.headers['x-amz-target'] ?? ''), 'Exact protected ECR target required');
   } else if (request.service === 's3') {
     check(url.origin === `https://${policy.store.bucket}.s3.${policy.region}.amazonaws.com` &&
       (url.pathname === `/${policy.store.prefix}/head.json` || new RegExp(`^/${policy.store.prefix}/events/[a-f0-9]{64}\\.json$`).test(url.pathname)) && !url.search, 'S3 resource differs');
   } else if (request.service === 'github') {
-    check(url.origin === 'https://api.github.com' && policy.github.deploymentIds.some(id => url.pathname === `/repos/${policy.github.repository}/deployments/${id}/statuses`) &&
-      [...url.searchParams.keys()].every(key => ['page', 'per_page'].includes(key)), 'GitHub reporting resource differs');
+    check(url.origin === 'https://api.github.com' && (policy.github.reporting === 'per-release' ? url.pathname === `/repos/${policy.github.repository}/deployments` || new RegExp(`^/repos/${policy.github.repository}/deployments/[1-9][0-9]{0,19}/statuses$`).test(url.pathname) : policy.github.deploymentIds.some(id => url.pathname === `/repos/${policy.github.repository}/deployments/${id}/statuses`)) &&
+      [...url.searchParams.keys()].every(key => ['page', 'per_page', ...(request.operation === 'report.deployments' ? ['sha', 'environment'] : [])].includes(key)), 'GitHub reporting resource differs');
   } else throw Error('Unsupported dispatch service');
   check(new Set([...url.searchParams.keys()]).size === [...url.searchParams.keys()].length, 'Duplicate dispatch query');
   const query = Object.fromEntries(url.searchParams), numericPage = /^[1-9][0-9]{0,2}$/.test(query.page ?? '') && Number(query.page) <= 64;
   const operationShapes = {
+    ...Object.fromEntries(Object.entries({ 'check-layers': 'BatchCheckLayerAvailability', 'initiate-layer': 'InitiateLayerUpload', 'upload-part': 'UploadLayerPart', 'complete-layer': 'CompleteLayerUpload', 'put-image': 'PutImage', 'get-image': 'BatchGetImage' }).map(([name, target]) => [`ecr.${name}`, request.method === 'POST' && url.pathname === '/' && !url.search && request.headers['x-amz-target'] === `AmazonEC2ContainerRegistry_V20150921.${target}`])),
+    'work.query': request.method === 'POST' && !url.search && policy.workInventory && url.pathname === `/client/v4/accounts/${policy.cloudflareAccountId}/d1/database/${policy.workInventory.databaseId}/query`,
     'worker.versions': request.method === 'GET' && url.pathname.endsWith('/versions') && numericPage && query.per_page === '100' && Object.keys(query).length === 2,
     'worker.version': request.method === 'GET' && /\/scripts\/[^/]+\/versions\/[a-f0-9-]{36}$/.test(url.pathname) && !url.search,
     'worker.version-content': request.method === 'GET' && /\/workers\/workers\/[^/]+\/versions\/[a-f0-9-]{36}$/.test(url.pathname) && query.include === 'modules,sourcemaps' && Object.keys(query).length === 1 && policy.workers.some(worker => worker.versionContentApi === 'workers-beta/v1' && url.pathname.includes(`/${worker.name}/`)),
@@ -50,10 +54,12 @@ export function validateDispatchTarget(request, policy) {
     'lambda.create-alias': request.method === 'POST' && url.pathname.endsWith('/aliases') && !url.search,
     'store.get': request.method === 'GET' && !url.search,
     'store.put': request.method === 'PUT' && !url.search && (request.headers['if-none-match'] === '*' || /^"[A-Za-z0-9-]{1,128}"$/.test(request.headers['if-match'] ?? '')),
+    'report.deployments': request.method === 'GET' && policy.github.reporting === 'per-release' && url.pathname === `/repos/${policy.github.repository}/deployments` && /^[a-f0-9]{40}$/.test(query.sha ?? '') && query.environment === policy.github.environment && numericPage && query.per_page === '100' && Object.keys(query).length === 4,
+    'report.create-deployment': request.method === 'POST' && policy.github.reporting === 'per-release' && url.pathname === `/repos/${policy.github.repository}/deployments` && !url.search,
     'report.statuses': request.method === 'GET' && numericPage && query.per_page === '100' && Object.keys(query).length === 2,
     'report.success': request.method === 'POST' && !url.search
   };
-  check(operationShapes[request.operation] === true && request.operation.startsWith(request.service === 'cloudflare' ? request.operation.startsWith('assets.') ? 'assets.' : 'worker.' : request.service === 's3' ? 'store.' : request.service === 'github' ? 'report.' : 'lambda.'), 'Dispatch operation, target or query differs');
+  check(operationShapes[request.operation] === true && request.operation.startsWith(request.service === 'cloudflare' ? request.operation.startsWith('assets.') ? 'assets.' : request.operation === 'work.query' ? 'work.' : 'worker.' : request.service === 's3' ? 'store.' : request.service === 'github' ? 'report.' : request.service === 'ecr' ? 'ecr.' : 'lambda.'), 'Dispatch operation, target or query differs');
   const bytes = Buffer.from(request.bodyBase64, 'base64');
   check(bytes.length <= protocolByteLimit && bytes.toString('base64') === request.bodyBase64 && sha256(bytes) === request.bodySha256 && request.headers['content-length'] === String(bytes.length), 'Dispatch serialized bytes differ');
   check(typeof request.authorizationDigest === 'string' && /^[a-f0-9]{64}$/.test(request.authorizationDigest) && typeof request.headers.authorization === 'string', 'Protected provider authorization required');

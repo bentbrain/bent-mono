@@ -157,7 +157,7 @@ export async function runWorkflowUpdate({ fixture, first, output, signal }) {
     const update = await runWorkflowJourney({ output: join(output, 'source-B'), configuration: next.configuration,
       service: fixture.service, apiBridge: next.bridge, signal });
     check(update.summary.complete, `Source B workflow did not complete: ${update.summary.failure?.message ?? 'unknown'}; ${update.invocations.at(-1)?.stderrText ?? ''}`);
-    const mutations = fixture.service.transcript.slice(before).filter(item => item.method !== 'GET' &&
+    const mutations = fixture.service.transcript.slice(before).filter(item => item.method !== 'GET' && !item.url.includes('/d1/database/') &&
       ['api.cloudflare.com', `lambda.${fixture.policy.region}.amazonaws.com`].includes(new URL(item.url).hostname));
     check(mutations.length === 2 && mutations.every(item => item.url.includes('synthetic-workflow-storefront')), 'Storefront source update changed another runtime');
     const retained = fixture.service.workDb.prepare('SELECT component,artifact_digest AS artifactDigest,format FROM accepted_jobs ORDER BY component').all();

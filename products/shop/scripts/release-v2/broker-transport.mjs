@@ -53,8 +53,12 @@ export async function requestBrokerIdentity({ root, env = process.env, request =
   return response.value;
 }
 
-export function createBrokerTransport({ root, token, request = jsonRequest }) {
-  validateHostedRoot(root); jwt(token);
+export function createBrokerTransport({ root, token, tokenProvider, request = jsonRequest, now = Date.now }) {
+  validateHostedRoot(root); check(tokenProvider === undefined || typeof tokenProvider === 'function', 'Explicit renewable broker identity required'); if (!tokenProvider) jwt(token);
   const url = new URL('/v1/invocations', root.credentialBroker.origin);
-  return call => request(url, 'POST', token, call, 256 * 1024 * 1024);
+  let current = token, expiresAt = 0;
+  return async call => {
+    if (tokenProvider && expiresAt <= now() + 30000) { current = await tokenProvider(); jwt(current); const claims = parseJSON(Buffer.from(current.split('.')[1], 'base64url'), 65536); check(Number.isSafeInteger(claims.exp) && claims.exp * 1000 > now() + 30000, 'Renewed broker identity expires too soon'); expiresAt = claims.exp * 1000; }
+    jwt(current); return request(url, 'POST', current, call, 256 * 1024 * 1024);
+  };
 }

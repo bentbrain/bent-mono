@@ -25,12 +25,12 @@ export function signingTrust({ policy, keys, maximumLifetimeMs = 30000 }) {
 }
 function credentialHeaders(request, headers, policy) {
   check(headers && typeof headers === 'object' && !Array.isArray(headers) && Object.keys(headers).length <= 4, 'Bounded signed credentials required');
-  const allowed = request.service === 's3' || request.service === 'lambda'
+  const allowed = ['s3', 'lambda', 'ecr'].includes(request.service)
     ? ['authorization', 'x-amz-date', 'x-amz-security-token', 'x-amz-content-sha256'] : ['authorization'];
   for (const [name, value] of Object.entries(headers)) {
     check(allowed.includes(name) && !Object.hasOwn(request.headers, name) && typeof value === 'string' && value.length > 0 && value.length <= 16384 && !/[\x00-\x1f\x7f]/.test(value), 'Signer changed a protected header');
   }
-  if (request.service === 's3' || request.service === 'lambda') {
+  if (['s3', 'lambda', 'ecr'].includes(request.service)) {
     exactFields(headers, ['authorization', 'x-amz-date', 'x-amz-security-token', 'x-amz-content-sha256']);
     check(/^[0-9]{8}T[0-9]{6}Z$/.test(headers['x-amz-date']) && headers['x-amz-content-sha256'] === request.bodySha256, 'AWS signing payload/date differs');
     const escaped = policy.region;

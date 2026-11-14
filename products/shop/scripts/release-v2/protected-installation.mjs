@@ -14,6 +14,28 @@ const hash = value => check(typeof value === 'string' && /^[a-f0-9]{64}$/.test(v
 const boundedName = value => check(typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value), 'Exact installed identity required');
 const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 const contains = (directory, path) => path === directory || path.startsWith(`${directory}${sep}`);
+const operationCommands = ['advance', 'begin', 'deliver', 'rollback'];
+function installationFields(contract) {
+  return ['schema', 'scope', 'root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence', 'signing',
+    'secretInstallations', 'componentConfigurations', 'artifactIntake', 'artifactPrivateKeyFile',
+    ...(Object.hasOwn(contract, 'operationScope') ? ['operationScope'] : [])];
+}
+
+function validateOperationScope(scope, contract, root, now) {
+  exactFields(scope, ['schema', 'scope', 'repository', 'repositoryName', 'environment', 'workflowPath', 'rootDigest',
+    'providerPolicyDigest', 'notBefore', 'expiresAt', 'commands'], 'Unexpected operation scope fields');
+  check(scope.schema === 'shop.qualification-operation-scope/v1' && scope.scope === 'isolated-qualification' &&
+    scope.scope === root.scope && same(scope.repository, root.repository) && scope.repositoryName === root.repositoryName &&
+    scope.environment === root.environment && scope.workflowPath === root.workflowPath && scope.rootDigest === contract.root.sha256 &&
+    scope.providerPolicyDigest === root.providerPolicyDigest, 'Installed operation scope target differs');
+  check(Number.isSafeInteger(now) && Number.isSafeInteger(scope.notBefore) && scope.notBefore > 0 &&
+    Number.isSafeInteger(scope.expiresAt) && scope.notBefore <= now && scope.expiresAt > now &&
+    scope.expiresAt - scope.notBefore <= 86400000, 'Installed operation scope is expired or outside its bounded interval');
+  check(Array.isArray(scope.commands) && scope.commands.length > 0 && scope.commands.length <= operationCommands.length &&
+    scope.commands.every(command => operationCommands.includes(command)) &&
+    same(scope.commands, [...new Set(scope.commands)].sort()), 'Installed operation scope commands differ');
+  return scope;
+}
 
 async function independentFile(path, excluded, maximum = 16 * 1024 * 1024) {
   check(typeof path === 'string' && path === resolve(path), 'Absolute protected installation path required');
@@ -49,8 +71,7 @@ export async function readReportingInstallation({ path, digest, identity, reposi
   const bytes = await independentFile(path, excluded);
   check(sha256(bytes) === digest, 'Protected installation digest differs');
   const contract = parseJSON(bytes, 16 * 1024 * 1024);
-  exactFields(contract, ['schema', 'scope', 'root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence', 'signing',
-    'secretInstallations', 'componentConfigurations', 'artifactIntake', 'artifactPrivateKeyFile']);
+  exactFields(contract, installationFields(contract));
   check(contract.schema === 'shop.protected-installation/v1' && contract.scope === 'isolated-qualification', 'Protected qualification installation required');
   await installedReference(contract.root, excluded, 65536);
   const root = await readInstalledRoot(contract.root.path, contract.root.sha256); identityMatches(root, identity);
@@ -83,8 +104,7 @@ export async function installProtectedPackage({ path, digest, destination, ident
   }
   check(same([...files.keys()], [...files.keys()].sort()), 'Protected package file inventory must be sorted');
   const contract = structuredClone(packed.contract);
-  exactFields(contract, ['schema', 'scope', 'root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence', 'signing',
-    'secretInstallations', 'componentConfigurations', 'artifactIntake', 'artifactPrivateKeyFile']);
+  exactFields(contract, installationFields(contract));
   check(contract.schema === 'shop.protected-installation/v1' && contract.scope === 'isolated-qualification', 'Protected qualification installation required');
   const referenced = new Set();
   const localFile = path => { pathName(path); check(files.has(path), 'Protected package reference has no exact file'); referenced.add(path); return join(target, path); };
@@ -94,6 +114,7 @@ export async function installProtectedPackage({ path, digest, destination, ident
     value.path = localFile(value.path);
   };
   for (const field of ['root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence']) reference(contract[field]);
+  if (Object.hasOwn(contract, 'operationScope')) reference(contract.operationScope);
   exactFields(contract.signing, ['source', 'composition']);
   for (const kind of ['source', 'composition']) { exactFields(contract.signing[kind], ['keyId', 'path']); contract.signing[kind].path = localFile(contract.signing[kind].path); }
   check(Array.isArray(contract.componentConfigurations) && contract.componentConfigurations.length <= 32, 'Bounded protected component configurations required');
@@ -141,11 +162,12 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
   const bytes = await independentFile(path, excluded);
   check(sha256(bytes) === digest, 'Protected installation digest differs');
   const contract = parseJSON(bytes, 16 * 1024 * 1024);
-  exactFields(contract, ['schema', 'scope', 'root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence', 'signing',
-    'secretInstallations', 'componentConfigurations', 'artifactIntake', 'artifactPrivateKeyFile']);
+  exactFields(contract, installationFields(contract));
   check(contract.schema === 'shop.protected-installation/v1' && contract.scope === 'isolated-qualification', 'Protected qualification installation required');
   await installedReference(contract.root, excluded, 65536);
   const root = await readInstalledRoot(contract.root.path, contract.root.sha256);
+  const operationScope = Object.hasOwn(contract, 'operationScope')
+    ? validateOperationScope((await installedReference(contract.operationScope, excluded, 65536)).value, contract, root, now) : null;
   const policy = (await installedReference(contract.compositionTemplate, excluded)).value;
   exactFields(policy, ['schema', 'scope', 'repository', 'keyId', 'publicKeyPem', 'keyFingerprint', 'implementationDigest', 'runner',
     'budgetMs', 'requiredProofKinds', 'closurePolicy', 'revokedReceipts', 'contracts', 'dependencies', 'schemaState']);
@@ -170,7 +192,8 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
   check(plan.schema === 'shop.hosted-target-plan/v1' && plan.scope === root.scope, 'Installed target plan scope differs');
   const providerPolicy = protocolPolicy(plan.providerPolicy);
   check(objectDigest(providerPolicy) === root.providerPolicyDigest && providerPolicy.github.repository === root.repositoryName &&
-    providerPolicy.github.environment === root.environment && providerPolicy.github.deploymentIds.includes(plan.deploymentId) &&
+    providerPolicy.github.environment === root.environment &&
+    (providerPolicy.github.reporting === 'per-release' ? plan.deploymentId === null : providerPolicy.github.deploymentIds.includes(plan.deploymentId)) &&
     policy.runner.origins.includes(plan.journeyOrigin), 'Installed target policy or reporting identity differs');
   check(Array.isArray(plan.targets) && same(plan.targets.map(target => target.component).sort(), [...policy.closurePolicy.components].sort()) &&
     new Set(plan.targets.map(target => target.component)).size === plan.targets.length &&
@@ -204,7 +227,7 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
   check(contract.artifactIntake.repository?.name === root.repositoryName && contract.artifactIntake.repository?.id === root.repository.repositoryId &&
     contract.artifactIntake.repository?.ownerId === root.repository.ownerId, 'Artifact admission repository differs from installed root');
   await independentFile(contract.artifactPrivateKeyFile, excluded, 16384);
-  const installation = freeze({ contract, root, template: policy, plan, providerPolicy, rootPath: contract.root.path, rootDigest: contract.root.sha256,
+  const installation = freeze({ contract, root, template: policy, plan, providerPolicy, operationScope, rootPath: contract.root.path, rootDigest: contract.root.sha256,
     planPath: contract.targetPlan.path, fencePath: contract.credentialFence.path, fenceDigest: contract.credentialFence.sha256,
     secretInstallations: contract.secretInstallations, sourceKeyPath: contract.signing.source.path, compositionKeyPath: contract.signing.composition.path,
     artifactIntake: contract.artifactIntake, artifactPrivateKeyFile: contract.artifactPrivateKeyFile });
@@ -213,6 +236,25 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
 }
 
 export function assertProtectedInstallation(installation) { check(installations.has(installation), 'Read an independently pinned protected installation first'); }
+/** Planning never grants mutation authority; each operation rechecks the independent scope bytes and clock. */
+export async function requireInstalledOperation(installation, command, now = Date.now()) {
+  assertProtectedInstallation(installation);
+  if (command === 'plan') return { command, scope: installation.root.scope, providerWrites: 0 };
+  check(operationCommands.includes(command) && installation.contract.operationScope,
+    'An independently installed operation scope is required');
+  const state = installations.get(installation), excluded = [...new Set([checkout, state.repositoryDirectory,
+    ...state.artifactDirectories].map(value => resolve(value)))];
+  const original = await independentFile(state.path, excluded);
+  check(sha256(original) === state.digest, 'Protected installation digest differs before operation');
+  const root = await readInstalledRoot(installation.rootPath, installation.rootDigest);
+  const scope = validateOperationScope((await installedReference(installation.contract.operationScope, excluded, 65536)).value,
+    installation.contract, root, now);
+  check(scope.commands.includes(command), 'Installed operation scope does not admit this command');
+  if (command === 'deliver') check(['begin', 'advance'].every(step => scope.commands.includes(step)),
+    'Installed operation scope must admit the complete delivery transition scope');
+  return Object.freeze({ command, scope: scope.scope, operationScopeDigest: installation.contract.operationScope.sha256,
+    expiresAt: scope.expiresAt, providerWrites: 0 });
+}
 export async function refreshProtectedInstallation(installation, now = Date.now(), artifactDirectories = []) {
   assertProtectedInstallation(installation); const state = installations.get(installation);
   return readProtectedInstallation({ ...state, artifactDirectories: [...state.artifactDirectories, ...artifactDirectories], now });

@@ -1,20 +1,26 @@
-name: Shop composed qualification plan
+name: Shop composed qualification
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Independently approved qualification operation
+        required: true
+        default: plan
+        type: choice
+        options: [plan, deliver, recover-report]
       artifact_run_id:
         description: Retained Linux journey run
-        required: true
+        required: false
         type: string
       artifact_run_attempt:
         description: Retained run attempt
-        required: true
+        required: false
         default: '1'
         type: string
       artifact_id:
         description: Encrypted Linux artifact
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -23,9 +29,10 @@ permissions:
   checks: read
   statuses: read
   pull-requests: read
+  id-token: write
 
 concurrency:
-  group: shop-composed-qualification-plan
+  group: shop-composed-qualification
   cancel-in-progress: false
 
 jobs:
@@ -52,6 +59,8 @@ jobs:
         env:
           SHOP_COMPOSITION_INSTALLATION_PACKAGE: ${{ secrets.SHOP_COMPOSITION_INSTALLATION_PACKAGE }}
           SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256: ${{ vars.SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256 }}
+          SHOP_COMPOSITION_REPORTING_AUTHORITY: ${{ secrets.SHOP_COMPOSITION_REPORTING_AUTHORITY }}
+          SHOP_COMPOSITION_COMMAND: ${{ inputs.operation }}
           SHOP_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           SHOP_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_attempt }}
           SHOP_ARTIFACT_ID: ${{ inputs.artifact_id }}

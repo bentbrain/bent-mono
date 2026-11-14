@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { canonical, check, filesUnder, readRegularFile, sha256 } from './data.mjs';
 import { actionsIdentity } from './hosted-admission.mjs';
-import { installProtectedPackage } from './protected-installation.mjs';
+import { installProtectedPackage, requireInstalledOperation } from './protected-installation.mjs';
 import { sealLinuxEvidence } from '../testing/linux-evidence.mjs';
 import { saveHostedFailure } from './hosted-diagnostics.mjs';
 
@@ -26,12 +26,26 @@ export async function prepareWorkflow(env = process.env) {
   const path = join(inputs, 'package.private.json'); await writeFile(path, bytes, { flag: 'wx', mode: 0o600 });
   const installed = await installProtectedPackage({ path, digest: env.SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256,
     destination: join(inputs, 'installed'), identity, artifactDirectories: [directory] });
-  const request = { runId: env.SHOP_ARTIFACT_RUN_ID, runAttempt: env.SHOP_ARTIFACT_RUN_ATTEMPT, artifactId: env.SHOP_ARTIFACT_ID, sourceCommit: identity.head };
-  for (const field of ['runId', 'runAttempt', 'artifactId']) check(/^[1-9][0-9]{0,15}$/.test(request[field] ?? ''), 'Exact retained artifact identity required');
-  const configuration = { installationPath: installed.path, installationDigest: installed.digest, request, directory, command: 'plan' };
+  const command = env.SHOP_COMPOSITION_COMMAND || 'plan';
+  check(['plan', 'deliver', 'begin', 'advance', 'rollback', 'recover-report'].includes(command), 'Choose a supported protected workflow operation');
+  let configuration, request = null;
+  if (command === 'recover-report') {
+    check(typeof env.SHOP_COMPOSITION_REPORTING_AUTHORITY === 'string' && Buffer.byteLength(env.SHOP_COMPOSITION_REPORTING_AUTHORITY) <= 1024 * 1024,
+      'Provide the separately signed protected reporting authority');
+    const authority = join(inputs, 'reporting-authority.private.json');
+    await writeFile(authority, env.SHOP_COMPOSITION_REPORTING_AUTHORITY, { flag: 'wx', mode: 0o600 });
+    configuration = { installationPath: installed.path, installationDigest: installed.digest, directory, command, recoveryAuthority: authority };
+  } else {
+    await requireInstalledOperation(installed.installation, command);
+    if (command === 'deliver') for (const operation of ['begin', 'advance']) await requireInstalledOperation(installed.installation, operation);
+    request = { runId: env.SHOP_ARTIFACT_RUN_ID, runAttempt: env.SHOP_ARTIFACT_RUN_ATTEMPT, artifactId: env.SHOP_ARTIFACT_ID, sourceCommit: identity.head };
+    for (const field of ['runId', 'runAttempt', 'artifactId']) check(/^[1-9][0-9]{0,15}$/.test(request[field] ?? ''), 'Exact retained artifact identity required');
+    configuration = { installationPath: installed.path, installationDigest: installed.digest, request, directory, command };
+    if (command === 'rollback') { check(typeof env.SHOP_COMPOSITION_ROLLBACK_DIRECTORY === 'string', 'Retained verified rollback directory required'); configuration.rollbackDirectory = env.SHOP_COMPOSITION_ROLLBACK_DIRECTORY; }
+  }
   await writeFile(paths.configuration, canonical(configuration), { flag: 'wx', mode: 0o600 });
   await writeFile(join(directory, 'workflow-preparation.private.json'), canonical({ schema: 'shop.workflow-preparation/v1', identity, request,
-    packageDigest: installed.packageDigest, installationDigest: installed.digest, operationalApproval: false, providerWrites: 0 }), { flag: 'wx', mode: 0o600 });
+    packageDigest: installed.packageDigest, installationDigest: installed.digest, command, operationalApproval: command !== 'plan', providerWrites: 0 }), { flag: 'wx', mode: 0o600 });
   return { configuration: paths.configuration, providerWrites: 0 };
 }
 

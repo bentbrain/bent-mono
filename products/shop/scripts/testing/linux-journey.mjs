@@ -4,7 +4,7 @@ import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { checkout, fileInventory, sha256, sourceInventory, verifyLinuxCandidate } from "./linux-candidate.mjs";
+import { checkout, fileInventory, sha256, sourceInventory, verifyLinuxCandidate, verifyOciCandidatePayload } from "./linux-candidate.mjs";
 import { verifyPortableBundle } from "../release-v2/portable-bundle.mjs";
 import { createProductImageV5Fixture, fixtureBinding, fixtureContext, fixtureEvent } from "./product-image-v5-fixtures.mjs";
 
@@ -126,13 +126,14 @@ export async function linuxJourney(candidatePath, outputPath, portablePath, expe
   assert.ok(output !== checkout && !output.startsWith(`${checkout}/`), "Use a new private journey directory outside checkout");
   await mkdir(output, { mode: 0o700 });
   const portable = portablePath ? await verifyPortableBundle(portablePath, JSON.parse(await readFile(expectedPath, "utf8"))) : null;
-  if (portable) assert.equal(candidate, resolve(portable.root, "payload/native"));
+  if (portable?.components.get("native").artifact.format === "oci-layout") await verifyOciCandidatePayload(candidate, portable.components.get("native"));
+  else if (portable) assert.equal(candidate, resolve(portable.root, "payload/native"));
   const identityDirectory = portable?.components.get("native").runtime.definition.identityDirectory
     ? join(portable.root, portable.components.get("native").runtime.definition.identityDirectory) : candidate;
   const startedAt = new Date().toISOString(), before = await sourceInventory(), receipt = await verifyLinuxCandidate(candidate, { identityDirectory });
   const candidateSha256 = sha256(await readFile(join(identityDirectory, "linux-candidate.json")));
   const summary = { schema: "shop.linux-j01/v1", qualification: "linux-candidate-execution", awsImageQualified: false, productionQualified: false,
-    providerScope: "inactive-local-fixtures", actualBusinessRuntime: "workerd-d1-r2-durable-objects", candidateSha256,
+    providerScope: "inactive-local-fixtures", ociContainerStartupVerified: false, actualBusinessRuntime: "workerd-d1-r2-durable-objects", candidateSha256,
     sourceCommit: receipt.sourceCommit, dirtySnapshot: receipt.dirtySnapshot, startedAt, complete: false };
   try {
     const storefront = portable ? join(portable.root, "payload/storefront") : join(checkout, "products/shop/apps/storefront/dist");

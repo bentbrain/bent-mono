@@ -3,13 +3,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { requireReleaseChecks } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, pathName, readRef, readRegularFile, same, sha256 } from './data.mjs';
-import { activationOrder, admitComposition, allInputs, conforms, subject } from './composition.mjs';
+import { activationOrder, admitComposition, admitPreviouslyVerifiedComposition, allInputs, conforms, subject } from './composition.mjs';
 import { verifyHostedAuthority } from './hosted-admission.mjs';
 import { materializePortableBundle, verifyPortableBundle } from './portable-bundle.mjs';
 import { assertHostedPortableImport } from './artifact-intake.mjs';
-import { assertProtectedInstallation, installedSigningKey, refreshProtectedInstallation } from './protected-installation.mjs';
+import { assertProtectedInstallation, installedSigningKey, refreshProtectedInstallation, requireInstalledOperation } from './protected-installation.mjs';
 import { admitCredentialFence, createHostedWriter, credentialBrokerBoundary } from './hosted-writer.mjs';
-import { preflightHostedTargets, retainedCandidateLoader } from './hosted-provider.mjs';
+import { preflightHostedTargets, retainedCandidateLoader, retainHostedRequestGraph } from './hosted-provider.mjs';
 import { createBrokerTransport, requestBrokerIdentity } from './broker-transport.mjs';
 
 const guardPath = new URL('../../../../scripts/require-release-checks.mjs', import.meta.url);
@@ -17,8 +17,10 @@ const prefix = '/repos/bentbrain/bent-mono';
 const sourceAdmissions = new WeakMap(), assemblies = new WeakMap();
 const validTime = (value, label) => check(Number.isSafeInteger(value) && value > 0, `Exact ${label} time required`);
 const clone = value => structuredClone(value);
-const deliveryTiming = (acceptedAt, observedAt, budgetMs) => ({ acceptedAt, observedAt, elapsedMs: observedAt - acceptedAt, budgetMs,
-  exceeded: observedAt - acceptedAt >= budgetMs, productionDeliveryMeasured: false });
+const deliveryTiming = (acceptedAt, observedAt, budgetMs, deliveryRequestedAt = null) => ({ acceptedAt, observedAt, elapsedMs: observedAt - acceptedAt, budgetMs,
+  exceeded: observedAt - acceptedAt >= budgetMs, deliveryRequestedAt, measuredElapsedMs: deliveryRequestedAt === null ? null : observedAt - deliveryRequestedAt,
+  measuredBudgetExceeded: deliveryRequestedAt === null ? null : observedAt - deliveryRequestedAt >= budgetMs,
+  automationTimingAvailable: deliveryRequestedAt !== null, productionDeliveryMeasured: false });
 
 function identityMatches(root, identity) {
   check(identity && same(identity.repository, root.repository) && identity.repositoryName === root.repositoryName &&
@@ -68,13 +70,27 @@ export async function qualifyHostedSource({ installation, identity, qualityApi, 
   const originalAcceptedAt = Date.parse(pull?.merged_at);
   validTime(originalAcceptedAt, 'canonical source acceptance');
   check(acceptedAt === undefined || acceptedAt === originalAcceptedAt, 'Accepted source time differs from canonical merged pull request');
+  let deliveryRequestedAt = null;
+  try {
+    const requests = [];
+    for (let page = 1; page <= 20; page++) {
+      const result = await read(`${prefix}/actions/runs?head_sha=${pull.head.sha}&per_page=100&page=${page}`);
+      check(Array.isArray(result.workflow_runs) && result.workflow_runs.length <= 100, 'Complete reviewed source automation requests required');
+      for (const run of result.workflow_runs) {
+        check(run.head_sha === pull.head.sha && run.repository?.id === root.repository.repositoryId && run.repository?.full_name === root.repositoryName &&
+          run.head_repository?.id === root.repository.repositoryId && run.head_repository?.full_name === root.repositoryName, 'Automation request source identity differs');
+        const createdAt = Date.parse(run.created_at); validTime(createdAt, 'automation request'); check(createdAt <= now(), 'Automation request is in the future'); requests.push(createdAt);
+      }
+      if (result.workflow_runs.length < 100) { check(requests.length > 0, 'Reviewed source automation request metadata missing'); deliveryRequestedAt = Math.min(...requests); break; }
+    }
+  } catch { deliveryRequestedAt = null; }
   const completedAt = now(); validTime(completedAt, 'source qualification');
   check(completedAt >= started && originalAcceptedAt <= started, 'Canonical source acceptance or qualification clock differs');
   const guardImplementationSha256 = sha256(await readFile(guardPath));
   check(guardImplementationSha256 === admittedGuardDigest, 'Canonical source guard implementation changed during qualification');
   const evidence = { schema: 'shop.source-issuance-evidence/v1', repository: root.repository, source: identity.head,
     acceptedAt: originalAcceptedAt, startedAt: started, completedAt, guardImplementationSha256,
-    timing: deliveryTiming(originalAcceptedAt, completedAt, template.budgetMs), result: quality, transcript: clone(transcript) };
+    timing: deliveryTiming(originalAcceptedAt, completedAt, template.budgetMs, deliveryRequestedAt), result: quality, transcript: clone(transcript) };
   const admission = { identity: clone(identity), base: commit.parents[0].sha, tree: commit.tree.sha, quality, acceptedAt: originalAcceptedAt, evidence };
   sourceAdmissions.set(admission, { admissionDigest: digest(admission), installationDigest: digest(current.contract), read, verifyInvocation, runPath, identityDigest: digest(identity) });
   return admission;
@@ -104,28 +120,36 @@ function sourcePolicy(installation, portable, source) {
   conforms(policy, 'hostedTrust'); return policy;
 }
 
-async function installedBaseline({ installation, payload, bundle, command, env, boundaries, now, evidenceDirectory }) {
-  check(['plan', 'advance', 'begin'].includes(command), 'Historical rollback requires its separately admitted verified composition');
-  if (command === 'plan') return { observed: false, parentCompositionDigest: null, rollbackCompositionDigest: null };
+async function installedReader({ installation, payload, bundle, env, boundaries, now, evidenceDirectory, release }) {
   // Validate all retained target bytes before obtaining even a read-only broker identity.
-  await preflightHostedTargets({ policy: installation.providerPolicy, components: payload.components, targets: installation.plan.targets,
-    load: retainedCandidateLoader({ bundle, targets: installation.plan.targets }) });
+  const preflight = await preflightHostedTargets({ policy: installation.providerPolicy, components: payload.components, targets: installation.plan.targets,
+    load: retainedCandidateLoader({ bundle, targets: installation.plan.targets }), release });
+  await mkdir(evidenceDirectory, { recursive: true, mode: 0o700 });
+  await retainHostedRequestGraph({ directory: evidenceDirectory, preflight });
   const fenceBytes = await readRegularFile(installation.fencePath, 65536, true);
   check(sha256(fenceBytes) === installation.fenceDigest, 'Installed baseline credential fence bytes differ');
   const fence = admitCredentialFence(parseJSON(fenceBytes), {
     keys: installation.root.credentialBroker.keys, policy: installation.providerPolicy, environmentId: installation.root.credentialBroker.environmentId,
     brokerId: installation.root.credentialBroker.id, implementationDigest: installation.root.credentialBroker.implementationDigest, now: now() });
   const boundary = boundaries.broker ?? createBrokerTransport({ root: installation.root,
-    token: await requestBrokerIdentity({ root: installation.root, env }) });
+    tokenProvider: () => requestBrokerIdentity({ root: installation.root, env }) });
   const broker = credentialBrokerBoundary({ fenceAdmission: fence, boundary, now });
   const writer = createHostedWriter({ policy: installation.providerPolicy, broker, fenceAdmission: fence,
     eventCacheDirectory: join(evidenceDirectory, 'immutable-journal-cache') });
+  return writer;
+}
+
+async function installedBaseline(args) {
+  const { installation, command } = args;
+  check(['plan', 'advance', 'begin'].includes(command), 'Historical rollback requires its separately admitted verified composition');
+  if (command === 'plan') return { observed: false, parentCompositionDigest: null, rollbackCompositionDigest: null };
+  const writer = await installedReader(args);
   const observed = await writer.readHead();
   if (!observed) return { observed: true, head: null, parentCompositionDigest: null, rollbackCompositionDigest: null };
   const state = observed.state, context = `protected-policy:${digest(installation.providerPolicy)}`;
-  check(state.schema === 'shop.hosted-release/v1' && state.providerOrigin === context && state.phase === 'complete' && state.operation === null &&
+  check(state.schema === 'shop.hosted-release/v1' && state.providerOrigin === context && ['complete', 'reporting-pending', 'report-intent', 'report-reconcile'].includes(state.phase) && (!state.operation || state.operation.kind === 'reports') &&
     state.lastVerified && state.desired && same(state.lastVerified, state.desired) && digest(state.lastVerified) === state.compositionDigest &&
-    state.policyDigest === state.lastVerified.policyDigest && state.report?.status === 'confirmed' && state.verification &&
+    state.policyDigest === state.lastVerified.policyDigest && ['pending', 'confirmed'].includes(state.report?.status) && state.verification &&
     state.verification.schema === 'shop.hosted-verification/v1' && state.verification.scope === installation.root.scope &&
     state.verification.compositionDigest === state.compositionDigest && state.report.verificationDigest === digest(state.verification) &&
     Array.isArray(state.history) && state.history.some(item => same(item, state.lastVerified)), 'Existing protected release has unresolved or invalid verified state');
@@ -153,8 +177,14 @@ async function signInstalledComposition({ installation, payload, sourceAdmission
     algorithm: 'ECDSA_SHA_256', signer: 'protected-ci', signature: sign('sha256', Buffer.from(canonical(payload)), key.privateKey).toString('base64') } };
 }
 
+async function installedOperationAuthorization(installation, command, now) {
+  if (command === 'plan') return { scopeDigest: installation.contract.operationScope?.sha256 ?? null, commands: [], expiresAt: now + installation.root.maximumLifetimeMs };
+  await requireInstalledOperation(installation, command, now);
+  return { scopeDigest: installation.contract.operationScope.sha256, commands: [...installation.operationScope.commands], expiresAt: installation.operationScope.expiresAt };
+}
+
 /** Issue existing-schema authority from an admitted assembly and actual guard result. */
-export async function issueHostedAuthority({ installation, identity, imported, composition, sourceAdmission, qualityApi, acceptedAt, now = Date.now }) {
+export async function issueHostedAuthority({ installation, identity, imported, composition, sourceAdmission, qualityApi, acceptedAt, command = 'plan', now = Date.now }) {
   assertProtectedInstallation(installation); check(typeof now === 'function', 'Explicit source issuance clock required');
   const source = sourceAdmission ?? await qualifyHostedSource({ installation, identity, qualityApi, acceptedAt, now });
   const state = assertSource(source, installation, identity);
@@ -187,11 +217,12 @@ export async function issueHostedAuthority({ installation, identity, imported, c
   const final = await refreshProtectedInstallation(current, issuedAt);
   check(same(final.contract, current.contract), 'Protected installation changed during issuance');
   assertSource(source, final, identity);
-  const evidence = { ...clone(source.evidence), timing: deliveryTiming(source.acceptedAt, issuedAt, policy.budgetMs) };
-  const payload = { schema: 'shop.hosted-source-authority/v1', scope: root.scope, repository: root.repository, repositoryName: root.repositoryName,
+  const evidence = { ...clone(source.evidence), timing: deliveryTiming(source.acceptedAt, issuedAt, policy.budgetMs, source.evidence.timing.deliveryRequestedAt) };
+  const operationAuthorization = await installedOperationAuthorization(final, command, issuedAt);
+  const payload = { schema: 'shop.hosted-source-authority/v3', operationAuthorization, recovery: null, scope: root.scope, repository: root.repository, repositoryName: root.repositoryName,
     environment: root.environment, head: identity.head, base: source.base, tree: source.tree, workflowPath: root.workflowPath,
     workflowCommit: identity.workflowCommit, runId: identity.runId, attempt: identity.attempt, issuedAt,
-    expiresAt: issuedAt + root.maximumLifetimeMs, acceptedAt: source.acceptedAt, policy,
+    expiresAt: Math.min(issuedAt + root.maximumLifetimeMs, operationAuthorization.expiresAt), acceptedAt: source.acceptedAt, policy,
     providerPolicyDigest: root.providerPolicyDigest, targetPlanDigest: current.contract.targetPlan.sha256, writerFenceDigest: current.fenceDigest,
     portableManifests, secretInstallations: current.secretInstallations,
     quality: { head: identity.head, runId: source.quality.qualityRunId, attempt: source.quality.qualityAttempt, releaseGuardDigest: digest(evidence) } };
@@ -206,6 +237,8 @@ export async function issueHostedAuthority({ installation, identity, imported, c
 export async function assembleHostedRelease({ installation, identity, imported, destination, evidenceDirectory, qualityApi, acceptedAt,
   command = 'plan', env = process.env, boundaries = {}, now = Date.now }) {
   assertProtectedInstallation(installation); check(typeof now === 'function', 'Explicit assembly clock required');
+  await requireInstalledOperation(installation, command, now());
+  if (command === 'begin') await requireInstalledOperation(installation, 'advance', now());
   const authenticated = await assertHostedPortableImport(imported, { installation: installation.artifactIntake, sourceCommit: identity.head }), portable = authenticated.portable;
   const current = await refreshProtectedInstallation(installation, now(), [portable.root, dirname(authenticated.evidence.path), resolve(destination)]); identityMatches(current.root, identity);
   const source = await qualifyHostedSource({ installation: current, identity, qualityApi, acceptedAt, now });
@@ -239,7 +272,7 @@ export async function assembleHostedRelease({ installation, identity, imported, 
   activationOrder(payload);
   await installedSigningKey(current, 'source');
   const key = await installedSigningKey(current, 'composition');
-  const baseline = await installedBaseline({ installation: current, payload, bundle: root, command, env, boundaries, now, evidenceDirectory });
+  const baseline = await installedBaseline({ installation: current, payload, bundle: root, command, env, boundaries, now, evidenceDirectory, release: { head: identity.head, compositionDigest: digest(payload) } });
   payload.parentCompositionDigest = baseline.parentCompositionDigest; payload.rollbackCompositionDigest = baseline.rollbackCompositionDigest;
   const baselineRef = await put(root, 'release-evidence/baseline.json', baseline);
   for (const component of payload.components) {
@@ -266,11 +299,69 @@ export async function assembleHostedRelease({ installation, identity, imported, 
   assemblies.set(payload, { installationDigest: digest(current.contract), payloadDigest: digest(payload) });
   const envelope = await signInstalledComposition({ installation: current, payload, sourceAdmission: source, identity, now: now() });
   const manifest = join(root, 'release-composition.json'); await writeFile(manifest, canonical(envelope), { mode: 0o600, flag: 'wx' });
-  const issued = await issueHostedAuthority({ installation: current, identity, imported, composition: { bundle: root, manifest }, sourceAdmission: source, now });
+  const issued = await issueHostedAuthority({ installation: current, identity, imported, composition: { bundle: root, manifest }, sourceAdmission: source, command, now });
   const authority = join(root, 'release-authority.json'); await writeFile(authority, canonical(issued.authority), { mode: 0o600, flag: 'wx' });
   await put(root, 'release-evidence/authority-issuance.json', issued.evidence);
   return { options: { bundle: root, portable: portable.root, manifest, authority, trustRoot: current.rootPath, rootDigest: current.rootDigest,
-    targetPlan: current.planPath, fence: current.fencePath, evidenceDirectory }, ...issued,
+    targetPlan: current.planPath, fence: current.fencePath, evidenceDirectory, sourceEvidence: join(root, 'release-evidence/authority-issuance.json') }, ...issued,
     baseline, readiness: { operationalApproval: false, awsImageQualified: false, realProviderQualificationRequired: true, providerWrites: 0,
       baselineObserved: baseline.observed, timing: issued.evidence.timing } };
+}
+
+
+/** Fresh canonical source authorizes one exact previously verified rollback. */
+export async function assembleHostedRollback({ installation, identity, rollbackDirectory, evidenceDirectory, qualityApi, acceptedAt, env = process.env, boundaries = {}, now = Date.now }) {
+  assertProtectedInstallation(installation);
+  for (const command of ['rollback', 'advance']) await requireInstalledOperation(installation, command, now());
+  const current = await refreshProtectedInstallation(installation, now()); identityMatches(current.root, identity);
+  const source = await qualifyHostedSource({ installation: current, identity, qualityApi, acceptedAt, now });
+  const sourceState = assertSource(source, current, identity);
+  const retained = parseJSON(await readRegularFile(join(resolve(rollbackDirectory), 'verified-release.private.json'), 1024 * 1024, true));
+  check(retained.schema === 'shop.verified-workflow-release/v1' && /^[a-f0-9]{64}$/.test(retained.eventDigest), 'Retained immutable verified release locator required');
+  const options = retained.options, originalAuthority = parseJSON(await readRegularFile(options.authority, 16 * 1024 * 1024, true));
+  check(options.rootDigest === current.rootDigest && originalAuthority.payload.targetPlanDigest === current.contract.targetPlan.sha256 && originalAuthority.payload.writerFenceDigest === current.fenceDigest, 'Historical installation differs');
+  const { contracts, dependencies, ...installedPolicy } = current.template;
+  delete installedPolicy.schemaState;
+  for (const [field, value] of Object.entries(installedPolicy)) if (field !== 'schema') check(same(originalAuthority.payload.policy[field], value), 'Historical policy is incompatible with current protected installation');
+  check(same(originalAuthority.payload.secretInstallations, current.secretInstallations), 'Historical protected secret versions differ');
+  const envelope = parseJSON(await readRegularFile(options.manifest, 16 * 1024 * 1024, true)), payload = envelope.payload;
+  check(payload.components.every(component => same(component.contract, contracts[component.id])) && same(payload.dependencies, dependencies), 'Historical component contracts differ from current installation');
+  check(digest(payload) === retained.compositionDigest && same(payload.repository, current.root.repository), 'Historical composition locator differs');
+  // This original signed issuance time authenticates retained bytes only.
+  // Current operation authority still requires the immutable remote verification.
+  await admitPreviouslyVerifiedComposition({ bundle: options.bundle, manifest: options.manifest, trust: originalAuthority.payload.policy,
+    domain: current.root.scope, originalAuthority, root: current.root,
+    verification: { compositionDigest: digest(payload), verifiedAt: originalAuthority.payload.issuedAt } });
+  await installedSigningKey(current, 'source'); await installedSigningKey(current, 'composition');
+  const writer = await installedReader({ installation: current, payload, bundle: options.bundle, env, boundaries, now, evidenceDirectory,
+    release: { head: identity.head, compositionDigest: digest(payload) } });
+  const baseline = await writer.readHead(), verified = await writer.readVerification(retained.eventDigest);
+  check(baseline?.state?.lastVerified && ['complete', 'reporting-pending', 'report-intent', 'report-reconcile'].includes(baseline.state.phase) &&
+    (!baseline.state.operation || baseline.state.operation.kind === 'reports') && baseline.state.desired.rollbackCompositionDigest === digest(payload) &&
+    baseline.state.history.some(item => same(item, payload)) && same(verified.lastVerified, payload) &&
+    verified.verification?.compositionDigest === digest(payload), 'Historical rollback is not the authenticated compatible target');
+  const historical = await admitPreviouslyVerifiedComposition({ bundle: options.bundle, manifest: options.manifest, trust: originalAuthority.payload.policy,
+    domain: current.root.scope, originalAuthority, root: current.root, verification: verified.verification });
+  check(same(historical.payload, payload) && same(await writer.readHead(), baseline), 'Historical rollback baseline changed');
+  sourceState.verifyInvocation(await sourceState.read(sourceState.runPath));
+  check((await sourceState.read(`${prefix}/git/ref/heads/main`)).object?.sha === identity.head, 'Canonical source changed before rollback authority');
+  const issuedAt = now(), final = await refreshProtectedInstallation(current, issuedAt); assertSource(source, final, identity);
+  const recovery = { kind: 'historical-rollback', compositionDigest: digest(payload), policyDigest: payload.policyDigest,
+    verifiedEventDigest: retained.eventDigest, verifiedAt: verified.verification.verifiedAt,
+    parentCompositionDigest: digest(baseline.state.lastVerified), originalAuthorityDigest: digest(originalAuthority) };
+  const operationAuthorization = await installedOperationAuthorization(final, 'rollback', issuedAt);
+  check(operationAuthorization.commands.includes('advance'), 'Historical rollback requires installed continuation authority');
+  const authorityPayload = { ...clone(originalAuthority.payload), schema: 'shop.hosted-source-authority/v3', operationAuthorization, head: identity.head, base: source.base, tree: source.tree,
+    workflowCommit: identity.workflowCommit, runId: identity.runId, attempt: identity.attempt, issuedAt, expiresAt: Math.min(issuedAt + final.root.maximumLifetimeMs, operationAuthorization.expiresAt),
+    acceptedAt: source.acceptedAt, recovery, quality: { head: identity.head, runId: source.quality.qualityRunId, attempt: source.quality.qualityAttempt, releaseGuardDigest: digest(source.evidence) } };
+  const key = await installedSigningKey(final, 'source');
+  const authority = { payload: authorityPayload, signature: { algorithm: 'ECDSA_SHA_256', keyId: key.keyId, payloadDigest: digest(authorityPayload),
+    signature: sign('sha256', Buffer.from(canonical(authorityPayload)), key.privateKey).toString('base64') } };
+  verifyHostedAuthority(authority, { root: final.root, identity, now: issuedAt });
+  const authorityPath = join(evidenceDirectory, `rollback-authority-${identity.runId}-${identity.attempt}.private.json`);
+  await writeFile(authorityPath, canonical(authority), { flag: 'wx', mode: 0o600 });
+  const sourceEvidence = join(evidenceDirectory, `rollback-source-${identity.runId}-${identity.attempt}.private.json`);
+  await writeFile(sourceEvidence, canonical(source.evidence), { flag: 'wx', mode: 0o600 });
+  return { options: { ...options, authority: authorityPath, originalAuthority: options.authority, trustRoot: current.rootPath, rootDigest: current.rootDigest, targetPlan: current.planPath, fence: current.fencePath, evidenceDirectory, sourceEvidence }, authority,
+    evidence: { ...source.evidence, recovery }, readiness: { operationalApproval: true, productionDeliveryMeasured: false } };
 }

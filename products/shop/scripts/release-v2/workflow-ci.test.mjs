@@ -14,8 +14,8 @@ test('plan workflow grants the canonical source guard read access and preserves 
   const block = text.match(/^permissions:\n((?:  [a-z-]+: [a-z]+\n)+)/m)?.[1];
   assert.ok(block);
   const permissions = Object.fromEntries([...block.matchAll(/^  ([a-z-]+): ([a-z]+)$/gm)].map(([, key, value]) => [key, value]));
-  assert.deepEqual(permissions, { contents: 'read', actions: 'read', checks: 'read', statuses: 'read', 'pull-requests': 'read' });
-  assert.doesNotMatch(text, /^\s+[a-z-]+: write$/m);
+  assert.deepEqual(permissions, { contents: 'read', actions: 'read', checks: 'read', statuses: 'read', 'pull-requests': 'read', 'id-token': 'write' });
+  assert.doesNotMatch(text, /^\s+(?:contents|actions|checks|statuses|pull-requests): write$/m);
   assert.match(text, /environment: Preview/);
   assert.match(text, /github\.ref == 'refs\/heads\/main'/);
   assert.match(text, /cancel-in-progress: false/);

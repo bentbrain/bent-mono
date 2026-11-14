@@ -87,10 +87,12 @@ test("each supported selector authenticates its complete private record and reje
 test("reviewed preparation keeps the release default and checks canonical bytes for all continuing workflows", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shop-operations-activation-"));
   try {
-    assert.equal((await activateShopWorkflows({ check: false, destination: directory })).length, 9);
+    const releaseFiles = await activateShopWorkflows({ check: false, destination: directory });
+    assert.equal(releaseFiles.length, 10);
+    assert.equal(releaseFiles.some(file => file.name === "shop-native-oci-producer.yml"), true);
     await rm(directory, { recursive: true });
     const files = await activateShopWorkflows({ check: false, operations: true, destination: directory });
-    assert.equal(files.length, 17);
+    assert.equal(files.length, 18);
     assert.equal(files.some(file => /schedule|recovery|bootstrap|cutover/.test(file.name)), false);
     await activateShopWorkflows({ operations: true, destination: directory });
     await writeFile(join(directory, "operations.yml"), "changed input guard");

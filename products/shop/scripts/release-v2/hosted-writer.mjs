@@ -1,6 +1,6 @@
 import { createPublicKey, randomUUID, verify } from 'node:crypto';
 import { canonical, check, digest, same } from './data.mjs';
-import { exactFields, assertPolicy, requestBuilders } from './provider-protocol-builders.mjs';
+import { exactFields, assertPolicy, requestBuilders, isReadRequest } from './provider-protocol-builders.mjs';
 import { appendProtectedJournal, readProtectedJournal, protectedStore } from './protected-store.mjs';
 import { ProtocolConflict, ProtocolFailure, responseBytes } from './provider-protocol.mjs';
 import { requestDigest } from './signing.mjs';
@@ -52,7 +52,7 @@ export function credentialBrokerBoundary({ fenceAdmission, boundary, now = Date.
     assertOwner: async owner => { const result = (await call('assert', owner)).result; check(result.current === true, 'Credential broker rejected stale writer'); },
     close: async owner => { const result = (await call('close', owner)).result; check(result.closed === true && result.outstanding === 0, 'Credential broker cannot release outstanding dispatch'); },
     workInventory: async () => { const value = (await call('work-inventory', null)).result; exactFields(value, ['schema', 'complete', 'environmentId', 'queryDigest', 'observedAt', 'jobs']); check(value.schema === 'shop.accepted-work-observation/v1' && value.complete === true && value.environmentId === fenceAdmission.payload.environmentId && hash(value.queryDigest) && Number.isSafeInteger(value.observedAt) && value.observedAt <= now() && now() - value.observedAt <= 30000 && Array.isArray(value.jobs) && value.jobs.length <= 4096, 'Complete signed accepted-work observation required'); for (const job of value.jobs) { exactFields(job, ['component', 'artifactDigest', 'format']); check(hash(job.artifactDigest) && typeof job.component === 'string' && typeof job.format === 'string', 'Accepted work identity differs'); } return value; },
-    read: async request => { check(request.method === 'GET', 'Custody read path permits GET only'); return (await call('read', null, request)).result; },
+    read: async request => { check(isReadRequest(request), 'Custody read path permits exact read operations only'); return (await call('read', null, request)).result; },
     journal: async (owner, request) => { check(request.service === 's3' && request.operation === 'store.put' && request.method === 'PUT', 'Custody journal path permits conditional S3 PUT only'); return (await call('journal', owner, request)).result; },
     dispatch: async (owner, request, intent) => {
       check(request.method !== 'GET' && intent && intent.requestDigest === requestDigest(request) && hash(intent.eventDigest), 'Durable exact request intent required at custody boundary');
@@ -94,10 +94,10 @@ export function createHostedWriter({ policy, store, broker, fenceAdmission, even
     cacheMeasurements: async () => typeof store.cacheMeasurements === 'function' ? store.cacheMeasurements() : null,
     readProviderState: async () => structuredClone((await readEnvelope())?.state.provider ?? emptyProvider()),
     recordProvider: async mutate => { const current = await update(envelope => mutate(envelope.provider)); return current.head.eventDigest; },
-    readVerification: async eventDigest => { check(hash(eventDigest), 'Exact immutable runtime verification identity required'); const current = await readEnvelope(); const found = current?.events.find(item => item.digest === eventDigest && item.event.state.controller?.phase === 'runtime-verified'); check(found?.event.state.controller.verification && found.event.state.controller.lastVerified, 'Immutable verified runtime event is unavailable'); return structuredClone(found.event.state.controller); },
+    readVerification: async eventDigest => { check(hash(eventDigest), 'Exact immutable runtime verification identity required'); const current = await readEnvelope(); const found = current?.events.find(item => item.digest === eventDigest && item.event.state.controller?.phase === 'runtime-verified' && (current.events[current.events.indexOf(item) - 1]?.event.state.controller?.generation ?? null) !== item.event.state.controller.generation); check(found?.event.state.controller.verification && found.event.state.controller.lastVerified, 'Immutable verified runtime event is unavailable'); return structuredClone(found.event.state.controller); },
     verificationRef: async () => {
       const current = await readEnvelope();
-      const found = current?.events.findLast(item => item.event.state.controller?.phase === 'runtime-verified');
+      const found = current?.events.findLast((item, index) => item.event.state.controller?.phase === 'runtime-verified' && (current.events[index - 1]?.event.state.controller?.generation ?? null) !== item.event.state.controller.generation);
       check(found && found.event.state.controller.verification && found.event.state.controller.lastVerified, 'Immutable runtime verification event required'); return found.digest;
     },
     dispatch: async (request, eventDigest) => { await assertOwner(); return broker.dispatch(active.owner, request, { requestDigest: requestDigest(request), eventDigest }); },

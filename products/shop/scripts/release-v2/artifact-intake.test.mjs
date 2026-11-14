@@ -44,6 +44,24 @@ test('original encrypted Actions archive retains all components and refreshes br
   const metadata = JSON.parse(await readFile(result.evidence.metadata.path)); assert.deepEqual(metadata, result.metadata);
 });
 
+test('separately installed OCI producer authenticates its exact workflow, job and artifact lineage', async t => {
+  const f = await createArtifactIntakeFixture(t, { root, producer: 'native-oci' }), result = await run(f);
+  assert.equal(result.portable.lineage.workflowRef, 'bentbrain/bent-mono/.github/workflows/shop-native-oci-producer.yml@refs/heads/main');
+  assert.equal(result.portable.lineage.jobId, 'producer');
+  assert.equal(result.awsImageQualified, false);
+  const original = structuredClone(f.documents);
+  for (const mutate of [
+    () => { f.installation.workflow.jobId = 'journey'; },
+    () => { document(f, 'actions/artifacts/789').name = 'shop-linux-private-123-1'; },
+    () => { document(f, 'actions/runs/123/attempts/1/jobs?per_page=100').jobs[0].name = 'Built Linux J01'; },
+  ]) {
+    for (const key of Object.keys(f.documents)) f.documents[key] = structuredClone(original[key]);
+    f.installation.workflow.jobId = 'producer'; mutate(); let downloads = 0;
+    await assert.rejects(run(f, { api: { ...f.api, downloadArtifact() { downloads++; throw Error('must not download'); } } }));
+    assert.equal(downloads, 0);
+  }
+});
+
 test('system GNU-format tar and gzip import through the original seal helpers', async t => {
   const fixture = await fixtureFor(t), source = join(fixture.root, 'system-tar'), archive = join(fixture.root, 'system-tar.tar.gz'); await mkdir(source, { mode: 0o700 });
   for (const entry of fixture.entries) {

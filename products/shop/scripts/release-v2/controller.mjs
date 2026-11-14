@@ -69,7 +69,8 @@ export async function advanceWithPorts(options, ports) {
       exact(observed.active, previous?.lastVerified?.components.map(wanted) ?? []);
       const order = compatible(payload, previous?.lastVerified ?? null, observed);
       if (previous) {
-        check(previous.phase === 'complete' && previous.operation === null, 'Previous release has unresolved work');
+        check(['complete', 'reporting-pending', 'report-intent', 'report-reconcile'].includes(previous.phase) && (!previous.operation || previous.operation.kind === 'reports') && previous.verification && previous.lastVerified &&
+          digest(previous.lastVerified) === previous.compositionDigest && previous.report?.verificationDigest === digest(previous.verification), 'Previous release has unresolved runtime work');
         if (command === 'rollback') {
           check(previous.history.some(item => digest(item) === compositionDigest), 'Rollback requires a previously verified composition');
           check(previous.desired.rollbackCompositionDigest === compositionDigest && payload.schemaState.rollbackEpochs.includes(previous.lastVerified.schemaState.epoch), 'Rollback target or schema constraint differs');

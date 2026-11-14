@@ -1,8 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createServer, request as httpRequest } from 'node:http';
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { createHmac, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { canonical, check, digest, parseJSON, sha256 } from '../data.mjs';
 import { protocolPolicy, assetManifest } from '../provider-protocol-builders.mjs';
+import { createProviderSigner } from '../provider-credentials.mjs';
+import { signingTrust } from '../signing.mjs';
 import { protocolClient } from '../provider-protocol.mjs';
 import { createCredentialCustody } from '../custody-service.mjs';
 import { protectedStore } from '../protected-store.mjs';
@@ -10,14 +12,15 @@ import { admitCredentialFence, credentialBrokerBoundary } from '../hosted-writer
 import { transcriptSigner, loopbackProtocolTransport } from './provider-protocol-service.mjs';
 
 async function loopbackServer(handler) {
+  const errors = [];
   const server = createServer(async (request, response) => {
     try {
       const chunks = []; let length = 0; for await (const chunk of request) { length += chunk.length; check(length <= 256 * 1024 * 1024, 'Fixture request bound'); chunks.push(chunk); }
       await handler(request, response, Buffer.concat(chunks));
-    } catch (error) { if (!response.destroyed) { response.writeHead(409, { 'content-type': 'application/json' }); response.end(canonical({ error: error.message })); } }
+    } catch (error) { errors.push({ message: error.message, method: request.method, path: request.url }); if (!response.destroyed) { response.writeHead(409, { 'content-type': 'application/json' }); response.end(canonical({ error: error.message })); } }
   });
   server.listen(0, '127.0.0.1'); await new Promise((accept, reject) => { server.once('listening', accept); server.once('error', reject); });
-  return { server, origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((accept, reject) => { server.closeAllConnections(); server.close(error => error ? reject(error) : accept()); }) };
+  return { server, errors, origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((accept, reject) => { server.closeAllConnections(); server.close(error => error ? reject(error) : accept()); }) };
 }
 export async function literalJSON(origin, value, path = '/') {
   const url = new URL(origin), bytes = Buffer.from(canonical(value));
@@ -30,23 +33,40 @@ export async function literalJSON(origin, value, path = '/') {
     const timer = setTimeout(() => { reject(Error('Broker deadline')); operation.destroy(); }, 5000); operation.on('close', () => clearTimeout(timer)); operation.on('error', reject); operation.end(bytes);
   });
 }
-export async function hostedProtocolFixture({ policy, targets, assets = [], faults = {} }) {
+export async function hostedProtocolFixture({ policy, targets, assets = [], faults = {}, realCredentials = true }) {
   const workDb = new DatabaseSync(':memory:'); workDb.exec('CREATE TABLE accepted_jobs(component TEXT NOT NULL, artifact_digest TEXT NOT NULL, format TEXT NOT NULL, status TEXT NOT NULL)');
   const workQuery = "SELECT component, artifact_digest AS artifactDigest, format FROM accepted_jobs WHERE status IN ('accepted','running','retry') ORDER BY component, artifact_digest, format";
   const custodyPolicy = protocolPolicy({ ...policy, store: { ...policy.store, prefix: `${policy.store.prefix}-custody` } });
   const custodyObjects = new Map();
-  const objects = new Map(), workers = new Map(policy.workers.map(item => [item.name, { versions: [], active: null }])), reports = [], transcript = [], brokerCalls = [];
+  const objects = new Map(), workers = new Map(policy.workers.map(item => [item.name, { versions: [], active: null }])), reports = [], deployments = [], ecrUploads = new Map(), ecrBlobs = new Map(), ecrImages = new Map(), transcript = [], brokerCalls = [];
   const functions = new Map(targets.filter(target => target.kind === 'lambda').map(target => [target.resource,
     { target, versions: [], active: null, latestRevision: 'latest-revision-1', aliasRevision: null }]));
+  const credentialPair = generateKeyPairSync('ed25519'), credentialKey = 'synthetic-real-provider', session = { accountId: policy.awsAccountId, region: policy.region, accessKeyId: 'ASIASYNTHETIC12345678', secretAccessKey: 'synthetic-loopback-only-signing-secret-value', sessionToken: 'synthetic-session', expiresAt: Date.now() + 3600000 };
+  const realSigner = signingPolicy => ({ signer: createProviderSigner({ policy: signingPolicy, session, bearerTokens: { cloudflare: 'synthetic-cloudflare', github: 'synthetic-github' }, keyId: credentialKey, privateKeyPem: credentialPair.privateKey.export({ type: 'pkcs8', format: 'pem' }) }), trust: signingTrust({ policy: signingPolicy, keys: [{ id: credentialKey, publicKey: credentialPair.publicKey.export({ type: 'spki', format: 'pem' }) }] }) });
   let versionCounter = 0, objectCounter = 0;
+
   const cloud = await loopbackServer(async (request, response, bytes) => {
-    const url = new URL(request.url, `https://${request.headers.host}`), record = { method: request.method, url: url.href, sha256: sha256(bytes), bytes: bytes.length }; transcript.push(record);
+    const url = new URL(request.url, `https://${request.headers.host}`);
+    if (realCredentials && request.headers.authorization?.startsWith('AWS4-HMAC-SHA256 ')) {
+      const match = /^AWS4-HMAC-SHA256 Credential=([^/]+)\/([0-9]{8})\/([^/]+)\/([^/]+)\/aws4_request, SignedHeaders=([^,]+), Signature=([a-f0-9]{64})$/.exec(request.headers.authorization);
+      check(match && match[1] === session.accessKeyId && request.headers['x-amz-security-token'] === session.sessionToken && request.headers['x-amz-content-sha256'] === sha256(bytes), 'Actual fixture AWS credential/payload differs');
+      const encode = value => encodeURIComponent(value).replace(/[!'()*]/g, ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`), names = match[5].split(';');
+      const headers = names.map(name => `${name}:${request.headers[name].trim().replace(/\s+/g, ' ')}\n`).join(''), query = [...url.searchParams].map(([key,value]) => [encode(key),encode(value)]).sort((a,b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1])).map(item => item.join('=')).join('&');
+      const canonicalRequest = [request.method, url.pathname.split('/').map(part => encode(decodeURIComponent(part))).join('/'), query, headers, names.join(';'), sha256(bytes)].join('\n'), hmac = (key,value) => createHmac('sha256',key).update(value).digest();
+      const key = hmac(hmac(hmac(hmac(`AWS4${session.secretAccessKey}`,match[2]),match[3]),match[4]),'aws4_request');
+      check(hmac(key,`AWS4-HMAC-SHA256\n${request.headers['x-amz-date']}\n${match[2]}/${match[3]}/${match[4]}/aws4_request\n${sha256(canonicalRequest)}`).toString('hex') === match[6], 'Actual fixture AWS signature differs');
+    } else if (realCredentials) check(request.headers.authorization === 'Bearer synthetic-cloudflare' || request.headers.authorization === 'Bearer synthetic-github' || request.headers.authorization === 'Bearer private.upload.capability', 'Actual fixture provider bearer differs');
+    const record = { method: request.method, url: url.href, sha256: sha256(bytes), bytes: bytes.length, ...(request.headers['x-amz-target'] ? { target: request.headers['x-amz-target'] } : {}) }; transcript.push(record);
     const send = (status, value, headers = {}) => { const body = Buffer.isBuffer(value) ? value : Buffer.from(canonical(value)); response.writeHead(status, { 'content-type': 'application/json', 'content-length': body.length, ...headers }); response.end(body); };
     const cf = result => send(200, { success: true, errors: [], result });
     if (request.headers.host === 'api.cloudflare.com' && url.pathname.endsWith('/workers/assets/upload')) {
       check(request.headers.authorization === 'Bearer private.upload.capability', 'Real asset capability must stay inside custody');
       const form = await new Response(bytes, { headers: { 'content-type': request.headers['content-type'] } }).formData(); check([...form].length === new Set(assetManifest(assets).inventory.map(asset => asset.hash)).size, 'All asset parts required');
       cf({ jwt: 'private.completion.capability' }); return;
+    }
+    if (request.headers.host === 'api.cloudflare.com' && policy.workInventory && url.pathname.endsWith(`/d1/database/${policy.workInventory.databaseId}/query`)) {
+      const query = parseJSON(bytes); check(query.params?.length === 0 && policy.workInventory.queries.some(item => item.sql === query.sql), 'Exact installed work SELECT required');
+      cf([{ success: true, results: workDb.prepare(query.sql).all(), meta: { served_by: 'sqlite-loopback', rows_read: 0 } }]); return;
     }
     const worker = [...workers.keys()].find(name => url.pathname.includes(`/${name}/`)), state = workers.get(worker);
     if (request.headers.host === 'api.cloudflare.com' && state) {
@@ -104,6 +124,17 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
           FunctionVersion: lambda.active, RevisionId: lambda.aliasRevision, RoutingConfig: { AdditionalVersionWeights: {} } }); return;
       }
     }
+    if (request.headers.host === `api.ecr.${policy.region}.amazonaws.com`) {
+      const value = parseJSON(bytes), operation = request.headers['x-amz-target']?.split('.').at(-1), repository = value.repositoryName;
+      check(value.registryId === policy.awsAccountId && policy.functions.some(item => item.imageRepository.endsWith(`.amazonaws.com/${repository}`)), 'Exact ECR registry/repository required');
+      const identity = { registryId: policy.awsAccountId, repositoryName: repository };
+      if (operation === 'BatchCheckLayerAvailability') { send(200, { layers: value.layerDigests.map(layerDigest => { const blob = ecrBlobs.get(`${repository}/${layerDigest}`); return { layerDigest, layerAvailability: blob ? 'AVAILABLE' : 'UNAVAILABLE', ...(blob ? { layerSize: blob.length } : {}) }; }), failures: [] }); return; }
+      if (operation === 'InitiateLayerUpload') { const uploadId = randomUUID(); ecrUploads.set(uploadId, { repository, parts: [] }); send(200, { ...identity, uploadId, partSize: 20971520 }); return; }
+      if (operation === 'UploadLayerPart') { const upload = ecrUploads.get(value.uploadId), part = Buffer.from(value.layerPartBlob, 'base64'); check(upload?.repository === repository && Buffer.concat(upload.parts).length === value.partFirstByte && value.partLastByte === value.partFirstByte + part.length - 1, 'Exact ECR part range required'); upload.parts.push(part); send(200, { ...identity, uploadId: value.uploadId, lastByteReceived: value.partLastByte }); return; }
+      if (operation === 'CompleteLayerUpload') { const upload = ecrUploads.get(value.uploadId), blob = Buffer.concat(upload.parts); check(upload.repository === repository && value.layerDigests.length === 1 && value.layerDigests[0] === `sha256:${sha256(blob)}`, 'Exact ECR completed blob digest required'); ecrBlobs.set(`${repository}/${value.layerDigests[0]}`, blob); send(200, { ...identity, uploadId: value.uploadId, layerDigest: value.layerDigests[0] }); return; }
+      if (operation === 'PutImage') { const manifest = parseJSON(Buffer.from(value.imageManifest)); check(value.imageDigest === `sha256:${sha256(value.imageManifest)}` && [manifest.config, ...manifest.layers].every(item => ecrBlobs.has(`${repository}/${item.digest}`)), 'Complete ECR image graph required'); const image = { ...identity, imageId: { imageDigest: value.imageDigest }, imageManifest: value.imageManifest, imageManifestMediaType: value.imageManifestMediaType }; ecrImages.set(`${repository}/${value.imageDigest}`, image); if (faults.dropEcrPutAfter) { faults.dropEcrPutAfter = false; request.socket.destroy(); return; } send(200, { image }); return; }
+      if (operation === 'BatchGetImage') { const image = ecrImages.get(`${repository}/${value.imageIds[0].imageDigest}`); send(200, { images: image ? [image] : [], failures: image ? [] : [{ imageId: value.imageIds[0], failureCode: 'ImageNotFound' }] }); return; }
+    }
     if (request.headers.host === `${policy.store.bucket}.s3.${policy.region}.amazonaws.com`) {
       const custodyRequest = url.pathname.startsWith(`/${custodyPolicy.store.prefix}/`), activePolicy = custodyRequest ? custodyPolicy : policy, activeObjects = custodyRequest ? custodyObjects : objects;
       const key = url.pathname.slice(activePolicy.store.prefix.length + 2), current = activeObjects.get(key);
@@ -114,9 +145,17 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
       const item = { bytes, etag: `"state-${++objectCounter}"`, versionId: `version-${objectCounter}` }; activeObjects.set(key, item); send(200, Buffer.alloc(0), headers(item)); return;
     }
     if (request.headers.host === 'api.github.com') {
-      if (request.method === 'GET') { send(200, reports); return; }
+      const root = `/repos/${policy.github.repository}/deployments`;
+      if (url.pathname === root) {
+        if (request.method === 'GET') { send(200, deployments.filter(item => item.sha === url.searchParams.get('sha') && item.environment === url.searchParams.get('environment'))); return; }
+        const value = parseJSON(bytes); const deployment = { ...value, sha: value.ref, id: deployments.length + 1000 }; deployments.push(deployment);
+        if (faults.dropDeploymentAfter) { faults.dropDeploymentAfter = false; request.socket.destroy(); return; }
+        send(201, deployment); return;
+      }
+      const deploymentId = url.pathname.split('/').at(-2);
+      if (request.method === 'GET') { send(200, reports.filter(item => !item.deploymentId || item.deploymentId === deploymentId)); return; }
       if (faults.dropReportBefore) { faults.dropReportBefore = false; request.socket.destroy(); return; }
-      const report = parseJSON(bytes); reports.push({ ...report, id: reports.length + 1 });
+      const report = parseJSON(bytes); reports.push({ ...report, deploymentId, id: reports.length + 1 });
       if (faults.dropReportAfter) { faults.dropReportAfter = false; request.socket.destroy(); return; }
       send(201, reports.at(-1)); return;
     }
@@ -127,12 +166,12 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
   const now = Date.now(), implementationDigest = sha256('synthetic-loopback-credential-custody-installation');
   const receipt = envelope({ schema: 'shop.credential-fence/v1', scope: 'protected-provider-writer', environmentId: 'synthetic-qualification', policyDigest: digest(policy), brokerId: 'synthetic-custody', implementationDigest, credentialCustody: 'broker-exclusive', ownership: 'non-expiring-single-writer', sendBoundary: 'atomic-owner-check-and-dispatch', reassignment: 'stop-drain-revoke-before-reassign', issuedAt: now, expiresAt: now + 3600000 });
   const fenceAdmission = admitCredentialFence(receipt, { keys: publicKeys, policy, environmentId: 'synthetic-qualification', brokerId: 'synthetic-custody', implementationDigest });
-  const signer = transcriptSigner(policy), custodySigner = transcriptSigner(custodyPolicy);
+  const signer = realCredentials ? realSigner(policy) : transcriptSigner(policy), custodySigner = realCredentials ? realSigner(custodyPolicy) : transcriptSigner(custodyPolicy);
   const custodyStore = protectedStore(protocolClient({ policy: custodyPolicy, ...custodySigner, transport: loopbackProtocolTransport(cloud.origin) }), custodyPolicy);
   const installation = envelope({ schema: 'shop.credential-installation/v1', fenceDigest: fenceAdmission.digest, environmentId: 'synthetic-qualification', installationId: randomUUID(), credentialEpoch: 'epoch-one', custodyPolicyDigest: digest(custodyPolicy), issuedAt: Date.now(), expiresAt: Date.now() + 3600000 });
   const factoryOptions = { policy, custodyPolicy, custodyStore, fenceAdmission, installation, ...signer, transport: loopbackProtocolTransport(cloud.origin), attest: async payload => envelope(payload),
     authenticate: async (_input, context) => { check(context?.authorization === 'Bearer synthetic-loopback-controller', 'Synthetic authenticated controller required'); return { environmentId: 'synthetic-qualification', policyDigest: digest(policy), fenceDigest: fenceAdmission.digest, principalDigest: sha256('synthetic-protected-controller') }; },
-    observeWork: async () => ({ complete: true, queryDigest: sha256(workQuery), jobs: workDb.prepare(workQuery).all() }), resolveAssets: async () => assets };
+    ...(policy.workInventory ? {} : { observeWork: async () => ({ complete: true, queryDigest: sha256(workQuery), jobs: workDb.prepare(workQuery).all() }) }), resolveAssets: async () => assets };
   const executor = await createCredentialCustody(factoryOptions);
   const custody = await loopbackServer(async (request, response, bytes) => {
     const input = parseJSON(bytes, 256 * 1024 * 1024); brokerCalls.push({ action: input.action, owner: input.owner, operation: input.request?.operation ?? null, nonce: input.nonce });
@@ -141,7 +180,7 @@ export async function hostedProtocolFixture({ policy, targets, assets = [], faul
     response.writeHead(200, { 'content-type': 'application/json' }); response.end(canonical(reply));
   });
   const boundary = input => literalJSON(custody.origin, input), broker = credentialBrokerBoundary({ fenceAdmission, boundary });
-  return { policy, targets, custodyOrigin: custody.origin, receipt, publicKeys, fenceAdmission, broker, boundary, cloudOrigin: cloud.origin, factoryOptions, signRoot: envelope, workDb, objects, custodyObjects, executor, custodyStore, custodyPolicy, installation, workers, functions, reports, transcript, brokerCalls, faults,
+  return { policy, targets, brokerErrors: custody.errors, cloudErrors: cloud.errors, custodyOrigin: custody.origin, receipt, publicKeys, fenceAdmission, broker, boundary, cloudOrigin: cloud.origin, factoryOptions, signRoot: envelope, workDb, objects, custodyObjects, executor, custodyStore, custodyPolicy, installation, workers, functions, reports, deployments, ecrBlobs, ecrImages, transcript, brokerCalls, faults,
     workInventory: broker.workInventory,
     stopDrainRevoke: async () => { const state = await executor.readState(); return executor.recoverOwner(envelope({ schema: 'shop.custody-owner-recovery/v1', fenceDigest: fenceAdmission.digest, installationId: installation.payload.installationId, owner: state.owner.id, controllerStopped: true, issuedAt: Date.now(), expiresAt: Date.now() + 60000 })); },
     close: async () => { await custody.close(); await cloud.close(); workDb.close(); } };

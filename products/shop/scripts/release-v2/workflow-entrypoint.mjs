@@ -7,8 +7,8 @@ import { githubApi } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, readRegularFile, same } from './data.mjs';
 import { actionsIdentity } from './hosted-admission.mjs';
 import { importHostedPortable } from './artifact-intake.mjs';
-import { readProtectedInstallation, readReportingInstallation } from './protected-installation.mjs';
-import { assembleHostedRelease } from './source-issuance.mjs';
+import { readProtectedInstallation, readReportingInstallation, requireInstalledOperation } from './protected-installation.mjs';
+import { assembleHostedRelease, assembleHostedRollback } from './source-issuance.mjs';
 import { hostedController } from './hosted-controller.mjs';
 import { saveHostedFailure } from './hosted-diagnostics.mjs';
 
@@ -25,7 +25,7 @@ async function privateDirectory(path) {
 
 /** One process owns each transition. Protected journal recovery never replays writes. */
 export async function workflowEntrypoint(options, boundaries = {}) {
-  if (options.command === 'deliver') return deliverWorkflow(options, boundaries);
+  if (options.command === 'deliver' || options.command === 'rollback' && !options.transitionOnly) return deliverWorkflow(options, boundaries);
   const { installationPath, installationDigest, request, directory, command = 'plan', acceptedAt, env = process.env } = options;
   check(commands.has(command), 'Unsupported workflow transition');
   trace.publish({ step: 'entrypoint-start', command });
@@ -40,8 +40,28 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     return { controller, paths: { authority: options.recoveryAuthority }, readiness: { realProviderQualificationRequired: true } };
   }
   const installation = await readProtectedInstallation(installedOptions);
-  check(request?.sourceCommit === identity.head, 'Artifact source differs from canonical workflow source');
+  await requireInstalledOperation(installation, command);
+  check(command === 'rollback' || request?.sourceCommit === identity.head, 'Artifact source differs from canonical workflow source');
   await privateDirectory(directory);
+  if (command === 'rollback' || options.rollbackDirectory) {
+    await privateDirectory(evidenceDirectory);
+    check(typeof options.rollbackDirectory === 'string', 'Provide the retained verified release directory');
+    const statePath = join(directory, 'rollback-state.private.json'), subject = { installationDigest, identity, rollbackDirectory: options.rollbackDirectory };
+    let assembled;
+    try {
+      const state = parseJSON(await readRegularFile(statePath, 1024 * 1024, true));
+      check(state.schema === 'shop.workflow-rollback-state/v1' && same(state.subject, subject), 'Saved rollback invocation differs');
+      assembled = state.assembled;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      check(command === 'rollback', 'Begin historical rollback before advancing');
+      assembled = await assembleHostedRollback({ installation, identity, rollbackDirectory: options.rollbackDirectory, evidenceDirectory,
+        qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, env, boundaries });
+      await writeFile(statePath, canonical({ schema: 'shop.workflow-rollback-state/v1', subject, assembled }), { flag: 'wx', mode: 0o600 });
+    }
+    const controller = await hostedController({ ...assembled.options, command, env }, boundaries);
+    return { controller, paths: assembled.options, readiness: assembled.readiness, evidence: assembled.evidence };
+  }
   const lock = join(directory, 'invocation.lock');
   await mkdir(lock, { mode: 0o700 });
   try {
@@ -76,6 +96,12 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     trace.publish({ step: 'controller-start', command });
     const controller = await hostedController({ ...assembled.options, command, env }, boundaries);
     trace.publish({ step: 'controller-complete', command, phase: controller.phase });
+    if (controller.report?.eventDigest && controller.lastVerified && digest(controller.lastVerified) === controller.compositionDigest) {
+      const verifiedPath = join(directory, 'verified-release.private.json');
+      try { await writeFile(verifiedPath, canonical({ schema: 'shop.verified-workflow-release/v1', options: assembled.options,
+        eventDigest: controller.report.eventDigest, compositionDigest: controller.compositionDigest }), { flag: 'wx', mode: 0o600 }); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
+    }
     return { controller, paths: assembled.options, readiness: assembled.readiness, evidence: assembled.evidence };
   } finally { await rm(lock, { recursive: true }); }
 }
@@ -83,12 +109,15 @@ export async function workflowEntrypoint(options, boundaries = {}) {
 /** Complete bounded forward transitions; an uncertain acknowledgement stops the run. */
 export async function deliverWorkflow(options, boundaries = {}) {
   check(typeof options.directory === 'string', 'Private workflow directory required');
-  let command = 'begin';
-  try { await lstat(join(options.directory, 'workflow-state.private.json')); command = 'advance'; }
+  const identity = actionsIdentity(options.env ?? process.env);
+  const installation = await readProtectedInstallation({ path: options.installationPath, digest: options.installationDigest, identity, artifactDirectories: [options.directory] });
+  for (const operation of options.command === 'rollback' ? ['rollback', 'advance'] : ['deliver', 'begin', 'advance']) await requireInstalledOperation(installation, operation);
+  let command = options.command === 'rollback' ? 'rollback' : 'begin';
+  try { await lstat(join(options.directory, options.rollbackDirectory ? 'rollback-state.private.json' : 'workflow-state.private.json')); command = 'advance'; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const transitions = []; let previousGeneration = null, result;
   for (let count = 0; count < 96; count++) {
-    result = await workflowEntrypoint({ ...options, command }, boundaries);
+    result = await workflowEntrypoint({ ...options, command, transitionOnly: true }, boundaries);
     const state = result.controller;
     transitions.push({ phase: state.phase, generation: state.generation ?? null, compositionDigest: state.compositionDigest });
     if (state.phase === 'complete' || state.waiting) return { ...result, transitions };

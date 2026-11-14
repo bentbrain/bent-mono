@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { canonical, digest, sha256 } from './data.mjs';
 import { protocolPolicy } from './provider-protocol-builders.mjs';
 import { createHostedWriter } from './hosted-writer.mjs';
-import { createHostedProvider, retainedCandidateLoader, preflightHostedTargets } from './hosted-provider.mjs';
+import { createHostedProvider, retainedCandidateLoader, preflightHostedTargets, retainHostedRequestGraph } from './hosted-provider.mjs';
 import { fixture } from './testing/fixtures.mjs';
 import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
 import { hostedProtocolFixture } from './testing/hosted-protocol-service.mjs';
@@ -16,7 +16,7 @@ import { reconcileHostedReport } from './hosted-reporting.mjs';
 import { codeIdentity } from './component-identity.mjs';
 import { lambdaBindingProjection } from './provider-protocol.mjs';
 
-async function setup(work, { bindings = [] } = {}) {
+async function setup(work, { bindings = [], perRelease = false } = {}) {
   const f = await fixture(), synthetic = protocolFixture(), targets = [];
   for (const component of f.payload.components) {
     const artifact = JSON.parse(await readFile(join(f.bundle, component.artifact.path), 'utf8'));
@@ -27,7 +27,7 @@ async function setup(work, { bindings = [] } = {}) {
     artifact.configDigest = component.config.sha256; artifact.provenanceDigest = component.provenance.sha256; component.artifact = await f.put(component.artifact.path, artifact);
     targets.push({ component: component.id, kind: 'worker', resource: `synthetic-${component.id}`, entrypoint: 'index.mjs', metadata: { main_module: 'index.mjs', compatibility_date: '2026-11-01', compatibility_flags: [], bindings }, modules: [{ name: 'index.mjs', path: artifact.entrypoint, type: 'application/javascript+module' }], assets: [] });
   }
-  const policy = protocolPolicy({ ...synthetic.policy, workers: targets.map(target => ({ name: target.resource, metadataDigest: digest(target.metadata), versionContentApi: 'workers-beta/v1' })) });
+  const policy = protocolPolicy({ ...synthetic.policy, ...(perRelease ? { github: { repository: synthetic.policy.github.repository, environment: synthetic.policy.github.environment, reporting: 'per-release' } } : {}), workers: targets.map(target => ({ name: target.resource, metadataDigest: digest(target.metadata), versionContentApi: 'workers-beta/v1' })) });
   const service = await hostedProtocolFixture({ policy, targets });
   const config = { policy, targets, bundle: f.bundle, payload: f.payload, startedAt: Date.now(), custodyOrigin: service.custodyOrigin, fenceReceipt: service.receipt, fenceKeys: service.publicKeys };
   try { return await work({ f, policy, targets, service, config }); } finally { await service.close(); await rm(f.directory, { recursive: true, force: true }); }
@@ -186,8 +186,9 @@ test('hosted target preflight verifies every component before opening a writer o
     const provenance = JSON.parse(await readFile(join(f.bundle, second.provenance.path), 'utf8')); provenance.artifactFilesDigest = digest(artifact.files);
     const provenanceRef = await f.put('metadata/producer-assets-provenance.json', provenance); artifact.provenanceDigest = provenanceRef.sha256;
     const artifactRef = await f.put('metadata/producer-assets-artifact.json', artifact), component = { ...second, artifact: artifactRef, provenance: provenanceRef };
-    const assetTargets = targets.map(target => target.component === second.id ? { ...target, assets: [{ name: 'index.html', path: assetFile.path, type: 'text/html' }] } : target);
-    await assert.rejects(preflightHostedTargets({ policy, components: [f.payload.components[0], component], targets: assetTargets, load: retainedCandidateLoader({ bundle: f.bundle, targets: assetTargets }) }), /served asset qualification/);
+    const assetTargets = targets.map(target => target.component === second.id ? { ...target, metadata: { ...target.metadata, assets: { config: { html_handling: 'none' } } }, assets: [{ name: 'index.html', path: assetFile.path, type: 'text/html' }] } : target);
+    const assetPolicy = protocolPolicy({ ...policy, workers: policy.workers.map(worker => ({ ...worker, metadataDigest: digest(assetTargets.find(target => target.resource === worker.name).metadata) })) });
+    await assert.rejects(preflightHostedTargets({ policy: assetPolicy, components: [f.payload.components[0], component], targets: assetTargets, load: retainedCandidateLoader({ bundle: f.bundle, targets: assetTargets }) }), /served asset qualification/);
     assert.equal(service.transcript.length, baseline); assert.equal(service.brokerCalls.length, brokerCalls);
   });
 });
@@ -247,5 +248,55 @@ test('malformed Lambda binding after a valid Worker is rejected before custody o
       assert.equal(service.transcript.length, baseline.transcript); assert.equal(service.brokerCalls.length, baseline.broker);
       assert.deepEqual([...service.objects.keys()], baseline.objects);
     }
+  });
+});
+
+
+test('per-release deployments use stable policy, real credential signing and durable unknown-create reconciliation', async () => {
+  await setup(async ({ f, policy, service, config }) => {
+    for (let step = 0; step < 24; step++) { const state = await hostedEngineStep(config); if (state.phase === 'report-intent') break; }
+    service.faults.dropDeploymentAfter = true;
+    await assert.rejects(hostedEngineStep(config), /socket|reset|acknowledgement|hang up/i); assert.equal(service.deployments.length, 1);
+    await service.stopDrainRevoke();
+    for (let step = 0; step < 6; step++) { const state = await hostedEngineStep(config); if (state.phase === 'complete') break; }
+    assert.equal(service.deployments.length, 1); assert.equal(service.reports.length, 1);
+    const head = JSON.parse(service.objects.get('head.json').bytes), state = JSON.parse(service.objects.get(`events/${head.eventDigest}.json`).bytes).state;
+    assert.equal(state.controller.phase, 'complete'); assert.equal(state.provider.reports.filter(item => item.kind === 'deployment').length, 1);
+    const expectedPolicyDigest = digest(policy); assert.equal(state.policyDigest, expectedPolicyDigest);
+    const graph = await preflightHostedTargets({ policy, components: f.payload.components, targets: config.targets, load: retainedCandidateLoader({ bundle: f.bundle, targets: config.targets }), release: { head: config.payload.intentSourceCommit, compositionDigest: digest(config.payload) } });
+    for (const operation of ['worker.upload', 'worker.activate', 'report.create-deployment', 'report.deployments', 'report.success', 'store.put']) assert(graph.requestGraph.requests.some(item => item.request.operation === operation));
+    assert.equal(graph.requestGraph.digest, digest(graph.requestGraph.requests));
+  }, { perRelease: true });
+});
+
+test('dynamic reporting recovery keeps the original verification event and needs no component bundle', async () => {
+  await setup(async ({ f, policy, service, config }) => {
+    let verified; for (let step = 0; step < 24; step++) { verified = await hostedEngineStep(config); if (verified.phase === 'runtime-verified') break; }
+    const writer = createHostedWriter({ policy, broker: service.broker, fenceAdmission: service.fenceAdmission }), eventDigest = await writer.verificationRef();
+    const authority = { eventDigest, compositionDigest: digest(verified.lastVerified), deploymentId: null, head: config.payload.intentSourceCommit };
+    await rm(f.bundle, { recursive: true, force: true }); service.faults.dropReportAfter = true; const before = service.transcript.length;
+    await assert.rejects(reconcileHostedReport({ writer, broker: service.broker, policy, authority }), /socket|reset|acknowledgement|hang up/i);
+    assert.equal(await writer.verificationRef(), eventDigest); await service.stopDrainRevoke();
+    const fresh = createHostedWriter({ policy, broker: service.broker, fenceAdmission: service.fenceAdmission });
+    assert.equal((await reconcileHostedReport({ writer: fresh, broker: service.broker, policy, authority })).phase, 'report-confirmed');
+    assert.equal(service.deployments.length, 1); assert.equal(service.reports.length, 1);
+    assert(service.transcript.slice(before).every(item => item.url.includes('.s3.') || item.url.startsWith('https://api.github.com/')));
+  }, { perRelease: true });
+});
+
+
+test('actual request graph consumer retains exact digests for a Worker multipart payload larger than 16 MiB', async () => {
+  await setup(async ({ f, policy, targets }) => {
+    const original = f.payload.components[0], artifact = JSON.parse(await readFile(join(f.bundle, original.artifact.path), 'utf8'));
+    const bytes = Buffer.from(`/*${'x'.repeat(17 * 1024 * 1024)}*/export const component='consumer';`), file = await f.put('artifacts/consumer-large/index.mjs', bytes);
+    const files = [{ ...file, mediaType: 'application/javascript' }], provenance = JSON.parse(await readFile(join(f.bundle, original.provenance.path), 'utf8')); provenance.artifactFilesDigest = digest(files);
+    const provenanceRef = await f.put('metadata/consumer-large-provenance.json', provenance), artifactRef = await f.put('metadata/consumer-large-artifact.json', { ...artifact, root: 'artifacts/consumer-large', entrypoint: file.path, files, provenanceDigest: provenanceRef.sha256 });
+    const component = { ...original, artifact: artifactRef, provenance: provenanceRef }, components = [component, f.payload.components[1]], largeTargets = targets.map(target => target.component === component.id ? { ...target, modules: [{ ...target.modules[0], path: file.path }] } : target);
+    const preflight = await preflightHostedTargets({ policy, components, targets: largeTargets, load: retainedCandidateLoader({ bundle: f.bundle, targets: largeTargets }) });
+    const upload = preflight.requestGraph.requests.find(item => item.component === component.id && item.request.operation === 'worker.upload');
+    assert(upload.bodyBytes > 16 * 1024 * 1024); assert.match(upload.requestDigest, /^[a-f0-9]{64}$/); assert(!Object.hasOwn(upload.request, 'bodyBase64')); assert.deepEqual(upload.immutableSubject.component.artifact, artifactRef);
+    const first = await retainHostedRequestGraph({ directory: f.directory, preflight }), second = await retainHostedRequestGraph({ directory: f.directory, preflight });
+    assert.deepEqual(first, second); assert(first.bytes < 100000); const retained = JSON.parse(await readFile(first.path, 'utf8')); assert.equal(retained.digest, digest(retained.requests));
+    const bodyHeader = upload.request.headers['content-length']; assert.equal(Number(bodyHeader), upload.bodyBytes);
   });
 });

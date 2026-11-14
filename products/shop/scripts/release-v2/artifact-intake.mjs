@@ -18,6 +18,15 @@ const sealedNames = ['linux-evidence.tar.gz.enc', 'linux-evidence.tar.gz.enc.env
 const defaultLimits = { archiveBytes: 4 * 1024 ** 3 - 1, expandedBytes: 12 * 1024 ** 3, files: 131072 };
 const admissions = new WeakMap();
 const githubApis = new WeakSet();
+const producerWorkflows = [
+  { path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey', artifactPrefix: 'shop-linux-private' },
+  { path: '.github/workflows/shop-native-oci-producer.yml', jobName: 'Built native OCI candidate', jobId: 'producer', artifactPrefix: 'shop-native-oci-private' },
+];
+const installedProducer = workflow => {
+  const producer = producerWorkflows.find(item => item.path === workflow?.path && item.jobName === workflow.jobName && item.jobId === workflow.jobId);
+  check(producer, 'An exact original supported Linux producer workflow is required');
+  return producer;
+};
 const exact = (value, fields, label) => check(value && typeof value === 'object' && !Array.isArray(value) && same(Object.keys(value).sort(), [...fields].sort()), `Unexpected ${label} fields`);
 const identifier = value => check(/^[1-9][0-9]{0,15}$/.test(String(value)) && Number.isSafeInteger(Number(value)), 'Exact GitHub resource ID required');
 const hex = value => check(/^[a-f0-9]{64}$/.test(value ?? ''), 'Protected SHA256 pin required');
@@ -45,7 +54,7 @@ function validateInput(request, installation) {
   const { repository, workflow, expected = {} } = installation;
   check(repository?.name === 'bentbrain/bent-mono', 'Pinned Shop repository required');
   identifier(repository.id); identifier(repository.ownerId); identifier(workflow?.id); if (expected.jobId !== undefined) identifier(expected.jobId);
-  check(workflow.path === '.github/workflows/shop-linux-journey.yml' && workflow.jobName === 'Built Linux J01' && workflow.jobId === 'journey', 'Original Linux customer journey workflow required');
+  installedProducer(workflow);
   check(/^[a-f0-9]{40}$/.test(request.sourceCommit ?? '') && request.sourceCommit !== '0'.repeat(40), 'Exact requested source commit required');
   hex(installation.recipientFingerprint);
   for (const name of ['manifestSha256', 'archiveSha256']) if (expected[name] !== undefined) hex(expected[name]);
@@ -114,12 +123,12 @@ async function authenticateMetadata(api, request, installation) {
     run.status === 'completed' && run.conclusion === 'success' && run.head_sha === request.sourceCommit && ['workflow_dispatch', 'pull_request'].includes(run.event) &&
     String(run.repository?.id) === String(repository.id) && String(run.repository?.owner?.id) === String(repository.ownerId) && run.repository?.full_name === repository.name &&
     String(run.head_repository?.id) === String(repository.id) && run.head_repository?.full_name === repository.name, 'Original successful GitHub run identity differs');
-  check(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length === 1, 'Complete original customer journey job required');
+  check(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length === 1, 'Complete original Linux producer job required');
   const job = jobs.jobs[0];
   identifier(job.id);
   check((expected.jobId === undefined || String(job.id) === String(expected.jobId)) && String(job.run_id) === String(request.runId) && String(job.run_attempt) === String(request.runAttempt) && job.head_sha === request.sourceCommit &&
     job.name === workflow.jobName && job.status === 'completed' && job.conclusion === 'success', 'Original successful GitHub job differs');
-  check(String(artifact.id) === String(request.artifactId) && artifact.name === `shop-linux-private-${request.runId}-${request.runAttempt}` && artifact.expired === false &&
+  check(String(artifact.id) === String(request.artifactId) && artifact.name === `${installedProducer(workflow).artifactPrefix}-${request.runId}-${request.runAttempt}` && artifact.expired === false &&
     /^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') && (expected.archiveSha256 === undefined || artifact.digest === `sha256:${expected.archiveSha256}`) && Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 &&
     String(artifact.workflow_run?.id) === String(request.runId) && String(artifact.workflow_run?.repository_id) === String(repository.id) &&
     String(artifact.workflow_run?.head_repository_id) === String(repository.id) && artifact.workflow_run?.head_sha === request.sourceCommit, 'Original retained artifact identity or digest differs');

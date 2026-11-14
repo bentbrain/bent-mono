@@ -13,6 +13,7 @@
         "scripts/release-v2/hosted-controller.mjs",
         "scripts/release-v2/workflow-ci.mjs",
         "scripts/release-v2/workflow-entrypoint.mjs",
+        "scripts/release-v2/custody-entrypoint.mjs",
         "scripts/release-v2/network-deny.mjs",
         "scripts/release-v2/qualification-network.mjs",
         "scripts/release-v2/testing/fixture-journey.mjs",
@@ -21,11 +22,14 @@
         "scripts/release-v2/testing/scoped-source-proof.mjs",
         "scripts/release-v2/testing/provider-protocol-transcript.mjs",
         "scripts/release-v2/testing/workflow-journey.mjs",
+        "scripts/release-v2/testing/delivery-path-acceptance.mjs",
         "scripts/release-v2/*.test.mjs",
         "scripts/testing/product-image-v5-smoke.mjs",
         "scripts/testing/linux-hosted-validation.mjs",
         "scripts/testing/workflow-proof-evidence.mjs",
         "scripts/testing/linux-journey.mjs",
+        "scripts/testing/native-v5-hosted.mjs",
+        "scripts/testing/*.test.mjs",
         "scripts/*.test.mjs"
       ],
       // The diagnostic runner uses the API workspace's Wrangler, the web
@@ -53,6 +57,9 @@
       "entry": ["scripts/product-lifecycle.mjs"]
     },
     "workers/video-renderer": {
+      // The OCI producer installs this sealed module beside the runtime tree.
+      // Native OCI closure tests verify its exact bytes and location.
+      "ignoreUnresolved": ["../../../../../../native-image/product-image-v5-entry.mjs"],
       "entry": [
         "custom/render.mjs",
         "aws-lambda/app-entry.mjs",

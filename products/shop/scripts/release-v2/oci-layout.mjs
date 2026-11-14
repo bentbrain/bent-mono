@@ -1,4 +1,13 @@
+import { gunzipSync, zstdDecompressSync } from 'node:zlib';
 import { check, parseJSON, same, sha256 } from './data.mjs';
+
+export function ociLayerBytes(mediaType, bytes) {
+  const options = { maxOutputLength: 1024 * 1024 * 1024 };
+  if (mediaType === 'application/vnd.oci.image.layer.v1.tar') return bytes;
+  if (mediaType === 'application/vnd.oci.image.layer.v1.tar+gzip') return gunzipSync(bytes, options);
+  if (mediaType === 'application/vnd.oci.image.layer.v1.tar+zstd') return zstdDecompressSync(bytes, options);
+  throw new Error('Unsupported OCI layer encoding');
+}
 
 const manifestType = 'application/vnd.oci.image.manifest.v1+json';
 const configType = 'application/vnd.oci.image.config.v1+json';
@@ -32,7 +41,13 @@ export async function verifyOciLayout({ artifact, readFile }) {
   const configuration = parseJSON(await descriptor(manifest.config, new Set([configType])), 16 * 1024 * 1024);
   check(configuration.os === 'linux' && configuration.architecture === imageDescriptor.platform.architecture && configuration.rootfs?.type === 'layers' && Array.isArray(configuration.rootfs.diff_ids) && configuration.rootfs.diff_ids.length === manifest.layers.length && configuration.rootfs.diff_ids.every(id => /^sha256:[a-f0-9]{64}$/.test(id)), 'OCI configuration platform or layer graph differs');
   check(configuration.history === undefined || Array.isArray(configuration.history) && configuration.history.length <= 4096, 'Invalid OCI history');
-  for (const layer of manifest.layers) await descriptor(layer, layers);
+  for (const [index, layer] of manifest.layers.entries()) {
+    const bytes = await descriptor(layer, layers);
+    check(`sha256:${sha256(ociLayerBytes(layer.mediaType, bytes))}` === configuration.rootfs.diff_ids[index], 'OCI uncompressed layer digest differs');
+  }
   check(same([...used].sort(), artifact.files.map(file => file.path).sort()), 'OCI inventory contains unreferenced objects');
-  return { imageDigest: imageDescriptor.digest.slice(7), architecture: configuration.architecture, layers: manifest.layers.length, runtimeQualified: false };
+  const ref = value => artifact.files.find(file => file.path === `${artifact.root}/blobs/sha256/${value.digest.slice(7)}`);
+  return { imageDigest: imageDescriptor.digest.slice(7), architecture: configuration.architecture, layers: manifest.layers.length, runtimeQualified: false,
+    manifestDescriptor: imageDescriptor, configDescriptor: manifest.config, layerDescriptors: manifest.layers, manifest, configuration,
+    descriptorRefs: { manifest: ref(imageDescriptor), config: ref(manifest.config), layers: manifest.layers.map(ref) } };
 }

@@ -14,7 +14,7 @@ import { imageService } from "./image-service-fixture.mjs";
 import { createShopifyFixture } from "./shopify-fixture.mjs";
 import { drainJourneyWork } from "../../../scripts/testing/linux-journey.mjs";
 import { verifyPortableBundle } from "../../../scripts/release-v2/portable-bundle.mjs";
-import { verifyLinuxCandidate } from "../../../scripts/testing/linux-candidate.mjs";
+import { verifyLinuxCandidate, verifyOciCandidatePayload } from "../../../scripts/testing/linux-candidate.mjs";
 import {
   fixtureBinding,
   fixtureContext,
@@ -43,7 +43,8 @@ if (linuxCandidate) {
   linuxCandidateReceipt = await verifyLinuxCandidate(linuxCandidate, { identityDirectory:
     portable?.components.get("native").runtime.definition.identityDirectory
       ? resolve(portableRoot, portable.components.get("native").runtime.definition.identityDirectory) : linuxCandidate });
-  if (portable) assert.equal(linuxCandidate, resolve(portableRoot, "payload/native"));
+  if (portable?.components.get("native").artifact.format === "oci-layout") await verifyOciCandidatePayload(linuxCandidate, portable.components.get("native"));
+  else if (portable) assert.equal(linuxCandidate, resolve(portableRoot, "payload/native"));
   assert.equal(resolve(capsule), resolve(linuxCandidate, "native-image"));
   assert.equal(nativeBuildId, linuxCandidateReceipt.capsuleManifestSha256);
   process.env.PATH = `${resolve(linuxCandidate, "runtime/bin")}:${process.env.PATH}`;

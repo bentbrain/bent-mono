@@ -60,7 +60,7 @@ export async function createWorkflowJourneyFixture(t, { output, sourceCommit = '
     const intake = await createArtifactIntakeFixture(t, { root: output, portableFixture: portable, sourceCommit });
     const bootstrap = await createBootstrapFixture(t, { root: output, intakeFixture: intake, sourceCommit,
       providerPolicy: provider.policy, plan: provider.plan, fenceReceipt: provider.service.receipt,
-      brokerKeys: provider.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000, maximumLifetimeMs });
+      brokerKeys: provider.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000, maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'] });
     await retainWorkflowVerifierSource(output, bootstrap.template.implementationDigest);
     const bridge = await workflowApiBridge({ intakeApi: intake.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
     t.after(() => bridge.close());
@@ -80,7 +80,7 @@ export async function createWorkflowUpdateFixture(t, { fixture, output }) {
   const bootstrap = await createBootstrapFixture(t, { root: output, intakeFixture: intake, sourceCommit, sourceBase: fixture.bootstrap.identity.head,
     runId: 11, keys: fixture.bootstrap.keys, providerPolicy: fixture.policy, plan: fixture.plan, fenceReceipt: fixture.service.receipt,
     brokerKeys: fixture.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000,
-    maximumLifetimeMs: fixture.bootstrap.root.maximumLifetimeMs });
+    maximumLifetimeMs: fixture.bootstrap.root.maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'] });
   await retainWorkflowVerifierSource(output, bootstrap.template.implementationDigest);
   check(bootstrap.installation.rootDigest === fixture.bootstrap.installation.rootDigest, 'Source update must retain the independently installed root');
   const bridge = await workflowApiBridge({ intakeApi: intake.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
@@ -229,12 +229,17 @@ async function createWorkflowProviderFixture(portable) {
   });
   const policy = protocolPolicy({ ...original, workers: targets.filter(target => target.kind === 'worker').map(target => ({
     name: target.resource, metadataDigest: digest(target.metadata), versionContentApi: 'workers-beta/v1' })),
-    github: { ...original.github, environment: 'Preview' } });
-  const service = await hostedProtocolFixture({ policy, targets });
+    github: { repository: original.github.repository, environment: 'Preview', reporting: 'per-release' },
+    workInventory: { databaseId: '00000000-0000-4000-8000-000000000001', queries: [
+      { family: 'product-images', component: 'business', sql: "SELECT artifact_digest AS artifactDigest, format FROM accepted_jobs WHERE component = 'business' AND status IN ('accepted','running','retry') ORDER BY artifact_digest, format" },
+      { family: 'story-video', component: 'native', sql: "SELECT artifact_digest AS artifactDigest, format FROM accepted_jobs WHERE component = 'native' AND status IN ('accepted','running','retry') ORDER BY artifact_digest, format" },
+      { family: 'print-assets', component: 'storefront', sql: "SELECT artifact_digest AS artifactDigest, format FROM accepted_jobs WHERE component = 'storefront' AND status IN ('accepted','running','retry') ORDER BY artifact_digest, format" }
+    ] } });
+  const service = await hostedProtocolFixture({ policy, targets, realCredentials: true });
   const close = service.close; let closed = false;
   service.close = async () => { if (!closed) { closed = true; await close(); } };
   const plan = { schema: 'shop.hosted-target-plan/v1', scope: 'isolated-qualification', providerPolicy: policy, targets,
-    deploymentId: policy.github.deploymentIds[0], journeyOrigin: 'https://synthetic-workflow.example.invalid' };
+    deploymentId: policy.github.reporting === 'per-release' ? null : policy.github.deploymentIds[0], journeyOrigin: 'https://synthetic-workflow.example.invalid' };
   return { policy, targets, plan, service, realAwsQualified: false, syntheticQualificationOnly: true };
 }
 
@@ -252,7 +257,7 @@ export function retainedWorkflowPlanTargets(portable) {
   const policy = protocolPolicy({ ...original, workers: targets.filter(target => target.kind === 'worker').map(target => ({
     name: target.resource, metadataDigest: digest(target.metadata), versionContentApi: 'workers-beta/v1' })), github: { ...original.github, environment: 'Preview' } });
   return { policy, plan: { schema: 'shop.hosted-target-plan/v1', scope: 'isolated-qualification', providerPolicy: policy, targets,
-    deploymentId: policy.github.deploymentIds[0], journeyOrigin: 'https://qualification.example.invalid' } };
+    deploymentId: policy.github.reporting === 'per-release' ? null : policy.github.deploymentIds[0], journeyOrigin: 'https://qualification.example.invalid' } };
 }
 
 const checkout = fileURLToPath(new URL('../../../../../', import.meta.url)).replace(/\/$/, '');

@@ -1,5 +1,5 @@
-import { check, parseJSON, same, sha256, canonical } from './data.mjs';
-import { assertPolicy, assertProtocolRequest, requestBuilders, protocolByteLimit, protocolPageLimit, protocolItemLimit, cloudflareVersion, numberedVersion, revision, sourceMapDataDigest } from './provider-protocol-builders.mjs';
+import { check, parseJSON, same, sha256, canonical, digest } from './data.mjs';
+import { assertPolicy, assertProtocolRequest, requestBuilders, protocolByteLimit, protocolPageLimit, protocolItemLimit, cloudflareVersion, numberedVersion, revision, sourceMapDataDigest, isReadRequest } from './provider-protocol-builders.mjs';
 import { authorizeRequest, requestDigest } from './signing.mjs';
 export { protocolPolicy, requestBuilders, assetManifest } from './provider-protocol-builders.mjs';
 
@@ -20,31 +20,32 @@ const cfResult = value => { check(value?.success === true && (!value.errors || A
 export function protocolClient({ policy, signer, trust, transport, now = Date.now }) {
   assertPolicy(policy); check(typeof transport === 'function', 'Explicit bounded provider transport required');
   const builders = requestBuilders(policy), mutations = new Set();
-  const send = async request => {
+  const send = async (request, { intentDigest = null } = {}) => {
     assertProtocolRequest(request, policy);
-    const identity = requestDigest(request);
-    check(request.method === 'GET' || !mutations.has(identity), 'Provider mutation replay refused; reconcile its durable intent by readback');
+    check(intentDigest === null || typeof intentDigest === 'string' && /^[a-f0-9]{64}$/.test(intentDigest), 'Exact durable send authorization scope required');
+    const identity = intentDigest === null ? requestDigest(request) : digest({ requestDigest: requestDigest(request), intentDigest });
+    check(isReadRequest(request) || !mutations.has(identity), 'Provider mutation replay refused; reconcile its durable intent by readback');
     const authorized = await authorizeRequest({ request, policy, signer, trust, now });
     // The durable controller journal owns cross-process recovery. This fence
     // also prevents a caller from retrying identical bytes in this client.
-    if (request.method !== 'GET') {
+    if (!isReadRequest(request)) {
       check(!mutations.has(identity), 'Provider mutation replay refused; concurrent identical request');
       mutations.add(identity);
     }
     let response;
     try { response = await transport(authorized); responseBytes(response); }
-    catch (error) { if (request.method !== 'GET') throw new UncertainWrite(request, error); throw error; }
+    catch (error) { if (!isReadRequest(request)) throw new UncertainWrite(request, error); throw error; }
     // No retries, redirects, refresh, or mutation replay. A 409/412 leaves the
     // caller fenced until it reads and admits the current provider identity.
     if (response.status === 409 || response.status === 412) throw new ProtocolConflict(request.operation);
-    if (response.status >= 500 && request.method !== 'GET') throw new UncertainWrite(request, new ProtocolFailure(request.operation, response.status));
+    if (response.status >= 500 && !isReadRequest(request)) throw new UncertainWrite(request, new ProtocolFailure(request.operation, response.status));
     if (response.status < 200 || response.status >= 300) throw new ProtocolFailure(request.operation, response.status);
     return response;
   };
   const json = async request => {
     const response = await send(request);
     try { return parseJSON(responseBytes(response), 16 * 1024 * 1024); }
-    catch (error) { if (request.method !== 'GET') throw new UncertainWrite(request, error); throw error; }
+    catch (error) { if (!isReadRequest(request)) throw new UncertainWrite(request, error); throw error; }
   };
   async function lambdaInventory(name) {
     const versions = [], markers = new Set(); let marker = null;

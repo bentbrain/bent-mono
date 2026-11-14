@@ -10,9 +10,17 @@ export async function rehydrateProviderRequest(input, { policy, assets = null })
   check(input.schema === 'shop.provider-request/v1' && input.policyDigest === digest(policy) && typeof input.bodyBase64 === 'string' && input.bodyBase64.length <= Math.ceil(protocolByteLimit / 3) * 4, 'Custody request schema/policy/size differs');
   const builders = requestBuilders(policy), url = new URL(input.url), body = Buffer.from(input.bodyBase64, 'base64');
   check(body.toString('base64') === input.bodyBase64 && sha256(body) === input.bodySha256 && body.length <= protocolByteLimit, 'Custody request bytes differ');
+  const ecrBody = input.service === 'ecr' ? parseJSON(body) : null, ecrFunction = ecrBody ? policy.functions.find(item => item.imageRepository.split('.amazonaws.com/')[1] === ecrBody.repositoryName) : null;
   const worker = policy.workers.find(item => url.pathname.includes(`/${item.name}/`)), fn = policy.functions.find(item => url.pathname === `/2015-03-31/functions/${item.name}` || url.pathname.startsWith(`/2015-03-31/functions/${item.name}/`));
   let request;
   switch (input.operation) {
+    case 'ecr.check-layers': request = builders.ecrCheckLayers(ecrFunction?.name, ecrBody.layerDigests.map(value => value.slice(7))); break;
+    case 'ecr.initiate-layer': request = builders.ecrInitiateLayer(ecrFunction?.name); break;
+    case 'ecr.upload-part': request = builders.ecrUploadPart(ecrFunction?.name, ecrBody.uploadId, Buffer.from(ecrBody.layerPartBlob, 'base64'), ecrBody.partFirstByte); break;
+    case 'ecr.complete-layer': request = builders.ecrCompleteLayer(ecrFunction?.name, ecrBody.uploadId, ecrBody.layerDigests[0]?.slice(7)); break;
+    case 'ecr.put-image': request = builders.ecrPutImage(ecrFunction?.name, Buffer.from(ecrBody.imageManifest), ecrBody.imageDigest?.slice(7)); break;
+    case 'ecr.get-image': request = builders.ecrGetImage(ecrFunction?.name, ecrBody.imageIds[0]?.imageDigest?.slice(7)); break;
+    case 'work.query': { const value = parseJSON(body); const index = policy.workInventory?.queries.findIndex(query => query.sql === value.sql); request = builders.workQuery(index); break; }
     case 'store.get': request = builders.storeGet(url.pathname.slice(policy.store.prefix.length + 2)); break;
     case 'store.put': request = builders.storePut(url.pathname.slice(policy.store.prefix.length + 2), body, input.headers['if-match'] ?? null); break;
     case 'worker.versions': request = builders.workerVersions(worker?.name, Number(url.searchParams.get('page'))); break;
@@ -44,6 +52,8 @@ export async function rehydrateProviderRequest(input, { policy, assets = null })
     case 'lambda.upload': { const value = parseJSON(body); request = builders.lambdaUpload(fn?.name, value.ImageUri?.split('@sha256:')[1], value.RevisionId); break; }
     case 'lambda.activate': { const value = parseJSON(body); request = builders.lambdaActivate(fn?.name, url.pathname.split('/').at(-1), value.FunctionVersion, value.RevisionId); break; }
     case 'lambda.create-alias': { const value = parseJSON(body); request = builders.lambdaCreateAlias(fn?.name, value.Name, value.FunctionVersion); break; }
+    case 'report.deployments': request = builders.deploymentInventory(url.searchParams.get('sha'), Number(url.searchParams.get('page'))); break;
+    case 'report.create-deployment': { const value = parseJSON(body); request = builders.deploymentCreate({ head: value.ref, compositionDigest: value.payload?.compositionDigest, eventDigest: value.payload?.eventDigest }); break; }
     case 'report.statuses': request = builders.reportStatuses(url.pathname.split('/').at(-2), Number(url.searchParams.get('page'))); break;
     case 'report.success': request = builders.reportSuccess(url.pathname.split('/').at(-2), parseJSON(body).description?.slice('Verified release event '.length)); break;
     default: throw Error('Unsupported custody provider operation');
@@ -64,7 +74,8 @@ export async function materializeProviderCapabilities(input, { policy, assets, r
     metadata.assets.jwt = await resolve(metadata.assets.jwt, 'asset-completion');
     const modules = []; for (const [name, part] of form) if (name !== 'metadata') modules.push({ name, type: part.type, bytes: Buffer.from(await part.arrayBuffer()) });
     const expectedInventory = modules.map(part => ({ name: part.name, type: part.type, bytes: part.bytes.length, sha256: sha256(part.bytes), ...(part.name.endsWith('.map') ? { sourceMapDataSha256: sourceMapDataDigest(part.bytes) } : {}) })).sort((a, b) => a.name.localeCompare(b.name));
-    const worker = policy.workers.find(item => url.pathname.includes(`/${item.name}/`)); return builders.workerUpload(worker?.name, { entrypoint: metadata.main_module, metadata, modules, expectedInventory });
+    const ecrBody = input.service === 'ecr' ? parseJSON(body) : null, ecrFunction = ecrBody ? policy.functions.find(item => item.imageRepository.split('.amazonaws.com/')[1] === ecrBody.repositoryName) : null;
+  const worker = policy.workers.find(item => url.pathname.includes(`/${item.name}/`)); return builders.workerUpload(worker?.name, { entrypoint: metadata.main_module, metadata, modules, expectedInventory });
   }
   return logical;
 }

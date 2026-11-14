@@ -37,6 +37,7 @@ function syntheticQualityApi({ identity, acceptedAt, base = 'c'.repeat(40), tree
     [`${prefix}/commits/${reviewed}/check-runs?filter=latest&per_page=100&page=1`, { check_runs: [{ name: 'CodeQL', app: { slug: 'github-advanced-security' }, head_sha: reviewed, status: 'completed', conclusion: 'success' }] }],
     [`${prefix}/commits/${reviewed}/statuses?per_page=100&page=1`, [{ context: 'Independent review', state: 'success', target_url: `https://github.com/bentbrain/bent-mono/pull/40#issuecomment-synthetic` }]],
     [`${prefix}/actions/runs/111`, quality],
+    [`${prefix}/actions/runs?head_sha=${reviewed}&per_page=100&page=1`, { workflow_runs: [{ ...quality, head_sha: reviewed, created_at: new Date(acceptedAt - 30000).toISOString() }] }],
   ]), calls = [];
   const api = async path => { calls.push(path); check(documents.has(path), `Unexpected synthetic quality API path: ${path}`); return structuredClone(documents.get(path)); };
   return { api, documents, calls, quality, invocation, acceptedAt, base, tree };
@@ -44,7 +45,7 @@ function syntheticQualityApi({ identity, acceptedAt, base = 'c'.repeat(40), tree
 
 export async function createBootstrapFixture(t, { root, providerPolicy: suppliedProviderPolicy, plan: suppliedPlan, fenceReceipt,
   brokerKeys, brokerOrigin = 'https://qualification.example.invalid', runner = Buffer.from('process.exit(0);'), sourceCommit = '1'.repeat(40), imported: suppliedImported,
-  intakeFixture: suppliedIntakeFixture, acceptedAt = Date.now() - 2000, maximumLifetimeMs = 600000, runId = 10, attempt = 1, keys, sourceBase = 'c'.repeat(40) } = {}) {
+  intakeFixture: suppliedIntakeFixture, acceptedAt = Date.now() - 2000, maximumLifetimeMs = 600000, runId = 10, attempt = 1, keys, operationCommands, sourceBase = 'c'.repeat(40) } = {}) {
   check(typeof root === 'string', 'Explicit private synthetic fixture directory required');
   await mkdir(root, { recursive: true, mode: 0o700 });
   const directory = await realpath(await mkdtemp(join(root, 'bootstrap-'))); t.after(() => rm(directory, { force: true, recursive: true }));
@@ -97,6 +98,13 @@ export async function createBootstrapFixture(t, { root, providerPolicy: supplied
     targetPlan: await put('plan.json', plan), credentialFence: await put('fence.json', receipt),
     signing: { source: { keyId: source.entry.id, path: sourceKey.path }, composition: { keyId: composition.entry.id, path: compositionKey.path } },
     secretInstallations: [], componentConfigurations, artifactIntake: intake.installation, artifactPrivateKeyFile: intake.privateKeyFile };
+  if (operationCommands) {
+    const now = Date.now();
+    installationContract.operationScope = await put('operation-scope.json', { schema: 'shop.qualification-operation-scope/v1', scope: rootDocument.scope,
+      repository, repositoryName: rootDocument.repositoryName, environment: rootDocument.environment, workflowPath: rootDocument.workflowPath,
+      rootDigest: installationContract.root.sha256, providerPolicyDigest: rootDocument.providerPolicyDigest,
+      notBefore: now - 1000, expiresAt: now + 600000, commands: [...operationCommands].sort() });
+  }
   const installationRef = await put('installation.json', installationContract);
   const identity = { repository, repositoryName: rootDocument.repositoryName, head: sourceCommit, workflowCommit: sourceCommit,
     workflowRef: `${rootDocument.repositoryName}/${rootDocument.workflowPath}@refs/heads/main`, runId, attempt };
@@ -119,6 +127,7 @@ export async function createProtectedPackageFixture(f) {
   };
   for (const [field, path] of [['root', 'root.json'], ['compositionTemplate', 'template.json'], ['runnerFile', 'runner.mjs'], ['targetPlan', 'plan.json'], ['credentialFence', 'fence.json']])
     contract[field].path = await include(path, contract[field].path);
+  if (contract.operationScope) contract.operationScope.path = await include('operation-scope.json', contract.operationScope.path);
   for (const kind of ['source', 'composition']) contract.signing[kind].path = await include(`${kind}.pem`, contract.signing[kind].path);
   for (const configuration of contract.componentConfigurations) configuration.config.path = await include(`config-${configuration.component}.json`, configuration.config.path);
   contract.artifactPrivateKeyFile = await include('artifact-recipient.pem', contract.artifactPrivateKeyFile);
