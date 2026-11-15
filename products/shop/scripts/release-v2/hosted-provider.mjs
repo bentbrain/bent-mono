@@ -358,7 +358,7 @@ export function createHostedProvider({ policy, writer, broker, components, targe
       let version;
       if(saved){
         const after=await providerVersions({kind:'lambda',resource}),matches=[];
-        for(const value of after.filter(item=>!saved.precondition.versions.includes(item))){try{verifyLambdaQualified(await json(builders.lambdaFunction(resource,value)),{policy,name:resource,version:value,imageDigest:candidate.native.imageDigest,expectedBinding:binding});matches.push(value);}catch(error){if(error instanceof ProtocolFailure&&error.status===404)continue;throw error;}}
+        for(const value of after.filter(item=>!saved.precondition.versions.includes(item))){try{verifyLambdaQualified(await json(builders.lambdaFunction(resource,value)),{policy,name:resource,version:value,imageDigest:candidate.native.imageDigest,expectedBinding:binding});matches.push(value);}catch(error){if ((error instanceof ProtocolFailure) && error.status === 404) continue;throw error;}}
         check(matches.length===1,'Unknown numbered publication requires one exact GET-only result');version=matches[0];
       }else{
         const before=await providerVersions({kind:'lambda',resource}),uploaded=await recordRequest(operation,step,builders.lambdaUpload(resource,candidate.native.imageDigest,latest.Configuration.RevisionId),{active,versions:before,revisionId:latest.Configuration.RevisionId});version=numberedVersion(uploaded.Version);

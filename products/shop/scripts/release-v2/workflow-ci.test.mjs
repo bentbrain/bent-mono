@@ -93,5 +93,5 @@ test('native bootstrap evidence seals exact receipt and bounded public proofs wi
   assert.deepEqual(parseJSON(await readFile(join(retained,'result.private.json'))),result);
   const inventory=parseJSON(await readFile(join(retained,'workflow-inventory.private.json')));
   assert.equal(inventory.schema,'shop.workflow-evidence/v2'); assert.ok(inventory.inventory.some(ref=>ref.path===`native-evidence/${proof}`));
-  assert.equal(inventory.inventory.some(ref=>/external-installed|\.pem$/.test(ref.path)),false);
+  assert.equal(inventory.inventory.some(ref=>ref.path.includes('external-installed') || ref.path.endsWith('.pem')),false);
 });

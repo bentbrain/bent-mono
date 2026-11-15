@@ -13,6 +13,7 @@ import { assertNoIgnoredBuildInputs } from "../release-v2/source-inventory.mjs";
 import { sourceInventory as captureRootSource } from "../release-v2/source-inventory.mjs";
 import { createNativeV5Oci, writeNativeV5Oci, verifyNativeV5OciReceipt } from "./native-v5-oci.mjs";
 import { verifyOciLayout } from "../release-v2/oci-layout.mjs";
+import { nativeHostTarget, nativePackageCompatible, requireSharpTarget } from "./native-target.mjs";
 import { packagePortableBundle } from "../release-v2/portable-bundle.mjs";
 
 const execute = promisify(execFile);
@@ -101,7 +102,7 @@ async function materializeTree(directory, output, prefix = "") {
   assert.deepEqual((await readdir(join(directory, prefix))).sort(), names, "Installed package changed during materialization");
 }
 
-async function copyDependency(name, from, output, dependencies, installed = new Map(), optional = false) {
+export async function copyDependency(name, from, output, dependencies, installed = new Map(), optional = false, target = nativeHostTarget()) {
   const resolver = createRequire(from);
   let metadataPath;
   for (const base of resolver.resolve.paths(name) ?? []) {
@@ -110,12 +111,14 @@ async function copyDependency(name, from, output, dependencies, installed = new 
   }
   if (!metadataPath) { if (optional) return; throw new Error(`Linux dependency unavailable: ${name}`); }
   const directory = await realpath(dirname(metadataPath)), metadataBytes = await readFile(metadataPath), metadata = JSON.parse(metadataBytes.toString("utf8"));
+  if (!nativePackageCompatible(metadata, target)) { if (optional) return; throw new Error(`Required native dependency ${name} is incompatible with ${target.os}/${target.cpu}/${target.libc ?? "host"}`); }
   if (installed.has(name)) { assert.equal(installed.get(name), directory, "Conflicting Linux dependency resolution"); return; }
   installed.set(name, directory);
   dependencies.push({ name, version: metadata.version, packageSha256: sha256(metadataBytes) });
   await materializeTree(directory, join(output, "node_modules", name));
-  for (const dep of Object.keys(metadata.dependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed);
-  for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, true);
+  for (const dep of Object.keys(metadata.dependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, false, target);
+  for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, true, target);
+  if (name === "sharp") requireSharpTarget(dependencies, target);
 }
 
 export function sharedLibraries(output) {
@@ -317,9 +320,9 @@ export async function packageLinuxCandidate(destination) {
   for (const [file, source] of [["lifestyle-white.png", "featured-blank-white.png"], ["lifestyle-black.png", "featured-blank-black.png"], ["lifestyle.json", "featured.json"],
     ["featured-mask-white.svg", "featured-mask-white.svg"], ["featured-mask-black.svg", "featured-mask-black.svg"]])
     await copy(join(checkout, "products/shop/assets/lifestyle", source), join(runtime, src, "product-assets", file));
-  const dependencies = [], installed = new Map();
+  const dependencies = [], installed = new Map(), target = nativeHostTarget();
   for (const name of ["@napi-rs/canvas", "@fontsource-variable/geist-mono", "sharp"])
-    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed);
+    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed, false, target);
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas" && dep.version === recipe.canvas));
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas-linux-x64-gnu" && dep.version === recipe.canvas));
   const binaries = await packageExecutables(runtime, join(output, "native-image"));

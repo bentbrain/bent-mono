@@ -4,6 +4,7 @@ import { open, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { checkout, packageLinuxCandidate, packageNativeV5Oci, packageShopPortableBundle, sha256 } from './linux-candidate.mjs';
+import { saveHostedFailure } from '../release-v2/hosted-diagnostics.mjs';
 import { retrieveNativeBaseOci } from './native-v5-base.mjs';
 
 const execute = promisify(execFile), env = process.env;
@@ -41,4 +42,7 @@ async function produce() {
 }
 
 try { assert.equal(process.argv.length, 2); await produce(); }
-catch { console.error('Native OCI production failed. Inspect the encrypted evidence.'); process.exitCode = 1; }
+catch (error) {
+  await saveHostedFailure(error, join(env.PRIVATE_EVIDENCE, 'diagnostics')).catch(() => {});
+  console.error('Native OCI production failed. Inspect the encrypted evidence.'); process.exitCode = 1;
+}

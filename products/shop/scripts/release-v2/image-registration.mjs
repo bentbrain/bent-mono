@@ -1,4 +1,4 @@
-import { check, digest, same, sha256 } from './data.mjs';
+import { check, digest, sha256 } from './data.mjs';
 import { assertPolicy, requestBuilders } from './provider-protocol-builders.mjs';
 import { requestDigest } from './signing.mjs';
 import { verifyOciLayout } from './oci-layout.mjs';

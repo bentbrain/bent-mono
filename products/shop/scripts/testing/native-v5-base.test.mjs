@@ -13,8 +13,8 @@ test('base retrieval binds the actual public registry manifest and stops on unav
   await assert.rejects(retrieveNativeBaseOci(join(root, 'base'), { send: async (url, options) => {
     calls.push({ url, options }); return calls.length === 1 ? new Response(pinnedManifest, { status: 200 }) : new Response(null, { status: 503 });
   } }), /registry read failed/);
-  assert.equal(calls.length, 2); assert.match(calls[0].url, /mcr\.microsoft\.com\/v2\/playwright\/manifests\/sha256:/);
-  assert.match(calls[1].url, /mcr\.microsoft\.com\/v2\/playwright\/blobs\/sha256:/);
+  assert.equal(calls.length, 2); assert.match(calls[0].url, /^https:\/\/mcr\.microsoft\.com\/v2\/playwright\/manifests\/sha256:[a-f0-9]{64}$/);
+  assert.match(calls[1].url, /^https:\/\/mcr\.microsoft\.com\/v2\/playwright\/blobs\/sha256:[a-f0-9]{64}$/);
   assert.deepEqual(calls.map(call => Object.keys(call.options.headers)), [['accept'], ['accept']]);
   assert.deepEqual(await readdir(join(root, 'base/blobs/sha256')), [sha256(pinnedManifest)]);
 });

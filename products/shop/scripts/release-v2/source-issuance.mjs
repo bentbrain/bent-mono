@@ -269,9 +269,9 @@ export async function prepareHostedNativeQualification({ installation, identity,
   };
   const revalidate = async () => {
     const fresh = await revalidateInstallation();
-    state.verifyInvocation(await qualityApi(state.runPath));
-    await requireReleaseChecks(identity.head, qualityApi);
-    check((await qualityApi(`${prefix}/git/ref/heads/main`)).object?.sha === identity.head,
+    state.verifyInvocation(await state.read(state.runPath));
+    await requireReleaseChecks(identity.head, state.read);
+    check((await state.read(`${prefix}/git/ref/heads/main`)).object?.sha === identity.head,
       'Canonical source changed before native qualification');
     return fresh;
   };

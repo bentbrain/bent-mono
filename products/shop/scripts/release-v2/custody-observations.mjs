@@ -1,4 +1,4 @@
-import { check, digest, parseJSON, readRef, same } from './data.mjs';
+import { check, digest, parseJSON, readRef } from './data.mjs';
 import { assertPolicy, assetManifest, exactFields } from './provider-protocol-builders.mjs';
 import { responseBytes } from './provider-protocol.mjs';
 
