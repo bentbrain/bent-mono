@@ -73,7 +73,7 @@ test('actual hosted admission verifies root, signed authority, full portable ass
   const env = { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: head, GITHUB_WORKFLOW_SHA: head,
     GITHUB_REPOSITORY: root.repositoryName, GITHUB_REPOSITORY_ID: String(root.repository.repositoryId), GITHUB_REPOSITORY_OWNER_ID: String(root.repository.ownerId),
     GITHUB_RUN_ID: String(signedPayload.runId), GITHUB_RUN_ATTEMPT: String(signedPayload.attempt), GITHUB_WORKFLOW_REF: `${root.repositoryName}/${root.workflowPath}@refs/heads/main` };
-  const options = { bundle: assembly.root, portable: portable.verified.root, manifest, authority: authorityPath, trustRoot: rootPath, rootDigest: digest(root), targetPlan, env };
-  assert.equal((await admitHostedInvocation(options)).admission.payload.components.length, 3);
-  assert.equal((await hostedController({ ...options, command: 'plan' })).readiness.awsImageQualified, false);
+  const options = { bundle: assembly.root, portable: portable.verified.root, manifest, authority: authorityPath, trustRoot: rootPath, rootDigest: digest(root), targetPlan };
+  assert.equal((await admitHostedInvocation(options, env)).admission.payload.components.length, 3);
+  assert.equal((await hostedController({ ...options, command: 'plan' }, env)).readiness.awsImageQualified, false);
 });

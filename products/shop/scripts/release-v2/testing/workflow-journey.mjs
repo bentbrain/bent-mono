@@ -13,16 +13,16 @@ const executable = fileURLToPath(import.meta.url);
 const phase = result => result.controller?.phase ?? result.phase;
 
 export async function workflowChild(configuration) {
-  check(configuration.options&&typeof configuration.options==='object'&&!Object.hasOwn(configuration.options,'env')&&!Object.hasOwn(configuration.options,'boundaries'),'Workflow child identity comes from its explicit process environment');
-  const options={...configuration.options,env:process.env};
+  check(configuration.options&&typeof configuration.options==='object'&&!Object.hasOwn(configuration.options,'env')&&!Object.hasOwn(configuration.options,'boundaries')&&!Object.hasOwn(configuration.options,'identity'),'Workflow child identity comes from its explicit process environment');
+  const options = configuration.options;
   const boundaries = workflowFixtureBoundaries(configuration.boundaries);
   if (configuration.mode === 'hosted-execution-probe') {
     const { hostedController } = await import('../hosted-controller.mjs');
-    return { controller: await hostedController(options, boundaries) };
+    return { controller: await hostedController(options, process.env, boundaries) };
   }
   check(configuration.mode === undefined, 'Unknown workflow proof process mode');
   const { workflowEntrypoint } = await import('../workflow-entrypoint.mjs');
-  return workflowEntrypoint(options, boundaries);
+  return workflowEntrypoint(options, process.env, boundaries);
 }
 
 export async function workflowInvocation({ output, name, configuration, timeoutMs = 30000, signal }) {

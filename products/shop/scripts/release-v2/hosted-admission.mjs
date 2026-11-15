@@ -67,6 +67,13 @@ export async function readHostedRoot(path, expectedDigest, bundle) {
   return readInstalledRoot(path, expectedDigest);
 }
 
+/** File-owned release settings never carry runtime identity or provider ports. */
+export function assertInvocationOptions(options) {
+  check(options && typeof options === 'object' && !Array.isArray(options) &&
+    ['env', 'identity', 'boundaries'].every(field => !Object.hasOwn(options, field)),
+  'Workflow identity and provider boundaries come from protected runtime');
+}
+
 export function actionsIdentity(env) {
   check(env.GITHUB_ACTIONS === 'true' && env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main', 'Canonical protected workflow dispatch required');
   const id = value => { check(typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value), 'Exact Actions identity required'); const result = Number(value); integer(result); return result; };

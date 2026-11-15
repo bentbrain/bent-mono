@@ -172,7 +172,7 @@ test('independently pinned package materializes exact root and signing keys with
   const imported = await importHostedPortable({ request: f.intake.request, installation: installed.installation.artifactIntake,
     privateKeyFile: installed.installation.artifactPrivateKeyFile, destination: join(f.directory, 'package-intake'), api: f.intake.api });
   const assembled = await assembleHostedRelease({ ...f, installation: installed.installation, imported, destination: join(f.directory, 'package-assembly') });
-  const plan = await hostedController({ ...assembled.options, env: f.env, command: 'plan' });
+  const plan = await hostedController({ ...assembled.options, command: 'plan' }, f.env);
   assert.equal(plan.phase, 'plan-admitted'); assert.equal(plan.readiness.awsImageQualified, false); assert.equal(plan.providerWrites, 0);
   await assert.rejects(installProtectedPackage(original), { code: 'EEXIST' });
 });

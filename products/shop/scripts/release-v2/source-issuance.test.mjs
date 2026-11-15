@@ -26,10 +26,10 @@ test('real importer, guard, installed signers and default controller share one s
   assert(f.quality.calls.some(path => path.includes('/attempts/1/jobs?')));
   assert.equal(result.evidence.guardImplementationSha256, sha256(await readFile(new URL('../../../../scripts/require-release-checks.mjs', import.meta.url))));
   assert(result.authority.payload.portableManifests.every(item => item.awsImageQualified === false));
-  const plan = await hostedController({ ...result.options, env: f.env, command: 'plan' });
+  const plan = await hostedController({ ...result.options, command: 'plan' }, f.env);
   assert.equal(plan.phase, 'plan-admitted'); assert.equal(plan.readiness.awsImageQualified, false); assert.equal(plan.operationalApproval, false); assert.equal(plan.providerWrites, 0);
   let brokerCalls = 0;
-  await assert.rejects(hostedController({ ...result.options, env: f.env, command: 'advance' }, { broker: async () => { brokerCalls++; throw Error('unexpected provider credential call'); } }), /target|format|qualification|resource|operation authority/i);
+  await assert.rejects(hostedController({ ...result.options, command: 'advance' }, f.env, { broker: async () => { brokerCalls++; throw Error('unexpected provider credential call'); } }), /target|format|qualification|resource|operation authority/i);
   assert.equal(brokerCalls, 0);
   const file = parseJSON(await readFile(result.options.authority)); assert.equal(digest(file), digest(result.authority));
 });
@@ -89,7 +89,7 @@ test('older qualified source preserves its accepted time and reports budget over
   assert.equal(timing.observedAt - acceptedAt, timing.elapsedMs); assert.equal(timing.exceeded, true); assert.equal(timing.productionDeliveryMeasured, false);
   assert.equal(result.authority.payload.expiresAt - result.authority.payload.issuedAt, f.root.maximumLifetimeMs);
   const verified = verifyHostedAuthority(result.authority, { root: f.root, identity: f.identity }); assert.equal(verified.payload.acceptedAt, acceptedAt);
-  assert.equal((await hostedController({ ...result.options, env: f.env, command: 'plan' })).operationalApproval, false);
+  assert.equal((await hostedController({ ...result.options, command: 'plan' }, f.env)).operationalApproval, false);
 });
 
 test('caller cannot reset the accepted source clock after qualification', async t => {

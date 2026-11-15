@@ -138,8 +138,13 @@ test('fresh source entrypoints complete an initial release and update only store
 
 test('workflow child rejects serialized identity before any transport and accepts identity only from its explicit runtime environment',async t=>{
   const output=process.env.SHOP_WORKFLOW_PROOF_ROOT?await realpath(await mkdtemp(join(process.env.SHOP_WORKFLOW_PROOF_ROOT,'identity-boundary-'))):await privateRoot(t),executable=new URL('./testing/workflow-journey.mjs',import.meta.url).pathname,configuration=join(output,'injected-child.private.json');
-  await writeFile(configuration,JSON.stringify({options:{env:{GITHUB_SHA:'1'.repeat(40)}},boundaries:{apiOrigin:'http://127.0.0.1:1/'}}),{mode:0o600});
-  const denied=await recordedProcess({output,name:'serialized-identity-denied',args:[executable,'--child',configuration]});assert.notEqual(denied.exitCode,0);assert.match(denied.stderrText,/identity comes from its explicit process environment/);assert(!denied.stderrText.includes('ECONNREFUSED'));
+  for (const field of ['env', 'identity', 'boundaries']) {
+    await writeFile(configuration, JSON.stringify({ options: { [field]: { GITHUB_SHA: '1'.repeat(40) } }, boundaries: { apiOrigin: 'http://127.0.0.1:1/' } }), { mode: 0o600 });
+    const denied = await recordedProcess({ output, name: `serialized-${field}-denied`, args: [executable, '--child', configuration] });
+    assert.notEqual(denied.exitCode, 0);
+    assert.match(denied.stderrText, /identity comes from its explicit process environment/);
+    assert(!denied.stderrText.includes('ECONNREFUSED'));
+  }
   const fixture=await createWorkflowJourneyFixture(t,{output:join(output,'fixture')}),calls=fixture.service.transcript.length,broker=fixture.service.brokerCalls.length;
   const configurationWithRuntime={...fixture.configuration,options:{...fixture.configuration.options,command:'plan'}},accepted=await workflowInvocation({output,name:'actual-runtime-plan',configuration:configurationWithRuntime});assert.equal(accepted.exitCode,0,accepted.stderrText);assert.equal(accepted.result.controller.phase,'plan-admitted');
   const serialized=JSON.parse(await readFile(join(output,'actual-runtime-plan-configuration.private.json')));assert(!Object.hasOwn(serialized.options,'env'));assert(!Object.hasOwn(serialized.options,'boundaries'));

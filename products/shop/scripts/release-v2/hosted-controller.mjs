@@ -9,7 +9,7 @@ import { canonical, check, digest, parseJSON, readRef, readRegularFile, same, sh
 import { selectedVersion } from './component-identity.mjs';
 import { compatible } from './composition.mjs';
 import { advanceWithPorts } from './controller.mjs';
-import { actionsIdentity, admitHostedComposition, readInstalledRoot, verifyHostedAuthority } from './hosted-admission.mjs';
+import { actionsIdentity, assertInvocationOptions, admitHostedComposition, readInstalledRoot, verifyHostedAuthority } from './hosted-admission.mjs';
 import { exactFields, protocolPolicy } from './provider-protocol-builders.mjs';
 import { verifyPortableBundle } from './portable-bundle.mjs';
 import { admitCredentialFence, credentialBrokerBoundary, createHostedWriter } from './hosted-writer.mjs';
@@ -22,9 +22,10 @@ import { snapshotRelease } from './release-snapshot.mjs';
 
 const commands = new Set(['plan', 'advance', 'begin', 'rollback', 'recover-report']);
 
-export async function admitHostedInvocation(options) {
+export async function admitHostedInvocation(options, env = process.env) {
+  assertInvocationOptions(options);
   check(commands.has(options.command ?? 'plan'), 'Unknown hosted qualification operation');
-  const identity = actionsIdentity(options.env ?? process.env);
+  const identity = actionsIdentity(env);
   const admission = await admitHostedComposition({ ...options, identity });
   const authority = admission.hostedAuthority.payload;
   const bytes = await readRegularFile(options.targetPlan, 16 * 1024 * 1024, true); check(bytes.length <= 16 * 1024 * 1024 && sha256(bytes) === authority.targetPlanDigest, 'Signed target plan bytes differ');
@@ -86,36 +87,39 @@ async function revalidateSource(options, authority, boundaries, retainedEvidence
     .sort((a, b) => b.id - a.id)[0]?.id === run.id, 'A newer source qualification attempt requires fresh admission');
 }
 
-export async function hostedController(options, boundaries = {}) {
-  if (options.command === 'recover-report') return hostedReporting(options, boundaries);
+export async function hostedController(options, env = process.env, boundaries = {}) {
+  assertInvocationOptions(options);
+  if (options.command === 'recover-report') return hostedReporting(options, env, boundaries);
   if ((options.command ?? 'plan') === 'plan') {
-    const admitted = await admitHostedInvocation(options), { admission, authority } = admitted;
+    const admitted = await admitHostedInvocation(options, env), { admission, authority } = admitted;
     return { schema: 'shop.hosted-plan/v1', scope: 'isolated-qualification', phase: 'plan-admitted',
       compositionDigest: admission.compositionDigest, authorityDigest: admission.hostedAuthority.authorityDigest,
       portableManifestDigest: admitted.portable.manifestSha256, providerWrites: 0, operationalApproval: false,
       readiness: { awsImageQualified: authority.portableManifests.every(item => item.component !== 'native' || item.awsImageQualified),
         credentialCustodyRequired: true, realProviderQualificationRequired: true } };
   }
-  return withHostedReleaseSession(options, boundaries, step => step(options.command));
+  return withHostedReleaseSession(options, env, boundaries, step => step(options.command));
 }
 
 // The callback receives one transition port backed by the same admitted private
 // bytes, client and exclusive writer. The port expires when the callback exits.
 // A new process always copies and authenticates every subject again.
-export async function withHostedReleaseSession(originalOptions, boundaries, work) {
+export async function withHostedReleaseSession(originalOptions, env, boundaries, work) {
+  assertInvocationOptions(originalOptions);
   check(typeof work === 'function', 'Explicit release session callback required');
-  originalOptions = { ...originalOptions, env: { ...(originalOptions.env ?? process.env) } };
+  originalOptions = { ...originalOptions };
+  env = Object.freeze({ ...env });
   boundaries = { ...boundaries };
   const initialRoot = await readInstalledRoot(originalOptions.trustRoot, originalOptions.rootDigest);
   const initialAuthority = verifyHostedAuthority(parseJSON(await readRegularFile(originalOptions.authority, 16 * 1024 * 1024, true)),
-    { root: initialRoot, identity: actionsIdentity(originalOptions.env ?? process.env) }).payload;
+    { root: initialRoot, identity: actionsIdentity(env) }).payload;
   assertOperation(initialAuthority, originalOptions.command ?? 'advance');
-  const snapshot = await snapshotRelease(originalOptions), options = { ...snapshot.options, env: { ...(originalOptions.env ?? process.env) } };
+  const snapshot = await snapshotRelease(originalOptions), options = snapshot.options;
   const cost = { schema: 'shop.release-session-cost/v1', startedAt: Date.now(), snapshot: snapshot.measurements,
     immutableAdmissions: 0, transitions: 0, sourceRevalidations: 0, callbackCompleted: false };
   let transport, writer, failure;
   try {
-    const admitted = await admitHostedInvocation(options), { admission, authority, plan, policy } = admitted;
+    const admitted = await admitHostedInvocation(options, env), { admission, authority, plan, policy } = admitted;
     cost.immutableAdmissions = 1;
     const authorityEnvelope = parseJSON(await readRegularFile(options.authority, 16 * 1024 * 1024, true));
     const sourceEvidence = options.sourceEvidence ? parseJSON(await readRegularFile(options.sourceEvidence, 32 * 1024 * 1024, true), 32 * 1024 * 1024) : null;
@@ -127,7 +131,7 @@ export async function withHostedReleaseSession(originalOptions, boundaries, work
     const currentAuthority = async command => {
       check(['begin', 'advance', 'rollback'].includes(command), 'Unsupported release session transition');
       const root = await readInstalledRoot(originalOptions.trustRoot, originalOptions.rootDigest);
-      const verified = verifyHostedAuthority(authorityEnvelope, { root, identity: actionsIdentity(options.env) });
+      const verified = verifyHostedAuthority(authorityEnvelope, { root, identity: actionsIdentity(env) });
       check(verified.authorityDigest === admission.hostedAuthority.authorityDigest && Date.now() < proofExpiresAt, 'Release session proof expired or authority changed');
       assertOperation(authority, command);
     };
@@ -148,7 +152,7 @@ export async function withHostedReleaseSession(originalOptions, boundaries, work
     const preflight = await preflightHostedTargets({ policy, components: admission.payload.components, targets: plan.targets, load, release });
     await retainHostedRequestGraph({ directory: options.evidenceDirectory, preflight });
     transport = boundaries.broker ?? createBrokerTransport({ root: admission.root,
-      tokenProvider: () => requestBrokerIdentity({ root: admission.root, env: options.env ?? process.env }) });
+      tokenProvider: () => requestBrokerIdentity({ root: admission.root, env }) });
     const broker = credentialBrokerBoundary({ fenceAdmission: fence, boundary: transport });
     const initialCommand = originalOptions.command ?? 'advance'; let activeCommand = initialCommand;
     writer = createHostedWriter({ policy, broker, fenceAdmission: fence, eventCacheDirectory: join(options.evidenceDirectory, 'immutable-journal-cache'),

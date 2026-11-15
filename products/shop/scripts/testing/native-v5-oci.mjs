@@ -39,65 +39,161 @@ export function nativeV5Layer(files) {
   return Buffer.concat([...chunks, Buffer.alloc(1024)], total);
 }
 
-// Base filesystem members can contain punctuation used by Debian multiarch
-// packages. Portable locators keep their separate, stricter URL-safe policy.
-function baseMemberPath(path) {
-  check(typeof path === 'string' && path.isWellFormed() && path.length <= 512 && /^[^\x00-\x1f\x7f\\]+$/u.test(path) &&
-    !path.startsWith('/') && path.split('/').every(part => part && part !== '.' && part !== '..'), 'Malformed base relative path');
+// Immutable Linux base names use valid, losslessly decoded UTF-8. All non-NUL
+// characters, including controls and backslash, are literal; slash separates
+// components. This is a bounded UTF-8 contract, not arbitrary POSIX byte names.
+const baseLimits = Object.freeze({ layerBytes: 1024 ** 3, totalBytes: 8 * 1024 ** 3, layers: 128,
+  members: 500000, entries: 300000, metadataBytes: 64 * 1024 ** 2, paxBytes: 1024 ** 2,
+  pathBytes: 4096, componentBytes: 255, components: 256, nameBytes: 128 * 1024 ** 2, treeSteps: 32000000, treeNodes: 2000000 });
+const baseWork = new WeakMap();
+function baseText(text, limits = baseLimits) {
+  check(typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && Buffer.byteLength(text) <= limits.pathBytes,
+    'Malformed base UTF-8 name or byte bound');
+  const parts = text.split('/');
+  check(parts.length <= limits.components && parts.every(part => Buffer.byteLength(part) <= limits.componentBytes), 'Base name component bound exceeded');
+  return text;
+}
+function baseMemberPath(path, limits = baseLimits) {
+  baseText(path, limits);
+  check(path && !path.startsWith('/') && path.split('/').every(part => part && part !== '.' && part !== '..'), 'Malformed base relative path');
   return path;
 }
+function tarText(value, terminated = true) {
+  const end = terminated ? value.indexOf(0) : -1, bytes = end < 0 ? value : value.subarray(0, end), text = bytes.toString('utf8');
+  check(Buffer.from(text, 'utf8').equals(bytes), 'Invalid base UTF-8 bytes');
+  return text;
+}
 
-// Inspect base tar records in memory. No base member is extracted on the host.
-export function inspectBaseLayer(bytes, entries = new Map()) {
-  let pending = {}, ended = false;
-  const string = value => value.toString('utf8').replace(/\0.*$/s, '');
-  const number = value => { const text = string(value).trim(); check(/^[0-7]*$/.test(text), 'Unsupported tar number'); return Number.parseInt(text || '0', 8); };
+// Inspect a complete layer without host extraction. Whiteouts affect the lower
+// tree first; additions then follow tar order, including directory replacement.
+export function inspectBaseLayer(bytes, entries = new Map(), limits = {}) {
+  const bound = { ...baseLimits, ...limits };
+  check(Object.entries(bound).every(([key, value]) => Object.hasOwn(baseLimits, key) && Number.isSafeInteger(value) && value > 0 && value <= baseLimits[key]), 'Base inspection limits may only tighten');
+  check(Buffer.isBuffer(bytes) && bytes.length <= bound.layerBytes && entries.size <= bound.entries, 'Base layer or entry bound exceeded');
+  check(bytes.length >= 1024 && bytes.length % 512 === 0, 'Truncated base tar framing');
+  const work = { layers: 0, bytes: 0, members: 0, metadataBytes: 0, nameBytes: 0, treeSteps: 0, treeNodes: 0, ...(baseWork.get(entries) ?? {}) };
+  work.layers++; work.bytes += bytes.length;
+  check(work.layers <= bound.layers && work.bytes <= bound.totalBytes, 'Aggregate base decompression bound exceeded');
+  const additions = [], whiteouts = [], opaque = [];
+  let pending = new Map(), ended = false;
+  const number = value => { const text = tarText(value).trim(); check(/^[0-7]*$/.test(text), 'Unsupported tar number');
+    const result = Number.parseInt(text || '0', 8); check(Number.isSafeInteger(result) && result >= 0, 'Unsafe base tar number'); return result; };
+  const name = value => { baseText(value, bound); work.nameBytes += Buffer.byteLength(value); check(work.nameBytes <= bound.nameBytes, 'Aggregate base name bound exceeded'); return value; };
   for (let offset = 0; offset < bytes.length;) {
     check(offset + 512 <= bytes.length, 'Truncated base tar header');
     const header = bytes.subarray(offset, offset + 512); offset += 512;
-    if (header.every(byte => byte === 0)) { check(bytes.subarray(offset).every(byte => byte === 0), 'Base tar has bytes after terminator'); ended = true; break; }
+    if (header.every(byte => byte === 0)) { check(offset + 512 <= bytes.length && bytes.subarray(offset).every(byte => byte === 0), 'Base tar terminator or trailing bytes differ'); ended = true; break; }
+    check(++work.members <= bound.members, 'Aggregate base member bound exceeded');
     const checksum = number(header.subarray(148, 156)), copy = Buffer.from(header); copy.fill(32, 148, 156);
     check([...copy].reduce((sum, byte) => sum + byte, 0) === checksum, 'Base tar checksum differs');
-    const size = number(header.subarray(124, 136)); check(Number.isSafeInteger(size) && size >= 0 && offset + Math.ceil(size / 512) * 512 <= bytes.length, 'Truncated base tar payload');
-    const content = bytes.subarray(offset, offset + size); offset += Math.ceil(size / 512) * 512;
-    const kind = string(header.subarray(156, 157)) || '0';
+    const size = number(header.subarray(124, 136)), padded = Math.ceil(size / 512) * 512;
+    check(Number.isSafeInteger(padded) && offset + padded <= bytes.length, 'Truncated base tar payload');
+    const content = bytes.subarray(offset, offset + size); offset += padded;
+    const kind = tarText(header.subarray(156, 157)) || '0';
     if (kind === 'x') {
-      let at = 0; pending = {};
-      while (at < content.length) { const space = content.indexOf(32, at), length = Number(content.subarray(at, space).toString());
-        check(space > at && Number.isSafeInteger(length) && length > 0 && at + length <= content.length, 'Invalid base PAX record');
-        const record = content.subarray(space + 1, at + length - 1).toString('utf8'), equal = record.indexOf('='); check(equal > 0, 'Invalid base PAX field');
-        const key = record.slice(0, equal); check(!Object.hasOwn(pending, key), 'Duplicate base PAX field'); pending[key] = record.slice(equal + 1); at += length; }
+      check(pending.size === 0 && size <= bound.paxBytes, 'Base PAX metadata bound or target differs');
+      work.metadataBytes += size; check(work.metadataBytes <= bound.metadataBytes, 'Aggregate base metadata bound exceeded');
+      for (let at = 0; at < content.length;) {
+        const space = content.indexOf(32, at), digits = content.subarray(at, space);
+        check(space > at && digits[0] >= 49 && digits[0] <= 57 && digits.every(byte => byte >= 48 && byte <= 57), 'Invalid base PAX record');
+        const length = Number(digits.toString('ascii'));
+        check(Number.isSafeInteger(length) && length > space - at + 2 && at + length <= content.length && content[at + length - 1] === 10, 'Invalid base PAX record');
+        const record = content.subarray(space + 1, at + length - 1), equal = record.indexOf(61);
+        check(equal > 0, 'Invalid base PAX field');
+        const key = tarText(record.subarray(0, equal), false), value = record.subarray(equal + 1);
+        check(!/[\0\n]/.test(key), 'Invalid base PAX field');
+        check(!pending.has(key) && pending.size < 128, 'Duplicate or excessive base PAX field');
+        // Extended attributes can contain arbitrary binary bytes. Only fields
+        // used for filesystem interpretation are decoded; original layers stay intact.
+        if (['path', 'linkpath', 'size'].includes(key)) {
+          const text = tarText(value, false); check(!text.includes('\0'), 'Invalid base PAX field'); pending.set(key, text);
+        } else pending.set(key, value);
+        at += length;
+      }
       continue;
     }
     check(['0', '1', '2', '5'].includes(kind), 'Unsupported base tar member');
-    let path = pending.path ?? [string(header.subarray(345, 500)), string(header.subarray(0, 100))].filter(Boolean).join('/');
-    path = path.replace(/^\.\//, '').replace(/\/$/, '');
-    if (path === '.' || path === '') { check(kind === '5', 'Invalid base root member'); pending = {}; continue; }
-    baseMemberPath(path); const link = pending.linkpath ?? string(header.subarray(157, 257));
-    check(pending.size === undefined || pending.size === String(size), 'PAX size differs'); pending = {};
-    const leaf = posix.basename(path), directory = posix.dirname(path);
-    if (leaf === '.wh..wh..opq') { for (const key of entries.keys()) if (key.startsWith(`${directory}/`)) entries.delete(key); }
-    else if (leaf.startsWith('.wh.')) { const removed = posix.join(directory, leaf.slice(4)); for (const key of entries.keys()) if (key === removed || key.startsWith(`${removed}/`)) entries.delete(key); }
-    else entries.set(path, { kind, mode: number(header.subarray(100, 108)), ...(kind === '0' ? { sha256: sha256(content), bytes: size } : { link }) });
+    check(pending.get('size') === undefined || pending.get('size') === String(size), 'PAX size differs');
+    let path = name(pending.get('path') ?? [tarText(header.subarray(345, 500)), tarText(header.subarray(0, 100))].filter(Boolean).join('/'));
+    while (path.startsWith('./')) path = path.slice(2);
+    if (path.endsWith('/')) { check(kind === '5', 'Non-directory base name has a trailing slash'); path = path.slice(0, -1); }
+    const link = ['1', '2'].includes(kind) ? name(pending.get('linkpath') ?? tarText(header.subarray(157, 257))) : '';
+    pending = new Map();
+    check(kind === '0' || size === 0, 'Non-file base payload differs');
+    if (path === '.' || path === '') { check(kind === '5', 'Invalid base root member'); continue; }
+    baseMemberPath(path, bound);
+    const parts = path.split('/'), leaf = parts.pop(), directory = parts.join('/');
+    check(parts.every(part => !part.startsWith('.wh.')), 'Base whiteout ancestor differs');
+    if (leaf.startsWith('.wh.')) {
+      check(kind === '0' && size === 0, 'Base whiteout must be an empty regular member');
+      if (leaf === '.wh..wh..opq') opaque.push(directory);
+      else { check(leaf.length > 4, 'Empty base whiteout target'); whiteouts.push([...parts, leaf.slice(4)].join('/')); }
+    } else {
+      const mode = number(header.subarray(100, 108)); check(mode <= 0o7777, 'Unsupported base mode');
+      check(!['1', '2'].includes(kind) || link.length > 0, 'Empty base link target');
+      additions.push([path, { kind, mode, ...(kind === '0' ? { sha256: sha256(content), bytes: size } : { link }) }]);
+    }
   }
-  check(ended && Object.keys(pending).length === 0, 'Base tar terminator or PAX target missing'); return entries;
+  check(ended && pending.size === 0, 'Base tar terminator or PAX target missing');
+  const node = () => { check(++work.treeNodes <= bound.treeNodes, 'Aggregate base tree node bound exceeded'); return { item: undefined, children: new Map() }; }, root = node();
+  const walk = (path, create = false, enforceAncestors = false) => {
+    let current = root;
+    for (const part of path ? path.split('/') : []) {
+      check(++work.treeSteps <= bound.treeSteps, 'Aggregate base tree work bound exceeded');
+      if (enforceAncestors) check(!current.item || current.item.kind === '5', 'Base member ancestor is not a directory');
+      let next = current.children.get(part);
+      if (!next) { if (!create) return; next = node(); current.children.set(part, next); }
+      current = next;
+    }
+    return current;
+  };
+  for (const [path, item] of entries) walk(baseMemberPath(path, bound), true).item = item;
+  for (const path of whiteouts) { const parts = path.split('/'), leaf = parts.pop(); walk(parts.join('/'))?.children.delete(leaf); }
+  for (const path of opaque) walk(path)?.children.clear();
+  for (const [path, item] of additions) {
+    const current = walk(path, true, true);
+    if (item.kind !== '5') current.children.clear();
+    current.item = item;
+  }
+  const result = new Map(), stack = [{ path: '', current: root }];
+  while (stack.length) {
+    const { path, current } = stack.pop();
+    check(!current.item || current.item.kind === '5' || current.children.size === 0, 'Base ancestor type differs');
+    if (current.item) { result.set(path, current.item); check(result.size <= bound.entries, 'Effective base entry bound exceeded'); }
+    for (const [part, child] of current.children) stack.push({ path: path ? `${path}/${part}` : part, current: child });
+  }
+  entries.clear(); for (const [path, item] of result) entries.set(path, item);
+  baseWork.set(entries, work); return entries;
 }
 
 function baseFile(entries, input) {
-  let path = input;
+  let path = baseMemberPath(input);
   for (let count = 0; count < 32; count++) {
     const parts = path.split('/'); let redirected = false;
     for (let index = 1; index <= parts.length; index++) {
       const key = parts.slice(0, index).join('/'), item = entries.get(key);
       if (item && item.kind === '5') check((item.mode & 0o001) === 0o001, 'Base runtime directory is not traversable by the Lambda user');
       if (item && ['1', '2'].includes(item.kind)) {
-        const target = item.link.startsWith('/') ? item.link.slice(1) : item.kind === '1' ? item.link : posix.join(posix.dirname(key), item.link);
+        baseText(item.link);
+        const target = item.link.startsWith('/') ? item.link.replace(/^\/+/, '') : item.kind === '1' ? item.link : posix.join(posix.dirname(key), item.link);
         path = posix.normalize(posix.join(target, ...parts.slice(index))); baseMemberPath(path); redirected = true; break;
       }
+      if (item && index < parts.length) check(item.kind === '5', 'Base runtime ancestor is not a directory');
     }
     if (!redirected) return entries.get(path);
   }
   throw Error('Base runtime link cycle');
+}
+
+export function verifyNativeV5BaseClosure(entries) {
+  check(baseWork.has(entries), 'Inspected base filesystem required');
+  check(![...entries.keys()].some(path => path === 'opt/shop' || path.startsWith('opt/shop/')) && (!entries.has('opt') || entries.get('opt').kind === '5'), 'Native application root must be absent from the pinned base');
+  const runtime = [];
+  for (const path of ['bin/sh', 'usr/bin/dirname', 'etc/ssl/certs/ca-certificates.crt']) {
+    const file = baseFile(entries, path); check(file?.kind === '0' && file.bytes > 0 && (file.mode & 0o004) === 0o004 && (path.startsWith('etc/') || (file.mode & 0o001) === 0o001), 'Base shell, core utility or CA runtime closure is missing');
+    runtime.push({ path, ...file });
+  }
+  return { entries: entries.size, work: { ...baseWork.get(entries) }, limits: baseLimits, runtime, runtimeQualified: false, awsImageQualified: false };
 }
 
 /** The caller supplies an authenticated pinned base graph, never an image tag. */
@@ -107,10 +203,7 @@ export async function createNativeV5Oci({ base, files, identity, candidateReceip
   check(graph.imageDigest === base.imageDigest && graph.configDescriptor.digest === `sha256:${base.configDigest}` && graph.architecture === 'amd64' && graph.layers > 0, 'Pinned base image/config/platform differs');
   const entries = new Map();
   for (let index = 0; index < graph.layers; index++) inspectBaseLayer(ociLayerBytes(graph.layerDescriptors[index].mediaType, await base.readFile(graph.descriptorRefs.layers[index])), entries);
-  check(![...entries.keys()].some(path => path === 'opt/shop' || path.startsWith('opt/shop/')) && (!entries.has('opt') || entries.get('opt').kind === '5'), 'Native application root must be absent from the pinned base');
-  for (const path of ['bin/sh', 'usr/bin/dirname', 'etc/ssl/certs/ca-certificates.crt']) {
-    const file = baseFile(entries, path); check(file?.kind === '0' && file.bytes > 0 && (file.mode & 0o004) === 0o004 && (path.startsWith('etc/') || (file.mode & 0o001) === 0o001), 'Base shell, core utility or CA runtime closure is missing');
-  }
+  verifyNativeV5BaseClosure(entries);
   check(identity?.schema === 'shop.native-v5-image-input/v1' && /^[a-f0-9]{40}$/.test(identity.sourceCommit) &&
     ['candidateManifestSha256', 'capsuleManifestSha256', 'runtimeFilesSha256', 'sourceInventorySha256'].every(key => /^[a-f0-9]{64}$/.test(identity[key])), 'Exact native source/capsule/runtime identity required');
   check(Array.isArray(files) && files.every(file => file.path.startsWith('runtime/') || file.path.startsWith('native-image/')), 'Native application input path differs');

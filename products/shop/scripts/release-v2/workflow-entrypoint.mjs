@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { channel } from 'node:diagnostics_channel';
 import { githubApi } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, readRegularFile, same } from './data.mjs';
-import { actionsIdentity } from './hosted-admission.mjs';
+import { actionsIdentity, assertInvocationOptions } from './hosted-admission.mjs';
 import { importHostedPortable } from './artifact-intake.mjs';
 import { importHostedReleaseHistory, assertHostedReleaseHistory, importHostedNativeQualificationReceipt, assertHostedNativeQualificationReceipt } from './retained-history.mjs';
 import { readProtectedInstallation, readReportingInstallation, requireInstalledOperation } from './protected-installation.mjs';
@@ -26,9 +26,11 @@ async function privateDirectory(path) {
 }
 
 /** Protected journal recovery never replays an uncertain write. */
-export async function workflowEntrypoint(options, boundaries = {}) {
-  if (options.command === 'deliver' || options.command === 'rollback' && !options.transitionOnly) return deliverWorkflow(options, boundaries);
-  const { installationPath, installationDigest, request, directory, command = 'plan', acceptedAt, env = process.env } = options;
+export async function workflowEntrypoint(options, env = process.env, boundaries = {}) {
+  assertInvocationOptions(options);
+  env = Object.freeze({ ...env });
+  if (options.command === 'deliver' || options.command === 'rollback' && !options.transitionOnly) return deliverWorkflow(options, env, boundaries);
+  const { installationPath, installationDigest, request, directory, command = 'plan', acceptedAt } = options;
   check(commands.has(command), 'Unsupported workflow transition');
   trace.publish({ step: 'entrypoint-start', command });
   const identity = actionsIdentity(env), planOnly = command === 'plan', evidenceDirectory = join(directory, planOnly ? 'plan-evidence' : 'controller-evidence');
@@ -38,7 +40,7 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     const installed = await readReportingInstallation(installedOptions);
     await privateDirectory(directory); await privateDirectory(evidenceDirectory);
     const controller = await hostedController({ command, authority: options.recoveryAuthority, trustRoot: installed.rootPath,
-      rootDigest: installed.rootDigest, fence: installed.fencePath, evidenceDirectory, env }, boundaries);
+      rootDigest: installed.rootDigest, fence: installed.fencePath, evidenceDirectory }, env, boundaries);
     return { controller, paths: { authority: options.recoveryAuthority }, readiness: { realProviderQualificationRequired: true } };
   }
   const installation = await readProtectedInstallation(installedOptions);
@@ -82,7 +84,7 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     check(assembled.options.trustRoot === installation.rootPath && assembled.options.rootDigest === installation.rootDigest &&
       assembled.options.targetPlan === installation.planPath && assembled.options.fence === installation.fencePath &&
       assembled.options.evidenceDirectory === evidenceDirectory, 'Saved rollback paths differ from protected installation');
-    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command, env }, boundaries);
+    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command }, env, boundaries);
     return { controller, paths: assembled.options, readiness: assembled.readiness, evidence: assembled.evidence };
   }
   const lock = join(directory, 'invocation.lock');
@@ -125,7 +127,7 @@ export async function workflowEntrypoint(options, boundaries = {}) {
       await writeFile(statePath, canonical(state), { flag: 'wx', mode: 0o600 });
     }
     trace.publish({ step: 'controller-start', command });
-    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command, env }, boundaries);
+    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command }, env, boundaries);
     trace.publish({ step: 'controller-complete', command, phase: controller.phase });
     if (controller.report?.eventDigest && controller.lastVerified && digest(controller.lastVerified) === controller.compositionDigest) {
       const verifiedPath = join(directory, 'verified-release.private.json');
@@ -138,9 +140,11 @@ export async function workflowEntrypoint(options, boundaries = {}) {
 }
 
 /** Complete bounded forward transitions; an uncertain acknowledgement stops the run. */
-export async function deliverWorkflow(options, boundaries = {}) {
+export async function deliverWorkflow(options, env = process.env, boundaries = {}) {
+  assertInvocationOptions(options);
+  env = Object.freeze({ ...env });
   check(typeof options.directory === 'string', 'Private workflow directory required');
-  const identity = actionsIdentity(options.env ?? process.env);
+  const identity = actionsIdentity(env);
   const installation = await readProtectedInstallation({ path: options.installationPath, digest: options.installationDigest, identity, artifactDirectories: [options.directory] });
   for (const operation of options.command === 'rollback' ? ['rollback', 'advance'] : ['deliver', 'begin', 'advance']) await requireInstalledOperation(installation, operation);
   let command = options.command === 'rollback' ? 'rollback' : 'begin';
@@ -148,7 +152,7 @@ export async function deliverWorkflow(options, boundaries = {}) {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const transitions = []; let previousGeneration = null, sessionMeasurements;
   const result = await workflowEntrypoint({ ...options, command, transitionOnly: true, [deliverSession]: async (assembled, installed) =>
-    withHostedReleaseSession({ ...assembled.options, command, env: options.env ?? process.env }, boundaries, async (step, measurements) => {
+    withHostedReleaseSession({ ...assembled.options, command }, env, boundaries, async (step, measurements) => {
       let state;
       for (let count = 0; count < 96; count++) {
         await requireInstalledOperation(installed, command);
@@ -160,7 +164,7 @@ export async function deliverWorkflow(options, boundaries = {}) {
         previousGeneration = state.generation; command = 'advance';
       }
       return { ...state, waiting: 'bounded-transition-limit' };
-    }) }, boundaries);
+    }) }, env, boundaries);
   return { ...result, transitions, sessionMeasurements };
 }
 
@@ -168,8 +172,7 @@ export async function main(argv = process.argv.slice(2)) {
   const { values } = parseArgs({ args: argv, strict: true, options: { configuration: { type: 'string' } } });
   check(values.configuration, 'Provide a protected workflow configuration file');
   const options = parseJSON(await readRegularFile(resolve(values.configuration), 1024 * 1024, true));
-  check(!Object.hasOwn(options, 'env') && !Object.hasOwn(options, 'boundaries'), 'Workflow identity and provider boundaries come from protected runtime');
-  return workflowEntrypoint(options);
+  return workflowEntrypoint(options, process.env);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().then(result => process.stdout.write(`${canonical(result)}\n`)).catch(async error => {

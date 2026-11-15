@@ -1,5 +1,5 @@
 import { check, digest, parseJSON, readRegularFile, same, sha256 } from './data.mjs';
-import { actionsIdentity, readInstalledRoot, verifyAuthoritySeal } from './hosted-admission.mjs';
+import { actionsIdentity, assertInvocationOptions, readInstalledRoot, verifyAuthoritySeal } from './hosted-admission.mjs';
 import { exactFields, protocolPageLimit, protocolPolicy, requestBuilders } from './provider-protocol-builders.mjs';
 import { responseBytes } from './provider-protocol.mjs';
 import { admitCredentialFence, createHostedWriter, credentialBrokerBoundary } from './hosted-writer.mjs';
@@ -99,17 +99,19 @@ export async function reconcileHostedReport({ writer, broker, policy, authority 
   });
 }
 
-export async function hostedReporting(options, boundaries = {}) {
+export async function hostedReporting(options, env = process.env, boundaries = {}) {
+  assertInvocationOptions(options);
+  env = Object.freeze({ ...env });
   const root = await readInstalledRoot(options.trustRoot, options.rootDigest);
   const envelope = parseJSON(await readRegularFile(options.authority, 1024 * 1024, true));
-  const admitted = verifyReportingAuthority(envelope, { root, identity: actionsIdentity(options.env ?? process.env) });
+  const admitted = verifyReportingAuthority(envelope, { root, identity: actionsIdentity(env) });
   const fenceBytes = await readRegularFile(options.fence, 65536, true);
   check(sha256(fenceBytes) === admitted.payload.writerFenceDigest, 'Reporting custody receipt differs');
   const installed = root.credentialBroker;
   const fence = admitCredentialFence(parseJSON(fenceBytes, 65536), { keys: installed.keys, policy: admitted.policy,
     environmentId: installed.environmentId, brokerId: installed.id, implementationDigest: installed.implementationDigest });
   const transport = boundaries.broker ?? createBrokerTransport({ root,
-    token: await requestBrokerIdentity({ root, env: options.env ?? process.env }) });
+    token: await requestBrokerIdentity({ root, env }) });
   const broker = credentialBrokerBoundary({ fenceAdmission: fence, boundary: transport });
   const writer = createHostedWriter({ policy: admitted.policy, broker, fenceAdmission: fence,
     ...(options.evidenceDirectory ? { eventCacheDirectory: join(options.evidenceDirectory, 'immutable-journal-cache') } : {}) });
