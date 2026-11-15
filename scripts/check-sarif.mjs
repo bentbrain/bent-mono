@@ -102,6 +102,45 @@ function normalizeLocations(value, run, paths) {
   return normalized;
 }
 
+function orderedRules(component) {
+  const rules = component?.rules === undefined ? [] : component.rules;
+  if (!Array.isArray(rules) || rules.some(rule => !object(rule) || !text(rule.id)) ||
+      new Set(rules.map(rule => rule.id)).size !== rules.length) {
+    fail("Rule descriptors require distinct, explicit identities.");
+  }
+  return [...rules].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+function ruleReference(run, reference, expectedId) {
+  if (!object(reference)) fail("Malformed SARIF rule reference.");
+  let component = run.tool?.driver;
+  if (reference.toolComponent !== undefined) {
+    const selected = reference.toolComponent;
+    if (!object(selected) || !Number.isSafeInteger(selected.index) || selected.index < 0) {
+      fail("Rule tool-component index is missing or invalid.");
+    }
+    component = run.tool?.extensions?.[selected.index];
+    if (!component || (selected.name !== undefined && selected.name !== component.name) ||
+        (selected.guid !== undefined && selected.guid !== component.guid)) {
+      fail("Conflicting rule tool-component identity.");
+    }
+  }
+  const ordered = orderedRules(component);
+  let descriptor;
+  if (reference.index !== undefined) {
+    if (!Number.isSafeInteger(reference.index) || reference.index < 0) fail("Invalid rule descriptor index.");
+    descriptor = component?.rules?.[reference.index];
+  } else if (text(reference.id)) {
+    descriptor = ordered.find(rule => rule.id === reference.id);
+  }
+  if (!descriptor || descriptor.id !== expectedId ||
+      (reference.id !== undefined && reference.id !== descriptor.id) ||
+      (reference.guid !== undefined && reference.guid !== descriptor.guid)) {
+    fail("Conflicting or missing SARIF rule descriptor.");
+  }
+  return { ...reference, id: descriptor.id, index: ordered.findIndex(rule => rule.id === descriptor.id) };
+}
+
 function analysisIdentity(run) {
   if ((run.properties?.incrementalMode !== undefined && run.properties.incrementalMode !== "") ||
       run.tool?.extensions?.some(extension => extension.name === "codeql-action/pr-diff-range")) {
@@ -123,6 +162,11 @@ function analysisIdentity(run) {
   // The installation UUID changes on every hosted runner. Preserve every
   // component/pack path and all other metadata, and leave raw SARIF untouched.
   const tool = structuredClone(run.tool);
+  // Rule indexes refer to the original table. Bind every descriptor in a
+  // deterministic order after resolving result references against that table.
+  for (const component of [tool.driver, ...(tool.extensions ?? [])]) {
+    if (component.rules !== undefined) component.rules = orderedRules(component);
+  }
   // Main scans can add these informational source-archive descriptors. They
   // are not queries or findings. Match their complete schema before excluding
   // them; changed/unknown metadata and actual warning/error notifications stay
@@ -155,9 +199,13 @@ export function describeResult(run, result) {
   if (result.rule?.id !== undefined && result.rule.id !== result.ruleId) fail("Conflicting SARIF rule identities.");
   const paths = new Set();
   // Keep the complete flow payload, including every thread, message and region.
-  // Only artifact indexes are resolved so unrelated artifact ordering is inert.
+  // Resolve indexes against their original tables before binding the complete
+  // payload. Rule-table and artifact-table order do not change their identities.
+  const rule = result.rule === undefined ? null : ruleReference(run, result.rule, result.ruleId);
+  const ruleIndex = result.ruleIndex === undefined ? undefined
+    : ruleReference(run, { index: result.ruleIndex }, result.ruleId).index;
   const flow = normalizeLocations({
-    ruleId: result.ruleId, rule: result.rule ?? null,
+    ruleId: result.ruleId, rule, ...(ruleIndex === undefined ? {} : { ruleIndex }),
     level: result.level ?? null, kind: result.kind ?? null,
     message: result.message, locations: result.locations,
     relatedLocations: result.relatedLocations ?? [], codeFlows: result.codeFlows ?? [],

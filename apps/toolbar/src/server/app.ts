@@ -405,8 +405,9 @@ export function createApp(options: Options) {
         ? z.object({ client_id: z.string() }).parse(JSON.parse(body)).client_id
         : new URLSearchParams(body).get('client_id');
       const response = await auth.handler(c.req.raw);
-      if (response.ok) {
-        // A client remains disabled even if native issuance consumed the device before revocation.
+      if (response.ok || response.status >= 500) {
+        // Revocation can delete a refresh row before native access-token insertion finishes.
+        // Preserve unrelated issuance failures while fencing this client's revoked grant.
         const client = z
           .object({ disabled: z.number(), userId: z.string().nullable(), metadata: z.string() })
           .safeParse(
@@ -417,7 +418,11 @@ export function createApp(options: Options) {
               })
             ).rows[0],
           );
-        if (!client.success || client.data.disabled !== 0 || !client.data.userId)
+        if (
+          (response.ok && (!client.success || !client.data.userId)) ||
+          (client.success &&
+            (response.ok ? client.data.disabled !== 0 : client.data.disabled === 1))
+        )
           return c.json(
             {
               error: 'invalid_grant',
