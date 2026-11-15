@@ -201,9 +201,17 @@ export function describeResult(run, result) {
   // Keep the complete flow payload, including every thread, message and region.
   // Resolve indexes against their original tables before binding the complete
   // payload. Rule-table and artifact-table order do not change their identities.
-  const rule = result.rule === undefined ? null : ruleReference(run, result.rule, result.ruleId);
+  if (result.rule !== undefined && !object(result.rule)) fail("Malformed SARIF rule reference.");
+  if (result.ruleIndex !== undefined && result.rule?.index !== undefined && result.ruleIndex !== result.rule.index) {
+    fail("Conflicting SARIF rule indexes.");
+  }
+  const reference = result.rule === undefined ? null : {
+    ...result.rule,
+    ...(result.rule.index === undefined && result.ruleIndex !== undefined ? { index: result.ruleIndex } : {}),
+  };
+  const rule = reference === null ? null : ruleReference(run, reference, result.ruleId);
   const ruleIndex = result.ruleIndex === undefined ? undefined
-    : ruleReference(run, { index: result.ruleIndex }, result.ruleId).index;
+    : (rule ?? ruleReference(run, { index: result.ruleIndex }, result.ruleId)).index;
   const flow = normalizeLocations({
     ruleId: result.ruleId, rule, ...(ruleIndex === undefined ? {} : { ruleIndex }),
     level: result.level ?? null, kind: result.kind ?? null,

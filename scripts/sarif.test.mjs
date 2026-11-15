@@ -206,15 +206,48 @@ test("rule-table permutation resolves indexes while preserving complete metadata
 
 test("legacy driver rule indexes resolve consistently and conflicting identities fail", async context => {
   const { source } = await fixture(context);
-  const original = report([finding()]);
-  original.runs[0].tool.driver.rules = [{ id: "js/file-access-to-http" }, { id: "js/request-forgery" }];
-  original.runs[0].results[0].ruleIndex = 0;
-  const manifest = reviewed([original], source);
-  const reordered = structuredClone(original);
-  reordered.runs[0].tool.driver.rules.reverse(); reordered.runs[0].results[0].ruleIndex = 1;
-  assert.equal(classifyReports([reordered], manifest, source).reviewed, 1);
-  reordered.runs[0].results[0].ruleIndex = 0;
-  assert.throws(() => classifyReports([reordered], manifest, source), /rule|descriptor|unused or stale/i);
+  for (const explicit of [false, true]) {
+    const original = report([finding()]);
+    original.runs[0].tool.driver.rules = [{ id: "js/file-access-to-http" }, { id: "js/request-forgery" }];
+    original.runs[0].results[0].ruleIndex = 0;
+    if (explicit) original.runs[0].results[0].rule = { id: "js/file-access-to-http", index: 0 };
+    const manifest = reviewed([original], source);
+    const reordered = structuredClone(original);
+    reordered.runs[0].tool.driver.rules.reverse(); reordered.runs[0].results[0].ruleIndex = 1;
+    if (explicit) reordered.runs[0].results[0].rule.index = 1;
+    assert.equal(classifyReports([reordered], manifest, source).reviewed, 1);
+    reordered.runs[0].results[0].ruleIndex = 0;
+    assert.throws(() => classifyReports([reordered], manifest, source), /rule|descriptor|unused or stale/i);
+  }
+});
+
+test("legacy indexes use the selected extension and agree before canonicalization", async context => {
+  const { source } = await fixture(context);
+  for (const sameDriverId of [false, true]) {
+    const original = report([finding()]);
+    if (sameDriverId) original.runs[0].tool.driver.rules = [{ id: "js/file-access-to-http" }];
+    original.runs[0].tool.extensions[0].rules.push({ id: "js/a-other" });
+    original.runs[0].results[0].rule = { id: "js/file-access-to-http", index: 0, toolComponent: { index: 0 } };
+    original.runs[0].results[0].ruleIndex = 0;
+    const manifest = reviewed([original], source);
+    assert.equal(classifyReports([original], manifest, source).reviewed, 1);
+    const reordered = structuredClone(original);
+    reordered.runs[0].tool.extensions[0].rules.reverse();
+    reordered.runs[0].results[0].rule.index = 1;
+    reordered.runs[0].results[0].ruleIndex = 1;
+    const before = JSON.stringify(reordered);
+    assert.equal(classifyReports([reordered], manifest, source).reviewed, 1);
+    assert.equal(JSON.stringify(reordered), before);
+    const fallback = structuredClone(reordered);
+    delete fallback.runs[0].results[0].rule.index;
+    assert.equal(classifyReports([fallback], manifest, source).reviewed, 1);
+    const conflicting = structuredClone(reordered);
+    conflicting.runs[0].results[0].ruleIndex = 0;
+    assert.throws(() => classifyReports([conflicting], manifest, source), /Conflicting.*rule/i);
+    const malformed = structuredClone(reordered);
+    malformed.runs[0].results[0].rule = null;
+    assert.throws(() => classifyReports([malformed], manifest, source), /Malformed.*rule/i);
+  }
 });
 
 test("main-only extraction telemetry is inert but changed metadata and extraction warnings fail", async context => {
