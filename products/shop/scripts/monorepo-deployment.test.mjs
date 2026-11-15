@@ -75,6 +75,24 @@ test("runtime configuration excludes release evidence, SSO and management contex
   assert.ok(worker.githubRepositoryId && worker.order1003ProviderOrderId);
 });
 
+test("native serving runtime pins are transferred as a complete optional pair", () => {
+  const original = process.env.SHOP_PROTECTED_CONFIG_JSON;
+  try {
+    const configured = JSON.parse(original), account = configured.awsAccountId;
+    configured.nativeServingFunctionArn = `arn:aws:lambda:ap-southeast-2:${account}:function:synthetic-serving`;
+    process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(configured);
+    assert.throws(() => workerProtectedConfiguration(), /nativeServingFailureFunctionArn/);
+    configured.nativeServingFailureFunctionArn = `${configured.nativeServingFunctionArn}-failures`;
+    process.env.SHOP_PROTECTED_CONFIG_JSON = JSON.stringify(configured);
+    const worker = JSON.parse(workerProtectedConfiguration());
+    assert.equal(worker.nativeServingFunctionArn, configured.nativeServingFunctionArn);
+    assert.equal(worker.nativeServingFailureFunctionArn, configured.nativeServingFailureFunctionArn);
+  } finally {
+    if (original === undefined) delete process.env.SHOP_PROTECTED_CONFIG_JSON;
+    else process.env.SHOP_PROTECTED_CONFIG_JSON = original;
+  }
+});
+
 const identity = { sourceCommit: "a".repeat(40), runId: "123", filename: "qualification-reference.json" };
 const key = { SHOP_EVIDENCE_KEY_VERSION: "v1", SHOP_EVIDENCE_ENCRYPTION_KEY: "07".repeat(32) };
 test("operational pointer artifacts authenticate source, run, file and version, with retained-key recovery", () => {

@@ -1,3 +1,5 @@
+import { verifyNativeQualificationReceipt } from './native-qualification.mjs';
+import { assertServingSelection } from './serving-provider.mjs';
 import { createPublicKey, verify } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
@@ -92,7 +94,9 @@ export function verifyHostedAuthority(envelope, { root, identity, now = Date.now
   const { payload } = verifyAuthoritySeal(envelope, root);
   exactFields(payload, ['schema', 'scope', 'repository', 'repositoryName', 'environment', 'head', 'base', 'tree', 'workflowPath',
     'workflowCommit', 'runId', 'attempt', 'issuedAt', 'expiresAt', 'acceptedAt', 'policy', 'providerPolicyDigest',
-    'portableManifests', 'secretInstallations', 'writerFenceDigest', 'targetPlanDigest', 'quality', ...(payload.schema === 'shop.hosted-source-authority/v2' ? ['recovery'] : payload.schema === 'shop.hosted-source-authority/v3' ? ['operationAuthorization', 'recovery'] : [])]);
+    'portableManifests', 'secretInstallations', 'writerFenceDigest', 'targetPlanDigest', 'quality', ...(payload.schema === 'shop.hosted-source-authority/v2' ? ['recovery'] : payload.schema === 'shop.hosted-source-authority/v3' ? ['operationAuthorization', 'recovery'] : []),
+    ...(payload.schema === 'shop.hosted-source-authority/v3' && Object.hasOwn(payload, 'nativeQualifications') ? ['nativeQualifications'] : []),
+    ...(payload.schema === 'shop.hosted-source-authority/v3' && Object.hasOwn(payload, 'nativeServingSelection') ? ['nativeServingSelection', 'nativeServingTargetDigest'] : [])]);
   check(['shop.hosted-source-authority/v1', 'shop.hosted-source-authority/v2', 'shop.hosted-source-authority/v3'].includes(payload.schema) && payload.scope === root.scope && payload.environment === root.environment &&
     same(payload.repository, root.repository) && payload.repositoryName === root.repositoryName && payload.workflowPath === root.workflowPath,
   'Source authority target differs');
@@ -140,6 +144,25 @@ export function verifyHostedAuthority(envelope, { root, identity, now = Date.now
     exactFields(installation, ['name', 'version', 'sha256']); name(installation.name); name(installation.version); hash(installation.sha256);
   }
   check(same(payload.secretInstallations.map(item => item.name).sort(), [...root.requiredSecrets].sort()), 'Protected secret installation inventory differs');
+  if (Object.hasOwn(payload, 'nativeQualifications')) {
+    boundedArray(payload.nativeQualifications, 1, 8);
+    unique(payload.nativeQualifications, digest);
+    for (const receipt of payload.nativeQualifications) {
+      check(Buffer.byteLength(canonical(receipt)) <= 1024 * 1024, 'Bounded native qualification receipt required');
+      verifyAuthoritySeal(receipt, root);
+    }
+  }
+  if (Object.hasOwn(payload, 'nativeServingSelection')) {
+    const selection = payload.nativeServingSelection;
+    assertServingSelection(selection, { nativeServing: selection });
+    for (const field of ['mainResource', 'failureResource', 'grantKeyId']) name(selection[field]);
+    check(['development', 'production'].includes(selection.environment) && selection.mainResource !== selection.failureResource,
+      'Exact signed serving environment and distinct functions required');
+    hash(payload.nativeServingTargetDigest);
+    check(payload.nativeQualifications?.length === 1 && digest(payload.nativeQualifications[0]) === selection.qualificationDigest, 'Signed serving qualification receipt differs');
+    verifyNativeQualificationReceipt(payload.nativeQualifications[0], { root, now, expected: {
+      sourceDigest: selection.codeDigest, codeDigest: selection.codeDigest, imageDigest: selection.imageDigest } });
+  }
   exactFields(payload.quality, ['head', 'runId', 'attempt', 'releaseGuardDigest']); commit(payload.quality.head); integer(payload.quality.runId); integer(payload.quality.attempt); hash(payload.quality.releaseGuardDigest);
   check(payload.quality.head === payload.head, 'Exact source release qualification required');
   return { payload, authorityDigest: digest(envelope), rootDigest: digest(root) };

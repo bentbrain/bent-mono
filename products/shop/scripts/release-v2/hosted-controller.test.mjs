@@ -99,7 +99,7 @@ test('content evidence must originate from actual retained bytes and immutable p
     const component = f.payload.components[0], version = (await provider.inventory()).versions[0], evidence = await provider.content(component.id, version.version);
     provider.verifyContent(evidence, component); assert.throws(() => provider.verifyContent(structuredClone(evidence), component), /subject differs/);
     const native = service.workers.get(targets[0].resource).versions[0]; native.modules[0].content_base64 = Buffer.from('mutated bytes').toString('base64');
-    await assert.rejects(provider.content(component.id, version.version), /inventory differs/);
+    const fresh=createHostedProvider({policy,writer,broker:service.broker,components:f.payload.components,targets,load:retainedCandidateLoader({bundle:f.bundle,targets}),deploymentId:'123'});await assert.rejects(fresh.content(component.id,version.version),/inventory differs/);
   });
 });
 
@@ -111,8 +111,8 @@ test('binding readback preserves every named value while allowing provider array
     const version = (await provider.inventory()).versions[0], component = f.payload.components.find(item => item.id === version.component), native = service.workers.get(targets[0].resource).versions[0];
     native.bindings.reverse(); provider.verifyContent(await provider.content(component.id, version.version), component);
     service.faults.versionResponseId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
-    await assert.rejects(provider.content(component.id, version.version), /response identity differs/); delete service.faults.versionResponseId;
-    native.bindings.push(native.bindings[0]); await assert.rejects(provider.content(component.id, version.version), /Unique named/);
+    const fresh=()=>createHostedProvider({policy,writer,broker:service.broker,components:f.payload.components,targets,load:retainedCandidateLoader({bundle:f.bundle,targets}),deploymentId:'123'});await assert.rejects(fresh().content(component.id,version.version),/response identity differs/); delete service.faults.versionResponseId;
+    native.bindings.push(native.bindings[0]); await assert.rejects(fresh().content(component.id, version.version), /Unique named/);
   }, { bindings: [{ name: 'DATA', type: 'r2_bucket', bucket_name: 'synthetic-data' }, { name: 'CACHE', type: 'kv_namespace', namespace_id: '0'.repeat(32) }] });
 });
 

@@ -2,26 +2,19 @@ import { check, digest, parseJSON, readRef, same } from './data.mjs';
 import { assertPolicy, assetManifest, exactFields } from './provider-protocol-builders.mjs';
 import { responseBytes } from './provider-protocol.mjs';
 
-export function createWorkObserver({ policy, client }) {
-  assertPolicy(policy); check(policy.workInventory && client?.builders && typeof client.send === 'function', 'Admitted complete accepted-work database adapter required');
-  return async () => {
-    const jobs = [];
-    for (let index = 0; index < policy.workInventory.queries.length; index++) {
-      const response = await client.send(client.builders.workQuery(index));
-      check(response.status === 200, 'Accepted-work database query failed');
-      const value = parseJSON(responseBytes(response));
-      check(value.success === true && Array.isArray(value.result) && value.result.length === 1 && (!value.errors || value.errors.length === 0), 'Complete accepted-work database response required');
-      const result = value.result[0];
-      check(result.success === true && Array.isArray(result.results) && result.results.length < 4096 && !result.next_page && !result.truncated && !result.error, 'Accepted-work query is incomplete or exceeds bound');
-      for (const row of result.results) {
-        exactFields(row, ['artifactDigest', 'format']);
-        check(/^[a-f0-9]{64}$/.test(row.artifactDigest) && typeof row.format === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(row.format), 'Accepted-work artifact/format identity differs');
-        jobs.push({ component: policy.workInventory.queries[index].component, ...row });
-      }
-      check(jobs.length <= 4096, 'Accepted-work inventory exceeds bound');
-    }
-    return { complete: true, queryDigest: digest(policy.workInventory), jobs };
-  };
+export function workObservation(policy,responses) {
+  assertPolicy(policy);check(policy.workInventory&&Array.isArray(responses)&&responses.length===policy.workInventory.queries.length,'Complete accepted-work response batch required');const jobs=[];
+  for(let index=0;index<responses.length;index++){
+    const response=responses[index];check(response.status===200,'Accepted-work database query failed');const value=parseJSON(responseBytes(response));
+    check(value.success===true&&Array.isArray(value.result)&&value.result.length===1&&(!value.errors||value.errors.length===0),'Complete accepted-work database response required');const result=value.result[0];
+    check(result.success===true&&Array.isArray(result.results)&&result.results.length<4096&&!result.next_page&&!result.truncated&&!result.error,'Accepted-work query is incomplete or exceeds bound');
+    for(const row of result.results){exactFields(row,['artifactDigest','format']);check(/^[a-f0-9]{64}$/.test(row.artifactDigest)&&typeof row.format==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(row.format),'Accepted-work artifact/format identity differs');jobs.push({component:policy.workInventory.queries[index].component,...row});}check(jobs.length<=4096,'Accepted-work inventory exceeds bound');
+  }
+  return {complete:true,queryDigest:digest(policy.workInventory),jobs};
+}
+export function createWorkObserver({policy,client}){
+ assertPolicy(policy);check(policy.workInventory&&client?.builders&&typeof client.send==='function','Admitted complete accepted-work database adapter required');
+ return async()=>{const responses=[];for(let index=0;index<policy.workInventory.queries.length;index++)responses.push(await client.send(client.builders.workQuery(index)));return workObservation(policy,responses);};
 }
 
 export function createRetainedAssetResolver({ bundle, entries }) {

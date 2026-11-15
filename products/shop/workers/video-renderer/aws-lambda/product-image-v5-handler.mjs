@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { executeProductImage, parseProductImageEvent } from "@forever-tee/product-image-renderer/execution";
+import { nativeRuntimeProfile } from './native-runtime-profile.mjs';
 
 const ORIGINS = Object.freeze({
     development: "https://forever-tee-api-development.socialqueue.workers.dev",
@@ -30,8 +31,12 @@ export function validateProductImageV5Binding(value) {
         if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port || url.origin !== value.apiOrigin)
             throw new Error("Expected a loopback native v5 API origin.");
     }
-    else if (!Object.hasOwn(ORIGINS, value.environment) || value.apiOrigin !== ORIGINS[value.environment])
-        throw new Error("Invalid native v5 API origin.");
+    else if (!Object.hasOwn(ORIGINS, value.environment) || value.apiOrigin !== ORIGINS[value.environment]) {
+        const profile = nativeRuntimeProfile(process.env, value.environment);
+        if (!profile || value.environment !== 'development' || value.apiOrigin !== profile.apiOrigin ||
+            value.functionArn !== profile.mainFunctionArn || value.buildId !== profile.buildId)
+            throw new Error("Invalid native v5 API origin.");
+    }
     return Object.freeze({ ...value, qualifiedFunctionArns: Object.freeze([...value.qualifiedFunctionArns]) });
 }
 export function validateProductImageV5Event(event) {

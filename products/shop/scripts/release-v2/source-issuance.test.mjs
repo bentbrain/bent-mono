@@ -3,10 +3,11 @@ import test from 'node:test';
 import { tmpdir } from 'node:os';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { digest, parseJSON, sha256 } from './data.mjs';
-import { assembleHostedRelease, issueHostedAuthority, qualifyHostedSource } from './source-issuance.mjs';
+import { assembleHostedRelease, issueHostedAuthority, prepareHostedNativeQualification, qualifyHostedSource } from './source-issuance.mjs';
 import { hostedController } from './hosted-controller.mjs';
 import { verifyHostedAuthority } from './hosted-admission.mjs';
 import { createBootstrapFixture } from './testing/bootstrap-fixture.mjs';
+import { nativeQualificationFixture } from './testing/native-qualification-fixture.mjs';
 
 const fixture = (t, overrides = {}) => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir(), ...overrides });
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
@@ -41,6 +42,14 @@ test('copied import descriptors and copied guard results cannot issue authority'
   await assert.rejects(issueHostedAuthority({ ...f, composition: { bundle: f.destination, manifest: 'missing.json' }, sourceAdmission: structuredClone(source) }), /Actual exact-source/);
   source.acceptedAt += 1;
   await assert.rejects(issueHostedAuthority({ ...f, composition: { bundle: f.destination, manifest: 'missing.json' }, sourceAdmission: source }), /Actual exact-source/);
+});
+
+test('native bootstrap permission is never copied into a composition execution grant', async t => {
+  const f = await fixture(t, { operationCommands: ['advance', 'begin', 'deliver', 'native-bootstrap', 'rollback'] });
+  const assembled = await assembleHostedRelease(f);
+  const result = await issueHostedAuthority({ ...f, composition: { bundle: assembled.options.bundle, manifest: assembled.options.manifest }, command: 'advance' });
+  assert.deepEqual(result.authority.payload.operationAuthorization.commands, ['advance', 'begin', 'deliver', 'rollback']);
+  verifyHostedAuthority(result.authority, { root: f.root, identity: f.identity });
 });
 
 test('canonical native security and genuine independent PR review must pass the existing guard', async t => {
@@ -95,6 +104,31 @@ test('execution assembly checks every retained target before broker identity or 
   assert.equal(calls, 0);
   await absent(`${f.destination}/release-proofs`);
   await absent(`${f.destination}/release-authority.json`);
+});
+
+test('caller receipt flags cannot qualify native code without installed qualification policy', async t => {
+  const f = await fixture(t); let brokerCalls = 0;
+  await assert.rejects(assembleHostedRelease({ ...f,
+    nativeQualificationReceipts: [{ payload: { awsImageQualified: true } }],
+    boundaries: { broker: async () => { brokerCalls++; throw Error('unexpected custody call'); } },
+  }), /receipt requires installed policy/);
+  assert.equal(brokerCalls, 0);
+  await absent(`${f.destination}/release-proofs`);
+  await absent(`${f.destination}/release-authority.json`);
+});
+
+test('an independently installed fixture scope cannot be upgraded to real AWS qualification', async t => {
+  const native = await nativeQualificationFixture();
+  t.after(() => native.service.close());
+  const providerPolicy = structuredClone(native.policy);
+  providerPolicy.nativeQualification.executionScope = 'fixture/provider-loopback';
+  providerPolicy.github.environment = 'Preview';
+  const f = await fixture(t, { providerPolicy, nativeQualificationPlan: native.template, operationCommands: ['native-bootstrap'] });
+  let sourceReads = 0;
+  await assert.rejects(prepareHostedNativeQualification({ ...f, executionScope: 'aws/provider', qualityApi: async () => {
+    sourceReads++; throw Error('Unexpected source access');
+  } }), /fixture qualification cannot issue an AWS qualification/);
+  assert.equal(sourceReads, 0);
 });
 
 test('source admission mutation during final asynchronous reads cannot reach the source signer', async t => {

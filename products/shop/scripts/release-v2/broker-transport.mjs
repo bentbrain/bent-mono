@@ -1,16 +1,16 @@
-import { request as httpsRequest } from 'node:https';
+import { Agent, request as httpsRequest } from 'node:https';
 import { canonical, check, parseJSON } from './data.mjs';
 import { actionsIdentity, validateHostedRoot } from './hosted-admission.mjs';
 
 const jwt = value => check(typeof value === 'string' && value.length <= 32768 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value), 'Bounded Actions identity token required');
-async function jsonRequest(url, method, token, value, maximumBytes) {
+async function jsonRequest(url, method, token, value, maximumBytes, agent = false, costs) {
   check(url.protocol === 'https:' && !url.port && !url.hash && !url.username && !url.password, 'Exact credential service HTTPS origin required');
   check(typeof token === 'string' && token.length > 0 && token.length <= 32768 && !/[\x00-\x20\x7f]/.test(token), 'Bounded credential service authorization required');
   const body = value === null ? Buffer.alloc(0) : Buffer.from(canonical(value));
   check(body.length <= 256 * 1024 * 1024, 'Credential service request exceeds bound');
   return new Promise((accept, reject) => {
     const request = httpsRequest({ hostname: url.hostname, port: 443, method, path: `${url.pathname}${url.search}`,
-      agent: false, rejectUnauthorized: true, minVersion: 'TLSv1.2', headers: { authorization: `Bearer ${token}`,
+      agent, rejectUnauthorized: true, minVersion: 'TLSv1.2', headers: { authorization: `Bearer ${token}`,
         'content-type': 'application/json', 'content-length': String(body.length) } }, response => {
       if (response.statusCode !== 200) { reject(Error('Credential service request failed; no replay or redirect')); response.destroy(); request.destroy(); return; }
       const chunks = []; let bytes = 0;
@@ -28,6 +28,11 @@ async function jsonRequest(url, method, token, value, maximumBytes) {
           accept(parseJSON(Buffer.concat(chunks), maximumBytes));
         } catch (error) { reject(error); }
       });
+    });
+    request.on('socket', socket => {
+      if (!costs) return;
+      if (request.reusedSocket) costs.reusedSockets++;
+      else { costs.sockets++; socket.once('secureConnect', () => { costs.tlsHandshakes++; }); }
     });
     const timeout = setTimeout(() => { reject(Error('Credential service deadline exceeded')); request.destroy(); }, 30000);
     request.once('close', () => clearTimeout(timeout)); request.once('error', reject); request.end(body);
@@ -56,9 +61,16 @@ export async function requestBrokerIdentity({ root, env = process.env, request =
 export function createBrokerTransport({ root, token, tokenProvider, request = jsonRequest, now = Date.now }) {
   validateHostedRoot(root); check(tokenProvider === undefined || typeof tokenProvider === 'function', 'Explicit renewable broker identity required'); if (!tokenProvider) jwt(token);
   const url = new URL('/v1/invocations', root.credentialBroker.origin);
-  let current = token, expiresAt = 0;
-  return async call => {
+  const agent = new Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1, timeout: 30000 });
+  const costs = { requests: 0, sockets: 0, reusedSockets: 0, tlsHandshakes: 0 };
+  let current = token, expiresAt = 0, closed = false;
+  const transport = async call => {
+    check(!closed, 'Credential service transport is closed'); costs.requests++;
     if (tokenProvider && expiresAt <= now() + 30000) { current = await tokenProvider(); jwt(current); const claims = parseJSON(Buffer.from(current.split('.')[1], 'base64url'), 65536); check(Number.isSafeInteger(claims.exp) && claims.exp * 1000 > now() + 30000, 'Renewed broker identity expires too soon'); expiresAt = claims.exp * 1000; }
-    jwt(current); return request(url, 'POST', current, call, 256 * 1024 * 1024);
+    check(!closed, 'Credential service transport is closed');
+    jwt(current); return request(url, 'POST', current, call, 256 * 1024 * 1024, agent, costs);
   };
+  transport.close = () => { closed = true; agent.destroy(); };
+  transport.measurements = () => ({ ...costs });
+  return transport;
 }

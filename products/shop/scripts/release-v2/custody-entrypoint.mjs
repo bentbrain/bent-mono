@@ -79,17 +79,19 @@ async function prepareCustody({ path, digest: expectedDigest }, boundaries = {})
   check(Object.keys(boundaries).every(key => ['transport', 'readGithubKeys'].includes(key)), 'Unsupported credential service boundary');
   const bytes = await pinnedBytes({ path, sha256: expectedDigest }), config = parseJSON(bytes);
   exactFields(config, ['schema', 'root', 'providerPolicy', 'custodyPolicy', 'fence', 'installation', 'replacement',
-    'providerSigner', 'custodySigner', 'attestation', 'assetCatalog', 'tls']);
+    'providerSigner', 'custodySigner', 'attestation', 'assetCatalog', 'tls',...(Object.hasOwn(config,'nativeFixtureGrantKey')?['nativeFixtureGrantKey']:[])]);
   check(config.schema === 'shop.credential-service-installation/v1', 'Credential service installation required');
   const root = await readInstalledRoot(config.root.path, config.root.sha256);
   await pinnedBytes(config.root);
-  const document = async ref => parseJSON(await pinnedBytes(ref));
-  const policy = protocolPolicy(await document(config.providerPolicy)), custodyPolicy = protocolPolicy(await document(config.custodyPolicy));
+  const document = async (ref,finiteFractions=false) => parseJSON(await pinnedBytes(ref),65536,{finiteFractions});
+  const policy = protocolPolicy(await document(config.providerPolicy,true)), custodyPolicy = protocolPolicy(await document(config.custodyPolicy,true));
   check(root.providerPolicyDigest === digest(policy), 'Credential service policy differs from independent root');
   const fenceAdmission = admitCredentialFence(await document(config.fence), { keys: root.credentialBroker.keys, policy,
     environmentId: root.credentialBroker.environmentId, brokerId: root.credentialBroker.id,
     implementationDigest: root.credentialBroker.implementationDigest });
   const installation = await document(config.installation), replacement = config.replacement === null ? null : await document(config.replacement);
+  const nativeFixtureGrantKey=config.nativeFixtureGrantKey?await document(config.nativeFixtureGrantKey):null;
+  if(policy.nativeQualification?.fixtureLifecycle)check(nativeFixtureGrantKey,'Independently installed native fixture grant key required');
   async function signerFor(entry, targetPolicy) {
     exactFields(entry, ['keyId', 'key', 'credentialEpoch', 'credentialsPath']);
     check(entry.credentialEpoch === installation.payload.credentialEpoch, 'Credential service epoch differs');
@@ -123,7 +125,7 @@ async function prepareCustody({ path, digest: expectedDigest }, boundaries = {})
   const assetRoot = await realpath(assetCatalog.bundle), privatePaths = [path, config.root.path, config.providerPolicy.path,
     config.custodyPolicy.path, config.fence.path, config.installation.path, config.providerSigner.key.path,
     config.providerSigner.credentialsPath, config.custodySigner.key.path, config.custodySigner.credentialsPath,
-    config.attestation.key.path, config.tls.key.path];
+    config.attestation.key.path, config.tls.key.path,...(config.nativeFixtureGrantKey?[config.nativeFixtureGrantKey.path]:[])];
   check(privatePaths.every(file => file !== assetRoot && !file.startsWith(`${assetRoot}${sep}`)),
     'Credential service authority must remain outside retained artifacts');
   const resolveAssets = createRetainedAssetResolver(assetCatalog);
@@ -138,7 +140,7 @@ async function prepareCustody({ path, digest: expectedDigest }, boundaries = {})
     publicIdentityRequest: { method: 'GET', url: 'https://token.actions.githubusercontent.com/.well-known/jwks' } };
   const requestGraph = { ...graph, digest: digest(graph) };
   const serviceOptions = { policy, custodyPolicy, custodyStore, fenceAdmission, installation, replacement,
-    ...provider, transport, assetCatalog, resolveAssets,
+    ...provider, transport, assetCatalog, resolveAssets, nativeBootstrapRoot:root,nativeFixtureGrantKey,
     authenticate: createActionsAuthenticator({ root, policy, fenceAdmission, ...(boundaries.readGithubKeys ? { readKeys: boundaries.readGithubKeys } : {}) }),
     attest: async payload => ({ keyId: config.attestation.keyId, payload, signature: sign(null, Buffer.from(canonical(payload)), attestationKey).toString('base64') }) };
   return { requestGraph, start: async () => {
@@ -161,7 +163,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const installed = await configuredCustody({ path: values.configuration, digest: values.digest });
   const server = createServer(installed.tls, installed.handler);
-  server.requestTimeout = 30000; server.headersTimeout = 10000; server.maxRequestsPerSocket = 1;
+  server.requestTimeout = 30000; server.headersTimeout = 10000; server.maxRequestsPerSocket = 256;
   await new Promise((accept, reject) => { server.once('error', reject); server.listen(installed.tls.port, installed.tls.host, accept); });
   return server;
 }

@@ -17,13 +17,14 @@ import { lambdaBindingProjection } from '../provider-protocol.mjs';
 import { createArtifactIntakeFixture } from './artifact-intake-fixture.mjs';
 import { createBootstrapFixture } from './bootstrap-fixture.mjs';
 import { installedSigningKey } from '../protected-installation.mjs';
+import { nativeQualificationFixture } from './native-qualification-fixture.mjs';
 
 export async function retainWorkflowProtocolEvidence(service, output) {
   const inventory = [];
   for (const [name, objects] of [['controller', service.objects], ['custody', service.custodyObjects]]) {
     const root = join(output, 'retained-protected-journals', name); await mkdir(root, { recursive: true, mode: 0o700 });
     for (const [key, object] of [...objects].sort(([a], [b]) => a.localeCompare(b))) {
-      check(key === 'head.json' || /^events\/[a-f0-9]{64}\.json$/.test(key), 'Exact protected journal evidence key required');
+      check(/^(?:native-qualification\/[a-f0-9]{64}\/)?(?:head\.json|events\/[a-f0-9]{64}\.json)$/.test(key), 'Exact protected journal evidence key required');
       const path = `${key}.gz`, compressed = gzipSync(object.bytes);
       await mkdir(dirname(join(root, path)), { recursive: true, mode: 0o700 });
       await writeFile(join(root, path), compressed, { flag: 'wx', mode: 0o600 });
@@ -35,13 +36,32 @@ export async function retainWorkflowProtocolEvidence(service, output) {
   return { objects: inventory.length, inventoryDigest: digest(inventory), rawBytes: inventory.reduce((sum, file) => sum + file.bytes, 0), retainedBytes: inventory.reduce((sum, file) => sum + file.retained.bytes, 0) };
 }
 
+export function workflowArchiveRegistry(first) {
+  const fixtures = [first];
+  return {
+    add: fixture => { check(!fixtures.some(item => item.request.artifactId === fixture.request.artifactId), 'Distinct authenticated fixture artifact IDs required'); fixtures.push(fixture); },
+    api: {
+      getJSON: async endpoint => {
+        const fixture = fixtures.findLast(item => Object.hasOwn(item.documents, endpoint));
+        check(fixture, 'Unknown registered workflow artifact metadata'); return fixture.api.getJSON(endpoint);
+      },
+      downloadArtifact: async options => {
+        const fixture = fixtures.find(item => options.endpoint === `/repos/bentbrain/bent-mono/actions/artifacts/${item.request.artifactId}/zip`);
+        check(fixture, 'Unknown registered workflow artifact download'); return fixture.api.downloadArtifact(options);
+      }
+    }
+  };
+}
+
 async function retainWorkflowVerifierSource(output, expectedDigest) {
   const root = fileURLToPath(new URL('../', import.meta.url)), files = [];
   const paths = (await filesUnder(root)).filter(path => !path.startsWith('testing/') && !path.endsWith('.test.mjs'))
     .map(path => `products/shop/scripts/release-v2/${path}`);
   paths.push('scripts/require-release-checks.mjs', 'products/shop/scripts/testing/linux-evidence.mjs',
     'products/shop/scripts/testing/linux-evidence-recipient.json', 'products/shop/scripts/release-evidence.mjs',
-    'products/shop/scripts/read-regular-file.mjs');
+    'products/shop/scripts/read-regular-file.mjs', 'products/shop/scripts/testing/native-v5-oci.mjs',
+    'products/shop/packages/contracts/src/story-video-grants.js',
+    'products/shop/packages/contracts/src/native-serving-target.js');
   for (const path of paths.sort()) {
     const bytes = await readFile(join(checkout, path)); files.push({ path, sha256: sha256(bytes) });
     await mkdir(dirname(join(output, 'verifier-source', path)), { recursive: true, mode: 0o700 });
@@ -51,23 +71,26 @@ async function retainWorkflowVerifierSource(output, expectedDigest) {
   await writeFile(join(output, 'verifier-source.private.json'), canonical({ implementationDigest: expectedDigest, files }), { flag: 'wx', mode: 0o600 });
 }
 
-export async function createWorkflowJourneyFixture(t, { output, sourceCommit = '1'.repeat(40), maximumLifetimeMs = 600000, malformedNative = false }) {
+export async function createWorkflowJourneyFixture(t, { output, sourceCommit = '1'.repeat(40), maximumLifetimeMs = 600000, malformedNative = false, keys, recipientPrivateKeyFile }) {
   await privateProofDirectory(output);
   const portable = await createWorkflowPortableFixture(t, { root: output, sourceCommit });
   const provider = await createWorkflowProviderFixture(portable); t.after(() => provider.service.close());
   try {
     if (malformedNative) provider.plan.targets.find(target => target.kind === 'lambda').expectedBinding.MemorySize = 0;
-    const intake = await createArtifactIntakeFixture(t, { root: output, portableFixture: portable, sourceCommit });
+    const intake = await createArtifactIntakeFixture(t, { root: output, portableFixture: portable, sourceCommit, recipientPrivateKeyFile });
+    const archives = workflowArchiveRegistry(intake);
+    const historyIntake = { repository: intake.installation.repository, recipientFingerprint: intake.installation.recipientFingerprint,
+      workflow: { id: 333, path: '.github/workflows/shop-composition-qualification.yml', jobName: 'Validate retained composition', jobId: 'plan' } };
     const bootstrap = await createBootstrapFixture(t, { root: output, intakeFixture: intake, sourceCommit,
       providerPolicy: provider.policy, plan: provider.plan, fenceReceipt: provider.service.receipt,
-      brokerKeys: provider.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000, maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'] });
+      brokerKeys: provider.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000, maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'], historyIntake, keys });
     await retainWorkflowVerifierSource(output, bootstrap.template.implementationDigest);
-    const bridge = await workflowApiBridge({ intakeApi: intake.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
+    const bridge = await workflowApiBridge({ intakeApi: archives.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
     t.after(() => bridge.close());
     const configuration = { options: { installationPath: bootstrap.installationPath, installationDigest: bootstrap.installationDigest,
       request: intake.request, directory: join(output, 'workflow'), command: 'advance', acceptedAt: bootstrap.acceptedAt, env: bootstrap.env },
       boundaries: { apiOrigin: bridge.origin, custodyOrigin: provider.service.custodyOrigin } };
-    return { portable, ...provider, intake, bootstrap, bridge, configuration, realAwsQualified: false };
+    return { portable, ...provider, intake, archives, bootstrap, bridge, configuration, realAwsQualified: false };
   } catch (error) { await provider.service.close(); throw error; }
 }
 
@@ -77,18 +100,49 @@ export async function createWorkflowUpdateFixture(t, { fixture, output }) {
   const portable = await createWorkflowPortableFixture(t, { root: output, sourceCommit, revision: 'B', runId: '124', previous: fixture.portable });
   const intake = await createArtifactIntakeFixture(t, { root: output, portableFixture: portable, sourceCommit, runId: 124,
     artifactId: 790, jobId: 988, recipientPrivateKeyFile: fixture.intake.privateKeyFile });
+  fixture.archives.add(intake);
   const bootstrap = await createBootstrapFixture(t, { root: output, intakeFixture: intake, sourceCommit, sourceBase: fixture.bootstrap.identity.head,
     runId: 11, keys: fixture.bootstrap.keys, providerPolicy: fixture.policy, plan: fixture.plan, fenceReceipt: fixture.service.receipt,
     brokerKeys: fixture.service.publicKeys, runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000,
-    maximumLifetimeMs: fixture.bootstrap.root.maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'] });
+    maximumLifetimeMs: fixture.bootstrap.root.maximumLifetimeMs, operationCommands: ['advance', 'begin', 'deliver', 'rollback'],
+    historyIntake: fixture.bootstrap.installationContract.historyIntake, nativeQualificationPlan: fixture.bootstrap.installation.nativeQualificationPlan });
   await retainWorkflowVerifierSource(output, bootstrap.template.implementationDigest);
   check(bootstrap.installation.rootDigest === fixture.bootstrap.installation.rootDigest, 'Source update must retain the independently installed root');
-  const bridge = await workflowApiBridge({ intakeApi: intake.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
+  const bridge = await workflowApiBridge({ intakeApi: fixture.archives.api, qualityApi: bootstrap.qualityApi, output: join(output, 'api-bridge') });
   t.after(() => bridge.close());
   const configuration = { options: { installationPath: bootstrap.installationPath, installationDigest: bootstrap.installationDigest,
     request: intake.request, directory: join(output, 'workflow'), command: 'begin', acceptedAt: bootstrap.acceptedAt, env: bootstrap.env },
     boundaries: { apiOrigin: bridge.origin, custodyOrigin: fixture.service.custodyOrigin } };
   return { ...fixture, portable, intake, bootstrap, bridge, configuration };
+}
+
+// This default-CLI rehearsal uses an independently pinned fixture scope. It
+// exercises construction, dispatch and cleanup and emits no AWS qualification.
+export async function createWorkflowNativeBootstrapFixture(t, { output, keys, recipientPrivateKeyFile }) {
+  const base = await createWorkflowJourneyFixture(t, { output, keys, recipientPrivateKeyFile });
+  await base.service.close(); await base.bridge.close();
+  const native = await nativeQualificationFixture();
+  await native.service.close();
+  t.after(() => rm(native.authority.directory, { recursive: true, force: true }));
+  const names = native.template.resources.map(item => item.name);
+  const policy = protocolPolicy({ ...base.policy, functions: [...base.policy.functions, ...native.policy.functions.filter(item => names.includes(item.name))],
+    nativeQualification: { ...native.policy.nativeQualification, executionScope: 'fixture/provider-loopback' } });
+  const plan = { ...base.plan, providerPolicy: policy }, root = {};
+  const identity = { ...base.bootstrap.identity, runId: 9 };
+  const service = await hostedProtocolFixture({ policy, targets: native.template.resources.map(resource => ({ ...resource, kind: 'lambda', resource: resource.name, alias: 'active' })),
+    nativeBootstrapRoot: root, invocation: identity });
+  t.after(() => service.close());
+  const bootstrap = await createBootstrapFixture(t, { root: output, intakeFixture: base.intake, sourceCommit: identity.head, runId: identity.runId,
+    keys: base.bootstrap.keys, providerPolicy: policy, plan, fenceReceipt: service.receipt, brokerKeys: service.publicKeys,
+    runner: syntheticRetainedRunner(), acceptedAt: Date.now() - 1000, operationCommands: ['native-bootstrap'], nativeQualificationPlan: native.template,
+    historyIntake: base.bootstrap.installationContract.historyIntake });
+  Object.assign(root, bootstrap.root);
+  const bridge = await workflowApiBridge({ intakeApi: base.archives.api, qualityApi: bootstrap.qualityApi, output: join(output, 'native-api-bridge') });
+  t.after(() => bridge.close());
+  return { ...base, policy, plan, service, bootstrap, bridge,
+    configuration: { options: { installationPath: bootstrap.installationPath, installationDigest: bootstrap.installationDigest,
+      request: base.intake.request, directory: join(output, 'native-workflow'), command: 'native-bootstrap', env: bootstrap.env },
+    boundaries: { apiOrigin: bridge.origin, custodyOrigin: service.custodyOrigin } }, realAwsQualified: false };
 }
 
 export async function recoverStoppedWorkflowOwner({ service, output, name }) {

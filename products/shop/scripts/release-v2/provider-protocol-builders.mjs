@@ -1,4 +1,7 @@
+import { validateServingPolicy, normalizeServingMetadata } from './serving-provider.mjs';
 import { extname } from 'node:path';
+import { matchNativeTemplate, validateNativeQualificationPolicy } from './native-qualification-policy.mjs';
+import { nativeFixtureQueryData, nativeFixtureReadActions } from './native-fixture-protocol.mjs';
 import { check, canonical, digest, pathName, sha256, same, parseJSON } from './data.mjs';
 
 export const protocolByteLimit = 256 * 1024 * 1024;
@@ -17,12 +20,15 @@ const list = (items, test) => { check(Array.isArray(items) && items.length > 0 &
 // validates a supplied contract; it does not discover credentials or grant trust.
 export function protocolPolicy(input) {
   const value = structuredClone(input);
-  exactFields(value, ['schema', 'awsAccountId', 'region', 'cloudflareAccountId', 'workers', 'functions', 'store', 'github', ...(Object.hasOwn(value, 'workInventory') ? ['workInventory'] : [])]);
+  exactFields(value, ['schema', 'awsAccountId', 'region', 'cloudflareAccountId', 'workers', 'functions', 'store', 'github', ...(Object.hasOwn(value, 'workInventory') ? ['workInventory'] : []), ...(Object.hasOwn(value, 'nativeQualification') ? ['nativeQualification'] : []), ...(Object.hasOwn(value,'nativeServing')?['nativeServing']:[])]);
   check(value.schema === 'shop.provider-protocol-policy/v1' && value.region === 'ap-southeast-2', 'Unsupported provider policy');
   bounded(value.awsAccountId, /^[0-9]{12}$/, 'Exact AWS account required');
   bounded(value.cloudflareAccountId, /^[a-f0-9]{32}$/, 'Exact Cloudflare account required');
   list(value.workers, item => {
-    exactFields(item, ['name', 'metadataDigest', ...(Object.hasOwn(item, 'versionContentApi') ? ['versionContentApi'] : [])]);
+    exactFields(item, ['name', 'metadataDigest', ...(Object.hasOwn(item, 'versionContentApi') ? ['versionContentApi'] : []),...(Object.hasOwn(item,'bootstrapMetadata')?['bootstrapMetadata']:[]),...(Object.hasOwn(item,'nativeServingMetadata')?['nativeServingMetadata']:[])]);
+    check(item.nativeServingMetadata===undefined||item.nativeServingMetadata==='native-serving/v1','Unsupported native serving metadata');
+    check(!(item.nativeServingMetadata&&item.bootstrapMetadata),'Serving and isolated metadata markers must remain distinct');
+    check(item.bootstrapMetadata===undefined||item.bootstrapMetadata==='native-qualification/v1','Unsupported bootstrap Worker metadata');
     check(item.versionContentApi === undefined || item.versionContentApi === 'workers-beta/v1', 'Unsupported immutable Worker content API');
     bounded(item.name, /^[a-z][a-z0-9-]{0,62}$/, 'Exact Worker name required');
     bounded(item.metadataDigest, /^[a-f0-9]{64}$/, 'Protected Worker metadata digest required');
@@ -48,9 +54,11 @@ export function protocolPolicy(input) {
     check(Array.isArray(value.workInventory.queries) && value.workInventory.queries.length === 3 && same(value.workInventory.queries.map(query => query.family).sort(), ['print-assets', 'product-images', 'story-video']), 'Complete accepted-work family inventory required');
     for (const query of value.workInventory.queries) { exactFields(query, ['family', 'component', 'sql']); bounded(query.component, /^[a-z][a-z0-9-]{0,63}$/, 'Exact work component required'); check(typeof query.sql === 'string' && query.sql.length <= 16384 && /^SELECT\s/i.test(query.sql) && !/;|--|\/\*|\*\/|\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX|ANALYZE|load_extension|writefile|readfile|eval)\b/i.test(query.sql) && /\bFROM\s+[A-Za-z_][A-Za-z0-9_]*/i.test(query.sql) && /\bartifactDigest\b/.test(query.sql) && /\bformat\b/.test(query.sql) && !/\bLIMIT\b/i.test(query.sql), 'Complete conservative read-only accepted-work SELECT required'); }
   }
+  if (value.nativeQualification) validateNativeQualificationPolicy(value.nativeQualification, value);
+  if(value.nativeServing)validateServingPolicy(value.nativeServing,value);
   deepFreeze(value); issuedPolicies.add(value); return value;
 }
-export const isReadRequest = request => request.method === 'GET' || ['work.query', 'ecr.check-layers', 'ecr.get-image'].includes(request.operation);
+export const isReadRequest = request => request.method === 'GET' || ['work.query', 'native.observation', 'native.fixture-read', 'ecr.check-layers', 'ecr.get-image'].includes(request.operation);
 export function assertPolicy(policy) { check(issuedPolicies.has(policy), 'Validated protected protocol policy required'); }
 export function assertProtocolRequest(request, policy) {
   assertPolicy(policy);
@@ -137,12 +145,30 @@ export function requestBuilders(policy) {
   const json = { 'content-type': 'application/json' };
   const page = value => { check(Number.isInteger(value) && value > 0 && value <= protocolPageLimit, 'Provider pagination exceeds bound'); return value; };
   const marker = value => { bounded(value, /^[A-Za-z0-9_+=/.-]{1,1024}$/, 'Malformed pagination marker'); return encodeURIComponent(value); };
-  const storeKey = key => { pathName(key); check(key === 'head.json' || /^events\/[a-f0-9]{64}\.json$/.test(key), 'Store key outside protected journal'); return `${s3Origin}/${policy.store.prefix}/${key}`; };
+  const storeKey = (key, namespace = null) => { pathName(key); check(key === 'head.json' || /^events\/[a-f0-9]{64}\.json$/.test(key), 'Store key outside protected journal'); check(namespace === null || policy.nativeQualification && /^native-qualification\/[a-f0-9]{64}$/.test(namespace), 'Store namespace outside protected native journal'); return `${s3Origin}/${policy.store.prefix}/${namespace === null ? '' : `${namespace}/`}${key}`; };
   const deployment = id => { check(typeof id === 'string' && /^[1-9][0-9]{0,19}$/.test(id) && (policy.github.reporting === 'per-release' || policy.github.deploymentIds.includes(id)), 'Reporting deployment outside protected allowlist'); return id; };
   const repository = name => { const item = policy.functions.find(item => item.name === name); check(item, 'ECR repository outside protected allowlist'); return item.imageRepository.split('.amazonaws.com/')[1]; };
   const image = value => { bounded(value, /^[a-f0-9]{64}$/, 'Exact immutable ECR image/blob digest required'); return `sha256:${value}`; };
   const ecr = (name, operation, target, body) => wire(policy, 'ecr', operation, 'POST', `https://api.ecr.${policy.region}.amazonaws.com/`, { registryId: policy.awsAccountId, repositoryName: repository(name), ...body }, { 'content-type': 'application/x-amz-json-1.1', 'x-amz-target': `AmazonEC2ContainerRegistry_V20150921.${target}` });
+  const isolated = name => { check(policy.nativeQualification?.resources.some(resource => resource.name === name), 'Function outside isolated native qualification scope'); return fn(name); };
+  const fixturePolicy=()=>{check(policy.nativeQualification?.fixtureLifecycle,'Pinned real native fixture lifecycle required');return policy.nativeQualification.fixtureLifecycle;};
+  const fixtureObject=(bucket,key)=>{const fixture=fixturePolicy();check([fixture.artworkBucket,fixture.videoBucket].includes(bucket)&&typeof key==='string'&&/^(?:designs\/[a-f0-9-]{36}\/(?:artwork\/[a-f0-9]{64}|product-images\/v[45]\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white-flat\.webp)|story-videos\/v7\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white\.mp4)$/.test(key),'Exact owned native fixture object key required');return `${cfOrigin}/r2/buckets/${bucket}/objects/${key}`;};
   return Object.freeze({
+    nativeFixtureQuery:(action,params)=>{const fixture=fixturePolicy(),body=nativeFixtureQueryData(action,params);return wire(policy,'cloudflare',nativeFixtureReadActions.includes(action)?'native.fixture-read':'native.fixture-query','POST',`${cfOrigin}/d1/database/${fixture.databaseId}/query`,body,json);},
+    nativeFixtureObjectGet:(bucket,key)=>wire(policy,'cloudflare','native.fixture-object-get','GET',fixtureObject(bucket,key)),
+    nativeFixtureObjectPut:(bucket,key,bytes)=>{check(Buffer.isBuffer(bytes)&&bytes.length>0&&bytes.length<=25000000,'Bounded exact native fixture artwork required');return wire(policy,'cloudflare','native.fixture-object-put','PUT',fixtureObject(bucket,key),bytes,{'content-type':'application/octet-stream'});},
+    nativeFixtureObjectDelete:(bucket,key)=>wire(policy,'cloudflare','native.fixture-object-delete','DELETE',fixtureObject(bucket,key)),
+    servingConfigure: (name,environment,revisionId) => { check(policy.nativeServing&&[policy.nativeServing.mainResource,policy.nativeServing.failureResource].includes(name)&&environment&&same(Object.keys(environment),['Variables'])&&environment.Variables&&Object.values(environment.Variables).every(value=>typeof value==='string'),'Exact serving environment update required');return wire(policy,'lambda','lambda.serving-configure','PUT',`${fn(name)}/configuration`,{Environment:environment,RevisionId:revision(revisionId)},json); },
+    servingEventMapping: () => { check(policy.nativeServing,'Pinned serving failure mapping required'); return wire(policy,'lambda','lambda.serving-event-mapping','GET',`${lambdaOrigin}/2015-03-31/event-source-mappings/${policy.nativeServing.failureMapping.id}`); },
+    servingUpdateMapping: version => { check(policy.nativeServing,'Pinned serving failure mapping required'); return wire(policy,'lambda','lambda.serving-update-event-mapping','PUT',`${lambdaOrigin}/2015-03-31/event-source-mappings/${policy.nativeServing.failureMapping.id}`,{FunctionName:`arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${policy.nativeServing.failureResource}:${numberedVersion(version)}`},json); },
+    nativeConcurrency: name => { isolated(name); return wire(policy, 'lambda', 'lambda.native-concurrency', 'GET', `${lambdaOrigin}/2019-09-30/functions/${name}/concurrency`); },
+    nativeEventConfig: name => { isolated(name); return wire(policy, 'lambda', 'lambda.native-event-config', 'GET', `${lambdaOrigin}/2019-09-25/functions/${name}/event-invoke-config`); },
+    nativeEventMapping: name => { isolated(name); const mapping = policy.nativeQualification.resources.find(resource => resource.name === name).eventSourceMapping; check(mapping, 'Pinned native failure mapping required'); return wire(policy, 'lambda', 'lambda.native-event-mapping', 'GET', `${lambdaOrigin}/2015-03-31/event-source-mappings/${mapping.id}`); },
+    nativeUpdateMapping:(name,version=null)=>{isolated(name);const pin=policy.nativeQualification.resources.find(resource=>resource.name===name).eventSourceMapping;check(pin?.restoreFunctionArn,'Separately installed isolated mapping mutation required');const target=version===null?pin.restoreFunctionArn:`arn:aws:lambda:${policy.region}:${policy.awsAccountId}:function:${name}:${numberedVersion(version)}`;return wire(policy,'lambda','lambda.native-update-event-mapping','PUT',`${lambdaOrigin}/2015-03-31/event-source-mappings/${pin.id}`,{FunctionName:target},json);},
+    nativeInvoke: (probeId, version, payload) => { const probe = policy.nativeQualification?.probes.find(item => item.id === probeId); check(probe, 'Exact admitted native probe required'); let body=payload; if(probe.fixtureKind){check(payload&&typeof payload.grant==='string'&&/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(payload.grant)&&/^[a-f0-9-]{36}$/.test(payload.jobId)&&(probe.fixtureKind==='v5'?payload.kind==='product-image-v5':probe.fixtureKind==='v4'?payload.kind==='product-image':!payload.kind),'Actual admitted native fixture event required');if(probe.fixtureKind==='v5'){exactFields(payload,['kind','schemaVersion','jobId','grant','rendererVersion']);body=Buffer.from(JSON.stringify({kind:payload.kind,schemaVersion:payload.schemaVersion,jobId:payload.jobId,grant:payload.grant,rendererVersion:payload.rendererVersion}));}}else if (Object.hasOwn(probe,'payloadTemplate')) matchNativeTemplate(probe.payloadTemplate,payload); else check(digest(payload) === probe.payloadDigest, 'Exact admitted native probe payload required'); return wire(policy, 'lambda', 'lambda.native-invoke', 'POST', `${isolated(probe.resource)}/invocations?Qualifier=${numberedVersion(version)}`, body, { ...json, 'x-amz-invocation-type': probe.invocationType, 'x-amz-log-type': 'None' }); },
+    nativeObservation: (probeId, parameters) => { const probe = policy.nativeQualification?.probes.find(item => item.id === probeId); check(probe, 'Pinned native observation required'); const { databaseId, sql, params } = probe.observation; const actual = parameters ?? params; matchNativeTemplate(params,actual); return wire(policy, 'cloudflare', 'native.observation', 'POST', `${cfOrigin}/d1/database/${databaseId}/query`, { sql, params: actual }, json); },
+    nativeDeleteVersion: (name, version) => wire(policy, 'lambda', 'lambda.native-delete-version', 'DELETE', `${isolated(name)}?Qualifier=${numberedVersion(version)}`),
+    nativeRestore: (name, imageDigest, revisionId) => { isolated(name); const repository = policy.functions.find(item => item.name === name).imageRepository; image(imageDigest); return wire(policy, 'lambda', 'lambda.native-restore', 'PUT', `${fn(name)}/code`, { ImageUri: `${repository}@${image(imageDigest)}`, Publish: false, RevisionId: revision(revisionId) }, json); },
     ecrCheckLayers: (name, digests) => { check(Array.isArray(digests) && digests.length > 0 && digests.length <= 100 && new Set(digests).size === digests.length, 'Complete unique ECR blob inventory required'); return ecr(name, 'ecr.check-layers', 'BatchCheckLayerAvailability', { layerDigests: digests.map(image) }); },
     ecrInitiateLayer: name => ecr(name, 'ecr.initiate-layer', 'InitiateLayerUpload', {}),
     ecrUploadPart: (name, uploadId, bytes, offset) => { cloudflareVersion(uploadId); check(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 20971520 && Number.isSafeInteger(offset) && offset >= 0, 'Bounded exact ECR upload part required'); return ecr(name, 'ecr.upload-part', 'UploadLayerPart', { uploadId, layerPartBlob: bytes.toString('base64'), partFirstByte: offset, partLastByte: offset + bytes.length - 1 }); },
@@ -157,7 +183,8 @@ export function requestBuilders(policy) {
     workerContent: name => wire(policy, 'cloudflare', 'worker.content', 'GET', `${worker(name)}/content/v2`),
     workerUpload: (name, upload) => {
       const protectedWorker = policy.workers.find(item => item.name === name); check(protectedWorker, 'Worker outside protected allowlist');
-      const metadata = structuredClone(upload.metadata);
+      const metadata = structuredClone(upload.metadata);if(protectedWorker.nativeServingMetadata){const normalized=normalizeServingMetadata(metadata,protectedWorker.nativeServingMetadata,metadata.bindings?.find(item=>item.name==='SHOP_NATIVE_SERVING_TARGET_JSON')?.text!=='$nativeServingTarget',policy);metadata.bindings=normalized.bindings;}if(protectedWorker.bootstrapMetadata||protectedWorker.nativeServingMetadata)check((metadata.bindings??[]).every(binding=>!['secret_text','secret_key'].includes(binding.type)),'Bootstrap secret bindings must inherit installed protected values');
+      if(protectedWorker.bootstrapMetadata){check(policy.nativeQualification?.fixtureLifecycle?.bootstrapWorker?.name===name,'Bootstrap metadata requires independently pinned isolated Worker');for(const [bindingName,placeholder,pattern] of [['SHOP_NATIVE_BOOTSTRAP_AUTHORITY_DIGEST','$bootstrapAuthorityDigest',/^[a-f0-9]{64}$/],['SHOP_NATIVE_BOOTSTRAP_OPERATION_ID','$operationId',/^native-[a-f0-9]{64}$/]]){const binding=metadata.bindings?.find(item=>item.name===bindingName);check(binding?.type==='plain_text'&&(binding.text===placeholder||pattern.test(binding.text)),'Exact bootstrap metadata binding required');binding.text=placeholder;}}
       // Session completion JWTs are short-lived capabilities returned by the
       // provider. All other metadata remains bound to protected admission.
       if (metadata.assets && Object.hasOwn(metadata.assets, 'jwt')) {
@@ -165,7 +192,7 @@ export function requestBuilders(policy) {
         delete metadata.assets.jwt;
       }
       check(digest(metadata) === protectedWorker.metadataDigest, 'Worker bindings/metadata differ from protected policy');
-      const parts = workerParts(upload); return wire(policy, 'cloudflare', 'worker.upload', 'POST', `${worker(name)}/versions`, parts.multipart.body, { 'content-type': parts.multipart.contentType }); },
+      const parts = workerParts(upload); return wire(policy, 'cloudflare', 'worker.upload', 'POST', `${worker(name)}/versions${protectedWorker.bootstrapMetadata||protectedWorker.nativeServingMetadata?'?bindings_inherit=strict':''}`, parts.multipart.body, { 'content-type': parts.multipart.contentType }); },
     workerActivate: (name, id) => wire(policy, 'cloudflare', 'worker.activate', 'POST', `${worker(name)}/deployments`, { strategy: 'percentage', versions: [{ version_id: cloudflareVersion(id), percentage: 100 }] }, json),
     assetSession: (name, assets) => wire(policy, 'cloudflare', 'assets.session', 'POST', `${worker(name)}/assets-upload-session`, { manifest: assetManifest(assets).manifest }, json),
     assetUpload: (assets, hashes, jwt) => {
@@ -187,12 +214,12 @@ export function requestBuilders(policy) {
     },
     lambdaActivate: (name, value, version, revisionId) => wire(policy, 'lambda', 'lambda.activate', 'PUT', alias(name, value), { FunctionVersion: numberedVersion(version), RevisionId: revision(revisionId), RoutingConfig: { AdditionalVersionWeights: {} } }, json),
     lambdaCreateAlias: (name, value, version) => { alias(name, value); return wire(policy, 'lambda', 'lambda.create-alias', 'POST', `${fn(name)}/aliases`, { Name: value, FunctionVersion: numberedVersion(version), RoutingConfig: { AdditionalVersionWeights: {} } }, json); },
-    storeGet: key => wire(policy, 's3', 'store.get', 'GET', storeKey(key), Buffer.alloc(0), { 'x-amz-expected-bucket-owner': policy.awsAccountId }),
-    storePut: (key, bytes, etag) => {
+    storeGet: (key, namespace = null) => wire(policy, 's3', 'store.get', 'GET', storeKey(key,namespace), Buffer.alloc(0), { 'x-amz-expected-bucket-owner': policy.awsAccountId }),
+    storePut: (key, bytes, etag, namespace = null) => {
       check(Buffer.isBuffer(bytes), 'Exact store bytes required');
       check(etag === null || typeof etag === 'string' && /^"[A-Za-z0-9-]{1,128}"$/.test(etag), 'Exact store ETag precondition required');
       check(!key.startsWith('events/') || etag === null, 'Events require create-only writes');
-      return wire(policy, 's3', 'store.put', 'PUT', storeKey(key), bytes, { ...json, 'x-amz-expected-bucket-owner': policy.awsAccountId,
+      return wire(policy, 's3', 'store.put', 'PUT', storeKey(key,namespace), bytes, { ...json, 'x-amz-expected-bucket-owner': policy.awsAccountId,
         'x-amz-server-side-encryption': 'aws:kms', 'x-amz-server-side-encryption-aws-kms-key-id': policy.store.kmsKeyArn,
         'x-amz-checksum-sha256': Buffer.from(sha256(bytes), 'hex').toString('base64'), ...(etag === null ? { 'if-none-match': '*' } : { 'if-match': etag }) });
     },

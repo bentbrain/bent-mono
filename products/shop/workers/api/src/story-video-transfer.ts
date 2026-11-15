@@ -115,6 +115,7 @@ export async function handleStoryVideoTransfer(request: Request, env: TransferEn
         // Destination delivery has no execution identity. It may fail an unclaimed
         // event, but cannot poison a claimed execution from another delivery.
         const ownsFailure = job.execution_id === executionId;
+        if (result.meta.changes === 1) await observeQualification(env, job.artwork_key, job.id, 'failure-committed', 204, executionId);
         if ((result.meta.changes === 1 || (job.status === "failed" && ownsFailure)) && grant.attempt < 3) {
             if (!env.STORY_VIDEO_JOBS)
                 return new Response(null, { status: 503 });

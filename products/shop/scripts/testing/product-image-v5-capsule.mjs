@@ -32,7 +32,7 @@ async function packageProductImageV5Capsule(destination) {
         sourceInputs.push({ path, size: bytes.length, sha256: digest(bytes) });
         await copyFile(join(root, path), join(output, target));
     }
-    for (const name of ["product-image-v5-handler.mjs", "product-image-v5-entry.mjs", "product-image-v5-integrity.mjs"])
+    for (const name of ["product-image-v5-handler.mjs", "product-image-v5-entry.mjs", "product-image-v5-integrity.mjs", "native-runtime-profile.mjs"])
         await source(`products/shop/workers/video-renderer/aws-lambda/${name}`, name);
     const renderer = "products/shop/packages/product-image-renderer";
     for (const name of ["package.json", "src/index.mjs", "src/index.d.ts", "src/execution.mjs", "src/execution.d.ts", "assets/displacement.wasm", "assets/displacement-build.json"])

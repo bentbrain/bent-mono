@@ -30,3 +30,15 @@ test('OIDC client requests its installed audience once and rejects another invoc
   await assert.rejects(transport({ action: 'dispatch' }), /lost acknowledgement/);
   assert.equal(calls.length, before + 1); assert.equal(calls.at(-1)[0].href, `${f.root.credentialBroker.origin}/v1/invocations`);
 });
+
+test('one root-scoped client renews its short-lived identity, retains its TLS agent and closes without another send', async () => {
+  const f = await authorityFixture(); let at = Date.now(), renewals = 0; const calls = [];
+  const token = () => `${Buffer.from('{}').toString('base64url')}.${Buffer.from(canonical({ exp: Math.floor(at / 1000) + 120 })).toString('base64url')}.signature`;
+  const transport = createBrokerTransport({ root: f.root, now: () => at, tokenProvider: async () => { renewals++; return token(); },
+    request: async (...args) => { calls.push(args); return { accepted: true }; } });
+  await transport({ action: 'read' }); await transport({ action: 'read' });
+  assert.equal(renewals, 1); assert.equal(calls[0][5], calls[1][5]); assert.equal(calls[0][5].keepAlive, true);
+  at += 100000; await transport({ action: 'read' }); assert.equal(renewals, 2); assert.notEqual(calls[0][2], calls[2][2]);
+  assert.deepEqual(transport.measurements(), { requests: 3, sockets: 0, reusedSockets: 0, tlsHandshakes: 0 });
+  transport.close(); await assert.rejects(transport({ action: 'read' }), /closed/); assert.equal(calls.length, 3);
+});

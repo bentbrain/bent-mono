@@ -14,6 +14,7 @@
     "./product-mockup-geometry": "./src/product-mockup-geometry.js",
     "./product-projection": "./src/product-projection.ts",
     "./story-video-grants": "./src/story-video-grants.js",
+    "./native-serving-target": "./src/native-serving-target.js",
     "./diagnostics": "./src/diagnostics.ts"
   },
   "scripts": {

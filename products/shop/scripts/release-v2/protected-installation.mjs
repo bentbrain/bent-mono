@@ -14,11 +14,29 @@ const hash = value => check(typeof value === 'string' && /^[a-f0-9]{64}$/.test(v
 const boundedName = value => check(typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value), 'Exact installed identity required');
 const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 const contains = (directory, path) => path === directory || path.startsWith(`${directory}${sep}`);
-const operationCommands = ['advance', 'begin', 'deliver', 'rollback'];
+const operationCommands = ['advance', 'begin', 'deliver', 'native-bootstrap', 'rollback'];
 function installationFields(contract) {
   return ['schema', 'scope', 'root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence', 'signing',
     'secretInstallations', 'componentConfigurations', 'artifactIntake', 'artifactPrivateKeyFile',
-    ...(Object.hasOwn(contract, 'operationScope') ? ['operationScope'] : [])];
+    ...(Object.hasOwn(contract, 'operationScope') ? ['operationScope'] : []),
+    ...(Object.hasOwn(contract, 'nativeQualificationPlan') ? ['nativeQualificationPlan'] : []),
+    ...(Object.hasOwn(contract, 'historyIntake') ? ['historyIntake'] : [])];
+}
+
+function validateHistoryIntake(contract, root) {
+  if (!Object.hasOwn(contract, 'historyIntake')) return;
+  const intake = contract.historyIntake;
+  exactFields(intake, ['repository', 'workflow', 'recipientFingerprint'], 'Unexpected historical artifact installation fields');
+  exactFields(intake.repository, ['id', 'ownerId', 'name']);
+  exactFields(intake.workflow, ['id', 'path', 'jobName', 'jobId']);
+  check(intake.repository.id === root.repository.repositoryId && intake.repository.ownerId === root.repository.ownerId &&
+    intake.repository.name === root.repositoryName && Number.isSafeInteger(intake.workflow.id) && intake.workflow.id > 0 &&
+    intake.workflow.path === '.github/workflows/shop-composition-qualification.yml' &&
+    intake.workflow.path === root.workflowPath && intake.workflow.jobName === 'Validate retained composition' &&
+    intake.workflow.jobId === 'plan', 'Historical artifact producer differs from installed release workflow');
+  hash(intake.recipientFingerprint);
+  check(intake.recipientFingerprint === contract.artifactIntake.recipientFingerprint,
+    'Historical artifact recipient differs from installed private key');
 }
 
 function validateOperationScope(scope, contract, root, now) {
@@ -49,11 +67,11 @@ async function independentFile(path, excluded, maximum = 16 * 1024 * 1024) {
   return bytes;
 }
 
-async function installedReference(reference, excluded, maximum) {
+async function installedReference(reference, excluded, maximum, jsonOptions) {
   exactFields(reference, ['path', 'sha256']); hash(reference.sha256);
   const bytes = await independentFile(reference.path, excluded, maximum);
   check(sha256(bytes) === reference.sha256, 'Installed document bytes differ');
-  return { bytes, value: parseJSON(bytes, maximum ?? 16 * 1024 * 1024) };
+  return { bytes, value: parseJSON(bytes, maximum ?? 16 * 1024 * 1024, jsonOptions) };
 }
 
 function identityMatches(root, identity) {
@@ -115,6 +133,7 @@ export async function installProtectedPackage({ path, digest, destination, ident
   };
   for (const field of ['root', 'compositionTemplate', 'runnerFile', 'targetPlan', 'credentialFence']) reference(contract[field]);
   if (Object.hasOwn(contract, 'operationScope')) reference(contract.operationScope);
+  if (Object.hasOwn(contract, 'nativeQualificationPlan')) reference(contract.nativeQualificationPlan);
   exactFields(contract.signing, ['source', 'composition']);
   for (const kind of ['source', 'composition']) { exactFields(contract.signing[kind], ['keyId', 'path']); contract.signing[kind].path = localFile(contract.signing[kind].path); }
   check(Array.isArray(contract.componentConfigurations) && contract.componentConfigurations.length <= 32, 'Bounded protected component configurations required');
@@ -187,7 +206,7 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
   const compositionKey = root.compositionKeys.find(key => key.id === policy.keyId);
   check(compositionKey && compositionKey.spkiSha256 === policy.keyFingerprint && compositionKey.publicKeyPem === policy.publicKeyPem,
     'Composition key differs from independent root');
-  const plan = (await installedReference(contract.targetPlan, excluded)).value;
+  const plan = (await installedReference(contract.targetPlan, excluded, undefined, { finiteFractions: true })).value;
   exactFields(plan, ['schema', 'scope', 'providerPolicy', 'targets', 'deploymentId', 'journeyOrigin']);
   check(plan.schema === 'shop.hosted-target-plan/v1' && plan.scope === root.scope, 'Installed target plan scope differs');
   const providerPolicy = protocolPolicy(plan.providerPolicy);
@@ -195,6 +214,10 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
     providerPolicy.github.environment === root.environment &&
     (providerPolicy.github.reporting === 'per-release' ? plan.deploymentId === null : providerPolicy.github.deploymentIds.includes(plan.deploymentId)) &&
     policy.runner.origins.includes(plan.journeyOrigin), 'Installed target policy or reporting identity differs');
+  const nativeQualificationPlan = Object.hasOwn(contract, 'nativeQualificationPlan')
+    ? (await installedReference(contract.nativeQualificationPlan, excluded, undefined, { finiteFractions: true })).value : null;
+  check(nativeQualificationPlan === null || providerPolicy.nativeQualification,
+    'Native qualification requires an independently installed resource policy');
   check(Array.isArray(plan.targets) && same(plan.targets.map(target => target.component).sort(), [...policy.closurePolicy.components].sort()) &&
     new Set(plan.targets.map(target => target.component)).size === plan.targets.length &&
     plan.targets.every(target => target.kind === (target.component === 'native' ? 'lambda' : 'worker')), 'Installed component targets differ');
@@ -226,11 +249,12 @@ export async function readProtectedInstallation({ path, digest, identity, reposi
   check(contract.artifactIntake && typeof contract.artifactIntake === 'object' && !Array.isArray(contract.artifactIntake), 'Installed artifact admission required');
   check(contract.artifactIntake.repository?.name === root.repositoryName && contract.artifactIntake.repository?.id === root.repository.repositoryId &&
     contract.artifactIntake.repository?.ownerId === root.repository.ownerId, 'Artifact admission repository differs from installed root');
+  validateHistoryIntake(contract, root);
   await independentFile(contract.artifactPrivateKeyFile, excluded, 16384);
-  const installation = freeze({ contract, root, template: policy, plan, providerPolicy, operationScope, rootPath: contract.root.path, rootDigest: contract.root.sha256,
+  const installation = freeze({ contract, root, template: policy, plan, providerPolicy, operationScope, nativeQualificationPlan, rootPath: contract.root.path, rootDigest: contract.root.sha256,
     planPath: contract.targetPlan.path, fencePath: contract.credentialFence.path, fenceDigest: contract.credentialFence.sha256,
     secretInstallations: contract.secretInstallations, sourceKeyPath: contract.signing.source.path, compositionKeyPath: contract.signing.composition.path,
-    artifactIntake: contract.artifactIntake, artifactPrivateKeyFile: contract.artifactPrivateKeyFile });
+    artifactIntake: contract.artifactIntake, historyIntake: contract.historyIntake, artifactPrivateKeyFile: contract.artifactPrivateKeyFile });
   installations.set(installation, { path, digest, identity: structuredClone(identity), repositoryDirectory, artifactDirectories: [...artifactDirectories], now });
   return installation;
 }
@@ -250,6 +274,8 @@ export async function requireInstalledOperation(installation, command, now = Dat
   const scope = validateOperationScope((await installedReference(installation.contract.operationScope, excluded, 65536)).value,
     installation.contract, root, now);
   check(scope.commands.includes(command), 'Installed operation scope does not admit this command');
+  if (command === 'native-bootstrap') check(installation.nativeQualificationPlan && installation.providerPolicy.nativeQualification,
+    'Native bootstrap requires its independently installed plan and resource policy');
   if (command === 'deliver') check(['begin', 'advance'].every(step => scope.commands.includes(step)),
     'Installed operation scope must admit the complete delivery transition scope');
   return Object.freeze({ command, scope: scope.scope, operationScopeDigest: installation.contract.operationScope.sha256,

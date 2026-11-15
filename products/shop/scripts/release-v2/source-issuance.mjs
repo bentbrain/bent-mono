@@ -1,5 +1,6 @@
+import { resolveServingPlan, assertServingPlanAuthority, materializeServingConfig } from './serving-plan.mjs';
 import { sign } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { requireReleaseChecks } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, pathName, readRef, readRegularFile, same, sha256 } from './data.mjs';
@@ -11,6 +12,8 @@ import { assertProtectedInstallation, installedSigningKey, refreshProtectedInsta
 import { admitCredentialFence, createHostedWriter, credentialBrokerBoundary } from './hosted-writer.mjs';
 import { preflightHostedTargets, retainedCandidateLoader, retainHostedRequestGraph } from './hosted-provider.mjs';
 import { createBrokerTransport, requestBrokerIdentity } from './broker-transport.mjs';
+import { admitNativeBootstrap, assertNativeQualificationResult, materializeNativeQualificationPlan, nativeBootstrapSubject,
+  preflightNativeQualification, runNativeQualification } from './native-qualification.mjs';
 
 const guardPath = new URL('../../../../scripts/require-release-checks.mjs', import.meta.url);
 const prefix = '/repos/bentbrain/bent-mono';
@@ -120,10 +123,50 @@ function sourcePolicy(installation, portable, source) {
   conforms(policy, 'hostedTrust'); return policy;
 }
 
-async function installedReader({ installation, payload, bundle, env, boundaries, now, evidenceDirectory, release }) {
+function nativeQualificationContext(installation, receipts = []) {
+  check(Array.isArray(receipts) && receipts.length <= 1, 'One exact native qualification receipt is supported');
+  if (!installation.providerPolicy.nativeQualification) {
+    check(receipts.length === 0, 'Native qualification receipt requires installed policy');
+    return undefined;
+  }
+  return { root: installation.root, receipts, environmentId: installation.root.credentialBroker.environmentId,
+    policyDigest: digest(installation.providerPolicy.nativeQualification), qualificationPolicy: installation.providerPolicy.nativeQualification,
+    secretVersionsDigest: digest(installation.secretInstallations) };
+}
+
+async function checkNativeReceipts(installation, payload, bundle, receipts, plan = installation.plan) {
+  const nativeQualification = nativeQualificationContext(installation, receipts);
+  if (!receipts.length) return;
+  const component = payload.components.find(item => item.id === 'native');
+  check(component, 'Native qualification requires its exact component');
+  const candidate = await retainedCandidateLoader({ bundle, targets: plan.targets, nativeQualification })(component);
+  check(candidate.native?.awsImageQualified === true, 'Actual native provider qualification is required');
+}
+
+async function nativeBootstrapWorker(current, portable, plan, evidencePath) {
+  if (!plan.bootstrapWorker) return undefined;
+  const { target } = plan.bootstrapWorker, business = portable.components.get('business');
+  check(business && target?.kind === 'worker' && target.component === 'business' &&
+    !current.plan.targets.some(item => item.kind === 'worker' && item.resource === target.resource),
+  'Bootstrap business Worker must be separate from all serving Workers');
+  const installed = current.contract.componentConfigurations.find(item => item.component === 'business');
+  check(installed, 'Installed business configuration is required for native bootstrap');
+  const configBytes = await readRegularFile(installed.config.path, 16 * 1024 * 1024, true);
+  check(sha256(configBytes) === installed.config.sha256, 'Installed bootstrap business configuration changed');
+  const directory = await mkdtemp(join(dirname(evidencePath), 'native-business-'));
+  for (const reference of [business.artifactRef, business.provenanceRef, ...business.artifact.files])
+    await put(directory, reference.path, await readRef(portable.root, reference));
+  const component = { ...clone(business.component), config: await put(directory, 'release-bindings/business.json', configBytes) };
+  const load = retainedCandidateLoader({ bundle: directory, targets: [target] });
+  await load(component);
+  return { component, target, load };
+}
+
+async function installedReader({ installation, payload, bundle, env, boundaries, now, evidenceDirectory, release, nativeQualificationReceipts = [], resolvedPlan = installation.plan }) {
   // Validate all retained target bytes before obtaining even a read-only broker identity.
-  const preflight = await preflightHostedTargets({ policy: installation.providerPolicy, components: payload.components, targets: installation.plan.targets,
-    load: retainedCandidateLoader({ bundle, targets: installation.plan.targets }), release });
+  const preflight = await preflightHostedTargets({ policy: installation.providerPolicy, components: payload.components, targets: resolvedPlan.targets,
+    load: retainedCandidateLoader({ bundle, targets: resolvedPlan.targets,
+      nativeQualification: nativeQualificationContext(installation, nativeQualificationReceipts) }), release });
   await mkdir(evidenceDirectory, { recursive: true, mode: 0o700 });
   await retainHostedRequestGraph({ directory: evidenceDirectory, preflight });
   const fenceBytes = await readRegularFile(installation.fencePath, 65536, true);
@@ -180,11 +223,122 @@ async function signInstalledComposition({ installation, payload, sourceAdmission
 async function installedOperationAuthorization(installation, command, now) {
   if (command === 'plan') return { scopeDigest: installation.contract.operationScope?.sha256 ?? null, commands: [], expiresAt: now + installation.root.maximumLifetimeMs };
   await requireInstalledOperation(installation, command, now);
-  return { scopeDigest: installation.contract.operationScope.sha256, commands: [...installation.operationScope.commands], expiresAt: installation.operationScope.expiresAt };
+  check(['advance', 'begin', 'deliver', 'rollback'].includes(command), 'Composition operation required');
+  return { scopeDigest: installation.contract.operationScope.sha256,
+    commands: installation.operationScope.commands.filter(value => ['advance', 'begin', 'deliver', 'rollback'].includes(value)),
+    expiresAt: installation.operationScope.expiresAt };
+}
+
+/** Prepare isolated native qualification from authenticated OCI bytes and installed policy. */
+export async function prepareHostedNativeQualification({ installation, identity, imported, qualityApi, acceptedAt, now = Date.now,
+  executionScope = installation.providerPolicy.nativeQualification?.executionScope ?? 'aws/provider' }) {
+  assertProtectedInstallation(installation); check(typeof now === 'function', 'Explicit native qualification clock required');
+  check(['aws/provider', 'fixture/provider-loopback'].includes(executionScope) &&
+    !(installation.providerPolicy.nativeQualification?.executionScope === 'fixture/provider-loopback' && executionScope !== 'fixture/provider-loopback'),
+  'Installed fixture qualification cannot issue an AWS qualification');
+  await requireInstalledOperation(installation, 'native-bootstrap', now());
+  const authenticated = await assertHostedPortableImport(imported, { installation: installation.artifactIntake, sourceCommit: identity.head });
+  const current = await refreshProtectedInstallation(installation, now(), [authenticated.portable.root, dirname(authenticated.evidence.path)]);
+  identityMatches(current.root, identity);
+  const source = await qualifyHostedSource({ installation: current, identity, qualityApi, acceptedAt, now });
+  const state = assertSource(source, current, identity), portable = await verifyPortableBundle(authenticated.portable.root, authenticated.portable.expected);
+  check(portable.manifest.originSourceCommit === identity.head, 'Native qualification source differs from canonical workflow source');
+  const native = portable.components.get('native');
+  check(native && native.artifact.format === 'oci-layout' && current.nativeQualificationPlan,
+    'Installed native qualification source or plan is missing');
+  check(executionScope === 'fixture/provider-loopback' || native.runtime.definition.kind === 'linux-native-oci-candidate' &&
+    native.runtime.definition.nativeOciReceipt?.schema === 'shop.native-v5-oci-receipt/v1',
+    'Real native qualification requires the complete verified OCI producer receipt');
+  const qualificationRuntime = native.runtime.definition.kind === 'linux-native-oci-candidate' ? native.runtime : null;
+  const plan = await materializeNativeQualificationPlan({ template: current.nativeQualificationPlan,
+    policy: current.providerPolicy, artifact: native.artifact, runtime: qualificationRuntime, component: native.component,
+    readFile: reference => readRef(portable.root, reference), secretVersionsDigest: digest(current.secretInstallations), invocation: identity });
+  const serving = current.plan.targets.filter(target => target.kind === 'lambda').map(target => target.resource);
+  check(current.providerPolicy.nativeQualification.resources.every(resource => !serving.includes(resource.name)),
+    'Native qualification resources must be separate from serving functions');
+  const bootstrapWorker = await nativeBootstrapWorker(current, portable, plan, authenticated.evidence.path);
+  const preflight = await preflightNativeQualification({ policy: current.providerPolicy, artifact: native.artifact,
+    component: native.component, runtime: qualificationRuntime, plan, bootstrapWorker, readFile: reference => readRef(portable.root, reference) });
+  const subject = nativeBootstrapSubject(preflight);
+  check(subject.sourceDigest === native.component.codeDigest && subject.secretVersionsDigest === digest(current.secretInstallations),
+    'Native qualification request graph subject differs');
+  const revalidateInstallation = async () => {
+    const at = now(), fresh = await refreshProtectedInstallation(current, at);
+    assertSource(source, fresh, identity); await requireInstalledOperation(fresh, 'native-bootstrap', at);
+    return fresh;
+  };
+  const revalidate = async () => {
+    const fresh = await revalidateInstallation();
+    state.verifyInvocation(await qualityApi(state.runPath));
+    await requireReleaseChecks(identity.head, qualityApi);
+    check((await qualityApi(`${prefix}/git/ref/heads/main`)).object?.sha === identity.head,
+      'Canonical source changed before native qualification');
+    return fresh;
+  };
+  const fresh = await revalidate(), issuedAt = now(), operation = await requireInstalledOperation(fresh, 'native-bootstrap', issuedAt);
+  const payload = { schema: 'shop.native-bootstrap-authority/v1', operation: 'native-bootstrap', scope: 'isolated-native-qualification',
+    invocation: clone(identity), sourceEvidenceDigest: digest(source.evidence),
+    environmentId: fresh.root.credentialBroker.environmentId, policyDigest: digest(fresh.providerPolicy), writerFenceDigest: fresh.fenceDigest,
+    sourceDigest: subject.sourceDigest, imageDigest: subject.imageDigest, recipeDigest: subject.recipeDigest,
+    secretVersionsDigest: subject.secretVersionsDigest, planDigest: subject.planDigest, requestGraphDigest: subject.requestGraphDigest,
+    executionScope, issuedAt, expiresAt: Math.min(issuedAt + fresh.root.maximumLifetimeMs, operation.expiresAt) };
+  const key = await installedSigningKey(fresh, 'source');
+  const authority = { payload, signature: { algorithm: 'ECDSA_SHA_256', keyId: key.keyId, payloadDigest: digest(payload),
+    signature: sign('sha256', Buffer.from(canonical(payload)), key.privateKey).toString('base64') } };
+  const admission = admitNativeBootstrap(authority, { root: fresh.root, policy: fresh.providerPolicy, fenceDigest: fresh.fenceDigest,
+    sourceDigest: subject.sourceDigest, identity, executionScope, now: issuedAt });
+  return { installation: fresh, identity, preflight, admission, authority, sourceEvidence: source.evidence, revalidate, revalidateInstallation };
+}
+
+/** Qualify one isolated OCI candidate through the default protected credential owner. */
+export async function executeHostedNativeQualification({ installation, identity, imported, evidenceDirectory, qualityApi, acceptedAt,
+  env = process.env, boundaries = {}, now = Date.now }) {
+  const executionScope = boundaries.broker || installation.providerPolicy.nativeQualification?.executionScope === 'fixture/provider-loopback'
+    ? 'fixture/provider-loopback' : 'aws/provider';
+  const prepared = await prepareHostedNativeQualification({ installation, identity, imported, qualityApi, acceptedAt, now, executionScope });
+  const current = prepared.installation;
+  await mkdir(evidenceDirectory, { recursive: true, mode: 0o700 });
+  const retain = async (path, value) => {
+    try { return await put(evidenceDirectory, path, value); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      check((await readRegularFile(join(evidenceDirectory, path), 16 * 1024 * 1024, true)).equals(Buffer.from(canonical(value))),
+        'Retained native qualification evidence changed');
+    }
+  };
+  await retain(`native-source-${digest(prepared.sourceEvidence)}.json`, prepared.sourceEvidence);
+  await retain(`native-authority-${digest(prepared.authority)}.json`, prepared.authority);
+  await retain(`native-request-graph-${prepared.preflight.digest}.json`, prepared.preflight);
+  const fenceBytes = await readRegularFile(current.fencePath, 65536, true);
+  check(sha256(fenceBytes) === current.fenceDigest, 'Installed native credential fence bytes differ');
+  const fenceAdmission = admitCredentialFence(parseJSON(fenceBytes), { keys: current.root.credentialBroker.keys,
+    policy: current.providerPolicy, environmentId: current.root.credentialBroker.environmentId, brokerId: current.root.credentialBroker.id,
+    implementationDigest: current.root.credentialBroker.implementationDigest, now: now() });
+  const boundary = boundaries.broker ?? createBrokerTransport({ root: current.root,
+    tokenProvider: () => requestBrokerIdentity({ root: current.root, env }) });
+  const broker = credentialBrokerBoundary({ fenceAdmission, boundary, now });
+  const writer = createHostedWriter({ policy: current.providerPolicy, broker, fenceAdmission,
+    journalNamespace: `native-qualification/${prepared.admission.payload.imageDigest}`,
+    beforeMutation: prepared.revalidateInstallation,
+    eventCacheDirectory: join(evidenceDirectory, 'immutable-native-journal-cache') });
+  const attest = async payload => {
+    assertNativeQualificationResult(payload, { preflight: prepared.preflight, admission: prepared.admission });
+    const fresh = await prepared.revalidate(), key = await installedSigningKey(fresh, 'source');
+    return { payload, signature: { algorithm: 'ECDSA_SHA_256', keyId: key.keyId, payloadDigest: digest(payload),
+      signature: sign('sha256', Buffer.from(canonical(payload)), key.privateKey).toString('base64') } };
+  };
+  try {
+    const receipt = await runNativeQualification({ ...prepared, writer, broker, attest });
+    await retain(`native-qualification-${digest(receipt)}.json`, receipt);
+    return { receipt, authority: prepared.authority, sourceEvidence: prepared.sourceEvidence,
+      readiness: { nativeQualificationComplete: true, awsImageQualified: receipt.payload.awsImageQualified,
+        executionScope: receipt.payload.scope, productionDeliveryMeasured: false } };
+  } finally { if (!boundaries.broker) boundary.close(); }
 }
 
 /** Issue existing-schema authority from an admitted assembly and actual guard result. */
-export async function issueHostedAuthority({ installation, identity, imported, composition, sourceAdmission, qualityApi, acceptedAt, command = 'plan', now = Date.now }) {
+export async function issueHostedAuthority({ installation, identity, imported, composition, sourceAdmission, qualityApi, acceptedAt, command = 'plan', now = Date.now,
+  nativeQualificationReceipts = [] }) {
   assertProtectedInstallation(installation); check(typeof now === 'function', 'Explicit source issuance clock required');
   const source = sourceAdmission ?? await qualifyHostedSource({ installation, identity, qualityApi, acceptedAt, now });
   const state = assertSource(source, installation, identity);
@@ -196,11 +350,20 @@ export async function issueHostedAuthority({ installation, identity, imported, c
   const policy = sourcePolicy(current, retained, source);
   check(envelope.payload.intentSourceCommit === identity.head && envelope.payload.policyDigest === digest(policy), 'Composition source or installed policy differs');
   const admission = await admitComposition({ ...composition, trust: policy, domain: root.scope });
+  const serving = resolveServingPlan({ plan: current.plan, policy: current.providerPolicy, components: admission.payload.components,
+    portable: retained, nativeQualification: nativeQualificationContext(current, nativeQualificationReceipts) });
+  await checkNativeReceipts(current, admission.payload, composition.bundle, nativeQualificationReceipts, serving.plan);
   const portableManifests = [];
   for (const component of admission.payload.components) {
     const original = retained.components.get(component.id), config = current.contract.componentConfigurations.find(item => item.component === component.id);
-    check(original && config && same(component.artifact, original.artifactRef) && same(component.provenance, original.provenanceRef) &&
-      component.codeDigest === original.artifact.codeDigest && component.config.sha256 === config.config.sha256 &&
+    check(config, 'Installed component configuration required');
+    const configured = await readRegularFile(config.config.path, 16 * 1024 * 1024, true);
+    check(sha256(configured) === config.config.sha256, 'Installed component configuration changed before authority signing');
+    const expectedConfigDigest = current.providerPolicy.nativeServing && component.id === current.providerPolicy.nativeServing.businessComponent
+      ? sha256(canonical(materializeServingConfig(parseJSON(configured), current.providerPolicy, serving.authorityFields.nativeServingSelection)))
+      : config.config.sha256;
+    check(original && same(component.artifact, original.artifactRef) && same(component.provenance, original.provenanceRef) &&
+      component.codeDigest === original.artifact.codeDigest && component.config.sha256 === expectedConfigDigest &&
       component.originSourceCommit === original.component.originSourceCommit && same(component.contract, current.template.contracts[component.id]),
     'Authority component differs from retained source or protected installation');
     const qualifications = [];
@@ -224,7 +387,7 @@ export async function issueHostedAuthority({ installation, identity, imported, c
     workflowCommit: identity.workflowCommit, runId: identity.runId, attempt: identity.attempt, issuedAt,
     expiresAt: Math.min(issuedAt + root.maximumLifetimeMs, operationAuthorization.expiresAt), acceptedAt: source.acceptedAt, policy,
     providerPolicyDigest: root.providerPolicyDigest, targetPlanDigest: current.contract.targetPlan.sha256, writerFenceDigest: current.fenceDigest,
-    portableManifests, secretInstallations: current.secretInstallations,
+    portableManifests, ...serving.authorityFields, ...(nativeQualificationReceipts.length ? { nativeQualifications: clone(nativeQualificationReceipts) } : {}), secretInstallations: current.secretInstallations,
     quality: { head: identity.head, runId: source.quality.qualityRunId, attempt: source.quality.qualityAttempt, releaseGuardDigest: digest(evidence) } };
   const key = await installedSigningKey(final, 'source');
   const authority = { payload, signature: { algorithm: 'ECDSA_SHA_256', keyId: key.keyId, payloadDigest: digest(payload),
@@ -235,7 +398,7 @@ export async function issueHostedAuthority({ installation, identity, imported, c
 
 /** Assemble existing retained bytes and derive fresh proofs from authenticated evidence. */
 export async function assembleHostedRelease({ installation, identity, imported, destination, evidenceDirectory, qualityApi, acceptedAt,
-  command = 'plan', env = process.env, boundaries = {}, now = Date.now }) {
+  command = 'plan', env = process.env, boundaries = {}, now = Date.now, nativeQualificationReceipts = [] }) {
   assertProtectedInstallation(installation); check(typeof now === 'function', 'Explicit assembly clock required');
   await requireInstalledOperation(installation, command, now());
   if (command === 'begin') await requireInstalledOperation(installation, 'advance', now());
@@ -244,6 +407,9 @@ export async function assembleHostedRelease({ installation, identity, imported, 
   const source = await qualifyHostedSource({ installation: current, identity, qualityApi, acceptedAt, now });
   const policy = sourcePolicy(current, portable, source);
   const root = resolve(destination), assembly = await materializePortableBundle(portable, root);
+  const serving = resolveServingPlan({ plan: current.plan, policy: current.providerPolicy,
+    components: [...assembly.components.values()].map(item => item.component), portable,
+    nativeQualification: nativeQualificationContext(current, nativeQualificationReceipts) });
   const sourceRef = await put(root, 'release-evidence/source.json', source.evidence);
   const artifactRef = await put(root, 'release-evidence/artifact.json', authenticated.evidence);
   const installationRef = await put(root, 'release-evidence/installation.json', { schema: 'shop.installed-release-evidence/v1',
@@ -263,16 +429,21 @@ export async function assembleHostedRelease({ installation, identity, imported, 
     const installedConfig = current.contract.componentConfigurations.find(item => item.component === component.id);
     const configBytes = await readRegularFile(installedConfig.config.path, 16 * 1024 * 1024, true);
     check(sha256(configBytes) === installedConfig.config.sha256, 'Installed component configuration changed');
-    component.config = await put(root, `release-bindings/${component.id}.json`, configBytes);
+    const configured = current.providerPolicy.nativeServing && component.id === current.providerPolicy.nativeServing.businessComponent
+      ? Buffer.from(canonical(materializeServingConfig(parseJSON(configBytes), current.providerPolicy, serving.authorityFields.nativeServingSelection)))
+      : configBytes;
+    component.config = await put(root, `release-bindings/${component.id}.json`, configured);
     payload.components.push(component);
   }
   // Validate the complete unsigned component subjects before reading a signing key.
   conforms({ ...payload, components: payload.components.map(component => ({ ...component, componentProofs: [sourceRef, artifactRef] })),
     proofRefs: policy.requiredProofKinds.map(kind => ({ kind, receipt: sourceRef })) }, 'hostedPayload');
   activationOrder(payload);
+  await checkNativeReceipts(current, payload, root, nativeQualificationReceipts, serving.plan);
   await installedSigningKey(current, 'source');
   const key = await installedSigningKey(current, 'composition');
-  const baseline = await installedBaseline({ installation: current, payload, bundle: root, command, env, boundaries, now, evidenceDirectory, release: { head: identity.head, compositionDigest: digest(payload) } });
+  const baseline = await installedBaseline({ installation: current, payload, bundle: root, command, env, boundaries, now, evidenceDirectory,
+    nativeQualificationReceipts, resolvedPlan: serving.plan, release: { head: identity.head, compositionDigest: digest(payload) } });
   payload.parentCompositionDigest = baseline.parentCompositionDigest; payload.rollbackCompositionDigest = baseline.rollbackCompositionDigest;
   const baselineRef = await put(root, 'release-evidence/baseline.json', baseline);
   for (const component of payload.components) {
@@ -299,7 +470,8 @@ export async function assembleHostedRelease({ installation, identity, imported, 
   assemblies.set(payload, { installationDigest: digest(current.contract), payloadDigest: digest(payload) });
   const envelope = await signInstalledComposition({ installation: current, payload, sourceAdmission: source, identity, now: now() });
   const manifest = join(root, 'release-composition.json'); await writeFile(manifest, canonical(envelope), { mode: 0o600, flag: 'wx' });
-  const issued = await issueHostedAuthority({ installation: current, identity, imported, composition: { bundle: root, manifest }, sourceAdmission: source, command, now });
+  const issued = await issueHostedAuthority({ installation: current, identity, imported, composition: { bundle: root, manifest }, sourceAdmission: source,
+    command, now, nativeQualificationReceipts });
   const authority = join(root, 'release-authority.json'); await writeFile(authority, canonical(issued.authority), { mode: 0o600, flag: 'wx' });
   await put(root, 'release-evidence/authority-issuance.json', issued.evidence);
   return { options: { bundle: root, portable: portable.root, manifest, authority, trustRoot: current.rootPath, rootDigest: current.rootDigest,
@@ -332,8 +504,22 @@ export async function assembleHostedRollback({ installation, identity, rollbackD
   await admitPreviouslyVerifiedComposition({ bundle: options.bundle, manifest: options.manifest, trust: originalAuthority.payload.policy,
     domain: current.root.scope, originalAuthority, root: current.root,
     verification: { compositionDigest: digest(payload), verifiedAt: originalAuthority.payload.issuedAt } });
+  let serving = { plan: current.plan, authorityFields: {} };
+  if (current.providerPolicy.nativeServing) {
+    const bytes = await readRegularFile(join(options.portable, 'portable-bundle.json'), 16 * 1024 * 1024, true);
+    check(sha256(bytes) === originalAuthority.payload.portableManifests[0].manifestSha256, 'Historical portable manifest differs');
+    const manifest = parseJSON(bytes);
+    check(originalAuthority.payload.portableManifests.every(item => item.manifestSha256 === sha256(bytes) && item.lineageDigest === digest(manifest.lineage)),
+      'Historical portable lineage differs');
+    const historicalPortable = await verifyPortableBundle(options.portable, { manifestSha256: sha256(bytes),
+      originSourceCommit: manifest.originSourceCommit, lineage: manifest.lineage, requireHostedLineage: true });
+    serving = resolveServingPlan({ plan: current.plan, policy: current.providerPolicy, components: payload.components,
+      portable: historicalPortable, nativeQualification: nativeQualificationContext(current, originalAuthority.payload.nativeQualifications ?? []) });
+  }
+  assertServingPlanAuthority(serving, originalAuthority.payload);
   await installedSigningKey(current, 'source'); await installedSigningKey(current, 'composition');
   const writer = await installedReader({ installation: current, payload, bundle: options.bundle, env, boundaries, now, evidenceDirectory,
+    nativeQualificationReceipts: originalAuthority.payload.nativeQualifications ?? [], resolvedPlan: serving.plan,
     release: { head: identity.head, compositionDigest: digest(payload) } });
   const baseline = await writer.readHead(), verified = await writer.readVerification(retained.eventDigest);
   check(baseline?.state?.lastVerified && ['complete', 'reporting-pending', 'report-intent', 'report-reconcile'].includes(baseline.state.phase) &&

@@ -22,7 +22,7 @@ export const same = (a, b) => canonical(a) === canonical(b);
 // Token validation follows native-worker-content's complete-json-data-v1
 // discipline. JSON.parse owns JSON syntax; this pass rejects duplicate keys
 // and ambiguous numbers before its otherwise lossy object construction.
-export function parseJSON(bytes, maximumBytes = 1024 * 1024) {
+export function parseJSON(bytes, maximumBytes = 1024 * 1024, { finiteFractions = false } = {}) {
   check(bytes.byteLength <= maximumBytes, 'JSON exceeds declared byte bound');
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   const parsed = JSON.parse(text);
@@ -60,7 +60,7 @@ export function parseJSON(bytes, maximumBytes = 1024 * 1024) {
       check(!['__proto__', 'constructor', 'prototype'].includes(key), 'Reserved JSON key');
     } else if (/^-?[0-9]/.test(token)) {
       const number = Number(token);
-      check(Number.isSafeInteger(number) && !Object.is(number, -0) && String(number) === token, 'Ambiguous JSON number');
+      check((Number.isSafeInteger(number) || finiteFractions && Number.isFinite(number) && !Number.isInteger(number)) && !Object.is(number, -0) && String(number) === token, 'Ambiguous JSON number');
     }
   }
   return parsed;

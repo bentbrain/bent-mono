@@ -63,5 +63,9 @@ const workerConfigurationKeys = [
   "resource_04473478c366", "resource_5ba68fa39a92", "resource_d590174029ce", "order1004ProviderOrderId", "resource_c7bc487d56fd",
 ];
 export function workerProtectedConfiguration() {
-  return JSON.stringify(Object.fromEntries(workerConfigurationKeys.map(key => [key, protectedConfig(key)])));
+  const configured = JSON.parse(process.env.SHOP_PROTECTED_CONFIG_JSON ?? "null");
+  const servingKeys = ["nativeServingFunctionArn", "nativeServingFailureFunctionArn"];
+  const keys = configured && servingKeys.some(key => Object.hasOwn(configured, key))
+    ? [...workerConfigurationKeys, ...servingKeys] : workerConfigurationKeys;
+  return JSON.stringify(Object.fromEntries(keys.map(key => [key, protectedConfig(key)])));
 }

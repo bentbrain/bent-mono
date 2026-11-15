@@ -113,6 +113,7 @@ export async function hostedReporting(options, boundaries = {}) {
   const broker = credentialBrokerBoundary({ fenceAdmission: fence, boundary: transport });
   const writer = createHostedWriter({ policy: admitted.policy, broker, fenceAdmission: fence,
     ...(options.evidenceDirectory ? { eventCacheDirectory: join(options.evidenceDirectory, 'immutable-journal-cache') } : {}) });
-  return reconcileHostedReport({ writer, broker, policy: admitted.policy, authority: admitted.payload });
+  try { return await reconcileHostedReport({ writer, broker, policy: admitted.policy, authority: admitted.payload }); }
+  finally { if(!boundaries.broker && typeof transport.close==='function') transport.close(); }
 }
 import { join } from 'node:path';

@@ -6,7 +6,13 @@ import { createImmutableEventCache } from './immutable-event-cache.mjs';
 const etag = value => { check(typeof value === 'string' && /^"[A-Za-z0-9-]{1,128}"$/.test(value), 'Missing exact protected store ETag'); return value; };
 const encoded = value => Buffer.from(canonical(value));
 export function protectedStore(client, policy, { eventCacheDirectory, eventCacheNamespace = digest(policy), eventCacheLimits = {} } = {}) {
-  let cache = null;
+  let cache = null, verifiedSnapshot = null;
+  const memory = new Map(); let memoryBytes = 0, memoryHits = 0, memoryCapacitySkips = 0;
+  const remember = (identity, bytes) => {
+    if (memory.has(identity)) return;
+    if (memory.size >= protocolItemLimit || memoryBytes + bytes.length > 64 * 1024 * 1024) { memoryCapacitySkips++; return; }
+    memory.set(identity, Buffer.from(bytes)); memoryBytes += bytes.length;
+  };
   const getCache = async () => {
     if (!eventCacheDirectory) return null;
     cache ??= createImmutableEventCache({ directory: eventCacheDirectory, namespace: eventCacheNamespace, ...eventCacheLimits });
@@ -23,11 +29,12 @@ export function protectedStore(client, policy, { eventCacheDirectory, eventCache
   };
   const get = async key => {
     const identity = /^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];
-    if (!identity || !eventCacheDirectory) return remoteGet(key);
-    const current = await getCache(), cached = await current.read(identity);
-    if (cached) return validateRead(cached, identity);
+    if (!identity) return remoteGet(key);
+    if (memory.has(identity)) { memoryHits++; return validateRead({ bytes: Buffer.from(memory.get(identity)), provenance: { kind: 'process-verified-immutable-event' } }, identity); }
+    const current = await getCache(), cached = current ? await current.read(identity) : null;
+    if (cached) { validateRead(cached, identity); remember(identity, cached.bytes); return cached; }
     const found = await remoteGet(key); if (!found) return null;
-    validateRead(found, identity); await current.write(identity, found.bytes); return found;
+    validateRead(found, identity); remember(identity, found.bytes); if (current) await current.write(identity, found.bytes); return found;
   };
   const put = async (key, bytes, expectedETag) => {
     // Each call sends at most one PUT. An uncertain acknowledgement permits
@@ -42,10 +49,28 @@ export function protectedStore(client, policy, { eventCacheDirectory, eventCache
       throw new ProtocolConflict('store.readback');
     }
     const identity = /^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];
-    if (identity && eventCacheDirectory) { eventData(observed.bytes, identity); await (await getCache()).write(identity, observed.bytes); }
+    if (identity) { eventData(observed.bytes, identity); remember(identity, observed.bytes); if (eventCacheDirectory) await (await getCache()).write(identity, observed.bytes); }
     return { ...observed, acknowledgement: uncertain ? 'reconciled' : 'confirmed' };
   };
-  return Object.freeze({ get, put, cacheMeasurements: async () => cache ? (await cache).measurements() : null });
+  const acceptReadback=(key,response)=>{const bytes=responseBytes(response);check(response.status===200&&response.headers['x-amz-server-side-encryption']==='aws:kms'&&response.headers['x-amz-server-side-encryption-aws-kms-key-id']===policy.store.kmsKeyArn&&typeof response.headers['x-amz-version-id']==='string'&&response.headers['x-amz-version-id']!=='null','Actual authenticated encrypted journal readback required');const value={bytes,etag:etag(response.headers.etag),versionId:response.headers['x-amz-version-id'],provenance:{kind:'authenticated-provider'}};const identity=/^events\/([a-f0-9]{64})\.json$/.exec(key)?.[1];if(identity){eventData(bytes,identity);remember(identity,bytes);}return value;};
+  const readSnapshot=typeof client.readJournalSnapshot==='function'?async()=>{
+    if(verifiedSnapshot){const current=await remoteGet('head.json');if(current&&same(headData(current.bytes),verifiedSnapshot.head)&&current.etag===verifiedSnapshot.etag&&current.versionId===verifiedSnapshot.versionId)return structuredClone(verifiedSnapshot);}
+    const snapshot=await client.readJournalSnapshot();check(snapshot&&Array.isArray(snapshot.events)&&snapshot.events.length<=protocolItemLimit,'Complete signed journal snapshot required');
+    if(snapshot.head===null){check(snapshot.events.length===0,'Absent journal has snapshot events');return null;}
+    const head=snapshot.head,bytes=Buffer.from(head.bodyBase64,'base64');check(bytes.toString('base64')===head.bodyBase64&&head.provenance?.kind==='authenticated-provider'&&typeof head.versionId==='string'&&head.versionId!=='null','Fresh authenticated journal snapshot head required');
+    const value={head:headData(bytes),etag:etag(head.etag),versionId:head.versionId,events:[]};let expected=value.head.eventDigest,generation=value.head.generation;
+    for(const item of snapshot.events){const bytes=Buffer.from(item.bodyBase64,'base64');check(bytes.toString('base64')===item.bodyBase64&&item.eventDigest===expected&&['authenticated-provider','custody-verified-immutable-event'].includes(item.provenance?.kind),'Exact verified snapshot event required');const parsed=eventData(bytes,expected);check(parsed.generation===generation,'Journal snapshot generation gap');remember(expected,bytes);value.events.push({digest:expected,event:parsed});expected=parsed.previous;generation--;}
+    check(expected===null&&generation===0&&value.events.length===value.head.generation,'Complete journal snapshot history required');value.events.reverse();value.state=value.events.at(-1).event.state;verifiedSnapshot=structuredClone(value);return value;
+  }:null;
+  const append=typeof client.appendJournal==='function'?async(expected,state)=>{
+    if(expected)check(verifiedSnapshot&&same(expected.head,verifiedSnapshot.head)&&expected.etag===verifiedSnapshot.etag&&expected.versionId===verifiedSnapshot.versionId,'Paired journal predecessor lacks verified complete history');
+    const event={schema:'shop.protected-journal-event/v1',generation:(expected?.head.generation??0)+1,previous:expected?.head.eventDigest??null,state},bytes=encoded(event),identity=sha256(bytes),head={schema:'shop.protected-journal-head/v1',generation:event.generation,eventDigest:identity};eventData(bytes,identity);
+    const requests=[client.builders.storePut(`events/${identity}.json`,bytes,null),client.builders.storePut('head.json',encoded(head),expected?.etag??null)],result=await client.appendJournal(requests);
+    const observedEvent=acceptReadback(`events/${identity}.json`,result.readbacks[0].response),observedHead=acceptReadback('head.json',result.readbacks[1].response);check(observedEvent.bytes.equals(bytes)&&observedHead.bytes.equals(encoded(head)),'Paired journal append readback changed');
+    const value={head,etag:observedHead.etag,versionId:observedHead.versionId,state,events:[...(verifiedSnapshot?.events??[]),{digest:identity,event}]};verifiedSnapshot=structuredClone(value);return value;
+  }:null;
+  return Object.freeze({ get, put,acceptReadback,...(readSnapshot?{readSnapshot}:{}),...(append?{append}:{}), cacheMeasurements: async () => ({ ...(cache ? (await cache).measurements() : {}),
+    processCache: { entries: memory.size, bytes: memoryBytes, hits: memoryHits, capacitySkips: memoryCapacitySkips } }) });
 }
 function headData(bytes) {
   const head = parseJSON(bytes);
@@ -61,9 +86,16 @@ function eventData(bytes, expectedDigest) {
     (event.previous === null || /^[a-f0-9]{64}$/.test(event.previous)), 'Malformed protected immutable event');
   check(Buffer.from(canonical(event)).equals(bytes), 'Protected events require canonical exact bytes'); return event;
 }
+const journalSnapshots = new WeakMap();
+function retainJournal(store, value) {
+  const snapshot = structuredClone(value); journalSnapshots.set(store, snapshot); return structuredClone(snapshot);
+}
 export async function readProtectedJournal(store) {
+  if(store.readSnapshot){const snapshot=await store.readSnapshot();return snapshot?retainJournal(store,snapshot):null;}
   const object = await store.get('head.json'); if (!object) return null;
-  const head = headData(object.bytes), events = [], seen = new Set(); let next = head.eventDigest, generation = head.generation;
+  const previous = journalSnapshots.get(store), parsedHead = headData(object.bytes);
+  if (previous && same(previous.head, parsedHead) && previous.etag === object.etag && previous.versionId === object.versionId) return structuredClone(previous);
+  const head = parsedHead, events = [], seen = new Set(); let next = head.eventDigest, generation = head.generation;
   check(generation <= protocolItemLimit, 'Protected journal replay exceeds bound');
   while (next !== null) {
     check(!seen.has(next) && events.length < protocolItemLimit, 'Protected journal contains a cycle or exceeds replay bound'); seen.add(next);
@@ -72,9 +104,10 @@ export async function readProtectedJournal(store) {
     events.push({ digest: next, event }); generation--; next = event.previous;
   }
   check(generation === 0, 'Protected journal history is incomplete');
-  return { head, etag: object.etag, versionId: object.versionId, state: events[0].event.state, events: events.reverse() };
+  return retainJournal(store, { head, etag: object.etag, versionId: object.versionId, state: events[0].event.state, events: events.reverse() });
 }
 export async function appendProtectedJournal(store, expected, state) {
+  if(store.append)return retainJournal(store,await store.append(expected,state));
   // A caller must persist intent before provider dispatch. CAS controls the
   // journal transition; provider fencing needs the separately admitted writer.
   const current = await readProtectedJournal(store);
@@ -89,7 +122,12 @@ export async function appendProtectedJournal(store, expected, state) {
     const existing = await store.get(key); check(existing && existing.bytes.equals(bytes), 'Conflicting immutable event');
   }
   const head = { schema: 'shop.protected-journal-head/v1', generation: event.generation, eventDigest };
-  await store.put('head.json', encoded(head), current?.etag ?? null);
+  const acknowledgement = await store.put('head.json', encoded(head), current?.etag ?? null);
+  if (acknowledgement?.bytes && acknowledgement.provenance?.kind === 'authenticated-provider') {
+    check(same(headData(acknowledgement.bytes), head), 'Protected journal transition readback differs');
+    return retainJournal(store, { head, etag: acknowledgement.etag, versionId: acknowledgement.versionId, state,
+      events: [...(current?.events ?? []), { digest: eventDigest, event }] });
+  }
   const observed = await readProtectedJournal(store); check(same(observed.head, head) && same(observed.state, state), 'Protected journal transition readback differs');
   return observed;
 }

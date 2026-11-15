@@ -36,3 +36,74 @@ test('signed work inventory requires completeness, freshness and exact accepted 
     await assert.rejects(broker.workInventory(), /work observation|work identity/);
   }
 });
+
+async function writerFixture(beforeMutation) {
+  const f = signedFence(), admission = admitCredentialFence(f.receipt, f.options), actions = [], objects = new Map();
+  let owner = null, version = 0, reads = 0;
+  const boundary = async input => {
+    actions.push(input.action); let result;
+    if (input.action === 'open') { assert.equal(owner, null); owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; result = { exclusive: true, outstanding: 0 }; }
+    else { assert.equal(input.owner, owner); assert(owner); result = input.action === 'close' ? { closed: true, outstanding: 0 } : { current: true }; }
+    const responseOwner = owner; if (input.action === 'close') owner = null;
+    return f.envelope({ schema: 'shop.credential-broker-result/v1', action: input.action, nonce: input.nonce, fenceDigest: admission.digest,
+      owner: responseOwner, issuedAt: Date.now(), callDigest: digest(input), result });
+  };
+  const store = { get: async key => { reads++; const found = objects.get(key); return found ? { ...found, bytes: Buffer.from(found.bytes) } : null; },
+    put: async (key, bytes, expected) => {
+      assert.equal(objects.get(key)?.etag ?? null, expected); version++;
+      const found = { bytes: Buffer.from(bytes), etag: `"${version}"`, versionId: String(version), provenance: { kind: 'authenticated-provider' } };
+      objects.set(key, found); return { ...found, bytes: Buffer.from(bytes) };
+    } };
+  const broker = credentialBrokerBoundary({ fenceAdmission: admission, boundary });
+  return { writer: createHostedWriter({ policy: f.policy, store, broker, fenceAdmission: admission, beforeMutation }), store, objects, actions, reads: () => reads, owner: () => owner };
+}
+
+test('one release session retains exclusive ownership and immutable history while remote heads stay fresh', async () => {
+  const f = await writerFixture();
+  await f.writer.withSession(async () => {
+    await f.writer.withWriter(async ({ initial, commit }) => { assert.equal(initial, null); await commit({ phase: 'prepared', value: 1 }); });
+    const before = f.reads();
+    assert.equal((await f.writer.readVerifiedHistory()).state.value, 1);
+    await f.writer.readProviderState(); assert.equal(f.reads(), before, 'Immutable history reread through provider lookup');
+    await f.writer.readHead(); assert.equal(f.reads(), before + 1, 'Current head was not remotely fetched');
+    await f.writer.withWriter(async ({ initial, commit }) => { assert.equal(initial.generation, 1); initial.value = 2; await commit(initial); });
+    assert.equal((await f.writer.readHead()).state.generation, 2);
+  });
+  assert.deepEqual(f.actions, ['open', 'close']); assert.equal(f.owner(), null);
+  await f.writer.withWriter(async ({ initial }) => assert.equal(initial.value, 2));
+  assert.deepEqual(f.actions, ['open', 'close', 'open', 'close']);
+});
+
+test('an externally advanced journal cannot be adopted by an active transaction and failure keeps the owner held', async () => {
+  const f = await writerFixture();
+  await assert.rejects(f.writer.withSession(async () => {
+    await f.writer.withWriter(async ({ commit }) => commit({ phase: 'prepared' }));
+    const head = f.objects.get('head.json'); head.etag = '"external-owner"';
+    await f.writer.withWriter(async ({ initial, commit }) => commit(initial));
+  }), /CAS observation changed/);
+  assert.deepEqual(f.actions, ['open']); assert(f.owner());
+});
+
+
+test('a fresh mutation admission failure stops before journal writes and retains the exclusive owner', async () => {
+  let admissions = 0;
+  const f = await writerFixture(async () => { admissions++; throw Error('signed operation expired'); });
+  await assert.rejects(f.writer.withSession(() => f.writer.withWriter(({ commit }) => commit({ phase: 'prepared' }))), /operation expired/);
+  assert.equal(admissions, 1); assert.equal(f.objects.size, 0); assert.deepEqual(f.actions, ['open']); assert(f.owner());
+});
+
+test('native fixture grants cross an exact signed scope and expose only an opaque handle', async () => {
+  const f = signedFence(), admission = admitCredentialFence(f.receipt, f.options), calls = [], owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let result = `custody_${owner}.grant`;
+  const broker = credentialBrokerBoundary({ fenceAdmission: admission, boundary: async input => {
+    calls.push(input);
+    return f.envelope({ schema: 'shop.credential-broker-result/v1', action: input.action, nonce: input.nonce, fenceDigest: admission.digest,
+      owner, issuedAt: Date.now(), callDigest: digest(input), result });
+  } });
+  const intent = { journalNamespace: `native-qualification/${'a'.repeat(64)}`, eventDigest: 'b'.repeat(64), probeId: 'probe-v5' };
+  assert.equal(await broker.nativeFixtureGrant(owner, intent), result);
+  assert.equal(calls[0].action, 'native-fixture-grant'); assert.equal(calls[0].request, null); assert.deepEqual(calls[0].intent, intent);
+  for (const changed of [{ ...intent, probeId: '../escape' }, { ...intent, eventDigest: 'bad' }, { ...intent, journalNamespace: null }]) await assert.rejects(broker.nativeFixtureGrant(owner, changed), /fixture intent/);
+  assert.equal(calls.length, 1);
+  result = 'secret.signature'; await assert.rejects(broker.nativeFixtureGrant(owner, intent), /Opaque custody/);
+});

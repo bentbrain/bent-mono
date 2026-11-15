@@ -35,8 +35,17 @@ test('a plan-only installation cannot grant operations through caller fields', a
   const f = await fixture(t), installed = await readProtectedInstallation(options(f));
   assert.equal(typeof installedOperations.requireInstalledOperation, 'function');
   assert.equal((await installedOperations.requireInstalledOperation(installed, 'plan')).providerWrites, 0);
-  for (const command of ['deliver', 'begin', 'advance', 'rollback'])
+  for (const command of ['deliver', 'begin', 'advance', 'rollback', 'native-bootstrap'])
     await assert.rejects(installedOperations.requireInstalledOperation(installed, command), /independently installed operation/i);
+});
+
+test('a native bootstrap grant cannot use serving configuration as a qualification plan', async t => {
+  const f = await fixture(t), operation = await operationInstallation(f, scope => { scope.commands = ['native-bootstrap']; });
+  const installed = await readProtectedInstallation(operation.options);
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'native-bootstrap'), /independently installed plan and resource policy/);
+  await assert.rejects(readProtectedInstallation(await updateInstallation(f, contract => {
+    contract.nativeQualificationPlan = contract.componentConfigurations[0].config;
+  })), /independently installed resource policy/);
 });
 
 test('independent operation scope pins environment, policy and exact allowed commands', async t => {
@@ -73,6 +82,25 @@ test('private installation pins raw root bytes, separate key identities, targets
   assert.equal(installed.plan.providerPolicy.github.environment, 'Preview');
   assert.equal(installed.template.schema, 'shop.hosted-composition-template/v1');
   assert.equal(Object.hasOwn(installed.template, 'intentCommits'), false);
+});
+
+test('historical intake requires the independently pinned release producer and installed recipient', async t => {
+  const f = await fixture(t), historyIntake = {
+    repository: structuredClone(f.installationContract.artifactIntake.repository),
+    workflow: { id: 333, path: '.github/workflows/shop-composition-qualification.yml', jobName: 'Validate retained composition', jobId: 'plan' },
+    recipientFingerprint: f.installationContract.artifactIntake.recipientFingerprint,
+  };
+  const installed = await readProtectedInstallation(await updateInstallation(f, contract => { contract.historyIntake = historyIntake; }));
+  assert.deepEqual(installed.contract.historyIntake, historyIntake);
+  for (const mutate of [
+    value => { value.repository.ownerId++; }, value => { value.workflow.id = 0; },
+    value => { value.workflow.path = '.github/workflows/quality.yml'; }, value => { value.workflow.jobId = 'other'; },
+    value => { value.recipientFingerprint = '0'.repeat(64); }, value => { value.githubConfigDirectory = '/tmp/untrusted'; },
+  ]) {
+    const invalid = structuredClone(historyIntake); mutate(invalid);
+    const options = await updateInstallation(f, contract => { contract.historyIntake = invalid; });
+    await assert.rejects(readProtectedInstallation(options), /Historical artifact|Unexpected/);
+  }
 });
 
 test('raw root SHA remains exact when installed JSON formatting changes', async t => {

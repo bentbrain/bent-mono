@@ -22,6 +22,9 @@ export async function implementationDigest() {
     ['products/shop/scripts/testing/linux-evidence-recipient.json', '../testing/linux-evidence-recipient.json'],
     ['products/shop/scripts/release-evidence.mjs', '../release-evidence.mjs'],
     ['products/shop/scripts/read-regular-file.mjs', '../read-regular-file.mjs'],
+    ['products/shop/scripts/testing/native-v5-oci.mjs', '../testing/native-v5-oci.mjs'],
+    ['products/shop/packages/contracts/src/story-video-grants.js', '../../packages/contracts/src/story-video-grants.js'],
+    ['products/shop/packages/contracts/src/native-serving-target.js', '../../packages/contracts/src/native-serving-target.js'],
   ]) records.push({ path, sha256: sha256(await readFile(new URL(relative, import.meta.url))) });
   return digest(records.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }

@@ -6,6 +6,8 @@ interface QualificationEnv {
     readonly STORY_VIDEO_PROVIDER?: string;
     readonly STORY_VIDEO_ENVIRONMENT?: string;
     readonly STORY_VIDEO_LAMBDA_FUNCTION?: string;
+    readonly SHOP_NATIVE_BOOTSTRAP_AUTHORITY_DIGEST?: string;
+    readonly SHOP_NATIVE_BOOTSTRAP_OPERATION_ID?: string;
 }
 type FaultPoint = "invoke-ack" | "invoke-duplicate" | "claim-ack" | "upload-ack" | "enqueue-send" | "direct-dispatch" | "terminate";
 const fixtureKey = /^designs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/artwork\/[0-9a-f]{64}$/;
@@ -38,14 +40,35 @@ export async function takeQualificationFault(env: QualificationEnv, artworkKey: 
         return false;
     }
 }
-export async function observeQualification(env: QualificationEnv, artworkKey: string, jobId: string, stage: "invoke" | "duplicate-invoke" | "claim" | "upload-committed" | "termination-issued", status: number, executionId: string | null = null) {
-    if (!qualificationEnvironment(env))
-        return;
+export async function observeQualification(env: QualificationEnv, artworkKey: string, jobId: string, stage: "invoke" | "duplicate-invoke" | "claim" | "upload-committed" | "failure-committed" | "termination-issued", status: number, executionId: string | null = null) {
+    const bootstrap = env.STORY_VIDEO_PROVIDER === 'lambda' && env.STORY_VIDEO_ENVIRONMENT === 'development' &&
+        /^[a-f0-9]{64}$/.test(env.SHOP_NATIVE_BOOTSTRAP_AUTHORITY_DIGEST ?? '') &&
+        /^native-[a-f0-9]{64}$/.test(env.SHOP_NATIVE_BOOTSTRAP_OPERATION_ID ?? '');
+    if (!qualificationEnvironment(env) && !bootstrap) return;
     const designId = fixtureKey.exec(artworkKey)?.[1];
     if (!designId)
         return;
     const now = Date.now();
     try {
+        if (bootstrap) {
+            await env.DB.prepare(`INSERT INTO native_video_qualification_observations
+              (id,design_id,job_id,stage,status,execution_id,observed_at)
+              SELECT ?,?,?,?,?,?,? WHERE EXISTS (
+                SELECT 1 FROM storage_test_fixtures fixtures JOIN designs ON designs.id=fixtures.design_id
+                  JOIN design_revisions revisions ON revisions.design_id=designs.id
+                  JOIN products ON products.design_revision_id=revisions.id AND products.design_id=designs.id AND products.status='active'
+                  JOIN story_video_jobs jobs ON jobs.product_id=products.id AND jobs.design_revision_id=revisions.id
+                WHERE fixtures.design_id=? AND fixtures.run_id=? AND fixtures.purpose='native-qualification'
+                  AND fixtures.created_at<=? AND fixtures.expires_at>? AND fixtures.expires_at<=fixtures.created_at+600000
+                  AND jobs.id=? AND revisions.artwork_key=? AND jobs.attempt_count BETWEEN 1 AND 3
+                  AND EXISTS(SELECT 1 FROM native_video_qualification_faults admission
+                    WHERE admission.design_id=fixtures.design_id AND admission.run_id=fixtures.run_id
+                      AND admission.release_id=? AND admission.created_at<=? AND admission.expires_at>?
+                      AND admission.expires_at<=admission.created_at+600000))`)
+                .bind(crypto.randomUUID(),designId,jobId,stage,status,executionId,now,designId,env.SHOP_NATIVE_BOOTSTRAP_OPERATION_ID,
+                    now,now,jobId,artworkKey,env.SHOP_NATIVE_BOOTSTRAP_AUTHORITY_DIGEST,now,now).run();
+            return;
+        }
         await env.DB.prepare(`INSERT INTO native_video_qualification_observations
       (id, design_id, job_id, stage, status, execution_id, observed_at)
       SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM native_video_qualification_faults

@@ -7,14 +7,16 @@ import { githubApi } from '../../../../scripts/require-release-checks.mjs';
 import { canonical, check, digest, parseJSON, readRegularFile, same } from './data.mjs';
 import { actionsIdentity } from './hosted-admission.mjs';
 import { importHostedPortable } from './artifact-intake.mjs';
+import { importHostedReleaseHistory, assertHostedReleaseHistory, importHostedNativeQualificationReceipt, assertHostedNativeQualificationReceipt } from './retained-history.mjs';
 import { readProtectedInstallation, readReportingInstallation, requireInstalledOperation } from './protected-installation.mjs';
-import { assembleHostedRelease, assembleHostedRollback } from './source-issuance.mjs';
-import { hostedController } from './hosted-controller.mjs';
+import { assembleHostedRelease, assembleHostedRollback, executeHostedNativeQualification } from './source-issuance.mjs';
+import { hostedController, withHostedReleaseSession } from './hosted-controller.mjs';
 import { saveHostedFailure } from './hosted-diagnostics.mjs';
 
 const checkout = resolve(fileURLToPath(new URL('../../../../', import.meta.url)));
-const commands = new Set(['plan', 'advance', 'begin', 'rollback', 'recover-report']);
+const commands = new Set(['plan', 'advance', 'begin', 'rollback', 'native-bootstrap', 'recover-report']);
 const trace = channel('shop.release-v2.workflow');
+const deliverSession = Symbol('admitted release session');
 async function privateDirectory(path) {
   check(typeof path === 'string' && path === resolve(path) && path !== checkout && !path.startsWith(`${checkout}${sep}`), 'Absolute private workflow directory outside source required');
   await mkdir(path, { recursive: true, mode: 0o700 });
@@ -23,7 +25,7 @@ async function privateDirectory(path) {
     (typeof process.getuid !== 'function' || entry.uid === process.getuid()), 'Owned private workflow directory required');
 }
 
-/** One process owns each transition. Protected journal recovery never replays writes. */
+/** Protected journal recovery never replays an uncertain write. */
 export async function workflowEntrypoint(options, boundaries = {}) {
   if (options.command === 'deliver' || options.command === 'rollback' && !options.transitionOnly) return deliverWorkflow(options, boundaries);
   const { installationPath, installationDigest, request, directory, command = 'plan', acceptedAt, env = process.env } = options;
@@ -41,12 +43,22 @@ export async function workflowEntrypoint(options, boundaries = {}) {
   }
   const installation = await readProtectedInstallation(installedOptions);
   await requireInstalledOperation(installation, command);
-  check(command === 'rollback' || request?.sourceCommit === identity.head, 'Artifact source differs from canonical workflow source');
+  check(command === 'rollback' || options.historyRequest || options.rollbackDirectory || request?.sourceCommit === identity.head, 'Artifact source differs from canonical workflow source');
   await privateDirectory(directory);
-  if (command === 'rollback' || options.rollbackDirectory) {
+  if (command === 'native-bootstrap') {
+    const lock = join(directory, 'invocation.lock'); await mkdir(lock, { mode: 0o700 });
+    try {
+      await privateDirectory(evidenceDirectory);
+      const imported = await importHostedPortable({ request, installation: installation.artifactIntake, destination: join(directory, 'native-intake'),
+        privateKeyFile: installation.artifactPrivateKeyFile, ...(boundaries.intakeApi ? { api: boundaries.intakeApi } : env.GH_TOKEN ? { githubToken: env.GH_TOKEN } : {}) });
+      return await executeHostedNativeQualification({ installation, identity, imported, evidenceDirectory,
+        qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, env, boundaries });
+    } finally { await rm(lock, { recursive: true }); }
+  }
+  if (command === 'rollback' || options.rollbackDirectory || options.historyRequest) {
     await privateDirectory(evidenceDirectory);
-    check(typeof options.rollbackDirectory === 'string', 'Provide the retained verified release directory');
-    const statePath = join(directory, 'rollback-state.private.json'), subject = { installationDigest, identity, rollbackDirectory: options.rollbackDirectory };
+    check(typeof options.rollbackDirectory === 'string' !== Boolean(options.historyRequest), 'Provide one retained release directory or authenticated history request');
+    const statePath = join(directory, 'rollback-state.private.json'), subject = { installationDigest, identity, ...(options.historyRequest ? { historyRequest: options.historyRequest } : { rollbackDirectory: options.rollbackDirectory }) };
     let assembled;
     try {
       const state = parseJSON(await readRegularFile(statePath, 1024 * 1024, true));
@@ -55,11 +67,22 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
       check(command === 'rollback', 'Begin historical rollback before advancing');
-      assembled = await assembleHostedRollback({ installation, identity, rollbackDirectory: options.rollbackDirectory, evidenceDirectory,
+      let rollbackDirectory = options.rollbackDirectory;
+      if (options.historyRequest) {
+        check(installation.historyIntake, 'Independently installed history intake required');
+        const imported = await importHostedReleaseHistory({ request: options.historyRequest, installation: { ...installation.historyIntake, githubConfigDirectory: installation.artifactIntake.githubConfigDirectory },
+          privateKeyFile: installation.artifactPrivateKeyFile, destination: join(directory, 'history-intake'),
+          ...(boundaries.historyApi ? { api: boundaries.historyApi } : env.GH_TOKEN ? { githubToken: env.GH_TOKEN } : {}) });
+        rollbackDirectory = (await assertHostedReleaseHistory(imported)).rollbackDirectory;
+      }
+      assembled = await assembleHostedRollback({ installation, identity, rollbackDirectory, evidenceDirectory,
         qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, env, boundaries });
       await writeFile(statePath, canonical({ schema: 'shop.workflow-rollback-state/v1', subject, assembled }), { flag: 'wx', mode: 0o600 });
     }
-    const controller = await hostedController({ ...assembled.options, command, env }, boundaries);
+    check(assembled.options.trustRoot === installation.rootPath && assembled.options.rootDigest === installation.rootDigest &&
+      assembled.options.targetPlan === installation.planPath && assembled.options.fence === installation.fencePath &&
+      assembled.options.evidenceDirectory === evidenceDirectory, 'Saved rollback paths differ from protected installation');
+    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command, env }, boundaries);
     return { controller, paths: assembled.options, readiness: assembled.readiness, evidence: assembled.evidence };
   }
   const lock = join(directory, 'invocation.lock');
@@ -70,7 +93,7 @@ export async function workflowEntrypoint(options, boundaries = {}) {
     let state;
     try { state = parseJSON(await readRegularFile(statePath, 1024 * 1024, true)); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const subject = { installationDigest, identity, request };
+    const subject = { installationDigest, identity, request, ...(options.qualificationRequest ? { qualificationRequest: options.qualificationRequest } : {}) };
     let assembled;
     if (state) {
       check(state.schema === 'shop.workflow-state/v1' && state.subjectDigest === digest(subject) && same(state.subject, subject), 'Saved workflow invocation differs');
@@ -85,16 +108,24 @@ export async function workflowEntrypoint(options, boundaries = {}) {
       const imported = await importHostedPortable({ request, installation: installation.artifactIntake, destination: intakeDirectory,
         privateKeyFile: installation.artifactPrivateKeyFile, ...(boundaries.intakeApi ? { api: boundaries.intakeApi } : env.GH_TOKEN ? { githubToken: env.GH_TOKEN } : {}) });
       trace.publish({ step: 'intake-complete', command });
+      const nativeQualificationReceipts = [];
+      if (options.qualificationRequest) {
+        check(installation.historyIntake, 'Independently installed native qualification receipt intake required');
+        const receipt = await importHostedNativeQualificationReceipt({ request: options.qualificationRequest, installation: { ...installation.historyIntake, githubConfigDirectory: installation.artifactIntake.githubConfigDirectory },
+          privateKeyFile: installation.artifactPrivateKeyFile, destination: join(directory, planOnly ? 'plan-qualification-intake' : 'qualification-intake'), root: installation.root, expected: {},
+          ...(boundaries.historyApi ? { api: boundaries.historyApi } : env.GH_TOKEN ? { githubToken: env.GH_TOKEN } : {}) });
+        nativeQualificationReceipts.push((await assertHostedNativeQualificationReceipt(receipt, { root: installation.root, expected: {} })).receipt);
+      }
       trace.publish({ step: 'assembly-start', command });
       assembled = await assembleHostedRelease({ installation, identity, imported, destination: bundle, evidenceDirectory,
-        qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, command, env, boundaries });
+        qualityApi: boundaries.qualityApi ?? githubApi, acceptedAt, command, env, boundaries, nativeQualificationReceipts });
       trace.publish({ step: 'assembly-complete', command });
       state = { schema: 'shop.workflow-state/v1', subject, subjectDigest: digest(subject), options: assembled.options,
         readiness: assembled.readiness, evidence: assembled.evidence };
       await writeFile(statePath, canonical(state), { flag: 'wx', mode: 0o600 });
     }
     trace.publish({ step: 'controller-start', command });
-    const controller = await hostedController({ ...assembled.options, command, env }, boundaries);
+    const controller = options[deliverSession] ? await options[deliverSession](assembled, installation) : await hostedController({ ...assembled.options, command, env }, boundaries);
     trace.publish({ step: 'controller-complete', command, phase: controller.phase });
     if (controller.report?.eventDigest && controller.lastVerified && digest(controller.lastVerified) === controller.compositionDigest) {
       const verifiedPath = join(directory, 'verified-release.private.json');
@@ -113,18 +144,24 @@ export async function deliverWorkflow(options, boundaries = {}) {
   const installation = await readProtectedInstallation({ path: options.installationPath, digest: options.installationDigest, identity, artifactDirectories: [options.directory] });
   for (const operation of options.command === 'rollback' ? ['rollback', 'advance'] : ['deliver', 'begin', 'advance']) await requireInstalledOperation(installation, operation);
   let command = options.command === 'rollback' ? 'rollback' : 'begin';
-  try { await lstat(join(options.directory, options.rollbackDirectory ? 'rollback-state.private.json' : 'workflow-state.private.json')); command = 'advance'; }
+  try { await lstat(join(options.directory, options.command === 'rollback' ? 'rollback-state.private.json' : 'workflow-state.private.json')); command = 'advance'; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const transitions = []; let previousGeneration = null, result;
-  for (let count = 0; count < 96; count++) {
-    result = await workflowEntrypoint({ ...options, command, transitionOnly: true }, boundaries);
-    const state = result.controller;
-    transitions.push({ phase: state.phase, generation: state.generation ?? null, compositionDigest: state.compositionDigest });
-    if (state.phase === 'complete' || state.waiting) return { ...result, transitions };
-    check(Number.isSafeInteger(state.generation) && (previousGeneration === null || state.generation > previousGeneration), 'Controller transition made no durable progress');
-    previousGeneration = state.generation; command = 'advance';
-  }
-  return { ...result, controller: { ...result.controller, waiting: 'bounded-transition-limit' }, transitions };
+  const transitions = []; let previousGeneration = null, sessionMeasurements;
+  const result = await workflowEntrypoint({ ...options, command, transitionOnly: true, [deliverSession]: async (assembled, installed) =>
+    withHostedReleaseSession({ ...assembled.options, command, env: options.env ?? process.env }, boundaries, async (step, measurements) => {
+      let state;
+      for (let count = 0; count < 96; count++) {
+        await requireInstalledOperation(installed, command);
+        state = await step(command);
+        transitions.push({ phase: state.phase, generation: state.generation ?? null, compositionDigest: state.compositionDigest });
+        sessionMeasurements = measurements();
+        if (state.phase === 'complete' || state.waiting) return state;
+        check(Number.isSafeInteger(state.generation) && (previousGeneration === null || state.generation > previousGeneration), 'Controller transition made no durable progress');
+        previousGeneration = state.generation; command = 'advance';
+      }
+      return { ...state, waiting: 'bounded-transition-limit' };
+    }) }, boundaries);
+  return { ...result, transitions, sessionMeasurements };
 }
 
 export async function main(argv = process.argv.slice(2)) {

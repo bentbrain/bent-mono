@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { parseJSON } from './data.mjs';
+import { canonical, digest, parseJSON } from './data.mjs';
 import { requestBuilders } from './provider-protocol-builders.mjs';
 import { requestDigest } from './signing.mjs';
 import { responseBytes } from './provider-protocol.mjs';
 import { createHostedWriter } from './hosted-writer.mjs';
+import { credentialBrokerBoundary } from './hosted-writer.mjs';
 import { createCredentialCustody } from './custody-service.mjs';
 import { hostedProtocolFixture } from './testing/hosted-protocol-service.mjs';
 import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
@@ -83,5 +84,20 @@ test('same-epoch authority renewal preserves exclusive owner and rejects epoch t
     const takeover = service.signRoot({ ...renewed.payload, credentialEpoch: 'takeover-epoch', expiresAt: renewed.payload.expiresAt + 60000 });
     await assert.rejects(service.executor.renewAuthority({ fenceAdmission: service.fenceAdmission, installation: takeover }), /cannot replace/);
     await assert.rejects(service.broker.open(), /held/); await service.broker.close(owner);
+  });
+});
+
+test('journal ACK folds into next durable claim; crash before folding retains unknown and GET-only reconciliation across replacement', async()=>{
+  await fixture(async(f,service)=>{
+    const builders=requestBuilders(f.policy),owner=await service.broker.open(),bytes=Buffer.from(canonical({schema:'fixture-durable-event',operation:'one'})),request=builders.storePut(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`,bytes,null);
+    await service.broker.journal(owner,request);
+    const before=await service.executor.readState(),claim=before.requests.find(item=>item.requestDigest===requestDigest(request));assert.equal(claim.status,'sending');
+    assert.equal(responseBytes(await service.broker.read(builders.storeGet(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`))).toString(),bytes.toString());
+    const installation=service.signRoot({...service.installation.payload,installationId:randomUUID(),credentialEpoch:'epoch-replacement'}),replacement=service.signRoot({schema:'shop.custody-installation-replacement/v1',fenceDigest:service.fenceAdmission.digest,previousInstallationId:service.installation.payload.installationId,previousCredentialEpoch:service.installation.payload.credentialEpoch,newInstallationId:installation.payload.installationId,credentialsRevoked:true,stopped:true,drained:true,issuedAt:Date.now(),expiresAt:Date.now()+60000});
+    const next=await createCredentialCustody({...service.factoryOptions,installation,replacement}),broker=credentialBrokerBoundary({fenceAdmission:service.fenceAdmission,boundary:input=>next.handle(input,{authorization:'Bearer synthetic-loopback-controller'})});
+    assert.equal((await next.readState()).requests.find(item=>item.claimDigest===claim.claimDigest).status,'sending');
+    const newOwner=await broker.open(),writes=service.transcript.filter(item=>item.method==='PUT').length;
+    await assert.rejects(broker.journal(newOwner,request),/no-replay/);assert.equal(service.transcript.filter(item=>item.method==='PUT').length,writes);
+    assert.equal(responseBytes(await broker.read(builders.storeGet(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`))).toString(),bytes.toString());await broker.close(newOwner);
   });
 });

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { canonical, digest } from './data.mjs';
-import { protectedStore, readProtectedJournal } from './protected-store.mjs';
+import { protectedStore, readProtectedJournal, appendProtectedJournal } from './protected-store.mjs';
 import { requestBuilders } from './provider-protocol-builders.mjs';
 import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
 import { ProtocolConflict, ProtocolFailure, UncertainWrite } from './provider-protocol.mjs';
@@ -49,7 +49,7 @@ test('fresh store instances keep head live and fetch each immutable event once a
   assert.equal(f.calls.filter(call => call.key.startsWith('events/')).length, 5, 'Repeated full-chain provider GET amplification');
 });
 
-test('each fetched immutable event is strictly parsed once before journal replay', async t => {
+test('an unchanged freshly fetched head reuses private verified history without reparsing events', async t => {
   const f = await fixture(t), store = protectedStore(f.client, f.policy, { eventCacheDirectory: f.directory });
   await readProtectedJournal(store);
   const original = JSON.parse; let parsedEvents = 0;
@@ -60,7 +60,8 @@ test('each fetched immutable event is strictly parsed once before journal replay
   };
   try { assert.equal((await readProtectedJournal(store)).events.length, 5); }
   finally { JSON.parse = original; }
-  assert.equal(parsedEvents, 5, 'Duplicate full event parsing during one replay');
+  assert.equal(parsedEvents, 0, 'Unchanged immutable history was reparsed');
+  assert.equal(f.calls.filter(call => call.key === 'head.json').length, 2, 'Head was reused without a remote read');
 });
 
 test('validation handoff rejects changed bytes and never reuses caller-mutated event state', async t => {
@@ -123,7 +124,7 @@ test('cached immutable content cannot confirm an unknown PUT acknowledgement or 
   f.objects.delete(key); f.faults.dropBefore = true;
   const before = f.calls.length; await assert.rejects(store.put(key, bytes, null), UncertainWrite);
   assert.deepEqual(f.calls.slice(before).map(call => [call.method, call.key]), [['PUT', key], ['GET', key]]);
-  assert.equal((await store.get(key)).provenance.kind, 'local-immutable-event-cache');
+  assert.equal((await store.get(key)).provenance.kind, 'process-verified-immutable-event');
   delete f.faults.dropBefore; f.faults.dropAfter = true;
   assert.equal((await store.put(key, bytes, null)).acknowledgement, 'reconciled');
   delete f.faults.dropAfter; f.faults.conflict = true;
@@ -135,7 +136,7 @@ test('three fresh Node processes reuse byte identity while fetching every curren
   await writeFile(model, canonical({ policy: f.policy, objects: Object.fromEntries([...f.objects].map(([key, bytes]) => [key, bytes.toString('base64')])) }), { mode: 0o600 });
   const script = `
     import { appendFile, readFile } from 'node:fs/promises';
-    import { protectedStore, readProtectedJournal } from ${JSON.stringify(new URL('./protected-store.mjs', import.meta.url).href)};
+    import { protectedStore, readProtectedJournal, appendProtectedJournal } from ${JSON.stringify(new URL('./protected-store.mjs', import.meta.url).href)};
     import { protocolPolicy, requestBuilders } from ${JSON.stringify(new URL('./provider-protocol-builders.mjs', import.meta.url).href)};
     const [modelPath, cachePath, auditPath] = process.argv.slice(1), model = JSON.parse(await readFile(modelPath));
     const policy = protocolPolicy(model.policy), client = { builders: requestBuilders(policy), send: async request => {
@@ -183,4 +184,21 @@ test('replacing an initialized cache namespace with a symlink fails before local
   const event = { schema: 'shop.protected-journal-event/v1', generation: 1, previous: null, state: {} };
   await assert.rejects(store.put(`events/${digest(event)}.json`, Buffer.from(canonical(event)), null), /private event cache directory/);
   await assert.rejects(access(join(outside, '.write-lock')), { code: 'ENOENT' });
+});
+
+
+test('a transaction reuses only its authenticated PUT readbacks and retains remote CAS and uncertainty checks', async t => {
+  const f = await fixture(t), store = protectedStore(f.client, f.policy);
+  const prior = await readProtectedJournal(store); const before = f.calls.length;
+  const next = await appendProtectedJournal(store, prior, { counter: 6 });
+  assert.deepEqual(f.calls.slice(before).map(call => [call.method, call.key.startsWith('events/') ? 'event' : call.key]),
+    [['GET', 'head.json'], ['PUT', 'event'], ['GET', 'event'], ['PUT', 'head.json'], ['GET', 'head.json']]);
+  next.state.counter = 999;
+  assert.equal((await readProtectedJournal(store)).state.counter, 6);
+  const putCount = f.calls.filter(call => call.method === 'PUT').length;
+  await assert.rejects(appendProtectedJournal(store, prior, { counter: 7 }), /CAS observation changed/);
+  assert.equal(f.calls.filter(call => call.method === 'PUT').length, putCount);
+  const current = await readProtectedJournal(store); f.faults.dropBefore = true;
+  await assert.rejects(appendProtectedJournal(store, current, { counter: 7 }), UncertainWrite);
+  assert.equal(f.calls.filter(call => call.method === 'PUT').length, putCount + 1, 'An uncertain immutable write was replayed');
 });

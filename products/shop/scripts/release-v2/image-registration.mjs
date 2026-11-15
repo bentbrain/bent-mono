@@ -24,7 +24,7 @@ export async function preflightImageRegistration({ policy, resource, artifact, r
 
 // Caller owns admitted source/bootstrap scope and the already committed exact
 // operation. Registration does not produce Lambda runtime qualification.
-export async function registerPreflightedImage({ graph, writer, broker, operationId }) {
+export async function registerPreflightedImage({ graph, writer, broker, operationId, revalidate = async () => {} }) {
   const value = prepared.get(graph); check(value && typeof operationId === 'string', 'Branded complete image registration graph required');
   const { policy, resource, image, blobs, readFile, manifest } = value, builders = requestBuilders(policy);
   const head = await writer.readHead(); check(head?.state.phase === 'image-registration-reconcile' && head.state.operation?.id === operationId, 'Admitted durable image registration operation required');
@@ -35,9 +35,9 @@ export async function registerPreflightedImage({ graph, writer, broker, operatio
   if (matching.length) return { imageDigest: image.imageDigest, registered: true, awsImageQualified: false };
   const send = async (step, request, precondition) => {
     const state = await writer.readProviderState(), prior = state.requests.find(item => item.operationId === operationId && item.step === step);
-    check(!prior, 'Unknown image registration acknowledgement; observation only, no write replay');
+    if(prior){const error=Error('Unknown image registration acknowledgement; observation only, no write replay');error.nativeUncertain=true;throw error;}
     const event = await writer.recordProvider(provider => provider.requests.push({ operationId, step, requestDigest: requestDigest(request), method: request.method, url: request.url, bodySha256: request.bodySha256, bytes: Buffer.from(request.bodyBase64, 'base64').length, headers: request.headers, target: { kind: 'ecr', resource, imageDigest: image.imageDigest }, precondition, status: 'intent' }));
-    const response = await writer.dispatch(request, event); check(response.status === 200, 'Image registration acknowledgement failed'); const result = JSON.parse(responseBytes(response));
+    await revalidate();let response;try{response=await writer.dispatch(request,event);}catch(error){error.nativeUncertain=true;throw error;}check(response.status===200,'Image registration acknowledgement failed');const result=JSON.parse(responseBytes(response));
     await writer.recordProvider(provider => { const saved = provider.requests.find(item => item.operationId === operationId && item.step === step); saved.status = 'acknowledged'; saved.responseDigest = digest(response); }); return result;
   };
   for (const blob of blobs) {

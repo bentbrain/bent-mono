@@ -217,8 +217,7 @@ export async function advanceWithPorts(options, ports) {
       await persist(next);
       // Intent and uncertain acknowledgement are committed and read back before
       // writing. Any failure from this point leaves a GET-only reconciliation.
-      await assertOwner();
-      const saved = await ports.readHead();
+      const saved = ports.readSendCheckpoint?await ports.readSendCheckpoint():(await assertOwner(),await ports.readHead());
       check(saved.state.generation === next.generation && same(saved.state.operation, next.operation), 'Saved intent readback differs');
       checkpoint(`${kind}:before-post`, crashAt);
       await provider.write(kind, request);

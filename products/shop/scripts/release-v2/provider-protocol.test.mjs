@@ -136,8 +136,8 @@ test('immutable journal replay rejects missing and changed historical events', a
     await appendProtectedJournal(store, first, { phase: 'two' });
     const key = `events/${first.head.eventDigest}.json`, original = service.objects.get(key);
     service.objects.set(key, { ...original, bytes: Buffer.from('{}') });
-    await assert.rejects(readProtectedJournal(store), /immutable event bytes differ/);
-    service.objects.delete(key); await assert.rejects(readProtectedJournal(store), /immutable event is missing/);
+    await assert.rejects(readProtectedJournal(protectedStore(client,policy)), /immutable event bytes differ/);
+    service.objects.delete(key); await assert.rejects(readProtectedJournal(protectedStore(client,policy)), /immutable event is missing/);
   });
 });
 

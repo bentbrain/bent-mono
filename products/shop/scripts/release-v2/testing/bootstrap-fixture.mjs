@@ -45,7 +45,8 @@ function syntheticQualityApi({ identity, acceptedAt, base = 'c'.repeat(40), tree
 
 export async function createBootstrapFixture(t, { root, providerPolicy: suppliedProviderPolicy, plan: suppliedPlan, fenceReceipt,
   brokerKeys, brokerOrigin = 'https://qualification.example.invalid', runner = Buffer.from('process.exit(0);'), sourceCommit = '1'.repeat(40), imported: suppliedImported,
-  intakeFixture: suppliedIntakeFixture, acceptedAt = Date.now() - 2000, maximumLifetimeMs = 600000, runId = 10, attempt = 1, keys, operationCommands, sourceBase = 'c'.repeat(40) } = {}) {
+  intakeFixture: suppliedIntakeFixture, acceptedAt = Date.now() - 2000, maximumLifetimeMs = 600000, runId = 10, attempt = 1, keys, operationCommands, sourceBase = 'c'.repeat(40),
+  historyIntake, nativeQualificationPlan } = {}) {
   check(typeof root === 'string', 'Explicit private synthetic fixture directory required');
   await mkdir(root, { recursive: true, mode: 0o700 });
   const directory = await realpath(await mkdtemp(join(root, 'bootstrap-'))); t.after(() => rm(directory, { force: true, recursive: true }));
@@ -98,6 +99,8 @@ export async function createBootstrapFixture(t, { root, providerPolicy: supplied
     targetPlan: await put('plan.json', plan), credentialFence: await put('fence.json', receipt),
     signing: { source: { keyId: source.entry.id, path: sourceKey.path }, composition: { keyId: composition.entry.id, path: compositionKey.path } },
     secretInstallations: [], componentConfigurations, artifactIntake: intake.installation, artifactPrivateKeyFile: intake.privateKeyFile };
+  if (historyIntake) installationContract.historyIntake = structuredClone(historyIntake);
+  if (nativeQualificationPlan) installationContract.nativeQualificationPlan = await put('native-qualification-plan.json', nativeQualificationPlan);
   if (operationCommands) {
     const now = Date.now();
     installationContract.operationScope = await put('operation-scope.json', { schema: 'shop.qualification-operation-scope/v1', scope: rootDocument.scope,
@@ -128,6 +131,7 @@ export async function createProtectedPackageFixture(f) {
   for (const [field, path] of [['root', 'root.json'], ['compositionTemplate', 'template.json'], ['runnerFile', 'runner.mjs'], ['targetPlan', 'plan.json'], ['credentialFence', 'fence.json']])
     contract[field].path = await include(path, contract[field].path);
   if (contract.operationScope) contract.operationScope.path = await include('operation-scope.json', contract.operationScope.path);
+  if (contract.nativeQualificationPlan) contract.nativeQualificationPlan.path = await include('native-qualification-plan.json', contract.nativeQualificationPlan.path);
   for (const kind of ['source', 'composition']) contract.signing[kind].path = await include(`${kind}.pem`, contract.signing[kind].path);
   for (const configuration of contract.componentConfigurations) configuration.config.path = await include(`config-${configuration.component}.json`, configuration.config.path);
   contract.artifactPrivateKeyFile = await include('artifact-recipient.pem', contract.artifactPrivateKeyFile);
