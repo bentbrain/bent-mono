@@ -3,10 +3,11 @@ import test from 'node:test';
 import { tmpdir } from 'node:os';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { digest, parseJSON, sha256 } from './data.mjs';
-import { assembleHostedRelease, issueHostedAuthority, qualifyHostedSource } from './source-issuance.mjs';
+import { assembleHostedRelease, issueHostedAuthority, prepareHostedNativeQualification, qualifyHostedSource } from './source-issuance.mjs';
 import { hostedController } from './hosted-controller.mjs';
 import { verifyHostedAuthority } from './hosted-admission.mjs';
 import { createBootstrapFixture } from './testing/bootstrap-fixture.mjs';
+import { nativeQualificationFixture } from './testing/native-qualification-fixture.mjs';
 
 const fixture = (t, overrides = {}) => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir(), ...overrides });
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
@@ -14,6 +15,8 @@ const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 test('real importer, guard, installed signers and default controller share one source-bound plan route', async t => {
   const f = await fixture(t), result = await assembleHostedRelease(f);
   const authority = verifyHostedAuthority(result.authority, { root: f.root, identity: f.identity });
+  assert.equal(authority.payload.schema, 'shop.hosted-source-authority/v3');
+  assert.deepEqual(authority.payload.operationAuthorization.commands, []);
   assert.equal(authority.payload.acceptedAt, f.acceptedAt);
   assert.equal(authority.payload.tree, f.quality.tree); assert.equal(authority.payload.base, f.quality.base);
   assert.equal(authority.payload.quality.releaseGuardDigest, digest(result.evidence));
@@ -23,10 +26,10 @@ test('real importer, guard, installed signers and default controller share one s
   assert(f.quality.calls.some(path => path.includes('/attempts/1/jobs?')));
   assert.equal(result.evidence.guardImplementationSha256, sha256(await readFile(new URL('../../../../scripts/require-release-checks.mjs', import.meta.url))));
   assert(result.authority.payload.portableManifests.every(item => item.awsImageQualified === false));
-  const plan = await hostedController({ ...result.options, env: f.env, command: 'plan' });
+  const plan = await hostedController({ ...result.options, command: 'plan' }, f.env);
   assert.equal(plan.phase, 'plan-admitted'); assert.equal(plan.readiness.awsImageQualified, false); assert.equal(plan.operationalApproval, false); assert.equal(plan.providerWrites, 0);
   let brokerCalls = 0;
-  await assert.rejects(hostedController({ ...result.options, env: f.env, command: 'advance' }, { broker: async () => { brokerCalls++; throw Error('unexpected provider credential call'); } }), /target|format|qualification|resource/i);
+  await assert.rejects(hostedController({ ...result.options, command: 'advance' }, f.env, { broker: async () => { brokerCalls++; throw Error('unexpected provider credential call'); } }), /target|format|qualification|resource|operation authority/i);
   assert.equal(brokerCalls, 0);
   const file = parseJSON(await readFile(result.options.authority)); assert.equal(digest(file), digest(result.authority));
 });
@@ -39,6 +42,14 @@ test('copied import descriptors and copied guard results cannot issue authority'
   await assert.rejects(issueHostedAuthority({ ...f, composition: { bundle: f.destination, manifest: 'missing.json' }, sourceAdmission: structuredClone(source) }), /Actual exact-source/);
   source.acceptedAt += 1;
   await assert.rejects(issueHostedAuthority({ ...f, composition: { bundle: f.destination, manifest: 'missing.json' }, sourceAdmission: source }), /Actual exact-source/);
+});
+
+test('native bootstrap permission is never copied into a composition execution grant', async t => {
+  const f = await fixture(t, { operationCommands: ['advance', 'begin', 'deliver', 'native-bootstrap', 'rollback'] });
+  const assembled = await assembleHostedRelease(f);
+  const result = await issueHostedAuthority({ ...f, composition: { bundle: assembled.options.bundle, manifest: assembled.options.manifest }, command: 'advance' });
+  assert.deepEqual(result.authority.payload.operationAuthorization.commands, ['advance', 'begin', 'deliver', 'rollback']);
+  verifyHostedAuthority(result.authority, { root: f.root, identity: f.identity });
 });
 
 test('canonical native security and genuine independent PR review must pass the existing guard', async t => {
@@ -78,7 +89,7 @@ test('older qualified source preserves its accepted time and reports budget over
   assert.equal(timing.observedAt - acceptedAt, timing.elapsedMs); assert.equal(timing.exceeded, true); assert.equal(timing.productionDeliveryMeasured, false);
   assert.equal(result.authority.payload.expiresAt - result.authority.payload.issuedAt, f.root.maximumLifetimeMs);
   const verified = verifyHostedAuthority(result.authority, { root: f.root, identity: f.identity }); assert.equal(verified.payload.acceptedAt, acceptedAt);
-  assert.equal((await hostedController({ ...result.options, env: f.env, command: 'plan' })).operationalApproval, false);
+  assert.equal((await hostedController({ ...result.options, command: 'plan' }, f.env)).operationalApproval, false);
 });
 
 test('caller cannot reset the accepted source clock after qualification', async t => {
@@ -88,11 +99,36 @@ test('caller cannot reset the accepted source clock after qualification', async 
 });
 
 test('execution assembly checks every retained target before broker identity or proof signing', async t => {
-  const f = await fixture(t); let calls = 0;
-  await assert.rejects(assembleHostedRelease({ ...f, command: 'begin', boundaries: { broker: async () => { calls++; throw Error('unexpected custody call'); } } }), /target|format|qualification|resource/i);
+  const f = await fixture(t, { operationCommands: ['advance', 'begin'] }); let calls = 0;
+  await assert.rejects(assembleHostedRelease({ ...f, command: 'begin', boundaries: { broker: async () => { calls++; throw Error('unexpected custody call'); } } }), /target|format|qualification|resource|operation authority/i);
   assert.equal(calls, 0);
   await absent(`${f.destination}/release-proofs`);
   await absent(`${f.destination}/release-authority.json`);
+});
+
+test('caller receipt flags cannot qualify native code without installed qualification policy', async t => {
+  const f = await fixture(t); let brokerCalls = 0;
+  await assert.rejects(assembleHostedRelease({ ...f,
+    nativeQualificationReceipts: [{ payload: { awsImageQualified: true } }],
+    boundaries: { broker: async () => { brokerCalls++; throw Error('unexpected custody call'); } },
+  }), /receipt requires installed policy/);
+  assert.equal(brokerCalls, 0);
+  await absent(`${f.destination}/release-proofs`);
+  await absent(`${f.destination}/release-authority.json`);
+});
+
+test('an independently installed fixture scope cannot be upgraded to real AWS qualification', async t => {
+  const native = await nativeQualificationFixture();
+  t.after(() => native.service.close());
+  const providerPolicy = structuredClone(native.policy);
+  providerPolicy.nativeQualification.executionScope = 'fixture/provider-loopback';
+  providerPolicy.github.environment = 'Preview';
+  const f = await fixture(t, { providerPolicy, nativeQualificationPlan: native.template, operationCommands: ['native-bootstrap'] });
+  let sourceReads = 0;
+  await assert.rejects(prepareHostedNativeQualification({ ...f, executionScope: 'aws/provider', qualityApi: async () => {
+    sourceReads++; throw Error('Unexpected source access');
+  } }), /fixture qualification cannot issue an AWS qualification/);
+  assert.equal(sourceReads, 0);
 });
 
 test('source admission mutation during final asynchronous reads cannot reach the source signer', async t => {
@@ -108,7 +144,7 @@ test('source admission mutation during final asynchronous reads cannot reach the
 
 test('both installed signing key identities are checked before custody or target access', async t => {
   for (const kind of ['source', 'composition']) await t.test(kind, async t => {
-    const f = await fixture(t); let custodyCalls = 0;
+    const f = await fixture(t, { operationCommands: ['advance', 'begin'] }); let custodyCalls = 0;
     const changed = kind === 'source' ? f.installation.sourceKeyPath : f.installation.compositionKeyPath;
     const replacement = kind === 'source' ? f.installation.compositionKeyPath : f.installation.sourceKeyPath;
     await writeFile(changed, await readFile(replacement), { mode: 0o600 });

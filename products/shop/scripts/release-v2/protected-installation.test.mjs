@@ -9,6 +9,7 @@ import { createBootstrapFixture, createProtectedPackageFixture } from './testing
 import { importHostedPortable } from './artifact-intake.mjs';
 import { assembleHostedRelease } from './source-issuance.mjs';
 import { hostedController } from './hosted-controller.mjs';
+import * as installedOperations from './protected-installation.mjs';
 
 const fixture = t => createBootstrapFixture(t, { root: process.env.SHOP_BOOTSTRAP_TEST_ROOT ?? tmpdir() });
 const options = f => ({ path: f.installationPath, digest: f.installationDigest, identity: f.identity, artifactDirectories: [f.portable.root, f.destination] });
@@ -18,6 +19,61 @@ async function updateInstallation(f, change) {
   return { ...options(f), digest: sha256(bytes) };
 }
 
+async function operationInstallation(f, change = () => {}) {
+  const now = Date.now(), scope = { schema: 'shop.qualification-operation-scope/v1', scope: f.root.scope,
+    repository: f.root.repository, repositoryName: f.root.repositoryName, environment: f.root.environment,
+    workflowPath: f.root.workflowPath, rootDigest: f.installation.rootDigest, providerPolicyDigest: f.root.providerPolicyDigest,
+    notBefore: now - 1000, expiresAt: now + 600000, commands: ['advance', 'begin', 'deliver', 'rollback'] };
+  change(scope);
+  const path = join(f.directory, 'installed', 'operation-scope.json'), bytes = Buffer.from(canonical(scope));
+  await writeFile(path, bytes, { mode: 0o600 });
+  const installed = await updateInstallation(f, contract => { contract.operationScope = { path, sha256: sha256(bytes) }; });
+  return { options: installed, path, scope };
+}
+
+test('a plan-only installation cannot grant operations through caller fields', async t => {
+  const f = await fixture(t), installed = await readProtectedInstallation(options(f));
+  assert.equal(typeof installedOperations.requireInstalledOperation, 'function');
+  assert.equal((await installedOperations.requireInstalledOperation(installed, 'plan')).providerWrites, 0);
+  for (const command of ['deliver', 'begin', 'advance', 'rollback', 'native-bootstrap'])
+    await assert.rejects(installedOperations.requireInstalledOperation(installed, command), /independently installed operation/i);
+});
+
+test('a native bootstrap grant cannot use serving configuration as a qualification plan', async t => {
+  const f = await fixture(t), operation = await operationInstallation(f, scope => { scope.commands = ['native-bootstrap']; });
+  const installed = await readProtectedInstallation(operation.options);
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'native-bootstrap'), /independently installed plan and resource policy/);
+  await assert.rejects(readProtectedInstallation(await updateInstallation(f, contract => {
+    contract.nativeQualificationPlan = contract.componentConfigurations[0].config;
+  })), /independently installed resource policy/);
+});
+
+test('independent operation scope pins environment, policy and exact allowed commands', async t => {
+  const f = await fixture(t), operation = await operationInstallation(f), installed = await readProtectedInstallation(operation.options);
+  const admitted = await installedOperations.requireInstalledOperation(installed, 'deliver');
+  assert.equal(admitted.scope, 'isolated-qualification'); assert.equal(admitted.command, 'deliver');
+  for (const mutate of [scope => { scope.environment = 'Production'; }, scope => { scope.rootDigest = '0'.repeat(64); },
+    scope => { scope.providerPolicyDigest = '0'.repeat(64); }, scope => { scope.commands.push('unknown'); },
+    scope => { scope.commands.push('deliver'); }, scope => { scope.expiresAt = scope.notBefore + 86400001; }]) {
+    const invalid = await operationInstallation(f, mutate);
+    await assert.rejects(readProtectedInstallation(invalid.options), /operation scope/i);
+  }
+});
+
+test('operation scope is re-read before use and expiry never grants a replacement writer', async t => {
+  const f = await fixture(t), operation = await operationInstallation(f), installed = await readProtectedInstallation(operation.options);
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'deliver', operation.scope.expiresAt), /operation scope/i);
+  await writeFile(operation.path, canonical({ ...operation.scope, commands: ['deliver'] }));
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'deliver'), /Installed document bytes differ/);
+});
+
+test('delivery requires the complete transition scope before its first operation', async t => {
+  const f = await fixture(t), operation = await operationInstallation(f, scope => { scope.commands = ['begin', 'deliver']; });
+  const installed = await readProtectedInstallation(operation.options);
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'deliver'), /complete delivery transition scope/i);
+  await assert.rejects(installedOperations.requireInstalledOperation(installed, 'rollback'), /does not admit/);
+});
+
 test('private installation pins raw root bytes, separate key identities, targets and component configuration', async t => {
   const f = await fixture(t), installed = await readProtectedInstallation(options(f));
   assert.equal(installed.rootDigest, sha256(await readFile(installed.rootPath)));
@@ -26,6 +82,25 @@ test('private installation pins raw root bytes, separate key identities, targets
   assert.equal(installed.plan.providerPolicy.github.environment, 'Preview');
   assert.equal(installed.template.schema, 'shop.hosted-composition-template/v1');
   assert.equal(Object.hasOwn(installed.template, 'intentCommits'), false);
+});
+
+test('historical intake requires the independently pinned release producer and installed recipient', async t => {
+  const f = await fixture(t), historyIntake = {
+    repository: structuredClone(f.installationContract.artifactIntake.repository),
+    workflow: { id: 333, path: '.github/workflows/shop-composition-qualification.yml', jobName: 'Validate retained composition', jobId: 'plan' },
+    recipientFingerprint: f.installationContract.artifactIntake.recipientFingerprint,
+  };
+  const installed = await readProtectedInstallation(await updateInstallation(f, contract => { contract.historyIntake = historyIntake; }));
+  assert.deepEqual(installed.contract.historyIntake, historyIntake);
+  for (const mutate of [
+    value => { value.repository.ownerId++; }, value => { value.workflow.id = 0; },
+    value => { value.workflow.path = '.github/workflows/quality.yml'; }, value => { value.workflow.jobId = 'other'; },
+    value => { value.recipientFingerprint = '0'.repeat(64); }, value => { value.githubConfigDirectory = '/tmp/untrusted'; },
+  ]) {
+    const invalid = structuredClone(historyIntake); mutate(invalid);
+    const options = await updateInstallation(f, contract => { contract.historyIntake = invalid; });
+    await assert.rejects(readProtectedInstallation(options), /Historical artifact|Unexpected/);
+  }
 });
 
 test('raw root SHA remains exact when installed JSON formatting changes', async t => {
@@ -97,7 +172,7 @@ test('independently pinned package materializes exact root and signing keys with
   const imported = await importHostedPortable({ request: f.intake.request, installation: installed.installation.artifactIntake,
     privateKeyFile: installed.installation.artifactPrivateKeyFile, destination: join(f.directory, 'package-intake'), api: f.intake.api });
   const assembled = await assembleHostedRelease({ ...f, installation: installed.installation, imported, destination: join(f.directory, 'package-assembly') });
-  const plan = await hostedController({ ...assembled.options, env: f.env, command: 'plan' });
+  const plan = await hostedController({ ...assembled.options, command: 'plan' }, f.env);
   assert.equal(plan.phase, 'plan-admitted'); assert.equal(plan.readiness.awsImageQualified, false); assert.equal(plan.providerWrites, 0);
   await assert.rejects(installProtectedPackage(original), { code: 'EEXIST' });
 });

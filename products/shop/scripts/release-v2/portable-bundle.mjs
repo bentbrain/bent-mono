@@ -5,6 +5,7 @@ import { check, canonical, digest, sha256, same, pathName, readRef, parseJSON, c
 import { codeIdentity } from './component-identity.mjs';
 import { componentClosure, parseLock, validateInventory } from './scoped-inputs.mjs';
 import { shopClosurePolicy } from './source-inventory.mjs';
+import { verifyNativeV5OciReceipt } from '../testing/native-v5-oci.mjs';
 import { verifyOciLayout } from './oci-layout.mjs';
 
 const manifestName = 'portable-bundle.json';
@@ -183,7 +184,11 @@ export async function verifyPortableBundle(directory, expected) {
     check(same(payload.map(file => ({ path: `${artifact.root}/${file.path}`, bytes: file.bytes, sha256: file.sha256, mediaType: mediaType(file.path) })), artifact.files), 'Portable component has extra or missing payload');
     check(payload.some(file => `${artifact.root}/${file.path}` === artifact.entrypoint) && same(payload.map(({ path, mode }) => ({ path, mode })), runtime.modes), 'Portable entrypoint or runtime modes differ');
     check(artifact.format === 'module-bundle' || record.id === 'native' && artifact.format === 'oci-layout', 'Unsupported portable artifact format');
-    if (artifact.format === 'oci-layout') await verifyOciLayout({ artifact, readFile: ref => readRef(root, ref) });
+    const oci = artifact.format === 'oci-layout' ? await verifyOciLayout({ artifact, readFile: ref => readRef(root, ref) }) : undefined;
+    if (runtime.definition?.kind === 'linux-native-oci-candidate') {
+      check(oci && runtime.definition.imageDigest === oci.imageDigest, 'Portable native OCI producer identity differs');
+      await verifyNativeV5OciReceipt({ graph: oci, receipt: runtime.definition.nativeOciReceipt, readFile: ref => readRef(root, ref) });
+    }
     check(runtime.schema === 'shop.portable-runtime/v1' && runtime.awsImageQualified === false && runtime.definition?.awsImageQualified !== true && digest(runtime) === artifact.runtimeDigest && artifact.runtimeDigest === policy.runtime[record.id], 'Portable runtime identity differs');
     if (runtime.definition.identityDirectory !== undefined) check(runtime.definition.identityDirectory === `metadata/${record.id}-candidate` &&
       actualFiles.some(file => file.path.startsWith(`${runtime.definition.identityDirectory}/`)), 'Portable runtime identity directory differs');
@@ -193,7 +198,7 @@ export async function verifyPortableBundle(directory, expected) {
     const component = { id: record.id, originSourceCommit: record.originSourceCommit, sourceTreeDigest: snapshot.treeDigest,
       inputsDigest: closure.buildDigest, intentInputsDigest: intentClosure.buildDigest, proofInputsDigest: closure.proofDigest, intentProofInputsDigest: intentClosure.proofDigest,
       inputsRef: snapshot.inputsRef, intentInputsRef: intent.inputsRef, artifact: record.artifactRef, provenance: record.provenanceRef, codeDigest: artifact.codeDigest };
-    components.set(record.id, { component, artifact, artifactRef: record.artifactRef, provenance, provenanceRef: record.provenanceRef, runtime, runtimeRef: record.runtimeRef, closure, snapshot });
+    components.set(record.id, { component, artifact, artifactRef: record.artifactRef, provenance, provenanceRef: record.provenanceRef, oci, runtime, runtimeRef: record.runtimeRef, closure, snapshot });
   }
   return { root, manifest, manifestSha256: expected.manifestSha256, components, lineage: manifest.lineage,
     sourceInventory: snapshots.get(manifest.originSourceCommit), snapshots, closurePolicy: policy, expected };

@@ -31,3 +31,14 @@ test('explicit temporary signer matches the existing AWS signer for complete S3 
   const expired = createProviderSigner({ ...options, session: { ...session, expiresAt: time + 10000 } });
   await assert.rejects(authorizeRequest({ request: requests[0], policy, signer: expired, trust, now: () => time }), /session differs/);
 });
+
+test('renewable provider credentials preserve epoch and fail expired or replaced sessions before signing', async () => {
+  const { policy } = protocolFixture(), pair = generateKeyPairSync('ed25519'); let time = Date.now(), calls = 0, epoch = 'installed-epoch';
+  const session = { accountId: policy.awsAccountId, region: policy.region, accessKeyId: 'ASIATESTSYNTHETIC1234', secretAccessKey: 'synthetic-renewable-secret-for-offline-only', sessionToken: 'initial-session', expiresAt: time + 60000 };
+  const signer = createProviderSigner({ policy, credentialEpoch: 'installed-epoch', getCredentials: async ({ credentialEpoch, minimumExpiresAt }) => { calls++; assert.equal(credentialEpoch, 'installed-epoch'); assert.equal(minimumExpiresAt, time + 30000); return { credentialEpoch: epoch, session, bearerTokens: { cloudflare: 'renewable-cloudflare', github: 'renewable-github' } }; }, keyId: 'renewable-key', privateKeyPem: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }), now: () => time });
+  const trust = signingTrust({ policy, keys: [{ id: 'renewable-key', publicKey: pair.publicKey.export({ type: 'spki', format: 'pem' }) }] }), request = requestBuilders(policy).storeGet('head.json');
+  assert.equal((await authorizeRequest({ request, policy, signer, trust, now: () => time })).headers['x-amz-security-token'], 'initial-session');
+  time += 45000; await assert.rejects(authorizeRequest({ request, policy, signer, trust, now: () => time }), /session differs/);
+  session.expiresAt = time + 60000; session.sessionToken = 'renewed-session'; assert.equal((await authorizeRequest({ request, policy, signer, trust, now: () => time })).headers['x-amz-security-token'], 'renewed-session');
+  epoch = 'different-epoch'; await assert.rejects(authorizeRequest({ request, policy, signer, trust, now: () => time }), /cannot replace/); assert.equal(calls, 4);
+});

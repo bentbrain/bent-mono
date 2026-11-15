@@ -1,20 +1,60 @@
-name: Shop composed qualification plan
+name: Shop composed qualification
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Independently approved qualification operation
+        required: true
+        default: plan
+        type: choice
+        options: [plan, deliver, rollback, native-bootstrap, recover-report]
       artifact_run_id:
         description: Retained Linux journey run
-        required: true
+        required: false
         type: string
       artifact_run_attempt:
         description: Retained run attempt
-        required: true
+        required: false
         default: '1'
         type: string
       artifact_id:
         description: Encrypted Linux artifact
-        required: true
+        required: false
+        type: string
+      historical_run_id:
+        description: Original successful composed release run for rollback
+        required: false
+        type: string
+      historical_run_attempt:
+        description: Original composed release attempt
+        required: false
+        default: '1'
+        type: string
+      historical_artifact_id:
+        description: Original encrypted composed release artifact
+        required: false
+        type: string
+      historical_source_commit:
+        description: Original composed release source commit
+        required: false
+        type: string
+
+      qualification_run_id:
+        description: Original successful native bootstrap run
+        required: false
+        type: string
+      qualification_run_attempt:
+        description: Original native bootstrap attempt
+        required: false
+        type: string
+      qualification_artifact_id:
+        description: Original encrypted native bootstrap artifact
+        required: false
+        type: string
+      qualification_source_commit:
+        description: Original native bootstrap source commit
+        required: false
         type: string
 
 permissions:
@@ -23,9 +63,10 @@ permissions:
   checks: read
   statuses: read
   pull-requests: read
+  id-token: write
 
 concurrency:
-  group: shop-composed-qualification-plan
+  group: shop-composed-qualification
   cancel-in-progress: false
 
 jobs:
@@ -52,9 +93,19 @@ jobs:
         env:
           SHOP_COMPOSITION_INSTALLATION_PACKAGE: ${{ secrets.SHOP_COMPOSITION_INSTALLATION_PACKAGE }}
           SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256: ${{ vars.SHOP_COMPOSITION_INSTALLATION_PACKAGE_SHA256 }}
+          SHOP_COMPOSITION_REPORTING_AUTHORITY: ${{ secrets.SHOP_COMPOSITION_REPORTING_AUTHORITY }}
+          SHOP_COMPOSITION_COMMAND: ${{ inputs.operation }}
           SHOP_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           SHOP_ARTIFACT_RUN_ATTEMPT: ${{ inputs.artifact_run_attempt }}
           SHOP_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          SHOP_HISTORY_RUN_ID: ${{ inputs.historical_run_id }}
+          SHOP_HISTORY_RUN_ATTEMPT: ${{ inputs.historical_run_attempt }}
+          SHOP_HISTORY_ARTIFACT_ID: ${{ inputs.historical_artifact_id }}
+          SHOP_HISTORY_SOURCE_COMMIT: ${{ inputs.historical_source_commit }}
+          SHOP_QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
+          SHOP_QUALIFICATION_RUN_ATTEMPT: ${{ inputs.qualification_run_attempt }}
+          SHOP_QUALIFICATION_ARTIFACT_ID: ${{ inputs.qualification_artifact_id }}
+          SHOP_QUALIFICATION_SOURCE_COMMIT: ${{ inputs.qualification_source_commit }}
         run: |
           umask 077
           node products/shop/scripts/release-v2/workflow-ci.mjs prepare

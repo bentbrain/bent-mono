@@ -5,7 +5,7 @@ import { canonical, check, digest, parseJSON, readRef } from '../data.mjs';
 import { fixtureEnvironment, loopbackOrigin } from '../provider.mjs';
 import { protocolPolicy } from '../provider-protocol-builders.mjs';
 import { admitCredentialFence, credentialBrokerBoundary, createHostedWriter } from '../hosted-writer.mjs';
-import { createHostedProvider, retainedCandidateLoader } from '../hosted-provider.mjs';
+import { createHostedProvider, retainedCandidateLoader, preflightHostedTargets } from '../hosted-provider.mjs';
 import { advanceWithPorts } from '../controller.mjs';
 import { literalJSON } from './hosted-protocol-service.mjs';
 
@@ -16,7 +16,8 @@ export async function hostedEngineStep(config) {
   const fenceAdmission = admitCredentialFence(config.fenceReceipt, { keys: config.fenceKeys, policy, environmentId: 'synthetic-qualification', brokerId: 'synthetic-custody', implementationDigest: config.fenceReceipt.payload.implementationDigest });
   const broker = credentialBrokerBoundary({ fenceAdmission, boundary: input => literalJSON(config.custodyOrigin, input) }), writer = createHostedWriter({ policy, broker, fenceAdmission });
   const load = retainedCandidateLoader({ bundle: config.bundle, targets: config.targets });
-  const provider = createHostedProvider({ policy, writer, broker, components: config.payload.components, targets: config.targets, load, deploymentId: '123' });
+  const release = { head: config.payload.intentSourceCommit, compositionDigest: digest(config.payload) }, preflight = await preflightHostedTargets({ policy, components: config.payload.components, targets: config.targets, load, release });
+  const provider = createHostedProvider({ policy, writer, broker, components: config.payload.components, targets: config.targets, load, release, preflight, deploymentId: '123' });
   const compositionDigest = digest(config.payload), admission = { payload: config.payload, compositionDigest, trust: { scope: 'isolated-qualification', budgetMs: 600000 } };
   const journey = async ({ phase }) => {
     const observed = [];

@@ -1,3 +1,5 @@
+import { canonicalNativeServingTarget, parseNativeServingTarget } from "@forever-tee/contracts/native-serving-target";
+import { installedNativeServingTarget, nativeServingAcceptanceStatement, prepareNativeServingAcceptance, verifyNativeServingAcceptance } from "./native-serving-target";
 import { withDatabasePrepare } from "./test-database";
 import { protectedConfig } from "./protected-config";
 import { type ProductImageEnv, consumeProductImageMessage, reconcileProductImages, productPreviewResponse, ensureProductImages, productImageTransfer, productImageResponse } from "./product-images";
@@ -18,7 +20,7 @@ import { LAMBDA_STORY_FUNCTION, renderLambdaVideo, validateLambdaStoryVideoEnv }
 import worker, { handleRequest } from "./index";
 import { handleNativeVideoStatus } from "./native-video-status";
 import { qualificationLambdaSend, takeQualificationFault } from "./story-video-qualification";
-import { canonicalNativeIdentity, nativeIdentityDigest, parseNativeV5Target } from "./native-v5-target";
+import { admittedNativeV5Target, canonicalNativeIdentity, nativeIdentityDigest, parseNativeV5Target } from "./native-v5-target";
 import { artworkPreviewKey } from "./artwork-preview";
 const DESIGN_ID = "9bbac861-76bf-4818-957d-12770401474a";
 const REVISION_ID = "a58634b2-02dd-4ac8-b449-1978df422377";
@@ -74,6 +76,7 @@ async function applyMigrations() {
         "0043_artwork_preparation_jobs.sql",
         "0044_video_preview_revisions.sql",
         "0045_native_v5_dispatches.sql",
+        "0046_native_serving_dispatches.sql",
         "0038_print_staging.sql",
     ];
     for (const name of files) {
@@ -282,6 +285,154 @@ describe("story-video jobs", () => {
         const env: ProductImageEnv = { ...lambdaEnv(), SHOP_NATIVE_V5_TARGET_JSON: JSON.stringify(target), SHOP_NATIVE_V5_GRANT_SECRET: "synthetic-native-grant-secret-n-00001" };
         return { env, target };
     }
+    function servingEnv(version = "7", environment: "development" | "production" = "development") {
+        const main = `arn:aws:lambda:ap-southeast-2:${protectedConfig("awsAccountId")}:function:shop-composed-native`;
+        const failure = `${main}-failure`;
+        const target = { schema: "shop.native-serving-target/v1", environment, functionArn: `${main}:${version}`, failureFunctionArn: `${failure}:${version}`,
+            codeDigest: "a".repeat(64), inputsDigest: "b".repeat(64), imageDigest: "c".repeat(64), buildId: "d".repeat(64), qualificationDigest: "e".repeat(64), grantKeyId: "normal-serving-key" };
+        const prior: unknown = JSON.parse(process.env["SHOP_PROTECTED_CONFIG_JSON"] ?? "null");
+        if (typeof prior !== "object" || prior === null || Array.isArray(prior)) throw new Error("Missing protected fixture.");
+        vi.stubEnv("SHOP_PROTECTED_CONFIG_JSON", JSON.stringify({ ...prior, nativeServingFunctionArn: main, nativeServingFailureFunctionArn: failure }));
+        const env: ProductImageEnv = { ...lambdaEnv(), STORY_VIDEO_ENVIRONMENT: environment, OPERATIONS_ENVIRONMENT: environment,
+            SHOP_NATIVE_SERVING_TARGET_JSON: canonicalNativeServingTarget(parseNativeServingTarget(JSON.stringify(target), { environment, mainFunctionArn: main, failureFunctionArn: failure })),
+            SHOP_NATIVE_V5_GRANT_SECRET: "synthetic-normal-serving-grant-secret-0001" };
+        return { env, target, main, failure };
+    }
+    it("routes normal v5 attempts through the qualified serving target and preserves old versions after promotion", async () => {
+        const original = servingEnv("7");
+        const requests: string[] = [];
+        vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+            if (!(input instanceof Request)) throw new Error("Expected signed native request.");
+            requests.push(decodeURIComponent(input.url));
+            return Promise.reject(new Error("Lost invocation acknowledgement"));
+        }));
+        try {
+            await ensureProductImages(original.env, SHIRT_ID);
+            expect(requests).toHaveLength(4);
+            expect(requests.every(url => url.includes(original.target.functionArn))).toBe(true);
+            const before = await original.env.DB.prepare("SELECT target_json,dispatch_state FROM native_v5_dispatches").all<{ target_json: string; dispatch_state: string }>();
+            expect(before.results.every(row => parseNativeV5Target(row.target_json).schemaVersion === 3 && row.dispatch_state === "uncertain")).toBe(true);
+            const next = servingEnv("8");
+            await original.env.DB.prepare("UPDATE product_image_jobs SET status='queued',updated_at=? WHERE status='rendering'").bind(Date.now() - 300000).run();
+            await consumeProductImageMessage({ id: "promoted-images", timestamp: new Date(), attempts: 1, body: { designRevisionId: REVISION_ID, productImages: true }, ack: () => undefined, retry: () => undefined }, next.env);
+            expect(requests).toHaveLength(8);
+            expect(requests.every(url => url.includes(original.target.functionArn))).toBe(true);
+            await original.env.DB.prepare("UPDATE product_image_jobs SET status='ready',execution_id=NULL").run();
+            await ensureProductImages(next.env, TOTE_ID);
+            expect(requests.slice(8).every(url => url.includes(next.target.functionArn))).toBe(true);
+            await original.env.DB.prepare("UPDATE product_image_jobs SET status='queued',updated_at=? WHERE product_id=? AND status='rendering'").bind(Date.now() - 300000, TOTE_ID).run();
+            const rollback = servingEnv("7");
+            await consumeProductImageMessage({ id: "rollback-images", timestamp: new Date(), attempts: 1, body: { designRevisionId: REVISION_ID, productImages: true }, ack: () => undefined, retry: () => undefined }, rollback.env);
+            expect(requests.slice(8)).toHaveLength(4);
+            expect(requests.slice(8).every(url => url.includes(next.target.functionArn))).toBe(true);
+        } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+    });
+    it("keeps normal v5 callbacks fenced after target promotion and current grant removal", async () => {
+        const original = servingEnv("7"), events: { jobId: string; grant: string }[] = [];
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+            if (!(input instanceof Request)) throw new Error("Expected signed native request.");
+            events.push(nativeEvent(await input.json()));
+            return new Response(null, { status: 202 });
+        }));
+        try {
+            await ensureProductImages(original.env, SHIRT_ID);
+            const event = events[0]; if (!event) throw new Error("Missing retained normal event.");
+            const next = servingEnv("8"), callbacks = { ...lambdaEnv(), STORY_VIDEO_ENVIRONMENT: "development", OPERATIONS_ENVIRONMENT: "development" };
+            expect(installedNativeServingTarget(next.env)?.functionArn).not.toBe(original.target.functionArn);
+            const endpoint = `https://api.test/v2/internal/product-image-jobs/${event.jobId}`, executionId = crypto.randomUUID();
+            const headers = { authorization: `Bearer ${event.grant}`, "x-image-execution-id": executionId, "x-image-renderer-version": "product-images-v5", accept: "application/vnd.bent.product-image-source" };
+            const claimed = await productImageTransfer(new Request(endpoint + "/claim", { method: "POST", headers }), callbacks);
+            expect(claimed?.status).toBe(201);
+            if (!claimed) throw new Error("Missing actual source response.");
+            expect(new Uint8Array(await claimed.arrayBuffer())).toEqual(ARTWORK);
+            expect((await productImageTransfer(new Request(endpoint + "/claim", { method: "POST", headers: { ...headers, "x-image-execution-id": crypto.randomUUID() } }), callbacks))?.status).toBe(204);
+            expect((await productImageTransfer(new Request(endpoint + "/artwork", { headers: { ...headers, authorization: `Bearer ${event.grant}x` } }), callbacks))?.status).toBe(403);
+            const bytes = new TextEncoder().encode("RIFF0000WEBPtest"), sha256 = await nativeIdentityDigest(bytes);
+            const result = await productImageTransfer(new Request(endpoint + "/image", { method: "PUT", headers: { ...headers, "content-type": "image/webp", "content-length": String(bytes.length), "x-image-sha256": sha256 }, body: bytes }), callbacks);
+            expect(result?.status).toBe(200);
+            expect(await original.env.DB.prepare("SELECT status,sha256 FROM product_image_jobs WHERE id=?").bind(event.jobId).first()).toEqual({ status: "ready", sha256 });
+        } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+    });
+    it("retains a real video attempt target across promotion, rollback and lost acknowledgements", async () => {
+        const original = servingEnv("7"), requests: string[] = [];
+        vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+            if (!(input instanceof Request)) throw new Error("Expected signed video request.");
+            requests.push(decodeURIComponent(input.url));
+            return Promise.reject(new Error("Lost acknowledgement"));
+        }));
+        try {
+            await ensureStoryVideoJobs(original.env, SHIRT_ID);
+            await renderStoryVideoRevisionBatch(original.env, REVISION_ID);
+            expect(requests).toHaveLength(2);
+            await renderStoryVideoRevisionBatch(servingEnv("8").env, REVISION_ID);
+            expect(requests).toHaveLength(2);
+            await original.env.DB.prepare("UPDATE story_video_jobs SET status='queued',updated_at=? WHERE status='rendering'").bind(Date.now() - 300000).run();
+            await renderStoryVideoRevisionBatch(servingEnv("8").env, REVISION_ID);
+            expect(requests).toHaveLength(4);
+            expect(requests.every(url => url.includes(original.target.functionArn))).toBe(true);
+            const rows = await original.env.DB.prepare("SELECT target_json FROM native_serving_dispatches WHERE kind='video'").all<{ target_json: string }>();
+            expect(rows.results).toHaveLength(4);
+            expect(rows.results.every(row => row.target_json === original.env.SHOP_NATIVE_SERVING_TARGET_JSON)).toBe(true);
+            await original.env.DB.prepare("DELETE FROM story_video_jobs").run();
+            expect(await original.env.DB.prepare("SELECT count(*) AS n FROM native_serving_dispatches").first()).toEqual({ n: 0 });
+        } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+    });
+    it("retains v4 dispatch identity transactionally and rejects modified or uncommitted identity", async () => {
+        const original = servingEnv("7");
+        try {
+            const now = Date.now(), jobId = crypto.randomUUID();
+            await original.env.DB.prepare(`INSERT INTO product_image_jobs(id,product_id,design_revision_id,colour,view,renderer_version,storage_key,status,attempt_count,created_at,updated_at)
+              VALUES (?,?,?,'White','flat','product-images-v4','test-v4','queued',0,?,?)`).bind(jobId, SHIRT_ID, REVISION_ID, now, now).run();
+            const accepted = await prepareNativeServingAcceptance(original.env.DB, original.env, "image-v4", jobId, 1);
+            if (!accepted) throw new Error("Expected installed serving acceptance.");
+            await expect(verifyNativeServingAcceptance(original.env.DB, accepted)).rejects.toThrow("did not commit");
+            const results = await original.env.DB.batch([
+                original.env.DB.prepare("UPDATE product_image_jobs SET status='rendering',attempt_count=1 WHERE id=? AND status='queued' AND attempt_count=0").bind(jobId),
+                nativeServingAcceptanceStatement(original.env.DB, accepted, now),
+            ]);
+            expect(results.map(result => result.meta.changes)).toEqual([1, 1]);
+            expect((await verifyNativeServingAcceptance(original.env.DB, accepted)).functionArn).toBe(original.target.functionArn);
+            expect((await prepareNativeServingAcceptance(original.env.DB, servingEnv("8").env, "image-v4", jobId, 2))?.target.functionArn).toBe(original.target.functionArn);
+            await original.env.DB.prepare("UPDATE product_image_jobs SET status='queued',updated_at=? WHERE id=?").bind(now - 300000, jobId).run();
+            const signedRequests: string[] = [];
+            vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+                if (!(input instanceof Request)) throw new Error("Expected signed retained v4 invocation.");
+                signedRequests.push(decodeURIComponent(input.url));
+                return Promise.resolve(new Response(null, { status: 202 }));
+            }));
+            await consumeProductImageMessage({ id: "retained-v4", timestamp: new Date(), attempts: 1, body: { designRevisionId: REVISION_ID, productImages: true }, ack: () => undefined, retry: () => undefined }, { ...lambdaEnv(), STORY_VIDEO_ENVIRONMENT: "development" });
+            expect(signedRequests).toHaveLength(1);
+            expect(signedRequests[0]).toContain(original.target.functionArn);
+            await original.env.DB.prepare("UPDATE native_serving_dispatches SET target_digest=? WHERE job_id=?").bind("f".repeat(64), jobId).run();
+            await expect(prepareNativeServingAcceptance(original.env.DB, original.env, "image-v4", jobId, 3)).rejects.toThrow("identity changed");
+        } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+    });
+    it("rejects first-cutover legacy attempts and malformed serving configuration before any send", async () => {
+        const original = servingEnv("7"), send = vi.fn<typeof fetch>();
+        vi.stubGlobal("fetch", send);
+        try {
+            await ensureStoryVideoJobs(original.env, SHIRT_ID);
+            await original.env.DB.prepare("UPDATE story_video_jobs SET attempt_count=1,status='queued'").run();
+            await expect(renderStoryVideoRevisionBatch(original.env, REVISION_ID)).rejects.toThrow("Drain legacy");
+            expect(send).not.toHaveBeenCalled();
+            for (const invalid of [JSON.stringify({ ...original.target, environment: "production" }), JSON.stringify({ ...original.target, functionArn: `${original.main}:current` }),
+                JSON.stringify({ ...original.target, grantKeyId: "bad/key" }), JSON.stringify({ ...original.target, failureFunctionArn: `${original.main}:7` }),
+                original.env.SHOP_NATIVE_SERVING_TARGET_JSON?.replace('"buildId":', '"buildId":"' + "f".repeat(64) + '","buildId":')]) {
+                if (!invalid) throw new Error("Missing invalid fixture.");
+                expect(() => installedNativeServingTarget({ ...original.env, SHOP_NATIVE_SERVING_TARGET_JSON: invalid })).toThrow();
+            }
+            expect(send).not.toHaveBeenCalled();
+        } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+    });
+    it("admits normal Production only through the shared protected serving target", async () => {
+        const normal = servingEnv("12", "production");
+        try {
+            expect((await admittedNativeV5Target(normal.env))?.schemaVersion).toBe(3);
+            expect(validateLambdaStoryVideoEnv(normal.env).functionArn).toBe(normal.target.functionArn);
+            await expect(admittedNativeV5Target({ ...normal.env, SHOP_NATIVE_V5_TARGET_JSON: "{}" })).rejects.toThrow("exactly one");
+            expect(() => validateLambdaStoryVideoEnv({ ...normal.env, OPERATIONS_ENVIRONMENT: "development" })).toThrow("business environment");
+        } finally { vi.unstubAllEnvs(); }
+    });
     function nativeEvent(value: unknown) {
         if (typeof value !== "object" || value === null || !("jobId" in value) || typeof value.jobId !== "string" || !("grant" in value) || typeof value.grant !== "string") throw new Error("Missing native invocation identity.");
         return { jobId: value.jobId, grant: value.grant };

@@ -1,3 +1,4 @@
+import { assertNativeServingAdmission, nativeServingAcceptanceStatement, prepareNativeServingAcceptance, verifyNativeServingAcceptance } from "./native-serving-target";
 import { safeErrorDetails } from "@forever-tee/contracts/diagnostics";
 import { consumeProductImageMessage } from "./product-images";
 import { baseProductSlugForId, productProjectionSpecification, type BaseProductSlug, } from "@forever-tee/contracts";
@@ -220,6 +221,7 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
     if (env.STORY_VIDEO_PROVIDER && !["lambda", "cloudflare"].includes(env.STORY_VIDEO_PROVIDER))
         throw new Error("Unknown video provider.");
     if (env.STORY_VIDEO_PROVIDER === "lambda") {
+        await assertNativeServingAdmission(env.DB, env, Date.now());
         validateLambdaStoryVideoEnv(env);
         await recoverExpiredRenders(env, revisionId);
     }
@@ -250,7 +252,11 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
     }
     const nativeSchema = env.STORY_VIDEO_PROVIDER === "lambda" && await hasNativeV5Schema(env.DB);
     const lambdaImage = nativeSchema ? "(renderer_version<>'product-images-v5' OR dispatch_provider IS 'native-v5' OR EXISTS(SELECT 1 FROM native_v5_dispatches native WHERE native.job_id=product_image_jobs.id))" : "renderer_version<>'product-images-v5'";
-    const claims = await env.DB.batch(pending.map((job) => env.DB.prepare(`
+    const servingPlans = await Promise.all(pending.map(async job => env.STORY_VIDEO_PROVIDER === "lambda" ? await prepareNativeServingAcceptance(env.DB, env, "video", job.job_id, job.attempt_count + 1) : undefined));
+    const claimOffsets: number[] = [], claimStatements: D1PreparedStatement[] = [];
+    pending.forEach((job, index) => {
+        claimOffsets.push(claimStatements.length);
+        claimStatements.push(env.DB.prepare(`
     UPDATE story_video_jobs
     SET status = 'rendering', attempt_count = attempt_count + 1,
       last_error = NULL, execution_id = NULL, updated_at = ?
@@ -262,8 +268,16 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
           (status IN ('ready', 'failed') AND execution_id IS NOT NULL AND updated_at > ?)
         LIMIT ?
       )) + (SELECT count(*) FROM (SELECT id FROM product_image_jobs WHERE ${lambdaImage} AND status='rendering' UNION ALL SELECT id FROM product_image_jobs WHERE ${lambdaImage} AND status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ? LIMIT 8)) < ?)
-  `).bind(now, job.job_id, job.attempt_count, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, capacity, now - LAMBDA_COMPLETION_HOLD_MS, capacity)));
-    const jobs = pending.filter((_job, index) => claims[index]?.meta.changes === 1);
+  `).bind(now, job.job_id, job.attempt_count, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, env.STORY_VIDEO_PROVIDER === "lambda" ? 1 : 0, now - LAMBDA_COMPLETION_HOLD_MS, capacity, now - LAMBDA_COMPLETION_HOLD_MS, capacity));
+        const serving = servingPlans[index];
+        if (serving) claimStatements.push(nativeServingAcceptanceStatement(env.DB, serving, now));
+    });
+    const claims = await env.DB.batch(claimStatements);
+    const jobs = pending.filter((_job, index) => {
+        const offset = claimOffsets[index], serving = servingPlans[index];
+        return offset !== undefined && claims[offset]?.meta.changes === 1 && (!serving || claims[offset + 1]?.meta.changes === 1);
+    });
+    const acceptedServing = new Map(pending.map((job, index) => [job.job_id, servingPlans[index]]));
     const artworkMetadata = jobs[0];
     if (!artworkMetadata)
         return;
@@ -276,11 +290,13 @@ export async function renderStoryVideoRevisionBatch(env: StoryVideoEnv, revision
         const outcomes = await Promise.allSettled(jobs.map(async (job) => {
             try {
                 const recursiveSource = recursiveVideoSource(job);
+                const serving = acceptedServing.get(job.job_id);
+                const retainedTarget = serving ? await verifyNativeServingAcceptance(env.DB, serving) : undefined;
                 const result = await renderLambdaVideo(env, {
                     ...renderJobInput(job), jobId: job.job_id, attempt: job.attempt_count + 1,
                     artwork: { sha256: job.artwork_sha256, size: job.artwork_size },
                     ...(recursiveSource ? { recursiveSource } : {}),
-                }, STORY_VIDEO_RENDERER_VERSION, qualificationLambdaSend(env, job.artwork_key, job.job_id, fetch), readLegacy);
+                }, STORY_VIDEO_RENDERER_VERSION, qualificationLambdaSend(env, job.artwork_key, job.job_id, fetch), readLegacy, retainedTarget);
                 if (result.status === "ready") {
                     const persisted = await env.DB.prepare(`
             UPDATE story_video_jobs SET status = 'ready', output_byte_size = ?, last_error = NULL, updated_at = ?, rendered_at = ?

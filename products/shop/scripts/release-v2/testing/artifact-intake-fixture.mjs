@@ -58,19 +58,26 @@ export function fixtureZip(entries, { descriptor = true, zip64 = false } = {}) {
   return Buffer.concat([...local, directory, end]);
 }
 
-async function collect(root, prefix = '', entries = []) {
+async function collect(root, prefix = '', entries = [], rootName = 'shop-linux-private') {
   for (const name of (await readdir(join(root, prefix))).sort()) {
     const path = prefix ? `${prefix}/${name}` : name, info = await lstat(join(root, path));
-    if (info.isDirectory()) { entries.push({ path: `shop-linux-private/${path}/`, type: '5', mode: 0o700 }); await collect(root, path, entries); }
-    else entries.push({ path: `shop-linux-private/${path}`, data: await readFile(join(root, path)), mode: info.mode & 0o111 ? 0o700 : 0o600 });
+    if (info.isDirectory()) { entries.push({ path: `${rootName}/${path}/`, type: '5', mode: 0o700 }); await collect(root, path, entries, rootName); }
+    else entries.push({ path: `${rootName}/${path}`, data: await readFile(join(root, path)), mode: info.mode & 0o111 ? 0o700 : 0o600 });
   }
   return entries;
 }
 
 export async function createArtifactIntakeFixture(t, options = {}) {
-  const sourceCommit = options.sourceCommit ?? '1'.repeat(40), request = { runId: options.runId ?? 123, runAttempt: options.runAttempt ?? 1, artifactId: options.artifactId ?? 789, sourceCommit }, jobId = options.jobId ?? 987;
-  const workflowRef = `bentbrain/bent-mono/.github/workflows/shop-linux-journey.yml@${options.pullRequestNumber ? `refs/pull/${options.pullRequestNumber}/merge` : 'refs/heads/main'}`;
-  const lineage = { kind: 'github-actions', repository: 'bentbrain/bent-mono', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef, jobId: 'journey' };
+  const sourceCommit = options.sourceCommit ?? '1'.repeat(40), request = { runId: options.runId ?? 123, runAttempt: options.runAttempt ?? 1, artifactId: options.artifactId ?? 789, sourceCommit }, jobId = options.jobId ?? 987, workflowId = options.workflowId ?? 456;
+  const history = options.producer === 'composition-history', rootName = history ? 'shop-composition-private' : 'shop-linux-private';
+  const sealPrefix = history ? 'composition-evidence' : 'linux-evidence';
+  const producer = history
+    ? { path: '.github/workflows/shop-composition-qualification.yml', jobName: 'Validate retained composition', jobId: 'plan', artifactPrefix: 'shop-composition-private' }
+    : options.producer === 'native-oci'
+    ? { path: '.github/workflows/shop-native-oci-producer.yml', jobName: 'Built native OCI candidate', jobId: 'producer', artifactPrefix: 'shop-native-oci-private' }
+    : { path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey', artifactPrefix: 'shop-linux-private' };
+  const workflowRef = `bentbrain/bent-mono/${producer.path}@${options.pullRequestNumber ? `refs/pull/${options.pullRequestNumber}/merge` : 'refs/heads/main'}`;
+  const lineage = { kind: 'github-actions', repository: 'bentbrain/bent-mono', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef, jobId: producer.jobId };
   const fixture = options.portableFixture ?? await createPortableFixture(t, { lineage, ...(options.root ? { rootDirectory: options.root } : {}) }), { root, verified } = fixture;
   const original = options.originalDirectory ?? join(root, 'original');
   if (!options.originalDirectory) {
@@ -90,27 +97,30 @@ export async function createArtifactIntakeFixture(t, options = {}) {
   const publicKeyPem = keypair.publicKey.export({ type: 'spki', format: 'pem' });
   const recipientFingerprint = createHash('sha256').update(keypair.publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
   if (!options.recipientPrivateKeyFile) await writeFile(privateKeyFile, keypair.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  const entries = [{ path: 'shop-linux-private/', type: '5', mode: 0o700 }, ...(await collect(original)).filter(entry => entry.path !== 'shop-linux-private/evidence-inventory.private.json')];
-  const files = entries.filter(entry => entry.type !== '5').map(entry => ({ path: entry.path.slice('shop-linux-private/'.length), bytes: entry.data.length, sha256: sha256(entry.data), executable: entry.mode === 0o700 }));
-  entries.push({ path: 'shop-linux-private/evidence-inventory.private.json', mode: 0o600, data: Buffer.from(JSON.stringify({ schema: 'shop.hosted-linux-evidence/v1', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef: lineage.workflowRef, repository: lineage.repository, recipe: { synthetic: true }, files, filesSha256: sha256(JSON.stringify(files)) })) });
+  const inventoryName = history ? 'workflow-inventory.private.json' : 'evidence-inventory.private.json';
+  const entries = [{ path: `${rootName}/`, type: '5', mode: 0o700 }, ...(await collect(original, '', [], rootName)).filter(entry => entry.path !== `${rootName}/${inventoryName}`)];
+  const files = entries.filter(entry => entry.type !== '5').map(entry => ({ path: entry.path.slice(rootName.length + 1), bytes: entry.data.length, sha256: sha256(entry.data), executable: entry.mode === 0o700 }));
+  const inventory = history ? { schema: 'shop.workflow-evidence/v2', identity: options.historyIdentity, inventory: files } :
+    { schema: 'shop.hosted-linux-evidence/v1', sourceCommit, runId: String(request.runId), runAttempt: String(request.runAttempt), workflowRef: lineage.workflowRef, repository: lineage.repository, recipe: { synthetic: true }, files, filesSha256: sha256(JSON.stringify(files)) };
+  entries.push({ path: `${rootName}/${inventoryName}`, mode: 0o600, data: Buffer.from(JSON.stringify(inventory)) });
   const state = { archive: undefined };
-  const installation = { repository: { name: 'bentbrain/bent-mono', id: 101, ownerId: 102 }, workflow: { id: 456, path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey' }, recipientFingerprint,
+  const installation = { repository: { name: 'bentbrain/bent-mono', id: 101, ownerId: 102 }, workflow: { id: workflowId, path: producer.path, jobName: producer.jobName, jobId: producer.jobId }, recipientFingerprint,
     limits: { archiveBytes: 16 * 1024 ** 2, expandedBytes: 32 * 1024 ** 2, files: 4096 } };
   const repo = { id: 101, full_name: 'bentbrain/bent-mono', owner: { id: 102, login: 'bentbrain' } }, prefix = '/repos/bentbrain/bent-mono';
   const documents = {
     [prefix]: repo,
-    [`${prefix}/actions/workflows/456`]: { id: 456, path: installation.workflow.path, state: 'active' },
-    [`${prefix}/actions/runs/${request.runId}`]: { id: request.runId, run_attempt: request.runAttempt, workflow_id: 456, path: installation.workflow.path, status: 'completed', conclusion: 'success', head_sha: sourceCommit,
+    [`${prefix}/actions/workflows/${workflowId}`]: { id: workflowId, path: installation.workflow.path, state: 'active' },
+    [`${prefix}/actions/runs/${request.runId}`]: { id: request.runId, run_attempt: request.runAttempt, workflow_id: workflowId, path: installation.workflow.path, status: 'completed', conclusion: 'success', head_sha: sourceCommit,
       event: options.pullRequestNumber ? 'pull_request' : 'workflow_dispatch', head_branch: 'main', ...(options.pullRequestNumber ? { pull_requests: [{ number: options.pullRequestNumber, head: { sha: sourceCommit, repo: { id: 101 } } }] } : {}), repository: repo, head_repository: repo, updated_at: '2026-11-12T00:10:00Z' },
-    [`${prefix}/actions/runs/${request.runId}/attempts/${request.runAttempt}/jobs?per_page=100`]: { total_count: 1, jobs: [{ id: jobId, run_id: request.runId, run_attempt: request.runAttempt, head_sha: sourceCommit, name: 'Built Linux J01', status: 'completed', conclusion: 'success', started_at: '2026-11-12T00:00:00Z', completed_at: '2026-11-12T00:09:00Z' }] },
-    [`${prefix}/actions/artifacts/${request.artifactId}`]: { id: request.artifactId, name: `shop-linux-private-${request.runId}-${request.runAttempt}`, expired: false, created_at: '2026-11-12T00:08:00Z', updated_at: '2026-11-12T00:08:30Z', workflow_run: { id: request.runId, repository_id: 101, head_repository_id: 101, head_sha: sourceCommit } },
+    [`${prefix}/actions/runs/${request.runId}/attempts/${request.runAttempt}/jobs?per_page=100`]: { total_count: 1, jobs: [{ id: jobId, run_id: request.runId, run_attempt: request.runAttempt, head_sha: sourceCommit, name: producer.jobName, status: 'completed', conclusion: 'success', started_at: '2026-11-12T00:00:00Z', completed_at: '2026-11-12T00:09:00Z' }] },
+    [`${prefix}/actions/artifacts/${request.artifactId}`]: { id: request.artifactId, name: `${producer.artifactPrefix}-${request.runId}-${request.runAttempt}`, expired: false, created_at: '2026-11-12T00:08:00Z', updated_at: '2026-11-12T00:08:30Z', workflow_run: { id: request.runId, repository_id: 101, head_repository_id: 101, head_sha: sourceCommit } },
   };
   let count = 0;
   async function sealEntries(nextEntries = entries, { gzip, zipEntries } = {}) {
     const tar = fixtureTar(nextEntries), compressed = gzip ?? gzipSync(tar), input = join(root, `plaintext-${count}.tar.gz`), sealed = join(root, `sealed-${count++}.enc`);
     await writeFile(input, compressed, { mode: 0o600 });
-    await sealLinuxEvidence(input, sealed, { sourceCommit, runId: String(request.runId), filename: 'linux-evidence.json' }, { publicKeyPem, keyFingerprint: recipientFingerprint });
-    const sealedEntries = await Promise.all([['linux-evidence.tar.gz.enc', sealed], ['linux-evidence.tar.gz.enc.json', `${sealed}.json`], ['linux-evidence.tar.gz.enc.envelope.json', `${sealed}.envelope.json`]].map(async ([name, path]) => ({ name, data: await readFile(path) })));
+    await sealLinuxEvidence(input, sealed, { sourceCommit, runId: String(request.runId), filename: `${sealPrefix}.json` }, { publicKeyPem, keyFingerprint: recipientFingerprint });
+    const sealedEntries = await Promise.all([[`${sealPrefix}.tar.gz.enc`, sealed], [`${sealPrefix}.tar.gz.enc.json`, `${sealed}.json`], [`${sealPrefix}.tar.gz.enc.envelope.json`, `${sealed}.envelope.json`]].map(async ([name, path]) => ({ name, data: await readFile(path) })));
     const archive = fixtureZip(zipEntries ? zipEntries(sealedEntries) : sealedEntries);
     setArchive(archive); return { tar, compressed, sealedEntries, archive };
   }

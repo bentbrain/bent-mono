@@ -5,12 +5,15 @@ import { STORY_RENDERER_VERSION } from "../src/version.mjs";
 import { ENCODING, VARIANTS } from "./config.mjs";
 import { sha256, validateSettings } from "./contract.mjs";
 import { appEnvironment } from "./app-environment.mjs";
+import { assertNativeNumberedInvocation } from './native-runtime-profile.mjs';
 const APP_FUNCTION = "forever-tee-video-development";
 export const APP_ARN = "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:" + (APP_FUNCTION);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 export function assertAppInvocation(context, environment = "development") {
-    if (context?.invokedFunctionArn !== appEnvironment(environment).functionArn || typeof context.awsRequestId !== "string" || !context.awsRequestId ||
+    const deployment = appEnvironment(environment);
+    if (deployment.runtimeProfile) assertNativeNumberedInvocation(context, deployment.runtimeProfile);
+    if ((!deployment.runtimeProfile && context?.invokedFunctionArn !== deployment.functionArn) || typeof context.awsRequestId !== "string" || !context.awsRequestId ||
         typeof context.getRemainingTimeInMillis !== "function" || !Number.isFinite(context.getRemainingTimeInMillis()) ||
         context.getRemainingTimeInMillis() < 60000)
         throw new Error("Expected the personal app Lambda invocation.");

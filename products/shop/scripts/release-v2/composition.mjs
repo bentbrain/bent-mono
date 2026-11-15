@@ -22,6 +22,9 @@ export async function implementationDigest() {
     ['products/shop/scripts/testing/linux-evidence-recipient.json', '../testing/linux-evidence-recipient.json'],
     ['products/shop/scripts/release-evidence.mjs', '../release-evidence.mjs'],
     ['products/shop/scripts/read-regular-file.mjs', '../read-regular-file.mjs'],
+    ['products/shop/scripts/testing/native-v5-oci.mjs', '../testing/native-v5-oci.mjs'],
+    ['products/shop/packages/contracts/src/story-video-grants.js', '../../packages/contracts/src/story-video-grants.js'],
+    ['products/shop/packages/contracts/src/native-serving-target.js', '../../packages/contracts/src/native-serving-target.js'],
   ]) records.push({ path, sha256: sha256(await readFile(new URL(relative, import.meta.url))) });
   return digest(records.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
@@ -53,7 +56,35 @@ export async function admit({ bundle, manifest, trustPath }) {
 
 // The caller authenticates its policy before reaching this shared content
 // verifier. Hosted and fixture policies retain distinct schema and domains.
-export async function admitComposition({ bundle, manifest, trust, domain }) {
+export async function admitComposition(options) { return verifyComposition(options, Date.now()); }
+
+// Historical proof time comes only from a fresh, independently signed recovery
+// authority and the original source authority sealed before runtime verification.
+export async function admitHistoricalComposition({ authority, originalAuthority, root, identity, ...options }) {
+  const { verifyHostedAuthority } = await import('./hosted-admission.mjs');
+  const current = verifyHostedAuthority(authority, { root, identity });
+  const recovery = current.payload.recovery;
+  check(recovery?.kind === 'historical-rollback' && digest(originalAuthority) === recovery.originalAuthorityDigest, 'Authenticated historical recovery subject required');
+  const admitted = await admitPreviouslyVerifiedComposition({ ...options, originalAuthority, root, verification: { compositionDigest: recovery.compositionDigest, verifiedAt: recovery.verifiedAt } });
+  check(admitted.compositionDigest === recovery.compositionDigest && digest(options.trust) === recovery.policyDigest, 'Historical composition differs from verified recovery');
+  return admitted;
+}
+
+// This verifies historical content only; the protected issuer separately requires
+// the immutable remote journal event before granting a current operation.
+export async function admitPreviouslyVerifiedComposition({ originalAuthority, root, verification, ...options }) {
+  const { verifyHostedAuthority } = await import('./hosted-admission.mjs');
+  const original = originalAuthority.payload;
+  check(Number.isSafeInteger(verification.verifiedAt) && verification.verifiedAt > 0, 'Exact prior runtime verification time required');
+  verifyHostedAuthority(originalAuthority, { root, identity: { repository: original.repository, repositoryName: original.repositoryName, head: original.head,
+    workflowCommit: original.workflowCommit, workflowRef: `${root.repositoryName}/${root.workflowPath}@refs/heads/main`, runId: original.runId, attempt: original.attempt }, now: verification.verifiedAt });
+  check(same(options.trust, original.policy), 'Historical policy differs from original source authority');
+  const admitted = await verifyComposition(options, verification.verifiedAt);
+  check(admitted.compositionDigest === verification.compositionDigest, 'Historical runtime composition differs');
+  return admitted;
+}
+
+async function verifyComposition({ bundle, manifest, trust, domain }, proofTime) {
   check(['inactive-loopback', 'isolated-qualification'].includes(domain), 'Unknown composition trust domain');
   conforms(trust, domain === 'inactive-loopback' ? 'trust' : 'hostedTrust');
   check(trust.scope === domain, 'Composition trust domain differs');
@@ -143,7 +174,7 @@ export async function admitComposition({ bundle, manifest, trust, domain }) {
       const kinds = [];
       for (const ref of component.componentProofs) {
         const receipt = parseJSON(await readRef(bundle, ref));
-        const proof = verifyComponentProof(receipt, { component, artifact, trust, now: Date.now(),
+        const proof = verifyComponentProof(receipt, { component, artifact, trust, now: proofTime,
           verifySignature: (value, signature) => verify('sha256', Buffer.from(canonical(value)), key, Buffer.from(signature, 'base64')) });
         conforms(proof.evidence, 'ref'); await readRef(bundle, proof.evidence); kinds.push(proof.kind);
       }

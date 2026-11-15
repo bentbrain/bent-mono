@@ -1,8 +1,10 @@
+import { verifyNativeQualificationReceipt } from './native-qualification.mjs';
+import { assertServingSelection } from './serving-provider.mjs';
 import { createPublicKey, verify } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { canonical, check, digest, parseJSON, readRef, readRegularFile, same, sha256 } from './data.mjs';
-import { admitComposition, conforms, implementationDigest } from './composition.mjs';
+import { admitComposition, admitHistoricalComposition, conforms, implementationDigest } from './composition.mjs';
 import { exactFields } from './provider-protocol-builders.mjs';
 
 const hash = value => check(typeof value === 'string' && /^[a-f0-9]{64}$/.test(value), 'Exact SHA-256 required');
@@ -65,6 +67,13 @@ export async function readHostedRoot(path, expectedDigest, bundle) {
   return readInstalledRoot(path, expectedDigest);
 }
 
+/** File-owned release settings never carry runtime identity or provider ports. */
+export function assertInvocationOptions(options) {
+  check(options && typeof options === 'object' && !Array.isArray(options) &&
+    ['env', 'identity', 'boundaries'].every(field => !Object.hasOwn(options, field)),
+  'Workflow identity and provider boundaries come from protected runtime');
+}
+
 export function actionsIdentity(env) {
   check(env.GITHUB_ACTIONS === 'true' && env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main', 'Canonical protected workflow dispatch required');
   const id = value => { check(typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value), 'Exact Actions identity required'); const result = Number(value); integer(result); return result; };
@@ -92,8 +101,10 @@ export function verifyHostedAuthority(envelope, { root, identity, now = Date.now
   const { payload } = verifyAuthoritySeal(envelope, root);
   exactFields(payload, ['schema', 'scope', 'repository', 'repositoryName', 'environment', 'head', 'base', 'tree', 'workflowPath',
     'workflowCommit', 'runId', 'attempt', 'issuedAt', 'expiresAt', 'acceptedAt', 'policy', 'providerPolicyDigest',
-    'portableManifests', 'secretInstallations', 'writerFenceDigest', 'targetPlanDigest', 'quality']);
-  check(payload.schema === 'shop.hosted-source-authority/v1' && payload.scope === root.scope && payload.environment === root.environment &&
+    'portableManifests', 'secretInstallations', 'writerFenceDigest', 'targetPlanDigest', 'quality', ...(payload.schema === 'shop.hosted-source-authority/v2' ? ['recovery'] : payload.schema === 'shop.hosted-source-authority/v3' ? ['operationAuthorization', 'recovery'] : []),
+    ...(payload.schema === 'shop.hosted-source-authority/v3' && Object.hasOwn(payload, 'nativeQualifications') ? ['nativeQualifications'] : []),
+    ...(payload.schema === 'shop.hosted-source-authority/v3' && Object.hasOwn(payload, 'nativeServingSelection') ? ['nativeServingSelection', 'nativeServingTargetDigest'] : [])]);
+  check(['shop.hosted-source-authority/v1', 'shop.hosted-source-authority/v2', 'shop.hosted-source-authority/v3'].includes(payload.schema) && payload.scope === root.scope && payload.environment === root.environment &&
     same(payload.repository, root.repository) && payload.repositoryName === root.repositoryName && payload.workflowPath === root.workflowPath,
   'Source authority target differs');
   for (const value of [payload.head, payload.base, payload.tree, payload.workflowCommit]) commit(value);
@@ -105,8 +116,24 @@ export function verifyHostedAuthority(envelope, { root, identity, now = Date.now
     Number.isSafeInteger(payload.acceptedAt) && payload.acceptedAt <= payload.issuedAt && payload.acceptedAt > 0 &&
     payload.issuedAt <= now && payload.expiresAt > now && payload.expiresAt - payload.issuedAt <= root.maximumLifetimeMs, 'Source authority expired or has an invalid measurement interval');
   conforms(payload.policy, 'hostedTrust');
-  check(payload.policy.scope === root.scope && same(payload.policy.repository, root.repository) && payload.policy.baseCommit === payload.base &&
-    payload.policy.intentCommits.includes(payload.head), 'Composition policy source differs');
+  check(payload.policy.scope === root.scope && same(payload.policy.repository, root.repository) && (payload.recovery || payload.policy.baseCommit === payload.base &&
+    payload.policy.intentCommits.includes(payload.head)), 'Composition policy source differs');
+  if (payload.schema === 'shop.hosted-source-authority/v3') {
+    const operation = payload.operationAuthorization;
+    exactFields(operation, ['scopeDigest', 'commands', 'expiresAt']);
+    check(Array.isArray(operation.commands) && operation.commands.length <= 4 && new Set(operation.commands).size === operation.commands.length &&
+      same(operation.commands, [...operation.commands].sort()) && operation.commands.every(command => ['advance', 'begin', 'deliver', 'rollback'].includes(command)), 'Exact installed operation commands required');
+    if (operation.scopeDigest !== null) hash(operation.scopeDigest);
+    check((operation.commands.length === 0 || operation.scopeDigest !== null) && Number.isSafeInteger(operation.expiresAt) && operation.expiresAt >= payload.expiresAt && operation.expiresAt > now, 'Installed operation authority expired or incomplete');
+    check(payload.recovery === null || typeof payload.recovery === 'object', 'Explicit recovery authorization required');
+  }
+  if (payload.recovery) {
+    const recovery = payload.recovery;
+    exactFields(recovery, ['kind', 'compositionDigest', 'policyDigest', 'verifiedEventDigest', 'verifiedAt', 'parentCompositionDigest', 'originalAuthorityDigest']);
+    check(recovery.kind === 'historical-rollback' && Number.isSafeInteger(recovery.verifiedAt) && recovery.verifiedAt > 0 && recovery.verifiedAt <= payload.issuedAt, 'Bounded historical runtime verification required');
+    for (const field of ['compositionDigest', 'policyDigest', 'verifiedEventDigest', 'parentCompositionDigest', 'originalAuthorityDigest']) hash(recovery[field]);
+    check(recovery.policyDigest === digest(payload.policy), 'Historical policy recovery binding differs');
+  }
   const compositionKey = root.compositionKeys.find(item => item.id === payload.policy.keyId);
   check(compositionKey && compositionKey.spkiSha256 === payload.policy.keyFingerprint && compositionKey.publicKeyPem === payload.policy.publicKeyPem,
     'Composition signing key is not independently installed');
@@ -124,19 +151,40 @@ export function verifyHostedAuthority(envelope, { root, identity, now = Date.now
     exactFields(installation, ['name', 'version', 'sha256']); name(installation.name); name(installation.version); hash(installation.sha256);
   }
   check(same(payload.secretInstallations.map(item => item.name).sort(), [...root.requiredSecrets].sort()), 'Protected secret installation inventory differs');
+  if (Object.hasOwn(payload, 'nativeQualifications')) {
+    boundedArray(payload.nativeQualifications, 1, 8);
+    unique(payload.nativeQualifications, digest);
+    for (const receipt of payload.nativeQualifications) {
+      check(Buffer.byteLength(canonical(receipt)) <= 1024 * 1024, 'Bounded native qualification receipt required');
+      verifyAuthoritySeal(receipt, root);
+    }
+  }
+  if (Object.hasOwn(payload, 'nativeServingSelection')) {
+    const selection = payload.nativeServingSelection;
+    assertServingSelection(selection, { nativeServing: selection });
+    for (const field of ['mainResource', 'failureResource', 'grantKeyId']) name(selection[field]);
+    check(['development', 'production'].includes(selection.environment) && selection.mainResource !== selection.failureResource,
+      'Exact signed serving environment and distinct functions required');
+    hash(payload.nativeServingTargetDigest);
+    check(payload.nativeQualifications?.length === 1 && digest(payload.nativeQualifications[0]) === selection.qualificationDigest, 'Signed serving qualification receipt differs');
+    verifyNativeQualificationReceipt(payload.nativeQualifications[0], { root, now, expected: {
+      sourceDigest: selection.codeDigest, codeDigest: selection.codeDigest, imageDigest: selection.imageDigest } });
+  }
   exactFields(payload.quality, ['head', 'runId', 'attempt', 'releaseGuardDigest']); commit(payload.quality.head); integer(payload.quality.runId); integer(payload.quality.attempt); hash(payload.quality.releaseGuardDigest);
   check(payload.quality.head === payload.head, 'Exact source release qualification required');
   return { payload, authorityDigest: digest(envelope), rootDigest: digest(root) };
 }
 
-export async function admitHostedComposition({ bundle, manifest, authority, trustRoot, rootDigest, identity, now }) {
+export async function admitHostedComposition({ bundle, manifest, authority, trustRoot, rootDigest, identity, now, originalAuthority }) {
   const root = await readHostedRoot(trustRoot, rootDigest, bundle);
   const envelope = parseJSON(await readRegularFile(authority, 16 * 1024 * 1024), 16 * 1024 * 1024);
   const verified = verifyHostedAuthority(envelope, { root, identity, now });
   const policy = verified.payload.policy;
   check(policy.implementationDigest === await implementationDigest(), 'Hosted verifier implementation changed');
-  const admission = await admitComposition({ bundle, manifest, trust: policy, domain: 'isolated-qualification' });
-  check(admission.payload.intentSourceCommit === verified.payload.head && admission.payload.baseCommit === verified.payload.base &&
+  const admission = verified.payload.recovery ? await admitHistoricalComposition({ bundle, manifest, trust: policy, domain: 'isolated-qualification', authority: envelope,
+    originalAuthority: parseJSON(await readRegularFile(originalAuthority, 16 * 1024 * 1024, true)), root, identity }) :
+    await admitComposition({ bundle, manifest, trust: policy, domain: 'isolated-qualification' });
+  check((verified.payload.recovery ? admission.compositionDigest === verified.payload.recovery.compositionDigest : admission.payload.intentSourceCommit === verified.payload.head && admission.payload.baseCommit === verified.payload.base) &&
     same(admission.payload.components.map(item => item.id).sort(), verified.payload.portableManifests.map(item => item.component).sort()), 'Admitted composition source or component inventory differs');
   for (const component of admission.payload.components) {
     const artifact = admission.artifacts.get(component.id), expected = verified.payload.portableManifests.find(item => item.component === component.id);

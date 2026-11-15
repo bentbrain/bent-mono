@@ -1,16 +1,20 @@
+import { parseNativeServingTarget, type NativeServingTarget } from "@forever-tee/contracts/native-serving-target";
+import { installedNativeServingTarget, nativeServingPins, type NativeServingEnv } from "./native-serving-target";
 import { protectedConfig } from "./protected-config";
 import { createStoryVideoGrant } from "./story-video-grants";
 
-export interface NativeV5Target {
-    readonly schemaVersion: 1;
+interface NativeV5TargetBase {
     readonly environment: "qualification";
     readonly functionArn: string;
     readonly codeDigest: string;
     readonly inputsDigest: string;
-    readonly qualificationDigest: string;
     readonly grantKeyId: string;
 }
-export interface NativeV5TargetEnv {
+export type NativeV5Target = (NativeV5TargetBase & (
+    { readonly schemaVersion: 1; readonly qualificationDigest: string } |
+    { readonly schemaVersion: 2; readonly bootstrapAuthorityDigest: string }
+)) | (Omit<NativeServingTarget, "schema"> & { readonly schemaVersion: 3 });
+export interface NativeV5TargetEnv extends NativeServingEnv {
     readonly SHOP_NATIVE_V5_TARGET_JSON?: string;
     readonly SHOP_NATIVE_V5_GRANT_SECRET?: string;
     readonly SHOP_NATIVE_V5_RETAINED_GRANT_SECRETS_JSON?: string;
@@ -30,7 +34,7 @@ export interface NativeV5Acceptance {
     readonly dispatch_state: "prepared" | "accepted" | "uncertain" | "rejected";
 }
 const HASH = /^[a-f0-9]{64}$/;
-const FIELDS = ["schemaVersion", "environment", "functionArn", "codeDigest", "inputsDigest", "qualificationDigest", "grantKeyId"];
+const FIELDS = ["schemaVersion", "environment", "functionArn", "codeDigest", "inputsDigest", "grantKeyId"];
 export function canonicalNativeIdentity(value: unknown): string {
     if (value === null || typeof value !== "object") {
         const encoded = JSON.stringify(value);
@@ -49,30 +53,55 @@ export async function nativeIdentityDigest(value: string | Uint8Array) {
 }
 export function parseNativeV5Target(serialized: string): NativeV5Target {
     if (serialized.length > 8192) throw new Error("Native v5 target exceeds its configuration bound.");
+    const value: unknown = JSON.parse(serialized);
+    if (typeof value === "object" && value !== null && "schemaVersion" in value && value.schemaVersion === 3) {
+        const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "schemaVersion"));
+        if (serialized !== canonicalNativeIdentity(value)) throw new Error("Retained serving targets require canonical unique JSON fields.");
+        const target = parseNativeServingTarget(JSON.stringify({ schema: "shop.native-serving-target/v1", ...rest }), nativeServingPins({
+            STORY_VIDEO_ENVIRONMENT: "environment" in value && value.environment === "production" ? "production" : "development",
+        }));
+        return normalNativeV5Target(target);
+    }
+    const bootstrap = typeof value === 'object' && value !== null && 'schemaVersion' in value && value.schemaVersion === 2;
+    const fields = [...FIELDS, bootstrap ? 'bootstrapAuthorityDigest' : 'qualificationDigest'];
     const propertyTokens = serialized.match(/"(?:[^"\\]|\\.)*"\s*:/g) ?? [];
     const properties = propertyTokens.map(token => {
         const property: unknown = JSON.parse(token.slice(0, token.lastIndexOf('"') + 1));
         if (typeof property !== "string") throw new Error("Expected a native target field name.");
         return property;
     });
-    if (properties.length !== FIELDS.length || new Set(properties).size !== properties.length) throw new Error("Native v5 target fields must be unique and complete.");
-    const value: unknown = JSON.parse(serialized);
-    if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== FIELDS.length || !FIELDS.every(key => Object.hasOwn(value, key)) ||
-        !("schemaVersion" in value) || value.schemaVersion !== 1 || !("environment" in value) || value.environment !== "qualification" ||
+    if (properties.length !== fields.length || new Set(properties).size !== properties.length) throw new Error("Native v5 target fields must be unique and complete.");
+    if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== fields.length || !fields.every(key => Object.hasOwn(value, key)) ||
+        !("schemaVersion" in value) || value.schemaVersion !== 1 && value.schemaVersion !== 2 || !("environment" in value) || value.environment !== "qualification" ||
         !("functionArn" in value) || typeof value.functionArn !== "string" || !/^arn:aws:lambda:ap-southeast-2:[0-9]{12}:function:[A-Za-z0-9_-]{1,64}:[1-9][0-9]*$/.test(value.functionArn) ||
         !("codeDigest" in value) || typeof value.codeDigest !== "string" || !HASH.test(value.codeDigest) ||
         !("inputsDigest" in value) || typeof value.inputsDigest !== "string" || !HASH.test(value.inputsDigest) ||
-        !("qualificationDigest" in value) || typeof value.qualificationDigest !== "string" || !HASH.test(value.qualificationDigest) ||
         !("grantKeyId" in value) || typeof value.grantKeyId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value.grantKeyId)) {
         throw new Error("Expected an admitted qualification-only numbered native v5 target.");
     }
-    return { schemaVersion: 1, environment: "qualification", functionArn: value.functionArn, codeDigest: value.codeDigest,
-        inputsDigest: value.inputsDigest, qualificationDigest: value.qualificationDigest, grantKeyId: value.grantKeyId };
+    const common: NativeV5TargetBase = { environment: "qualification", functionArn: value.functionArn, codeDigest: value.codeDigest,
+        inputsDigest: value.inputsDigest, grantKeyId: value.grantKeyId };
+    if (value.schemaVersion === 1 && 'qualificationDigest' in value && typeof value.qualificationDigest === 'string' && HASH.test(value.qualificationDigest))
+        return { ...common, schemaVersion: 1, qualificationDigest: value.qualificationDigest };
+    if (value.schemaVersion === 2 && 'bootstrapAuthorityDigest' in value && typeof value.bootstrapAuthorityDigest === 'string' && HASH.test(value.bootstrapAuthorityDigest))
+        return { ...common, schemaVersion: 2, bootstrapAuthorityDigest: value.bootstrapAuthorityDigest };
+    throw new Error('Expected an exact native qualification or bootstrap authority digest.');
 }
-export async function admittedNativeV5Target(env: NativeV5TargetEnv) {
+function normalNativeV5Target(target: NativeServingTarget): NativeV5Target {
+    return { schemaVersion: 3, environment: target.environment, functionArn: target.functionArn, failureFunctionArn: target.failureFunctionArn,
+        imageDigest: target.imageDigest, codeDigest: target.codeDigest, inputsDigest: target.inputsDigest, buildId: target.buildId,
+        qualificationDigest: target.qualificationDigest, grantKeyId: target.grantKeyId };
+}
+export async function admittedNativeV5Target(env: NativeV5TargetEnv): Promise<NativeV5Target | undefined> {
+    const serving = installedNativeServingTarget(env);
+    if (serving) {
+        if (env.SHOP_NATIVE_V5_TARGET_JSON !== undefined) throw new Error("Install exactly one native dispatch target.");
+        return normalNativeV5Target(serving);
+    }
     if (env.SHOP_NATIVE_V5_TARGET_JSON === undefined) return undefined;
     if (env.STORY_VIDEO_ENVIRONMENT === "production" || env.OPERATIONS_ENVIRONMENT === "production") throw new Error("Native v5 target admission is restricted to qualification.");
     const target = parseNativeV5Target(env.SHOP_NATIVE_V5_TARGET_JSON);
+    if (target.schemaVersion !== 1) throw new Error('A bootstrap target cannot select the normal native dispatcher.');
     const resource = protectedConfig("nativeV5QualificationFunctionArn");
     if (!resource.startsWith(`arn:aws:lambda:ap-southeast-2:${protectedConfig("awsAccountId")}:function:`) ||
         !target.functionArn.startsWith(`${resource}:`) || !/^[1-9][0-9]*$/.test(target.functionArn.slice(resource.length + 1)) ||

@@ -4,6 +4,7 @@ import { createRequire, stripTypeScriptTypes } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { nativeHostTarget, nativePackageCompatible, requireSharpTarget } from "./native-target.mjs";
 import { productImageV5Inventory, verifyProductImageV5Runtime } from "../../workers/video-renderer/aws-lambda/product-image-v5-integrity.mjs";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -22,6 +23,42 @@ async function copyFile(source, destination) {
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
     await cp(source, destination, { dereference: true });
 }
+
+export async function copyCapsuleDependency(name, from, output, dependencies, installed = new Map(), optional = false, target = nativeHostTarget()) {
+    const require = createRequire(from);
+    let metadataPath;
+    for (const base of require.resolve.paths(name) ?? []) {
+        const candidate = join(base, name, "package.json");
+        try {
+            await readFile(candidate);
+            metadataPath = candidate;
+            break;
+        }
+        catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    if (!metadataPath) {
+        if (optional) return;
+        throw new Error(`Native dependency unavailable: ${name}`);
+    }
+    const directory = await realpath(dirname(metadataPath));
+    const metadata = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
+    if (!nativePackageCompatible(metadata, target)) { if (optional) return; throw new Error(`Required native dependency ${name} is incompatible with ${target.os}/${target.cpu}/${target.libc ?? "host"}`); }
+    if (installed.has(name)) {
+        if (installed.get(name) !== directory) throw new Error("Conflicting native dependency resolution.");
+        return;
+    }
+    installed.set(name, directory);
+    dependencies.push({ name, version: metadata.version, packageSha256: digest(await readFile(join(directory, "package.json"))) });
+    await cp(directory, join(output, "node_modules", name), {
+        recursive: true, dereference: true,
+        filter: path => !relative(directory, path).split(/[\\/]/).includes("node_modules"),
+    });
+    for (const dep of Object.keys(metadata.dependencies ?? {}).sort())
+        await copyCapsuleDependency(dep, join(directory, "package.json"), output, dependencies, installed, false, target);
+    for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort())
+        await copyCapsuleDependency(dep, join(directory, "package.json"), output, dependencies, installed, true, target);
+    if (name === "sharp") requireSharpTarget(dependencies, target);
+}
 async function packageProductImageV5Capsule(destination) {
     const output = resolve(destination);
     // Never overwrite a previous capsule or evidence.
@@ -32,7 +69,7 @@ async function packageProductImageV5Capsule(destination) {
         sourceInputs.push({ path, size: bytes.length, sha256: digest(bytes) });
         await copyFile(join(root, path), join(output, target));
     }
-    for (const name of ["product-image-v5-handler.mjs", "product-image-v5-entry.mjs", "product-image-v5-integrity.mjs"])
+    for (const name of ["product-image-v5-handler.mjs", "product-image-v5-entry.mjs", "product-image-v5-integrity.mjs", "native-runtime-profile.mjs"])
         await source(`products/shop/workers/video-renderer/aws-lambda/${name}`, name);
     const renderer = "products/shop/packages/product-image-renderer";
     for (const name of ["package.json", "src/index.mjs", "src/index.d.ts", "src/execution.mjs", "src/execution.d.ts", "assets/displacement.wasm", "assets/displacement-build.json"])
@@ -57,44 +94,11 @@ async function packageProductImageV5Capsule(destination) {
     const assets = "products/shop/apps/web/public/mockups/lifestyle-v4";
     for (const name of (await readdir(join(root, assets))).sort())
         await source(`${assets}/${name}`, `assets/lifestyle-v4/${name}`);
-    async function dependency(name, from, optional = false) {
-        const require = createRequire(from);
-        let metadataPath;
-        for (const base of require.resolve.paths(name) ?? []) {
-            const candidate = join(base, name, "package.json");
-            try {
-                await readFile(candidate);
-                metadataPath = candidate;
-                break;
-            }
-            catch (error) { if (error.code !== "ENOENT") throw error; }
-        }
-        if (!metadataPath) {
-            if (optional) return;
-            throw new Error(`Native dependency unavailable: ${name}`);
-        }
-        const directory = await realpath(dirname(metadataPath));
-        const metadata = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-        if (installed.has(name)) {
-            if (installed.get(name) !== directory) throw new Error("Conflicting native dependency resolution.");
-            return;
-        }
-        installed.set(name, directory);
-        dependencies.push({ name, version: metadata.version, packageSha256: digest(await readFile(join(directory, "package.json"))) });
-        await cp(directory, join(output, "node_modules", name), {
-            recursive: true, dereference: true,
-            filter: path => !relative(directory, path).split(/[\\/]/).includes("node_modules"),
-        });
-        for (const dep of Object.keys(metadata.dependencies ?? {}).sort())
-            await dependency(dep, join(directory, "package.json"));
-        for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort())
-            await dependency(dep, join(directory, "package.json"), true);
-    }
-    await dependency("sharp", join(shop, "packages/product-image-renderer/package.json"));
+    await copyCapsuleDependency("sharp", join(shop, "packages/product-image-renderer/package.json"), output, dependencies, installed);
     const lock = await readFile(join(root, "bun.lock"));
     sourceInputs.push({ path: "bun.lock", size: lock.length, sha256: digest(lock) });
     // Bind the collector itself and the source geometry/WASM inputs as proof inputs.
-    for (const path of ["products/shop/scripts/testing/product-image-v5-capsule.mjs", `${renderer}/wasm/src/lib.rs`, `${renderer}/wasm/Cargo.toml`, `${renderer}/wasm/Cargo.lock`]) {
+    for (const path of ["products/shop/scripts/testing/product-image-v5-capsule.mjs", "products/shop/scripts/testing/native-target.mjs", `${renderer}/wasm/src/lib.rs`, `${renderer}/wasm/Cargo.toml`, `${renderer}/wasm/Cargo.lock`]) {
         const bytes = await readFile(join(root, path));
         sourceInputs.push({ path, size: bytes.length, sha256: digest(bytes) });
     }

@@ -62,14 +62,19 @@ function ProductMediaGalleryContent({
   productTitle,
   revision,
 }: ProductMediaGalleryProps) {
-  const [selection, setSelection] = useState<{ color: string; media: ProductMedia }>({ color, media: "product" });
+  const panelActive = useProductPanelActive();
+  const [selection, setSelection] = useState<{
+    color: string; baseProductSlug: BaseProductSlug; panelActive: boolean; media: ProductMedia;
+  }>({ color, baseProductSlug, panelActive, media: "product" });
+  if (selection.color !== color || selection.baseProductSlug !== baseProductSlug || selection.panelActive !== panelActive) {
+    setSelection({ color, baseProductSlug, panelActive, media: "product" });
+  }
   const [carouselApi, setCarouselApi] = useState<CarouselApi>();
   const [shareFailed, setShareFailed] = useState(false);
   const [availableLifestyleColors, setAvailableLifestyleColors] = useState<Record<string, boolean>>({});
   const lifestyleAvailable = useCallback((variantColor: string, available: boolean) => {
     setAvailableLifestyleColors(previous => previous[variantColor] === available ? previous : { ...previous, [variantColor]: available });
   }, []);
-  const panelActive = useProductPanelActive();
   const { warm } = useProductMediaWarmup();
   const colors = productProjectionSpecification(baseProductSlug).colors;
   const videoQueries = useStoryVideos(productId, colors, panelActive);
@@ -88,7 +93,11 @@ function ProductMediaGalleryContent({
   const activeSlide = selection.color !== color ? 0
     : selection.media === "video" && video ? videoSlide
       : selection.media === "lifestyle" && lifestyle ? 1 : 0;
-  const mediaLabels = ["Show product image", ...(lifestyle ? ["Show lifestyle image"] : []), ...(video ? ["Show story video"] : [])];
+  const mediaOptions: { label: string; media: ProductMedia }[] = [
+    { label: "Show product image", media: "product" },
+  ];
+  if (lifestyle) mediaOptions.push({ label: "Show lifestyle image", media: "lifestyle" });
+  if (video) mediaOptions.push({ label: "Show story video", media: "video" });
   const visibleSlide = (video || lifestyle) && panelActive ? activeSlide : 0;
 
   useEffect(() => {
@@ -97,21 +106,31 @@ function ProductMediaGalleryContent({
 
   useEffect(() => {
     if (!carouselApi) return;
+    let restoringSelection = false;
     const updateActiveSlide = () => {
+      if (restoringSelection) return;
       const slide = carouselApi.selectedScrollSnap();
       const media = slide === videoSlide && video ? "video"
         : slide === 1 && lifestyle ? "lifestyle" : "product";
       setSelection(previous => previous.media === media && previous.color === color
-        ? previous : { color, media });
+        ? previous : { ...previous, color, media });
     };
-    const restoreSelectedMedia = () => { carouselApi.scrollTo(activeSlide, true); };
+    const scrollToSelection = (jump: boolean) => {
+      // Embla emits select synchronously and can clamp against the old snaps
+      // until reInit. That temporary position must preserve the chosen media.
+      restoringSelection = true;
+      try { carouselApi.scrollTo(visibleSlide, jump); }
+      finally { restoringSelection = false; }
+    };
+    const restoreSelectedMedia = () => { scrollToSelection(true); };
     carouselApi.on("select", updateActiveSlide);
     carouselApi.on("reInit", restoreSelectedMedia);
+    scrollToSelection(false);
     return () => {
       carouselApi.off("select", updateActiveSlide);
       carouselApi.off("reInit", restoreSelectedMedia);
     };
-  }, [carouselApi, color, activeSlide, lifestyle, video, videoSlide]);
+  }, [carouselApi, color, visibleSlide, lifestyle, video, videoSlide]);
 
   useEffect(() => {
     if (!video && !lifestyle) {
@@ -209,7 +228,7 @@ function ProductMediaGalleryContent({
         ) : null}
       </CarouselContent>
 
-      {mediaLabels.length > 1 ? (
+      {mediaOptions.length > 1 ? (
         <>
           <CarouselPrevious
             className="left-3 z-20 size-11 rounded-none border-primary bg-background text-primary hover:bg-primary hover:text-primary-foreground max-[900px]:hidden"
@@ -220,25 +239,25 @@ function ProductMediaGalleryContent({
         </>
       ) : null}
 
-      {mediaLabels.length > 1 ? (
+      {mediaOptions.length > 1 ? (
           <div
             aria-label="Choose product media"
             className="absolute bottom-0 left-1/2 z-20 flex -translate-x-1/2"
             data-slot="carousel-indicators"
             role="group"
           >
-            {mediaLabels.map((label, slide) => (
+            {mediaOptions.map(({ label, media }, slide) => (
               <button
                 aria-label={label}
                 aria-pressed={visibleSlide === slide}
                 className={cn(
                   "group grid size-11 items-end pb-2 outline-none focus-visible:outline-1 focus-visible:outline-primary",
-                  mediaLabels.length > 2 ? "w-6 justify-items-center" : slide === 0 ? "justify-items-end pr-1" : "justify-items-start pl-1",
+                  mediaOptions.length > 2 ? "w-6 justify-items-center" : slide === 0 ? "justify-items-end pr-1" : "justify-items-start pl-1",
                 )}
                 data-active={visibleSlide === slide}
                 key={label}
                 type="button"
-                onClick={() => carouselApi?.scrollTo(slide)}
+                onClick={() => { setSelection({ color, baseProductSlug, panelActive, media }); }}
               >
                 <span className="size-2.5 rounded-full border border-primary bg-white group-aria-pressed:border-white group-aria-pressed:bg-primary group-aria-pressed:shadow-[0_0_0_1px_var(--blue)]" />
               </button>

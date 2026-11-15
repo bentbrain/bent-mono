@@ -70,6 +70,7 @@ export function createActionsAuthenticator({ root, policy, fenceAdmission, readK
     'Signed GitHub workflow, environment or validity differs');
     check(input.environmentId === fenceAdmission.payload.environmentId && input.fenceDigest === fenceAdmission.digest, 'Authenticated custody call target differs');
     return { environmentId: input.environmentId, fenceDigest: input.fenceDigest, policyDigest: digest(policy),
+      invocation: { repository:root.repository,repositoryName:root.repositoryName,head:claims.sha,workflowCommit:claims.workflow_sha,workflowRef:claims.workflow_ref,runId:Number(claims.run_id),attempt:Number(claims.run_attempt) },
       principalDigest: digest({ repository: root.repository, workflowRef: claims.workflow_ref, head: claims.sha, runId: claims.run_id, attempt: claims.run_attempt }) };
   };
 }

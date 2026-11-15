@@ -1,3 +1,4 @@
+import { assertNativeServingAdmission, nativeServingAcceptanceStatement, prepareNativeServingAcceptance, verifyNativeServingAcceptance } from "./native-serving-target";
 import { protectedConfig } from "./protected-config";
 import { artworkPreviewKey } from "./artwork-preview";
 import { baseProductSlugForId, productProjectionSpecification } from "@forever-tee/contracts";
@@ -9,7 +10,7 @@ import { acceptedNativeV5Grant, admittedNativeV5Target, canonicalNativeIdentity,
 import { isAuthenticatedServiceRequest } from "./service-auth";
 const PRODUCT_IMAGE_VERSION = "product-images-v4";
 const VERCEL_IMAGE_VERSION = "product-images-v5";
-function imageVersion(env: ProductImageEnv) { return env.SHOP_NATIVE_V5_TARGET_JSON !== undefined || env.PRODUCT_IMAGE_PROVIDER === "vercel" ? VERCEL_IMAGE_VERSION : PRODUCT_IMAGE_VERSION; }
+function imageVersion(env: ProductImageEnv) { return env.SHOP_NATIVE_SERVING_TARGET_JSON !== undefined || env.SHOP_NATIVE_V5_TARGET_JSON !== undefined || env.PRODUCT_IMAGE_PROVIDER === "vercel" ? VERCEL_IMAGE_VERSION : PRODUCT_IMAGE_VERSION; }
 function rendererOrigin(env: ProductImageEnv) {
     if (env.STORY_VIDEO_ENVIRONMENT !== "development" || !env.PRODUCT_IMAGE_RENDERER_BYPASS_SECRET || !env.FOREVER_TEE_API_SHARED_SECRET)
         throw new Error("Vercel image renderer is not configured for Preview.");
@@ -100,6 +101,7 @@ const UNRETAINED_LEGACY_WORK = `NOT EXISTS(SELECT 1 FROM native_v5_dispatches ac
     AND (legacy.dispatch_provider IS NULL OR legacy.attempt_count>0))
     OR (legacy.execution_id IS NOT NULL AND legacy.updated_at>?))`;
 async function assertNativeImageAdmission(env: ProductImageEnv) {
+    await assertNativeServingAdmission(env.DB, env, Date.now());
     if (!await hasNativeV5Schema(env.DB)) throw new Error("Install the additive native dispatch schema before admitting its target.");
     if (await env.DB.prepare(`SELECT id FROM product_image_jobs legacy WHERE ${UNRETAINED_LEGACY_WORK} LIMIT 1`).bind(Date.now() - HOLD).first())
         throw new Error("Legacy image work lacks retained historical transport and grant identity. Resume its original configured runtime before native target admission.");
@@ -272,21 +274,31 @@ async function dispatchProductImages(env: ProductImageEnv, revision: string, sen
     + (SELECT count(*) FROM story_video_jobs WHERE status='rendering' OR (status IN ('ready','failed') AND execution_id IS NOT NULL AND updated_at > ?)))`;
     // D1 serializes conditional claims. Vercel has its own bounded lane; Lambda
     // images and videos retain their original shared reserved-concurrency limit.
-    const claims = await env.DB.batch(pending.results.map(job => env.DB.prepare(`UPDATE product_image_jobs
+    const servingPlans = await Promise.all(pending.results.map(async job => vercel ? undefined : await prepareNativeServingAcceptance(env.DB, env, "image-v4", job.job_id, job.attempt_count + 1)));
+    const claimOffsets: number[] = [], claimStatements: D1PreparedStatement[] = [];
+    pending.results.forEach((job, index) => {
+        claimOffsets.push(claimStatements.length);
+        claimStatements.push(env.DB.prepare(`UPDATE product_image_jobs
     SET status='rendering',attempt_count=attempt_count+1,execution_id=NULL,updated_at=?
     WHERE id=? AND status IN ('queued','failed') AND attempt_count=? AND (execution_id IS NULL OR updated_at<=?) AND ${occupancy} < ?`)
-        .bind(now, job.job_id, job.attempt_count, now - HOLD, ...(vercel ? [now - HOLD] : [now - HOLD, now - HOLD]), capacity)));
-    const signer = config ? new AwsClient({ accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, service: "lambda", region: "ap-southeast-2", retries: 0 }) : undefined;
+        .bind(now, job.job_id, job.attempt_count, now - HOLD, ...(vercel ? [now - HOLD] : [now - HOLD, now - HOLD]), capacity));
+        const serving = servingPlans[index];
+        if (serving) claimStatements.push(nativeServingAcceptanceStatement(env.DB, serving, now));
+    });
+    const claims = await env.DB.batch(claimStatements);
+    const signer = config ? new AwsClient({ accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey, ...(config.sessionToken ? { sessionToken: config.sessionToken } : {}), service: "lambda", region: "ap-southeast-2", retries: 0 }) : undefined;
     await Promise.allSettled(pending.results.map(async (job, index) => {
-        if (claims[index]?.meta.changes !== 1)
-            return;
+        const offset = claimOffsets[index], serving = servingPlans[index];
+        if (offset === undefined || claims[offset]?.meta.changes !== 1 || (serving && claims[offset + 1]?.meta.changes !== 1)) return;
         const attempt = job.attempt_count + 1;
         try {
             const slug = baseProductSlugForId(job.base_product_id);
             if (!slug)
                 throw new Error("Unknown product.");
+            const retainedTarget = serving ? await verifyNativeServingAcceptance(env.DB, serving) : undefined;
+            const selectedConfig = retainedTarget ? validateLambdaStoryVideoEnv(env, retainedTarget) : config;
             const grant = await createStoryVideoGrant(grantSecret, job.job_id, attempt);
-            const request = vercel ? new Request(`${rendererOrigin(env)}/api/internal/product-image-render`, { method: "POST", headers: vercelHeaders(env), body: JSON.stringify({ jobId: job.job_id, grant, rendererVersion: version }) }) : signer && config ? await signer.sign(`https://lambda.ap-southeast-2.amazonaws.com/2015-03-31/functions/${encodeURIComponent(config.functionArn)}/invocations`, {
+            const request = vercel ? new Request(`${rendererOrigin(env)}/api/internal/product-image-render`, { method: "POST", headers: vercelHeaders(env), body: JSON.stringify({ jobId: job.job_id, grant, rendererVersion: version }) }) : signer && config ? await signer.sign(`https://lambda.ap-southeast-2.amazonaws.com/2015-03-31/functions/${encodeURIComponent(selectedConfig?.functionArn ?? config.functionArn)}/invocations`, {
                 method: "POST", headers: { "content-type": "application/json", "x-amz-invocation-type": "RequestResponse" },
                 body: JSON.stringify({ kind: "product-image", schemaVersion: 1, jobId: job.job_id, attempt, grant,
                     rendererVersion: PRODUCT_IMAGE_VERSION, artwork: { sha256: job.source_sha256, size: job.source_size },

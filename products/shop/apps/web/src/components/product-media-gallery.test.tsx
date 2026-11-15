@@ -10,7 +10,13 @@ import { ProductMediaGallery } from "@/components/product-media-gallery";
 import { ProductFamily } from "@/components/product-family";
 
 const lifestyleState = vi.hoisted(() => ({ready:false, listeners:new Set<() => void>()}));
-const carouselState = vi.hoisted(() => ({reInit:(): void => {throw new Error("Carousel is not mounted.");}}));
+const carouselState = vi.hoisted(() => ({
+  ready: true,
+  snapCount: 3,
+  selected: 0,
+  listeners: new Set<() => void>(),
+  reInit: (): void => { throw new Error("Carousel is not mounted."); },
+}));
 const lifestyleQueries = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/use-lifestyle-image",async()=>{
   const {useSyncExternalStore}=await import("react");
@@ -26,36 +32,45 @@ vi.mock("@/lib/use-lifestyle-image",async()=>{
 // Supply carousel geometry-independent navigation; the gallery still owns all
 // selection, product-switching and video lifecycle behaviour.
 vi.mock("embla-carousel-react", async () => {
-  const { useMemo } = await import("react");
+  const { useMemo, useSyncExternalStore } = await import("react");
   return {
-    default: function useMockEmblaCarousel() { return useMemo(() => {
-      let selected = 0;
-      const listeners = new Map<string, Set<() => void>>();
-      carouselState.reInit = () => { listeners.get("reInit")?.forEach(listener=>{listener();}); };
-      const select = (index: number) => {
-        selected = index;
-        listeners.get("select")?.forEach((listener) => { listener(); });
-      };
-      const api = {
-        selectedScrollSnap: () => selected,
-        canScrollPrev: () => true,
-        canScrollNext: () => true,
-        scrollPrev: () => { select(selected === 0 ? 1 : 0); },
-        scrollNext: () => { select(selected === 0 ? 1 : 0); },
-        scrollTo: (index: number) => { select(index); },
-        on: (event: string, listener: () => void) => {
-          const handlers=listeners.get(event) ?? new Set<() => void>();
-          handlers.add(listener);
-          listeners.set(event,handlers);
-          return api;
-        },
-        off: (event: string, listener: () => void) => {
-          listeners.get(event)?.delete(listener);
-          return api;
-        },
-      };
-      return [() => undefined, api];
-    }, []); },
+    default: function useMockEmblaCarousel() {
+      const ready = useSyncExternalStore(listener => {
+        carouselState.listeners.add(listener);
+        return () => { carouselState.listeners.delete(listener); };
+      }, () => carouselState.ready);
+      const carousel = useMemo(() => {
+        let selected = 0;
+        const listeners = new Map<string, Set<() => void>>();
+        carouselState.reInit = () => { listeners.get("reInit")?.forEach(listener=>{listener();}); };
+        const select = (index: number) => {
+          if (selected === index) return;
+          selected = index;
+          carouselState.selected = index;
+          listeners.get("select")?.forEach((listener) => { listener(); });
+        };
+        const api = {
+          selectedScrollSnap: () => selected,
+          canScrollPrev: () => true,
+          canScrollNext: () => true,
+          scrollPrev: () => { select(selected === 0 ? 1 : 0); },
+          scrollNext: () => { select(selected === 0 ? 1 : 0); },
+          scrollTo: (index: number) => { select(Math.min(index, carouselState.snapCount - 1)); },
+          on: (event: string, listener: () => void) => {
+            const handlers=listeners.get(event) ?? new Set<() => void>();
+            handlers.add(listener);
+            listeners.set(event,handlers);
+            return api;
+          },
+          off: (event: string, listener: () => void) => {
+            listeners.get(event)?.delete(listener);
+            return api;
+          },
+        };
+        return { ref: () => undefined, api };
+    }, []);
+      return [carousel.ref, ready ? carousel.api : undefined];
+    },
   };
 });
 
@@ -111,6 +126,9 @@ describe("ProductMediaGallery", () => {
   beforeEach(() => {
     queryClient = new QueryClient();
     lifestyleState.ready=false;
+    carouselState.ready = true;
+    carouselState.snapCount = 3;
+    carouselState.selected = 0;
     notifyManager.setScheduler(queueMicrotask);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("fetch", fetchStoryVideo);
@@ -243,6 +261,60 @@ describe("ProductMediaGallery", () => {
       expect(container.querySelector("video[src]")).toBe(player);
       expect(container.querySelector("#product-media-video")?.getAttribute("aria-hidden")).toBe("false");
     } finally {act(()=>{root.unmount();});}
+  });
+
+  it("retains an initial video choice before the carousel API arrives", async () => {
+    carouselState.ready = false;
+    const container = document.createElement("div"), root = createGalleryRoot(container);
+    try {
+      await act(async () => {
+        root.render(<ProductMediaGallery baseProductSlug="staple-tee" color="White"
+          productId="late-carousel" productTitle="bent.shop"><div>Flatlay</div></ProductMediaGallery>);
+        await Promise.resolve();
+      });
+      act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Show story video"]')?.click(); });
+      expect(container.querySelector('[aria-label="Show story video"]')?.getAttribute("aria-pressed")).toBe("true");
+      const player = container.querySelector<HTMLVideoElement>('video[data-selected="true"]');
+      const source = player?.getAttribute("src");
+      expect(source).toContain("/late-carousel/white.mp4?");
+      act(() => {
+        carouselState.ready = true;
+        carouselState.listeners.forEach(listener => { listener(); });
+      });
+      expect(carouselState.selected).toBe(1);
+      expect(container.querySelector('[aria-label="Show story video"]')?.getAttribute("aria-pressed")).toBe("true");
+      expect(player?.getAttribute("src")).toBe(source);
+    } finally { act(() => { root.unmount(); }); }
+  });
+
+  it("retains an initial video choice while a new lifestyle slide awaits carousel reinitialization", async () => {
+    carouselState.snapCount = 2;
+    const container = document.createElement("div"), root = createGalleryRoot(container);
+    try {
+      await act(async () => {
+        root.render(<ProductMediaGallery baseProductSlug="staple-tee" color="White"
+          productId="changing-slides" productTitle="bent.shop"><div>Flatlay</div></ProductMediaGallery>);
+        await Promise.resolve();
+      });
+      act(() => {
+        lifestyleState.ready = true;
+        lifestyleState.listeners.forEach(listener => { listener(); });
+      });
+      expect(container.querySelectorAll('[data-slot="carousel-indicators"] button')).toHaveLength(3);
+      act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Show story video"]')?.click(); });
+      expect(container.querySelector('[aria-label="Show story video"]')?.getAttribute("aria-pressed")).toBe("true");
+      const player = container.querySelector<HTMLVideoElement>('video[data-selected="true"]');
+      const source = player?.getAttribute("src");
+      expect(source).toContain("/changing-slides/white.mp4?");
+      act(() => {
+        carouselState.snapCount = 3;
+        carouselState.reInit();
+      });
+      expect(carouselState.selected).toBe(2);
+      expect(container.querySelector('[aria-label="Show story video"]')?.getAttribute("aria-pressed")).toBe("true");
+      expect(container.querySelector("#product-media-video")?.getAttribute("aria-hidden")).toBe("false");
+      expect(player?.getAttribute("src")).toBe(source);
+    } finally { act(() => { root.unmount(); }); }
   });
 
   it("returns to the image when colour or configured product changes", async () => {

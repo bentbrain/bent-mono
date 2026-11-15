@@ -11,6 +11,9 @@ import { readRegularFile as readFile } from "../read-regular-file.mjs";
 import { verifyProductImageV5Capsule } from "./product-image-v5-capsule.mjs";
 import { assertNoIgnoredBuildInputs } from "../release-v2/source-inventory.mjs";
 import { sourceInventory as captureRootSource } from "../release-v2/source-inventory.mjs";
+import { createNativeV5Oci, writeNativeV5Oci, verifyNativeV5OciReceipt } from "./native-v5-oci.mjs";
+import { verifyOciLayout } from "../release-v2/oci-layout.mjs";
+import { nativeHostTarget, nativePackageCompatible, requireSharpTarget } from "./native-target.mjs";
 import { packagePortableBundle } from "../release-v2/portable-bundle.mjs";
 
 const execute = promisify(execFile);
@@ -99,7 +102,7 @@ async function materializeTree(directory, output, prefix = "") {
   assert.deepEqual((await readdir(join(directory, prefix))).sort(), names, "Installed package changed during materialization");
 }
 
-async function copyDependency(name, from, output, dependencies, installed = new Map(), optional = false) {
+export async function copyDependency(name, from, output, dependencies, installed = new Map(), optional = false, target = nativeHostTarget()) {
   const resolver = createRequire(from);
   let metadataPath;
   for (const base of resolver.resolve.paths(name) ?? []) {
@@ -108,12 +111,14 @@ async function copyDependency(name, from, output, dependencies, installed = new 
   }
   if (!metadataPath) { if (optional) return; throw new Error(`Linux dependency unavailable: ${name}`); }
   const directory = await realpath(dirname(metadataPath)), metadataBytes = await readFile(metadataPath), metadata = JSON.parse(metadataBytes.toString("utf8"));
+  if (!nativePackageCompatible(metadata, target)) { if (optional) return; throw new Error(`Required native dependency ${name} is incompatible with ${target.os}/${target.cpu}/${target.libc ?? "host"}`); }
   if (installed.has(name)) { assert.equal(installed.get(name), directory, "Conflicting Linux dependency resolution"); return; }
   installed.set(name, directory);
   dependencies.push({ name, version: metadata.version, packageSha256: sha256(metadataBytes) });
   await materializeTree(directory, join(output, "node_modules", name));
-  for (const dep of Object.keys(metadata.dependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed);
-  for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, true);
+  for (const dep of Object.keys(metadata.dependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, false, target);
+  for (const dep of Object.keys(metadata.optionalDependencies ?? {}).sort()) await copyDependency(dep, metadataPath, output, dependencies, installed, true, target);
+  if (name === "sharp") requireSharpTarget(dependencies, target);
 }
 
 export function sharedLibraries(output) {
@@ -123,23 +128,37 @@ export function sharedLibraries(output) {
   return [...new Set(paths)].sort();
 }
 
-async function packageExecutables(runtime) {
-  const libraries = new Map(), executables = [];
-  for (const [name, binary] of [["node", process.execPath], ["ffmpeg", "/usr/bin/ffmpeg"], ["ffprobe", "/usr/bin/ffprobe"]]) {
-    await copy(binary, join(runtime, "bin", `${name}.real`), true);
+async function packageExecutables(runtime, nativeImage) {
+  const libraries = new Map(), executables = [], nativeElfDependencies = [];
+  async function captureLibraries(binary) {
     const ldd = await execute("ldd", [binary], { maxBuffer: 1024 * 1024 });
+    const retained = [];
     for (const path of sharedLibraries(ldd.stdout)) {
       const materialized = await realpath(path), bytes = await readFile(materialized), key = basename(path), hash = sha256(bytes);
       assert.ok(!libraries.has(key) || libraries.get(key) === hash, "Conflicting shared library basenames");
       libraries.set(key, hash);
       await copy(materialized, join(runtime, "lib", key), key === "ld-linux-x86-64.so.2");
+      assert.equal(sha256(await readFile(join(runtime, "lib", key))), hash, "Shared library changed during retention");
+      retained.push({ name: key, sha256: hash });
     }
+    return retained;
+  }
+  for (const [name, binary] of [["node", process.execPath], ["ffmpeg", "/usr/bin/ffmpeg"], ["ffprobe", "/usr/bin/ffprobe"]]) {
+    await copy(binary, join(runtime, "bin", `${name}.real`), true);
+    await captureLibraries(binary);
     const script = '#!/bin/sh\nset -eu\nruntime="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"\nexec "$runtime/lib/ld-linux-x86-64.so.2" --library-path "$runtime/lib" "$runtime/bin/' + name + '.real" "$@"\n';
     const launcher = name === "node" ? script.replace('exec "$runtime/lib/ld-linux-x86-64.so.2" --library-path "$runtime/lib"', 'export LD_LIBRARY_PATH="$runtime/lib"\nexec') : script;
     await writeFile(join(runtime, "bin", name), launcher, { mode: 0o700, flag: "wx" });
     executables.push({ name, sha256: sha256(await readFile(binary)) });
   }
-  return { executables, libraries: [...libraries].map(([name, hash]) => ({ name, sha256: hash })) };
+  for (const [folder, root] of [["runtime/node_modules", join(runtime, "node_modules")], ["native-image/node_modules", join(nativeImage, "node_modules")]]) {
+    for (const file of await fileInventory(root)) if (/\.(?:node|so(?:\.[0-9]+)*)$/.test(file.path)) {
+      const binary = join(root, file.path), bytes = await readFile(binary);
+      assert.ok(bytes.length >= 64 && bytes.subarray(0, 6).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1])) && bytes.readUInt16LE(18) === 62, "Native dependency requires Linux amd64 ELF");
+      nativeElfDependencies.push({ path: `${folder}/${file.path}`, sha256: file.sha256, libraries: await captureLibraries(binary) });
+    }
+  }
+  return { executables, nativeElfDependencies, libraries: [...libraries].map(([name, hash]) => ({ name, sha256: hash })) };
 }
 
 export async function verifyLinuxCandidate(directory, { identityDirectory = directory } = {}) {
@@ -193,7 +212,44 @@ async function inspectLinuxCandidate(directory) {
   return { root, receipt, manifestSha256: sha256(bytes), source };
 }
 
-export async function packageShopPortableBundle({ candidate, destination, lineage, originSourceCommit,
+export async function verifyOciCandidatePayload(candidate, native) {
+  assert.equal(native.artifact.format, "oci-layout");
+  assert.equal(native.runtime.definition.kind, "linux-native-oci-candidate");
+  const receipt = native.runtime.definition.nativeOciReceipt;
+  assert.equal(native.oci.imageDigest, receipt.imageDigest);
+  const inspected = await inspectLinuxCandidate(candidate);
+  assert.equal(inspected.manifestSha256, receipt.identity.candidateManifestSha256);
+  const files = [];
+  for (const folder of ["runtime", "native-image"]) for (const file of await fileInventory(join(inspected.root, folder)))
+    files.push({ path: `opt/shop/${folder}/${file.path}`, bytes: file.bytes, sha256: file.sha256, mode: file.executable ? 0o755 : 0o644 });
+  files.sort((a, b) => a.path < b.path ? -1 : 1);
+  assert.deepEqual(files, receipt.inventory, "Native execution candidate differs from retained OCI application layers");
+  return receipt;
+}
+
+export async function packageNativeV5Oci({ candidate, baseDirectory, destination }) {
+  const output = resolve(destination);
+  assert.ok(output !== checkout && !output.startsWith(`${checkout}/`), "Use a new OCI directory outside checkout");
+  const native = await inspectLinuxCandidate(candidate), baseRoot = await realpath(baseDirectory);
+  const baseFiles = await fileInventory(baseRoot), artifact = { format: "oci-layout", component: "native", root: "base", entrypoint: "base/index.json",
+    files: baseFiles.map(file => ({ path: `base/${file.path}`, bytes: file.bytes, sha256: file.sha256 })) };
+  const base = { artifact, readFile: ref => readFile(join(baseRoot, ref.path.slice(5))),
+    imageDigest: recipe.baseImage.split("@sha256:")[1], configDigest: recipe.baseConfigDigest.slice(7) };
+  const identity = { schema: "shop.native-v5-image-input/v1", sourceCommit: native.receipt.sourceCommit,
+    candidateManifestSha256: native.manifestSha256, capsuleManifestSha256: native.receipt.capsuleManifestSha256,
+    runtimeFilesSha256: native.receipt.runtimeFilesSha256, sourceInventorySha256: native.receipt.sourceInventorySha256 };
+  const files = [];
+  for (const folder of ["runtime", "native-image"]) for (const file of await fileInventory(join(native.root, folder)))
+    files.push({ path: `${folder}/${file.path}`, bytes: await readFile(join(native.root, folder, file.path)), mode: file.executable ? 0o755 : 0o644 });
+  const result = await createNativeV5Oci({ base, files, identity, candidateReceipt: await readFile(join(native.root, "linux-candidate.json")),
+    sourceInventory: await readFile(join(native.root, "source-inventory.json")) });
+  await writeNativeV5Oci(result, destination);
+  for (const file of ["linux-candidate.json", "source-inventory.json"]) await copy(join(native.root, file), join(destination, file));
+  await writeFile(join(destination, "native-v5-oci-receipt.json"), json(result.receipt), { mode: 0o600, flag: "wx" });
+  return { directory: destination, receipt: result.receipt, imageDigest: result.graph.imageDigest };
+}
+
+export async function packageShopPortableBundle({ candidate, nativeOci, destination, lineage, originSourceCommit,
     storefront = join(checkout, "products/shop/apps/storefront/dist"), business = join(checkout, "products/shop/workers/api/dist/local") }) {
   const native = await inspectLinuxCandidate(candidate), source = await captureRootSource(checkout);
   assert.equal((await execute("git", ["rev-parse", "HEAD"], { cwd: checkout })).stdout.trim(), originSourceCommit);
@@ -207,20 +263,57 @@ export async function packageShopPortableBundle({ candidate, destination, lineag
   const apiConfig = JSON.parse(apiConfigText.replace(/^\s*\/\/.*$/gm, ""));
   const workerRuntime = config => ({ kind: "cloudflare-module-worker", compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, awsImageQualified: false });
+  let nativeComponent = { id: "native", directory: native.root, identityFiles: ["linux-candidate.json", "source-inventory.json"], entrypoint: "native-image/product-image-v5-entry.mjs", originSourceCommit: native.receipt.sourceCommit,
+    runtime: { kind: "linux-native-payload", ...native.receipt.runtime, identityDirectory: "metadata/native-candidate",
+      capsuleManifestSha256: native.receipt.capsuleManifestSha256, runtimeFilesSha256: native.receipt.runtimeFilesSha256, awsImageQualified: false } };
+  if (nativeOci) {
+    const receipt = JSON.parse((await readFile(join(nativeOci, "native-v5-oci-receipt.json"))).toString("utf8"));
+    assert.equal(receipt.schema, "shop.native-v5-oci-receipt/v1"); assert.equal(receipt.awsImageQualified, false); assert.equal(receipt.runtimeQualified, false);
+    assert.equal(receipt.identity.candidateManifestSha256, native.manifestSha256); assert.equal(receipt.identity.sourceCommit, native.receipt.sourceCommit);
+    assert.equal(receipt.identity.capsuleManifestSha256, native.receipt.capsuleManifestSha256);
+    assert.equal(receipt.identity.runtimeFilesSha256, native.receipt.runtimeFilesSha256); assert.equal(receipt.identity.sourceInventorySha256, native.receipt.sourceInventorySha256);
+    assert.equal(receipt.baseImageDigest, recipe.baseImage.split("@sha256:")[1]); assert.equal(receipt.baseConfigDigest, recipe.baseConfigDigest.slice(7));
+    const sidecars = ["linux-candidate.json", "source-inventory.json", "native-v5-oci-receipt.json"];
+    for (const file of sidecars.slice(0, 2)) assert.deepEqual(await readFile(join(nativeOci, file)), await readFile(join(native.root, file)));
+    const files = (await fileInventory(nativeOci)).filter(file => !sidecars.includes(file.path));
+    const graph = await verifyOciLayout({ artifact: { format: "oci-layout", component: "native", root: "native", entrypoint: "native/index.json",
+      files: files.map(file => ({ path: `native/${file.path}`, bytes: file.bytes, sha256: file.sha256 })) }, readFile: ref => readFile(join(nativeOci, ref.path.slice(7))) });
+    assert.equal(graph.imageDigest, receipt.imageDigest);
+    await verifyNativeV5OciReceipt({ graph, receipt, readFile: ref => readFile(join(nativeOci, ref.path.slice(7))) });
+    nativeComponent = { id: "native", directory: nativeOci, format: "oci-layout", identityFiles: sidecars, entrypoint: "index.json", originSourceCommit: native.receipt.sourceCommit,
+      runtime: { kind: "linux-native-oci-candidate", identityDirectory: "metadata/native-candidate", ...native.receipt.runtime, imageDigest: graph.imageDigest,
+        nativeOciReceipt: receipt, awsImageQualified: false } };
+  }
   const bundle = await packagePortableBundle({ destination, originSourceCommit, lineage, sources, components: [
     { id: "business", directory: business, entrypoint: "index.js", originSourceCommit,
       runtime: { ...workerRuntime(apiConfig), sourceEntry: "products/shop/workers/api/src/index.ts" } },
     { id: "storefront", directory: storefront, entrypoint: "server/index.js", originSourceCommit,
       runtime: { ...workerRuntime(startConfig), assetsDirectory: "client", noBundle: true } },
-    { id: "native", directory: native.root, identityFiles: ["linux-candidate.json", "source-inventory.json"], entrypoint: "native-image/product-image-v5-entry.mjs", originSourceCommit: native.receipt.sourceCommit,
-      runtime: { kind: "linux-native-payload", ...native.receipt.runtime, identityDirectory: "metadata/native-candidate",
-        capsuleManifestSha256: native.receipt.capsuleManifestSha256, runtimeFilesSha256: native.receipt.runtimeFilesSha256, awsImageQualified: false } },
+    nativeComponent,
   ] });
   if (lineage.kind === "github-actions") {
     assert.deepEqual(await captureRootSource(checkout), source, "Source changed during portable bundle retention");
     assert.equal((await execute("git", ["status", "--porcelain"], { cwd: checkout })).stdout.trim(), "", "Hosted artifact requires clean exact source");
   }
   return bundle;
+}
+
+export async function copyNativeRuntimeSource(runtime) {
+  const src = "products/shop/workers/video-renderer";
+  for (const file of ["src/renderer.mjs", "src/geometry.mjs", "src/product-mockup-geometry.mjs", "src/product-image-renderer.mjs", "src/lifestyle.mjs", "src/lifestyle-template.mjs", "src/version.mjs", "aws-lambda/app-entry.mjs", "aws-lambda/failure-entry.mjs", "aws-lambda/product-image-handler.mjs", "aws-lambda/native-v5-runtime.mjs", "aws-lambda/native-runtime-profile.mjs", "aws-lambda/product-image-v5-handler.mjs", "aws-lambda/app-handler.mjs", "aws-lambda/protected-config.mjs", "aws-lambda/config.mjs", "aws-lambda/contract.mjs", "aws-lambda/app-environment.mjs", "aws-lambda/variants.mjs"])
+    await copy(join(checkout, src, file), join(runtime, src, file));
+  for (const file of ["products/shop/packages/contracts/package.json", "products/shop/packages/contracts/src/product-mockup-geometry.js"])
+    await copy(join(checkout, file), join(runtime, file));
+}
+
+export async function copyNativeRuntimeDependencies(runtime, capsule) {
+  const src = "products/shop/workers/video-renderer";
+  const dependencies = [], installed = new Map(), target = nativeHostTarget();
+  for (const name of ["@napi-rs/canvas", "@fontsource-variable/geist-mono", "sharp"])
+    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed, false, target);
+  await verifyProductImageV5Capsule(capsule);
+  await materializeTree(join(capsule, "node_modules"), join(runtime, "node_modules"));
+  return dependencies;
 }
 
 export async function packageLinuxCandidate(destination) {
@@ -234,18 +327,18 @@ export async function packageLinuxCandidate(destination) {
   await writeFile(join(runtime, "package.json"), json({ private: true, type: "module" }), { mode: 0o600 });
   await execute(process.execPath, [fileURLToPath(new URL("./product-image-v5-capsule.mjs", import.meta.url)), join(output, "native-image")], { cwd: checkout, maxBuffer: 1024 * 1024 });
   const src = "products/shop/workers/video-renderer";
-  for (const file of ["src/renderer.mjs", "src/geometry.mjs", "src/product-mockup-geometry.mjs", "src/version.mjs", "aws-lambda/app-handler.mjs", "aws-lambda/protected-config.mjs", "aws-lambda/config.mjs", "aws-lambda/contract.mjs", "aws-lambda/app-environment.mjs", "aws-lambda/variants.mjs"])
-    await copy(join(checkout, src, file), join(runtime, src, file));
-  for (const file of ["products/shop/packages/contracts/package.json", "products/shop/packages/contracts/src/product-mockup-geometry.js"])
-    await copy(join(checkout, file), join(runtime, file));
+  await copyNativeRuntimeSource(runtime);
   for (const file of ["tee-black-cutout-v1.png", "tee-white-cutout-v1.png", "tote-black-print-bar-1001.webp", "tote-cream-print-bar-1001.webp"])
     await copy(join(checkout, "products/shop/apps/web/public/mockups", file), join(runtime, "assets", file));
-  const dependencies = [], installed = new Map();
-  for (const name of ["@napi-rs/canvas", "@fontsource-variable/geist-mono"])
-    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed);
+  for (const file of ["tee-black-cutout-v1.png", "tee-white-cutout-v1.png", "tote-black-print-bar-1001.webp", "tote-cream-print-bar-1001.webp"])
+    await copy(join(checkout, "products/shop/apps/web/public/mockups", file), join(runtime, src, "product-assets", file));
+  for (const [file, source] of [["lifestyle-white.png", "featured-blank-white.png"], ["lifestyle-black.png", "featured-blank-black.png"], ["lifestyle.json", "featured.json"],
+    ["featured-mask-white.svg", "featured-mask-white.svg"], ["featured-mask-black.svg", "featured-mask-black.svg"]])
+    await copy(join(checkout, "products/shop/assets/lifestyle", source), join(runtime, src, "product-assets", file));
+  const dependencies = await copyNativeRuntimeDependencies(runtime, join(output, "native-image"));
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas" && dep.version === recipe.canvas));
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas-linux-x64-gnu" && dep.version === recipe.canvas));
-  const binaries = await packageExecutables(runtime);
+  const binaries = await packageExecutables(runtime, join(output, "native-image"));
   const ffmpegPackage = (await execute("dpkg-query", ["-W", "-f=${Version}", "ffmpeg"])).stdout;
   assert.equal(ffmpegPackage, recipe.ffmpeg.packageVersion, "Pinned FFmpeg package required");
   const bun = (await execute("bun", ["--version"])).stdout.trim();

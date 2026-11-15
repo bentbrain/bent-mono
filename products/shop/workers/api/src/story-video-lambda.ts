@@ -1,9 +1,11 @@
+import { canonicalNativeServingTarget, parseNativeServingTarget, type NativeServingTarget } from "@forever-tee/contracts/native-serving-target";
+import { installedNativeServingTarget, nativeServingPins, type NativeServingEnv } from "./native-serving-target";
 import { protectedConfig } from "./protected-config";
 import { AwsClient } from "aws4fetch";
 import { createStoryVideoGrant } from "./story-video-grants";
 import { legacyStoredVideo } from "./story-video-legacy-cache";
 import type { NativeV5Target } from "./native-v5-target";
-export interface LambdaStoryVideoEnv {
+export interface LambdaStoryVideoEnv extends NativeServingEnv {
     readonly STORY_VIDEO_PROVIDER?: string;
     readonly STORY_VIDEO_ENVIRONMENT?: string;
     readonly STORY_VIDEO_LAMBDA_FUNCTION?: string;
@@ -14,6 +16,13 @@ export interface LambdaStoryVideoEnv {
     readonly STORY_VIDEOS?: R2Bucket;
 }
 export async function invokeQualifiedNativeV5(env: LambdaStoryVideoEnv, target: NativeV5Target, body: string, send: typeof fetch = fetch) {
+    if (target.schemaVersion === 2) throw new Error('Bootstrap invocations require the separately admitted credential owner.');
+    if (target.schemaVersion === 3) {
+        const fields = Object.fromEntries(Object.entries(target).filter(([key]) => key !== "schemaVersion"));
+        parseNativeServingTarget(JSON.stringify({ schema: "shop.native-serving-target/v1", ...fields }), nativeServingPins(env));
+    } else if (env.STORY_VIDEO_ENVIRONMENT === "production" || env.OPERATIONS_ENVIRONMENT === "production") {
+        throw new Error("Native v5 qualification targets cannot serve Production.");
+    }
     if (!env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID || !env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY)
         throw new Error("Install the protected native invocation credentials.");
     const signer = new AwsClient({ accessKeyId: env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID, secretAccessKey: env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY,
@@ -50,16 +59,18 @@ export interface LambdaVideoJob {
 }
 const hash = /^[0-9a-f]{64}$/;
 export const LAMBDA_STORY_FUNCTION = "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-development";
-export function validateLambdaStoryVideoEnv(env: LambdaStoryVideoEnv) {
-    const functionArn = env.STORY_VIDEO_ENVIRONMENT === "production"
-        ? "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-production" : env.STORY_VIDEO_ENVIRONMENT === undefined || env.STORY_VIDEO_ENVIRONMENT === "development" ? LAMBDA_STORY_FUNCTION : undefined;
-    if (!functionArn || env.STORY_VIDEO_LAMBDA_FUNCTION !== functionArn ||
+export function validateLambdaStoryVideoEnv(env: LambdaStoryVideoEnv, retainedTarget?: NativeServingTarget) {
+    const installed = installedNativeServingTarget(env);
+    const selected = retainedTarget ? parseNativeServingTarget(canonicalNativeServingTarget(retainedTarget), nativeServingPins(env)) : installed;
+    const functionArn = selected?.functionArn ?? (env.STORY_VIDEO_ENVIRONMENT === "production"
+        ? "arn:aws:lambda:ap-southeast-2:" + protectedConfig("awsAccountId") + ":function:forever-tee-video-production" : env.STORY_VIDEO_ENVIRONMENT === undefined || env.STORY_VIDEO_ENVIRONMENT === "development" ? LAMBDA_STORY_FUNCTION : undefined);
+    if (!functionArn || (!selected && env.STORY_VIDEO_LAMBDA_FUNCTION !== functionArn) ||
         !env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID || !env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY ||
         !env.STORY_VIDEO_GRANT_SECRET || env.STORY_VIDEO_GRANT_SECRET.length < 32 || !env.STORY_VIDEOS) {
         throw new Error("The personal Lambda provider does not match its deployment environment.");
     }
     return { functionArn, accessKeyId: env.STORY_VIDEO_LAMBDA_ACCESS_KEY_ID, secretAccessKey: env.STORY_VIDEO_LAMBDA_SECRET_ACCESS_KEY,
-        grantSecret: env.STORY_VIDEO_GRANT_SECRET, videos: env.STORY_VIDEOS };
+        sessionToken: env.STORY_VIDEO_LAMBDA_SESSION_TOKEN, grantSecret: env.STORY_VIDEO_GRANT_SECRET, videos: env.STORY_VIDEOS };
 }
 export async function storedLambdaVideo(bucket: R2Bucket, job: Pick<LambdaVideoJob, "storyKey" | "jobId" | "artwork"> & {
     readonly recursiveSource?: {
@@ -99,8 +110,9 @@ type LambdaDispatchResult = {
     sha256: string;
     timings: Readonly<Record<string, number>>;
 };
-export async function renderLambdaVideo(env: LambdaStoryVideoEnv, job: LambdaVideoJob, rendererVersion: string, send: typeof fetch = fetch, readLegacy = legacyStoredVideo): Promise<LambdaDispatchResult> {
-    const config = validateLambdaStoryVideoEnv(env);
+export async function renderLambdaVideo(env: LambdaStoryVideoEnv, job: LambdaVideoJob, rendererVersion: string, send: typeof fetch = fetch, readLegacy = legacyStoredVideo, retainedTarget?: NativeServingTarget): Promise<LambdaDispatchResult> {
+    if (env.SHOP_NATIVE_SERVING_TARGET_JSON !== undefined && !retainedTarget) throw new Error("Persist native serving identity before dispatching a video attempt.");
+    const config = validateLambdaStoryVideoEnv(env, retainedTarget);
     const cached = await storedLambdaVideo(config.videos, job, rendererVersion, readLegacy);
     if (cached)
         return { status: "ready", ...cached, timings: { lambdaCacheHit: 1 } };
@@ -108,7 +120,7 @@ export async function renderLambdaVideo(env: LambdaStoryVideoEnv, job: LambdaVid
     // This service identity can invoke only the exact personal function. It never
     // uses local AWS profiles or a credential-provider chain. Retries belong to the queue.
     const signer = new AwsClient({ accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey,
-        service: "lambda", region: "ap-southeast-2", retries: 0 });
+        ...(config.sessionToken ? { sessionToken: config.sessionToken } : {}), service: "lambda", region: "ap-southeast-2", retries: 0 });
     const request = await signer.sign(`https://lambda.ap-southeast-2.amazonaws.com/2015-03-31/functions/${encodeURIComponent(config.functionArn)}/invocations`, {
         method: "POST", headers: { "content-type": "application/json", "x-amz-invocation-type": "Event" },
         body: JSON.stringify({ schemaVersion: job.recursiveSource?.placement ? 3 : job.recursiveSource ? 2 : 1, ...job, rendererVersion, grant }),

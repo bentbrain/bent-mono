@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { parseJSON } from './data.mjs';
+import { canonical, digest, parseJSON } from './data.mjs';
 import { requestBuilders } from './provider-protocol-builders.mjs';
 import { requestDigest } from './signing.mjs';
 import { responseBytes } from './provider-protocol.mjs';
 import { createHostedWriter } from './hosted-writer.mjs';
+import { credentialBrokerBoundary } from './hosted-writer.mjs';
 import { createCredentialCustody } from './custody-service.mjs';
 import { hostedProtocolFixture } from './testing/hosted-protocol-service.mjs';
 import { protocolFixture } from './testing/provider-protocol-transcript.mjs';
@@ -50,5 +51,53 @@ test('asset upload capabilities stay in production custody and each exact wire r
       const claim = custody.requests.find(item => item.requestDigest === requestDigest(upload)); assert(claim); assert.notEqual(claim.wireRequestDigest, claim.requestDigest); assert.equal(claim.status, 'acknowledged');
       assert.equal(service.transcript.filter(item => item.method === 'POST' && item.url.endsWith('/versions')).length, 1);
     });
+  });
+});
+
+test('fresh admitted rollback may repeat serving bytes while one operation cannot replay an uncertain send', async () => {
+  await fixture(async (f, service) => {
+    const builders = requestBuilders(f.policy), writer = createHostedWriter({ policy: f.policy, broker: service.broker, fenceAdmission: service.fenceAdmission });
+    let version;
+    await writer.withWriter(async ({ commit }) => {
+      await commit({ phase: 'stage-reconcile', operation: { id: 'first-stage' } });
+      const request = builders.workerUpload(f.worker, { entrypoint: 'index.js', metadata: f.metadata, modules: f.modules, expectedInventory: f.expectedInventory });
+      const event = await writer.recordProvider(state => state.requests.push({ requestDigest: requestDigest(request), operationId: 'first-stage', step: 'stage', method: request.method, url: request.url, bodySha256: request.bodySha256, status: 'intent', target: { resource: f.worker } }));
+      version = parseJSON(responseBytes(await writer.dispatch(request, event))).result.id;
+    });
+    for (const operationId of ['first-activate', 'rollback-activate']) await writer.withWriter(async ({ commit }) => {
+      await commit({ phase: 'activate-reconcile', operation: { id: operationId } });
+      const request = builders.workerActivate(f.worker, version), event = await writer.recordProvider(state => state.requests.push({ requestDigest: requestDigest(request), operationId, step: 'activate', method: request.method, url: request.url, bodySha256: request.bodySha256, status: 'intent', target: { resource: f.worker } }));
+      await writer.dispatch(request, event); await assert.rejects(writer.dispatch(request, event), /no-replay/);
+      const changed = builders.workerActivate(f.worker, 'ffffffff-ffff-4fff-8fff-ffffffffffff'), changedEvent = await writer.recordProvider(state => state.requests.push({ requestDigest: requestDigest(changed), operationId, step: 'activate', method: changed.method, url: changed.url, bodySha256: changed.bodySha256, status: 'intent', target: { resource: f.worker } }));
+      await assert.rejects(writer.dispatch(changed, changedEvent), /no-replay/);
+    });
+    assert.equal(service.transcript.filter(item => item.method === 'POST' && item.url.endsWith('/deployments')).length, 2);
+  });
+});
+
+test('same-epoch authority renewal preserves exclusive owner and rejects epoch takeover', async () => {
+  await fixture(async (_f, service) => {
+    const owner = await service.broker.open(), before = await service.executor.readState();
+    const renewed = service.signRoot({ ...service.installation.payload, expiresAt: service.installation.payload.expiresAt + 60000 });
+    const result = await service.executor.renewAuthority({ fenceAdmission: service.fenceAdmission, installation: renewed }); assert.equal(result.owner, owner);
+    assert.equal((await service.executor.readState()).owner.id, before.owner.id); await service.broker.assertOwner(owner);
+    const takeover = service.signRoot({ ...renewed.payload, credentialEpoch: 'takeover-epoch', expiresAt: renewed.payload.expiresAt + 60000 });
+    await assert.rejects(service.executor.renewAuthority({ fenceAdmission: service.fenceAdmission, installation: takeover }), /cannot replace/);
+    await assert.rejects(service.broker.open(), /held/); await service.broker.close(owner);
+  });
+});
+
+test('journal ACK folds into next durable claim; crash before folding retains unknown and GET-only reconciliation across replacement', async()=>{
+  await fixture(async(f,service)=>{
+    const builders=requestBuilders(f.policy),owner=await service.broker.open(),bytes=Buffer.from(canonical({schema:'fixture-durable-event',operation:'one'})),request=builders.storePut(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`,bytes,null);
+    await service.broker.journal(owner,request);
+    const before=await service.executor.readState(),claim=before.requests.find(item=>item.requestDigest===requestDigest(request));assert.equal(claim.status,'sending');
+    assert.equal(responseBytes(await service.broker.read(builders.storeGet(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`))).toString(),bytes.toString());
+    const installation=service.signRoot({...service.installation.payload,installationId:randomUUID(),credentialEpoch:'epoch-replacement'}),replacement=service.signRoot({schema:'shop.custody-installation-replacement/v1',fenceDigest:service.fenceAdmission.digest,previousInstallationId:service.installation.payload.installationId,previousCredentialEpoch:service.installation.payload.credentialEpoch,newInstallationId:installation.payload.installationId,credentialsRevoked:true,stopped:true,drained:true,issuedAt:Date.now(),expiresAt:Date.now()+60000});
+    const next=await createCredentialCustody({...service.factoryOptions,installation,replacement}),broker=credentialBrokerBoundary({fenceAdmission:service.fenceAdmission,boundary:input=>next.handle(input,{authorization:'Bearer synthetic-loopback-controller'})});
+    assert.equal((await next.readState()).requests.find(item=>item.claimDigest===claim.claimDigest).status,'sending');
+    const newOwner=await broker.open(),writes=service.transcript.filter(item=>item.method==='PUT').length;
+    await assert.rejects(broker.journal(newOwner,request),/no-replay/);assert.equal(service.transcript.filter(item=>item.method==='PUT').length,writes);
+    assert.equal(responseBytes(await broker.read(builders.storeGet(`events/${digest({schema:'fixture-durable-event',operation:'one'})}.json`))).toString(),bytes.toString());await broker.close(newOwner);
   });
 });

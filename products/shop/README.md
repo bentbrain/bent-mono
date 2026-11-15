@@ -95,6 +95,22 @@ Scoped composition admission records each artifact's original source, resolved d
 
 Run `node scripts/release-v2/testing/scoped-source-proof.mjs /absolute/private/new-run` to check proposed source changes against the current repository inventory. Run `node scripts/release-v2/testing/provider-protocol-transcript.mjs --output /absolute/private/new-run` to exercise Cloudflare, Lambda, conditional storage and reporting request construction through local HTTP protocol fixtures. Both commands retain their evidence privately.
 
+### Guarded component delivery
+
+The composition workflow consumes an independently pinned installation package, authenticated build artifacts and signed operation authority. Native bootstrap registers the retained OCI image, qualifies its isolated runtime and callbacks, and records fixture cleanup. Normal delivery requires the resulting source-signed qualification receipt. Both serving functions use the same image and capsule build identity, and custody installs their verified numbered versions into the business Worker.
+
+The business release identity includes its selected native runtime. Accepted image and video attempts retain that target across later releases and rollback. Historical release archives include the original signed journey runner and complete referenced artifact bytes. A fresh runner authenticates the archive and obtains current rollback authority before using it. An uncertain provider write is reconciled through readback before another write is considered.
+
+Run the default executable rehearsal with a new private destination:
+
+```sh
+node scripts/release-v2/testing/delivery-path-acceptance.mjs \
+  --network loopback-only \
+  --artifact-dir /absolute/private/new-run
+```
+
+This rehearsal covers delivery, an update, reporting recovery and historical rollback through the protected command path. It retains request counts and fails when the update exceeds its 600-request coordinator budget. Its provider responses are local protocol fixtures; cloud qualification and Production timing require the guarded hosted route.
+
 The `Shop Linux customer journey` workflow packages a pinned Linux runtime and runs the built storefront, business Worker, native image and video rendering, print assets, cart and checkout fixtures. It encrypts its evidence with a fresh archive key wrapped for the public recipient in `scripts/testing/linux-evidence-recipient.json`. The corresponding private key stays with the authorized recipient. Provider deployment and Production qualification use the guarded release route.
 
 Read `AGENTS.md` and `docs/ui-ux-principles.md` before changing shop behaviour. Keep customer incident records and private acceptance evidence outside this public repository.

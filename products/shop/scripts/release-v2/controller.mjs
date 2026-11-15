@@ -69,7 +69,8 @@ export async function advanceWithPorts(options, ports) {
       exact(observed.active, previous?.lastVerified?.components.map(wanted) ?? []);
       const order = compatible(payload, previous?.lastVerified ?? null, observed);
       if (previous) {
-        check(previous.phase === 'complete' && previous.operation === null, 'Previous release has unresolved work');
+        check(['complete', 'reporting-pending', 'report-intent', 'report-reconcile'].includes(previous.phase) && (!previous.operation || previous.operation.kind === 'reports') && previous.verification && previous.lastVerified &&
+          digest(previous.lastVerified) === previous.compositionDigest && previous.report?.verificationDigest === digest(previous.verification), 'Previous release has unresolved runtime work');
         if (command === 'rollback') {
           check(previous.history.some(item => digest(item) === compositionDigest), 'Rollback requires a previously verified composition');
           check(previous.desired.rollbackCompositionDigest === compositionDigest && payload.schemaState.rollbackEpochs.includes(previous.lastVerified.schemaState.epoch), 'Rollback target or schema constraint differs');
@@ -216,8 +217,7 @@ export async function advanceWithPorts(options, ports) {
       await persist(next);
       // Intent and uncertain acknowledgement are committed and read back before
       // writing. Any failure from this point leaves a GET-only reconciliation.
-      await assertOwner();
-      const saved = await ports.readHead();
+      const saved = ports.readSendCheckpoint?await ports.readSendCheckpoint():(await assertOwner(),await ports.readHead());
       check(saved.state.generation === next.generation && same(saved.state.operation, next.operation), 'Saved intent readback differs');
       checkpoint(`${kind}:before-post`, crashAt);
       await provider.write(kind, request);

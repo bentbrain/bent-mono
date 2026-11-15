@@ -17,7 +17,20 @@ const repositoryDirectory = fileURLToPath(new URL('../../../../', import.meta.ur
 const sealedNames = ['linux-evidence.tar.gz.enc', 'linux-evidence.tar.gz.enc.envelope.json', 'linux-evidence.tar.gz.enc.json'];
 const defaultLimits = { archiveBytes: 4 * 1024 ** 3 - 1, expandedBytes: 12 * 1024 ** 3, files: 131072 };
 const admissions = new WeakMap();
+const compositionAdmissions = new WeakMap();
+const compositionProducer = { path: '.github/workflows/shop-composition-qualification.yml', jobName: 'Validate retained composition', jobId: 'plan', artifactPrefix: 'shop-composition-private' };
+const compositionSealNames = ['composition-evidence.tar.gz.enc', 'composition-evidence.tar.gz.enc.envelope.json', 'composition-evidence.tar.gz.enc.json'];
 const githubApis = new WeakSet();
+const producerWorkflows = [
+  { path: '.github/workflows/shop-linux-journey.yml', jobName: 'Built Linux J01', jobId: 'journey', artifactPrefix: 'shop-linux-private' },
+  { path: '.github/workflows/shop-native-oci-producer.yml', jobName: 'Built native OCI candidate', jobId: 'producer', artifactPrefix: 'shop-native-oci-private' },
+];
+const installedProducer = (workflow, purpose = 'linux') => {
+  check(['linux', 'composition-history'].includes(purpose), 'Unsupported original artifact purpose');
+  const producer = (purpose === 'composition-history' ? [compositionProducer] : producerWorkflows).find(item => item.path === workflow?.path && item.jobName === workflow.jobName && item.jobId === workflow.jobId);
+  check(producer, 'An exact original supported Linux producer workflow is required');
+  return producer;
+};
 const exact = (value, fields, label) => check(value && typeof value === 'object' && !Array.isArray(value) && same(Object.keys(value).sort(), [...fields].sort()), `Unexpected ${label} fields`);
 const identifier = value => check(/^[1-9][0-9]{0,15}$/.test(String(value)) && Number.isSafeInteger(Number(value)), 'Exact GitHub resource ID required');
 const hex = value => check(/^[a-f0-9]{64}$/.test(value ?? ''), 'Protected SHA256 pin required');
@@ -39,13 +52,13 @@ async function privateDirectory(path) {
   check(info.isDirectory() && (info.mode & 0o777) === 0o700 && (process.getuid === undefined || info.uid === process.getuid()), 'Owned private directory required');
 }
 
-function validateInput(request, installation) {
+function validateInput(request, installation, purpose = 'linux') {
   exact(request, ['runId', 'runAttempt', 'artifactId', 'sourceCommit'], 'artifact request');
   for (const field of ['runId', 'runAttempt', 'artifactId']) identifier(request[field]);
   const { repository, workflow, expected = {} } = installation;
   check(repository?.name === 'bentbrain/bent-mono', 'Pinned Shop repository required');
   identifier(repository.id); identifier(repository.ownerId); identifier(workflow?.id); if (expected.jobId !== undefined) identifier(expected.jobId);
-  check(workflow.path === '.github/workflows/shop-linux-journey.yml' && workflow.jobName === 'Built Linux J01' && workflow.jobId === 'journey', 'Original Linux customer journey workflow required');
+  installedProducer(workflow, purpose);
   check(/^[a-f0-9]{40}$/.test(request.sourceCommit ?? '') && request.sourceCommit !== '0'.repeat(40), 'Exact requested source commit required');
   hex(installation.recipientFingerprint);
   for (const name of ['manifestSha256', 'archiveSha256']) if (expected[name] !== undefined) hex(expected[name]);
@@ -102,7 +115,7 @@ async function retainRawMetadata(api, destination) {
   return retained;
 }
 
-async function authenticateMetadata(api, request, installation) {
+async function authenticateMetadata(api, request, installation, purpose = 'linux') {
   const prefix = `/repos/${installation.repository.name}`, { repository, workflow, expected = {} } = installation;
   const [repo, definition, run, jobs, artifact] = await Promise.all([
     api.getJSON(prefix), api.getJSON(`${prefix}/actions/workflows/${workflow.id}`), api.getJSON(`${prefix}/actions/runs/${request.runId}`),
@@ -114,17 +127,18 @@ async function authenticateMetadata(api, request, installation) {
     run.status === 'completed' && run.conclusion === 'success' && run.head_sha === request.sourceCommit && ['workflow_dispatch', 'pull_request'].includes(run.event) &&
     String(run.repository?.id) === String(repository.id) && String(run.repository?.owner?.id) === String(repository.ownerId) && run.repository?.full_name === repository.name &&
     String(run.head_repository?.id) === String(repository.id) && run.head_repository?.full_name === repository.name, 'Original successful GitHub run identity differs');
-  check(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length === 1, 'Complete original customer journey job required');
+  check(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length === 1, 'Complete original Linux producer job required');
   const job = jobs.jobs[0];
   identifier(job.id);
   check((expected.jobId === undefined || String(job.id) === String(expected.jobId)) && String(job.run_id) === String(request.runId) && String(job.run_attempt) === String(request.runAttempt) && job.head_sha === request.sourceCommit &&
     job.name === workflow.jobName && job.status === 'completed' && job.conclusion === 'success', 'Original successful GitHub job differs');
-  check(String(artifact.id) === String(request.artifactId) && artifact.name === `shop-linux-private-${request.runId}-${request.runAttempt}` && artifact.expired === false &&
+  check(String(artifact.id) === String(request.artifactId) && artifact.name === `${installedProducer(workflow, purpose).artifactPrefix}-${request.runId}-${request.runAttempt}` && artifact.expired === false &&
     /^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') && (expected.archiveSha256 === undefined || artifact.digest === `sha256:${expected.archiveSha256}`) && Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 &&
     String(artifact.workflow_run?.id) === String(request.runId) && String(artifact.workflow_run?.repository_id) === String(repository.id) &&
     String(artifact.workflow_run?.head_repository_id) === String(repository.id) && artifact.workflow_run?.head_sha === request.sourceCommit, 'Original retained artifact identity or digest differs');
   const timestamps = [job.started_at, artifact.created_at, artifact.updated_at, job.completed_at, run.updated_at].map(value => Date.parse(value));
   check(timestamps.every(Number.isFinite) && timestamps.every((value, index) => index === 0 || value >= timestamps[index - 1]), 'Artifact attempt timing differs');
+  if (purpose === 'composition-history') check(run.event === 'workflow_dispatch' && run.head_branch === 'main', 'Historical release requires the canonical successful main dispatch');
   return { repository: repo, workflow: definition, run, jobs, job, artifact };
 }
 
@@ -221,7 +235,7 @@ function zipExtra(bytes, values) {
   return values;
 }
 
-async function extractSeal(zip, destination, limits) {
+async function extractSeal(zip, destination, limits, names = sealedNames) {
   await mkdir(destination, { mode: 0o700 });
   const handle = await open(zip, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -252,7 +266,7 @@ async function extractSeal(zip, destination, limits) {
       const nameLength = central.readUInt16LE(cursor + 28), extraLength = central.readUInt16LE(cursor + 30), commentLength = central.readUInt16LE(cursor + 32), endEntry = cursor + 46 + nameLength + extraLength + commentLength;
       check(endEntry <= central.length && commentLength === 0 && central.readUInt16LE(cursor + 34) === 0, 'ZIP central record differs');
       const name = new TextDecoder('utf-8', { fatal: true }).decode(central.subarray(cursor + 46, cursor + 46 + nameLength));
-      check(sealedNames.includes(name) && !entries.some(entry => entry.name === name), 'Original sealed files required without ZIP duplicates');
+      check(names.includes(name) && !entries.some(entry => entry.name === name), 'Original sealed files required without ZIP duplicates');
       const flags = central.readUInt16LE(cursor + 8), method = central.readUInt16LE(cursor + 10), attributes = central.readUInt32LE(cursor + 38), mode = attributes >>> 16;
       check((flags & ~0x808) === 0 && [0, 8].includes(method) && (attributes & 0x10) === 0 && (mode === 0 || ((mode & 0xf000) === 0 || (mode & 0xf000) === 0x8000) && [0o600, 0o644].includes(mode & 0o7777)), 'ZIP type, mode or compression differs');
       const entry = zipExtra(central.subarray(cursor + 46 + nameLength, cursor + 46 + nameLength + extraLength), { name, flags, method, crc: central.readUInt32LE(cursor + 16), size: central.readUInt32LE(cursor + 24), compressed: central.readUInt32LE(cursor + 20), offset: central.readUInt32LE(cursor + 42), zip64: central.readUInt32LE(cursor + 24) === 0xffffffff || central.readUInt32LE(cursor + 20) === 0xffffffff });
@@ -301,7 +315,7 @@ function tarNumber(bytes) {
   const value = parseInt(matched[1], 8); check(Number.isSafeInteger(value), 'Tar integer exceeds bound'); return value;
 }
 
-async function extractTarGzip(source, destination, limits) {
+async function extractTarGzip(source, destination, limits, rootName = 'shop-linux-private') {
   await mkdir(destination, { mode: 0o700 });
   const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   const files = [], directories = new Set(), paths = new Set(); let output, pending = Buffer.alloc(0), current, remaining = 0, padding = 0, longName, zeros = 0, total = 0, crc = 0xffffffff;
@@ -346,15 +360,15 @@ async function extractTarGzip(source, destination, limits) {
         check(type === 0 || type === 48 || type === 53, 'Tar links, extended metadata and special files are forbidden');
         path = longName ?? path; longName = undefined;
         if (type === 53 && path.endsWith('/')) path = path.slice(0, -1);
-        check(path === 'shop-linux-private' || path.startsWith('shop-linux-private/'), 'Tar path escapes original evidence root');
-        pathName(path === 'shop-linux-private' ? path : path.slice('shop-linux-private/'.length));
+        check(path === rootName || path.startsWith(`${rootName}/`), 'Tar path escapes original evidence root');
+        pathName(path === rootName ? path : path.slice(`${rootName}/`.length));
         const collision = path.normalize('NFC').toLowerCase(); check(!paths.has(collision), 'Tar duplicate or filesystem path collision'); paths.add(collision);
         check(paths.size <= limits.files, 'Tar record count exceeds bound');
         const parent = dirname(path); check(parent === '.' || directories.has(parent), 'Tar parent directory must precede its children');
         if (type === 53) { check(length === 0 && mode === 0o700, 'Private tar directory mode differs'); await mkdir(join(destination, path), { mode: 0o700 }); directories.add(path); }
         else {
           check([0o600, 0o700].includes(mode) && length <= 512 * 1024 ** 2, 'Private tar file mode or size differs');
-          current = { path: path.slice('shop-linux-private/'.length), size: length, executable: mode === 0o700, hash: createHash('sha256') }; check(path !== 'shop-linux-private', 'Tar evidence root must be a directory');
+          current = { path: path.slice(`${rootName}/`.length), size: length, executable: mode === 0o700, hash: createHash('sha256') }; check(path !== rootName, 'Tar evidence root must be a directory');
           output = await open(join(destination, path), 'wx', mode); remaining = length; padding = (512 - length % 512) % 512;
           if (!length) { await output.close(); output = undefined; files.push({ path: current.path, bytes: 0, sha256: current.hash.digest('hex'), executable: current.executable }); }
         }
@@ -365,7 +379,7 @@ async function extractTarGzip(source, destination, limits) {
     const trailerOffset = start + inflater.bytesWritten; check(trailerOffset + 8 === size, 'Gzip extra member or ignored trailing bytes');
     const trailer = await readAt(handle, 8, trailerOffset);
     check(trailer.readUInt32LE(0) === (crc ^ 0xffffffff) >>> 0 && trailer.readUInt32LE(4) === total % 2 ** 32, 'Gzip CRC or length differs');
-    return { files: files.sort((a, b) => a.path < b.path ? -1 : 1), directories: [...directories].filter(path => path !== 'shop-linux-private').map(path => path.slice('shop-linux-private/'.length)).sort() };
+    return { files: files.sort((a, b) => a.path < b.path ? -1 : 1), directories: [...directories].filter(path => path !== rootName).map(path => path.slice(`${rootName}/`.length)).sort() };
   } finally { await output?.close().catch(() => {}); await handle.close(); }
 }
 
@@ -450,4 +464,73 @@ export async function assertHostedPortableImport(result, { installation, sourceC
   await verifyRetainedEvidence(admitted.original, admitted.files, admitted.directories);
   check(result.portable.root === admitted.root && result.portable.manifestSha256 === portable.manifestSha256 && same(result.portable.expected, admitted.expected), 'Retained portable admission changed');
   return { portable, metadata, evidence: { ...evidence, path: admitted.evidenceFile }, awsImageQualified: false };
+}
+
+/** Authenticate the original protected composition archive before historical assembly. */
+export async function importHostedCompositionArchive({ request, installation, destination, api, privateKeyFile, githubToken }) {
+  request = structuredClone(request); installation = structuredClone(installation);
+  const purpose = 'composition-history', limits = validateInput(request, installation, purpose);
+  check(isAbsolute(destination) && resolve(destination) === destination && outside(destination, repositoryDirectory), 'New private history destination outside checkout required');
+  await privateDirectory(dirname(destination));
+  check(isAbsolute(privateKeyFile) && await realpath(privateKeyFile) === privateKeyFile && outside(privateKeyFile, repositoryDirectory) && outside(privateKeyFile, destination), 'Protected recipient key must remain outside history');
+  check(api === undefined || githubToken === undefined, 'Select an explicit artifact API or GitHub job token');
+  api ??= await createGithubArtifactApi(installation, { token: githubToken });
+  check(typeof api.getJSON === 'function' && typeof api.downloadArtifact === 'function', 'Explicit original history API required');
+  const metadata = await authenticateMetadata(api, request, installation, purpose);
+  check(metadata.artifact.size_in_bytes <= limits.archiveBytes, 'Original history exceeds protected download bound');
+  await mkdir(destination, { mode: 0o700 });
+  const archive = join(destination, 'original-actions-artifact.zip'); let privateKeyPem;
+  try {
+    const metadataFile = join(destination, 'github-metadata.private.json'); await writeFile(metadataFile, JSON.stringify(metadata) + '\n', { flag: 'wx', mode: 0o600 });
+    await api.downloadArtifact({ endpoint: `/repos/${installation.repository.name}/actions/artifacts/${request.artifactId}/zip`, destination: archive, maxBytes: limits.archiveBytes });
+    const archiveIdentity = await hashFile(archive, limits.archiveBytes);
+    check(`sha256:${archiveIdentity.sha256}` === metadata.artifact.digest && archiveIdentity.bytes === metadata.artifact.size_in_bytes, 'Original history ZIP SHA256 or size differs');
+    const seal = join(destination, 'original-seal'); await extractSeal(archive, seal, limits, compositionSealNames);
+    for (const name of compositionSealNames.filter(name => name.endsWith('.json'))) parseJSON(await readRegularFile(join(seal, name), 16384));
+    privateKeyPem = await readRegularFile(privateKeyFile, 16384, true);
+    const plaintext = join(destination, 'authenticated-composition-evidence.tar.gz');
+    await openLinuxEvidence(join(seal, 'composition-evidence.tar.gz.enc'), plaintext, { sourceCommit: request.sourceCommit, runId: String(request.runId), filename: 'composition-evidence.json' },
+      { privateKeyPem, keyFingerprint: installation.recipientFingerprint });
+    const retainedTransport = await Promise.all([...compositionSealNames.map(name => join(seal, name)), plaintext].map(async path => ({ path, ...await hashFile(path, limits.archiveBytes) })));
+    const { files, directories } = await extractTarGzip(plaintext, join(destination, 'evidence'), limits, 'shop-composition-private');
+    const root = join(destination, 'evidence/shop-composition-private'), inventoryPath = join(root, 'workflow-inventory.private.json');
+    const inventoryBytes = await readRegularFile(inventoryPath, 32 * 1024 ** 2, true), inventory = parseJSON(inventoryBytes, 32 * 1024 ** 2);
+    exact(inventory, ['schema', 'identity', 'inventory'], 'original workflow inventory');
+    const identity = { repository: { ownerId: Number(installation.repository.ownerId), repositoryId: Number(installation.repository.id) }, repositoryName: installation.repository.name,
+      head: request.sourceCommit, workflowCommit: request.sourceCommit, workflowRef: `${installation.repository.name}/${installation.workflow.path}@refs/heads/main`, runId: Number(request.runId), attempt: Number(request.runAttempt) };
+    check(inventory.schema === 'shop.workflow-evidence/v2' && same(inventory.identity, identity) && Array.isArray(inventory.inventory) &&
+      same(files.filter(file => file.path !== 'workflow-inventory.private.json'), [...inventory.inventory].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)), 'Authenticated complete original workflow inventory differs');
+    const recheck = await authenticateMetadata(api, request, installation, purpose);
+    check(same(metadataIdentity(recheck), metadataIdentity(metadata)), 'Original workflow or artifact changed during history intake');
+    const recheckFile = join(destination, 'github-metadata-recheck.private.json'); await writeFile(recheckFile, JSON.stringify(recheck) + '\n', { flag: 'wx', mode: 0o600 });
+    const rawMetadata = await retainRawMetadata(api, destination);
+    check(same(await hashFile(archive, limits.archiveBytes), archiveIdentity), 'Original history ZIP changed during intake');
+    const evidence = { schema: 'shop.hosted-history-archive-intake/v1', request, identity, archive: { path: archive, ...archiveIdentity },
+      inventory: { path: inventoryPath, sha256: sha256(inventoryBytes) }, metadata: { path: metadataFile, sha256: digest(metadata) },
+      metadataRecheck: { path: recheckFile, sha256: digest(recheck) }, rawMetadata, retainedTransport, transport: githubApis.has(api) ? 'authenticated-github-cli' : 'explicit-artifact-api', remoteVerificationRequired: true };
+    const evidenceFile = join(destination, 'history-archive-intake.private.json'); await writeFile(evidenceFile, canonicalHistory(evidence), { flag: 'wx', mode: 0o600 });
+    const result = Object.freeze({ root, metadata, identity, evidence: { ...evidence, path: evidenceFile } });
+    compositionAdmissions.set(result, { archive, archiveIdentity, maximum: limits.archiveBytes, evidenceFile, evidenceDigest: digest(evidence), metadataFile, metadataDigest: digest(metadata), root, files: structuredClone(files), directories, installationDigest: digest(installation), sourceCommit: request.sourceCommit });
+    return result;
+  } catch (error) {
+    await retainRawMetadata(api, destination).catch(() => {});
+    await writeFile(join(destination, 'history-intake-failed.private.json'), JSON.stringify({ schema: 'shop.hosted-history-intake-failed/v1', message: error.message }) + '\n', { flag: 'wx', mode: 0o600 }).catch(() => {}); throw error;
+  } finally { privateKeyPem?.fill(0); }
+}
+const canonicalHistory = value => JSON.stringify(value) + '\n';
+
+/** A locator or copied descriptor never creates an authenticated history import. */
+export async function assertHostedCompositionArchive(result, { installation, sourceCommit } = {}) {
+  const admitted = compositionAdmissions.get(result); check(admitted, 'Authenticated in-process history archive required');
+  check((installation === undefined || digest(installation) === admitted.installationDigest) && (sourceCommit === undefined || sourceCommit === admitted.sourceCommit), 'History installation or original source differs');
+  check(same(await hashFile(admitted.archive, admitted.maximum), admitted.archiveIdentity), 'Original history ZIP changed');
+  const evidence = parseJSON(await readRegularFile(admitted.evidenceFile, 1024 * 1024, true)), metadata = parseJSON(await readRegularFile(admitted.metadataFile, 1024 * 1024, true));
+  const { path, ...returnedEvidence } = result.evidence;
+  check(path === admitted.evidenceFile && digest(evidence) === admitted.evidenceDigest && same(returnedEvidence, evidence) && digest(metadata) === admitted.metadataDigest && digest(result.metadata) === admitted.metadataDigest, 'Historical archive evidence changed');
+  for (const ref of [evidence.inventory, ...evidence.rawMetadata]) { const bytes = await readRegularFile(ref.path, 32 * 1024 ** 2, true); check(sha256(bytes) === ref.sha256 && (ref.bytes === undefined || bytes.length === ref.bytes), 'Original historical inventory or raw metadata changed'); }
+  check(digest(parseJSON(await readRegularFile(evidence.metadataRecheck.path, 1024 * 1024, true))) === evidence.metadataRecheck.sha256, 'Historical metadata recheck changed');
+  for (const { path, ...identity } of evidence.retainedTransport) check(same(await hashFile(path, admitted.maximum), identity), 'Original historical framing changed');
+  await verifyRetainedEvidence(admitted.root, admitted.files, admitted.directories);
+  check(result.root === admitted.root && same(result.identity, evidence.identity), 'Historical root identity changed');
+  return result;
 }
