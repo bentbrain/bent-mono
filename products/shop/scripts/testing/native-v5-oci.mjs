@@ -39,6 +39,14 @@ export function nativeV5Layer(files) {
   return Buffer.concat([...chunks, Buffer.alloc(1024)], total);
 }
 
+// Base filesystem members can contain punctuation used by Debian multiarch
+// packages. Portable locators keep their separate, stricter URL-safe policy.
+function baseMemberPath(path) {
+  check(typeof path === 'string' && path.isWellFormed() && path.length <= 512 && /^[^\x00-\x1f\x7f\\]+$/u.test(path) &&
+    !path.startsWith('/') && path.split('/').every(part => part && part !== '.' && part !== '..'), 'Malformed base relative path');
+  return path;
+}
+
 // Inspect base tar records in memory. No base member is extracted on the host.
 export function inspectBaseLayer(bytes, entries = new Map()) {
   let pending = {}, ended = false;
@@ -65,7 +73,7 @@ export function inspectBaseLayer(bytes, entries = new Map()) {
     let path = pending.path ?? [string(header.subarray(345, 500)), string(header.subarray(0, 100))].filter(Boolean).join('/');
     path = path.replace(/^\.\//, '').replace(/\/$/, '');
     if (path === '.' || path === '') { check(kind === '5', 'Invalid base root member'); pending = {}; continue; }
-    pathName(path); const link = pending.linkpath ?? string(header.subarray(157, 257));
+    baseMemberPath(path); const link = pending.linkpath ?? string(header.subarray(157, 257));
     check(pending.size === undefined || pending.size === String(size), 'PAX size differs'); pending = {};
     const leaf = posix.basename(path), directory = posix.dirname(path);
     if (leaf === '.wh..wh..opq') { for (const key of entries.keys()) if (key.startsWith(`${directory}/`)) entries.delete(key); }
@@ -84,7 +92,7 @@ function baseFile(entries, input) {
       if (item && item.kind === '5') check((item.mode & 0o001) === 0o001, 'Base runtime directory is not traversable by the Lambda user');
       if (item && ['1', '2'].includes(item.kind)) {
         const target = item.link.startsWith('/') ? item.link.slice(1) : item.kind === '1' ? item.link : posix.join(posix.dirname(key), item.link);
-        path = posix.normalize(posix.join(target, ...parts.slice(index))); pathName(path); redirected = true; break;
+        path = posix.normalize(posix.join(target, ...parts.slice(index))); baseMemberPath(path); redirected = true; break;
       }
     }
     if (!redirected) return entries.get(path);

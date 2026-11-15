@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { sign } from 'node:crypto';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,9 @@ import { canonical, digest } from './data.mjs';
 import { assembleHostedRelease, assembleHostedRollback } from './source-issuance.mjs';
 import { createBootstrapFixture } from './testing/bootstrap-fixture.mjs';
 import { createWorkflowJourneyFixture } from './testing/workflow-journey-fixture.mjs';
+
+const proofRoot = process.env.SHOP_WORKFLOW_PROOF_ROOT ?? tmpdir();
+await mkdir(proofRoot, { recursive: true, mode: 0o700 });
 
 async function directCli(options, env, command) {
   const file = fileURLToPath(new URL('./hosted-controller.mjs', import.meta.url));
@@ -26,7 +29,7 @@ async function directCli(options, env, command) {
 }
 
 test('default plan authority cannot execute through the direct hosted CLI with qualified target inputs', async t => {
-  const output = await mkdtemp(join(process.env.SHOP_WORKFLOW_PROOF_ROOT ?? tmpdir(), 'operation-cli-'));
+  const output = await mkdtemp(join(proofRoot, 'operation-cli-'));
   const f = await createWorkflowJourneyFixture(t, { output });
   const assembled = await assembleHostedRelease(f.bootstrap);
   assert.equal(assembled.authority.payload.schema, 'shop.hosted-source-authority/v3');
@@ -58,7 +61,7 @@ test('partial installed begin scope stops source assembly before source or crede
 
 test('malformed historical signature and changed closure fail before credential reads', async t => {
   for (const mutation of ['signature', 'closure']) await t.test(mutation, async t => {
-    const output = await mkdtemp(join(process.env.SHOP_WORKFLOW_PROOF_ROOT ?? tmpdir(), 'historic-preflight-'));
+    const output = await mkdtemp(join(proofRoot, 'historic-preflight-'));
     const f = await createWorkflowJourneyFixture(t, { output }), assembled = await assembleHostedRelease(f.bootstrap);
     const envelope = JSON.parse(await readFile(assembled.options.manifest));
     await writeFile(join(f.bootstrap.directory, 'verified-release.private.json'), canonical({ schema: 'shop.verified-workflow-release/v1',

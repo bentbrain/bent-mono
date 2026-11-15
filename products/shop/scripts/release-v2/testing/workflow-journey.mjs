@@ -13,22 +13,28 @@ const executable = fileURLToPath(import.meta.url);
 const phase = result => result.controller?.phase ?? result.phase;
 
 export async function workflowChild(configuration) {
+  check(configuration.options&&typeof configuration.options==='object'&&!Object.hasOwn(configuration.options,'env')&&!Object.hasOwn(configuration.options,'boundaries'),'Workflow child identity comes from its explicit process environment');
+  const options={...configuration.options,env:process.env};
   const boundaries = workflowFixtureBoundaries(configuration.boundaries);
   if (configuration.mode === 'hosted-execution-probe') {
     const { hostedController } = await import('../hosted-controller.mjs');
-    return { controller: await hostedController(configuration.options, boundaries) };
+    return { controller: await hostedController(options, boundaries) };
   }
   check(configuration.mode === undefined, 'Unknown workflow proof process mode');
   const { workflowEntrypoint } = await import('../workflow-entrypoint.mjs');
-  return workflowEntrypoint(configuration.options, boundaries);
+  return workflowEntrypoint(options, boundaries);
 }
 
 export async function workflowInvocation({ output, name, configuration, timeoutMs = 30000, signal }) {
   await privateProofDirectory(output);
   const config = join(output, `${name}-configuration.private.json`);
-  await writeFile(config, canonical(configuration), { flag: 'wx', mode: 0o600 });
-  const process = await recordedProcess({ output, name, args: [executable, '--child', config], timeoutMs, signal });
-  return { ...process, result: process.exitCode === 0 ? parseJSON(Buffer.from(process.stdoutText), 16 * 1024 * 1024) : null };
+  const {env={},...options}=configuration.options;
+  check(env&&typeof env==='object'&&!Array.isArray(env)&&Object.values(env).every(value=>typeof value==='string'),'Explicit string-valued workflow child environment required');
+  const environmentPath=`${name}-environment.private.json`,environmentBytes=Buffer.from(canonical({schema:'shop.workflow-proof-environment/v1',environment:env}));
+  await writeFile(join(output,environmentPath),environmentBytes,{flag:'wx',mode:0o600});
+  await writeFile(config, canonical({...configuration,options}), { flag: 'wx', mode: 0o600 });
+  const process = await recordedProcess({ output, name, args: [executable, '--child', config],env, timeoutMs, signal });
+  return { ...process,environment:{path:environmentPath,bytes:environmentBytes.length,sha256:digest({schema:'shop.workflow-proof-environment/v1',environment:env})}, result: process.exitCode === 0 ? parseJSON(Buffer.from(process.stdoutText), 16 * 1024 * 1024) : null };
 }
 
 export function workflowIdentityProbes(configuration) {

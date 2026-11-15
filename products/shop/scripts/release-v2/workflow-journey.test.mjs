@@ -8,7 +8,7 @@ import { recordProofBoundary } from './testing/proof-observations.mjs';
 import { journey } from './journey.mjs';
 import { scopedFixture } from './testing/scoped-fixtures.mjs';
 import { createWorkflowJourneyFixture, privateProofDirectory, recordedProcess, syntheticRetainedRunner, workflowApiBridge, workflowFixtureBoundaries } from './testing/workflow-journey-fixture.mjs';
-import { runWorkflowJourney, runWorkflowUpdate, workflowInvocation } from './testing/workflow-journey.mjs';
+import { runWorkflowJourney, runWorkflowUpdate, workflowInvocation, workflowIdentityProbes } from './testing/workflow-journey.mjs';
 
 async function privateRoot(t) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'shop-workflow-journey-')));
@@ -133,4 +133,21 @@ test('fresh source entrypoints complete an initial release and update only store
   assert.equal(fixture.service.reports.length, 2);
   assert.equal(updated.evidence.realAwsQualified, false);
   passed = true;
+});
+
+
+test('workflow child rejects serialized identity before any transport and accepts identity only from its explicit runtime environment',async t=>{
+  const output=process.env.SHOP_WORKFLOW_PROOF_ROOT?await realpath(await mkdtemp(join(process.env.SHOP_WORKFLOW_PROOF_ROOT,'identity-boundary-'))):await privateRoot(t),executable=new URL('./testing/workflow-journey.mjs',import.meta.url).pathname,configuration=join(output,'injected-child.private.json');
+  await writeFile(configuration,JSON.stringify({options:{env:{GITHUB_SHA:'1'.repeat(40)}},boundaries:{apiOrigin:'http://127.0.0.1:1/'}}),{mode:0o600});
+  const denied=await recordedProcess({output,name:'serialized-identity-denied',args:[executable,'--child',configuration]});assert.notEqual(denied.exitCode,0);assert.match(denied.stderrText,/identity comes from its explicit process environment/);assert(!denied.stderrText.includes('ECONNREFUSED'));
+  const fixture=await createWorkflowJourneyFixture(t,{output:join(output,'fixture')}),calls=fixture.service.transcript.length,broker=fixture.service.brokerCalls.length;
+  const configurationWithRuntime={...fixture.configuration,options:{...fixture.configuration.options,command:'plan'}},accepted=await workflowInvocation({output,name:'actual-runtime-plan',configuration:configurationWithRuntime});assert.equal(accepted.exitCode,0,accepted.stderrText);assert.equal(accepted.result.controller.phase,'plan-admitted');
+  const serialized=JSON.parse(await readFile(join(output,'actual-runtime-plan-configuration.private.json')));assert(!Object.hasOwn(serialized.options,'env'));assert(!Object.hasOwn(serialized.options,'boundaries'));
+  const environment=await readFile(join(output,accepted.environment.path));assert.equal(sha256(environment),accepted.environment.sha256);assert.deepEqual(JSON.parse(environment).environment,fixture.configuration.options.env);
+  for(const probe of workflowIdentityProbes(configurationWithRuntime).filter(item=>item.name!=='wrong-installed-root-pin')){
+    const result=await workflowInvocation({output,name:`runtime-${probe.name}`,configuration:probe.configuration});assert.notEqual(result.exitCode,0,probe.name);assert.equal(result.signal,null);assert.equal(result.timedOut,false);assert.equal(result.reaped,true);
+    const options=JSON.parse(await readFile(join(output,`runtime-${probe.name}-configuration.private.json`))).options;assert(!Object.hasOwn(options,'env'));
+    const recorded=JSON.parse(await readFile(join(output,result.environment.path)));assert.deepEqual(recorded.environment,probe.configuration.options.env);assert.equal(fixture.service.transcript.length,calls);assert.equal(fixture.service.brokerCalls.length,broker);
+  }
+  assert.equal(fixture.service.transcript.length,calls);assert.equal(fixture.service.brokerCalls.length,broker);
 });

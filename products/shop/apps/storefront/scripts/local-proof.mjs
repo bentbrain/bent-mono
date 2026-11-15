@@ -13,6 +13,7 @@ import { browserJourney } from "./browser-journey.mjs";
 import { imageService } from "./image-service-fixture.mjs";
 import { createShopifyFixture } from "./shopify-fixture.mjs";
 import { drainJourneyWork } from "../../../scripts/testing/linux-journey.mjs";
+import { saveHostedFailure } from "../../../scripts/release-v2/hosted-diagnostics.mjs";
 import { verifyPortableBundle } from "../../../scripts/release-v2/portable-bundle.mjs";
 import { verifyLinuxCandidate, verifyOciCandidatePayload } from "../../../scripts/testing/linux-candidate.mjs";
 import {
@@ -567,6 +568,9 @@ try {
       blocked,
     }),
   );
+} catch (error) {
+  await saveHostedFailure(error, resolve(artifact, "diagnostics"));
+  throw error;
 } finally {
   releaseImages();
   let drain, drainFailure;

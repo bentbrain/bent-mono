@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { canonical, pathName, sha256 } from '../release-v2/data.mjs';
 import { createNativeOciFixture as fixture } from './native-v5-oci-fixture.mjs';
 import { createNativeV5Oci, inspectBaseLayer, nativeV5Layer, verifyNativeV5OciReceipt } from './native-v5-oci.mjs';
 import { createNativeV5Handler, runNativeV5Runtime } from '../../workers/video-renderer/aws-lambda/native-v5-runtime.mjs';
@@ -37,6 +38,95 @@ test('base tar inspector rejects truncation, bad checksums and unsafe member pat
   const changed = Buffer.from(layer); changed[0] ^= 1; assert.throws(() => inspectBaseLayer(changed), /checksum/);
   assert.throws(() => nativeV5Layer([{ path: 'opt/shop/../a', bytes: Buffer.from('a'), mode: 0o644 }]), /relative path/);
 });
+// Model base records independently from the stricter application/locator names.
+function baseLayer(records) {
+  return Buffer.concat([...records.map(({ path, bytes = Buffer.alloc(0), kind = '0', link = '', mode = 0o644 }) => {
+    const encoded = nativeV5Layer([{ path: 'opt/shop/member', bytes, mode }]);
+    const record = Buffer.from(encoded.subarray(-1024 - 512 - Math.ceil(bytes.length / 512) * 512, -1024));
+    const header = record.subarray(0, 512);
+    header.fill(0, 0, 100); header.write(path, 0, 100);
+    header.fill(0, 345, 500); header.write(kind, 156, 1);
+    header.fill(0, 157, 257); header.write(link, 157, 100);
+    header.fill(32, 148, 156);
+    header.write(`${[...header].reduce((sum, byte) => sum + byte, 0).toString(8).padStart(6, '0')}\0 `, 148);
+    return record;
+  }), Buffer.alloc(1024)]);
+}
+
+test('base tar accepts Debian multiarch filenames while portable locators remain strict', () => {
+  const path = 'var/lib/dpkg/info/gcc-14-base:amd64.list', bytes = Buffer.from('/usr/share/doc/gcc-14-base\n');
+  const entries = inspectBaseLayer(baseLayer([{ path, bytes }]));
+  assert.deepEqual(entries.get(path), { kind: '0', mode: 0o644, sha256: sha256(bytes), bytes: bytes.length });
+  assert.throws(() => pathName(path), /Malformed relative path/);
+  for (const path of ['usr/share/name#part', 'usr/share/name?part', 'usr/share/name%2Fpart']) {
+    assert.ok(inspectBaseLayer(baseLayer([{ path, bytes }])).has(path));
+    assert.throws(() => pathName(path), /Malformed relative path/);
+  }
+});
+
+test('base tar keeps POSIX member confinement, PAX paths and whiteout semantics', () => {
+  for (const path of ['/escape', '../escape', 'a/../escape', 'a/./escape', 'a//escape', 'a\\escape', 'a\nescape']) {
+    assert.throws(() => inspectBaseLayer(baseLayer([{ path }])), /relative path/);
+  }
+  const paxPath = 'var/lib/dpkg/info/libc6:amd64.list', data = `path=${paxPath}\n`;
+  let length = Buffer.byteLength(data) + 2;
+  while (Buffer.byteLength(`${length} ${data}`) !== length) length = Buffer.byteLength(`${length} ${data}`);
+  const entries = inspectBaseLayer(baseLayer([
+    { path: 'pax-header', kind: 'x', bytes: Buffer.from(`${length} ${data}`) },
+    { path: 'placeholder', bytes: Buffer.from('libc6') },
+  ]));
+  assert.ok(entries.has(paxPath)); assert.equal(entries.has('placeholder'), false);
+  inspectBaseLayer(baseLayer([{ path: 'var/lib/dpkg/info/.wh.libc6:amd64.list' }]), entries);
+  assert.equal(entries.has(paxPath), false);
+  entries.set(paxPath, { kind: '0' }); entries.set('var/lib/dpkg/info/child/file', { kind: '0' });
+  entries.set('var/lib/dpkg/elsewhere', { kind: '0' });
+  inspectBaseLayer(baseLayer([{ path: 'var/lib/dpkg/info/.wh..wh..opq' }]), entries);
+  assert.deepEqual([...entries.keys()], ['var/lib/dpkg/elsewhere']);
+});
+
+function fixtureWithBaseRecords(records) {
+  const input = fixture(), documents = new Map(), layer = baseLayer(records);
+  const put = (mediaType, bytes) => {
+    const digest = sha256(bytes); documents.set(`base/blobs/sha256/${digest}`, bytes);
+    return { mediaType, digest: `sha256:${digest}`, size: bytes.length };
+  };
+  const config = put('application/vnd.oci.image.config.v1+json', Buffer.from(canonical({
+    architecture: 'amd64', os: 'linux', rootfs: { type: 'layers', diff_ids: [`sha256:${sha256(layer)}`] },
+  })));
+  const manifest = put('application/vnd.oci.image.manifest.v1+json', Buffer.from(canonical({
+    schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config,
+    layers: [put('application/vnd.oci.image.layer.v1.tar', layer)],
+  })));
+  documents.set('base/index.json', Buffer.from(canonical({ schemaVersion: 2, manifests: [{ ...manifest, platform: { architecture: 'amd64', os: 'linux' } }] })));
+  documents.set('base/oci-layout', Buffer.from(canonical({ imageLayoutVersion: '1.0.0' })));
+  input.base = {
+    artifact: { component: 'native', format: 'oci-layout', root: 'base', entrypoint: 'base/index.json',
+      files: [...documents].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })) },
+    readFile: async ref => documents.get(ref.path), imageDigest: manifest.digest.slice(7), configDigest: config.digest.slice(7),
+  };
+  return input;
+}
+
+test('base runtime resolves confined POSIX links and preserves directory, cycle and escape checks', async () => {
+  const records = [
+    { path: 'usr', kind: '5', mode: 0o755 },
+    { path: 'usr/bin', kind: '5', mode: 0o755 },
+    { path: 'bin/sh', kind: '2', link: '../usr/bin/sh:amd64' },
+    { path: 'usr/bin/sh:amd64', mode: 0o755, bytes: Buffer.from('shell') },
+    { path: 'usr/bin/dirname', kind: '1', link: 'usr/bin/coreutils:amd64' },
+    { path: 'usr/bin/coreutils:amd64', mode: 0o755, bytes: Buffer.from('dirname') },
+    { path: 'etc/ssl/certs/ca-certificates.crt', kind: '2', link: '/usr/share/ca-certificates/root.crt' },
+    { path: 'usr/share/ca-certificates/root.crt', bytes: Buffer.from('certificate') },
+  ];
+  const result = await createNativeV5Oci(fixtureWithBaseRecords(records));
+  assert.equal(result.receipt.runtimeQualified, false); assert.equal(result.receipt.awsImageQualified, false);
+  const changed = (path, change) => records.map(record => record.path === path ? { ...record, ...change } : record);
+  await assert.rejects(createNativeV5Oci(fixtureWithBaseRecords(changed('bin/sh', { link: '../../escape' }))), /relative path/);
+  await assert.rejects(createNativeV5Oci(fixtureWithBaseRecords(changed('bin/sh', { link: 'sh' }))), /link cycle/);
+  await assert.rejects(createNativeV5Oci(fixtureWithBaseRecords(changed('usr/bin', { mode: 0o644 }))), /not traversable/);
+  await assert.rejects(createNativeV5Oci(fixtureWithBaseRecords(changed('usr/bin/sh:amd64', { mode: 0o644 }))), /runtime closure/);
+});
+
 test('native runtime retains v5, v4/video and failure handler dispatch', async () => {
   const calls = [], route = createNativeV5Handler(Object.fromEntries(['v5', 'app', 'failure'].map(kind => [kind, async event => { calls.push(kind); return event; }])));
   for (const event of [{ kind: 'product-image-v5' }, { kind: 'product-image' }, { kind: 'story-video' }, { Records: [] }]) assert.deepEqual(await route(event, {}), event);

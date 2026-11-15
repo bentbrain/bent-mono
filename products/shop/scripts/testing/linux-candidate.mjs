@@ -298,6 +298,24 @@ export async function packageShopPortableBundle({ candidate, nativeOci, destinat
   return bundle;
 }
 
+export async function copyNativeRuntimeSource(runtime) {
+  const src = "products/shop/workers/video-renderer";
+  for (const file of ["src/renderer.mjs", "src/geometry.mjs", "src/product-mockup-geometry.mjs", "src/product-image-renderer.mjs", "src/lifestyle.mjs", "src/lifestyle-template.mjs", "src/version.mjs", "aws-lambda/app-entry.mjs", "aws-lambda/failure-entry.mjs", "aws-lambda/product-image-handler.mjs", "aws-lambda/native-v5-runtime.mjs", "aws-lambda/native-runtime-profile.mjs", "aws-lambda/product-image-v5-handler.mjs", "aws-lambda/app-handler.mjs", "aws-lambda/protected-config.mjs", "aws-lambda/config.mjs", "aws-lambda/contract.mjs", "aws-lambda/app-environment.mjs", "aws-lambda/variants.mjs"])
+    await copy(join(checkout, src, file), join(runtime, src, file));
+  for (const file of ["products/shop/packages/contracts/package.json", "products/shop/packages/contracts/src/product-mockup-geometry.js"])
+    await copy(join(checkout, file), join(runtime, file));
+}
+
+export async function copyNativeRuntimeDependencies(runtime, capsule) {
+  const src = "products/shop/workers/video-renderer";
+  const dependencies = [], installed = new Map(), target = nativeHostTarget();
+  for (const name of ["@napi-rs/canvas", "@fontsource-variable/geist-mono", "sharp"])
+    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed, false, target);
+  await verifyProductImageV5Capsule(capsule);
+  await materializeTree(join(capsule, "node_modules"), join(runtime, "node_modules"));
+  return dependencies;
+}
+
 export async function packageLinuxCandidate(destination) {
   assertLinuxRuntime();
   const output = resolve(destination);
@@ -309,10 +327,7 @@ export async function packageLinuxCandidate(destination) {
   await writeFile(join(runtime, "package.json"), json({ private: true, type: "module" }), { mode: 0o600 });
   await execute(process.execPath, [fileURLToPath(new URL("./product-image-v5-capsule.mjs", import.meta.url)), join(output, "native-image")], { cwd: checkout, maxBuffer: 1024 * 1024 });
   const src = "products/shop/workers/video-renderer";
-  for (const file of ["src/renderer.mjs", "src/geometry.mjs", "src/product-mockup-geometry.mjs", "src/product-image-renderer.mjs", "src/lifestyle.mjs", "src/lifestyle-template.mjs", "src/version.mjs", "aws-lambda/app-entry.mjs", "aws-lambda/failure-entry.mjs", "aws-lambda/product-image-handler.mjs", "aws-lambda/native-v5-runtime.mjs", "aws-lambda/app-handler.mjs", "aws-lambda/protected-config.mjs", "aws-lambda/config.mjs", "aws-lambda/contract.mjs", "aws-lambda/app-environment.mjs", "aws-lambda/variants.mjs"])
-    await copy(join(checkout, src, file), join(runtime, src, file));
-  for (const file of ["products/shop/packages/contracts/package.json", "products/shop/packages/contracts/src/product-mockup-geometry.js"])
-    await copy(join(checkout, file), join(runtime, file));
+  await copyNativeRuntimeSource(runtime);
   for (const file of ["tee-black-cutout-v1.png", "tee-white-cutout-v1.png", "tote-black-print-bar-1001.webp", "tote-cream-print-bar-1001.webp"])
     await copy(join(checkout, "products/shop/apps/web/public/mockups", file), join(runtime, "assets", file));
   for (const file of ["tee-black-cutout-v1.png", "tee-white-cutout-v1.png", "tote-black-print-bar-1001.webp", "tote-cream-print-bar-1001.webp"])
@@ -320,9 +335,7 @@ export async function packageLinuxCandidate(destination) {
   for (const [file, source] of [["lifestyle-white.png", "featured-blank-white.png"], ["lifestyle-black.png", "featured-blank-black.png"], ["lifestyle.json", "featured.json"],
     ["featured-mask-white.svg", "featured-mask-white.svg"], ["featured-mask-black.svg", "featured-mask-black.svg"]])
     await copy(join(checkout, "products/shop/assets/lifestyle", source), join(runtime, src, "product-assets", file));
-  const dependencies = [], installed = new Map(), target = nativeHostTarget();
-  for (const name of ["@napi-rs/canvas", "@fontsource-variable/geist-mono", "sharp"])
-    await copyDependency(name, join(checkout, src, "package.json"), runtime, dependencies, installed, false, target);
+  const dependencies = await copyNativeRuntimeDependencies(runtime, join(output, "native-image"));
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas" && dep.version === recipe.canvas));
   assert.ok(dependencies.some(dep => dep.name === "@napi-rs/canvas-linux-x64-gnu" && dep.version === recipe.canvas));
   const binaries = await packageExecutables(runtime, join(output, "native-image"));
