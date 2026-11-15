@@ -125,6 +125,53 @@ function fixtureWithBaseRecords(records) {
   return input;
 }
 
+test('hard links retain inode bytes and modes after target whiteouts and replacement', () => {
+  const shell = Buffer.from('original executable'), replacement = Buffer.from('replacement executable');
+  const records = [
+    { path: 'usr/bin/shell', bytes: shell, mode: 0o755 },
+    { path: 'bin/sh', kind: '1', link: 'usr/bin/shell' },
+    { path: 'usr/bin/dirname', bytes: Buffer.from('utility'), mode: 0o755 },
+    { path: 'etc/ssl/certs/ca-certificates.crt', bytes: Buffer.from('certificate') },
+  ];
+  for (const upper of [
+    [{ path: 'usr/bin/.wh.shell' }],
+    [{ path: 'usr/bin/shell', bytes: replacement, mode: 0o644 }],
+    [{ path: 'usr/bin/shell', kind: '5', mode: 0o755 }],
+  ]) {
+    const entries = inspectBaseLayer(baseLayer(records));
+    inspectBaseLayer(baseLayer(upper), entries);
+    const file = verifyNativeV5BaseClosure(entries).runtime.find(item => item.path === 'bin/sh');
+    assert.equal(file.sha256, sha256(shell)); assert.equal(file.mode, 0o755);
+    assert.equal(entries.get('bin/sh').kind, '1', 'Application-layer policy must still distinguish tar hard links');
+  }
+  const entries = inspectBaseLayer(baseLayer(records));
+  inspectBaseLayer(baseLayer([{ path: 'bin/.wh.sh' }]), entries);
+  assert.equal(entries.get('usr/bin/shell').sha256, sha256(shell)); assert.equal(entries.has('bin/sh'), false);
+});
+
+test('hard-link chains, forward targets and symlink inodes remain confined and bounded', () => {
+  const bytes = Buffer.from('original'), shell = { path: 'usr/bin/shell', bytes, mode: 0o755 };
+  for (const links of [
+    [{ path: 'bin/sh', kind: '1', link: 'usr/bin/shell' }, shell],
+    [shell, { path: 'alias', kind: '1', link: 'usr/bin/shell' }, { path: 'bin/sh', kind: '1', link: 'alias' }],
+    [shell, { path: 'usr/bin/symlink', kind: '2', link: 'shell' }, { path: 'usr/bin/linked-symlink', kind: '1', link: 'usr/bin/symlink' }, { path: 'bin/sh', kind: '2', link: '../usr/bin/linked-symlink' }],
+  ]) {
+    const entries = inspectBaseLayer(baseLayer([...links,
+      { path: 'usr/bin/dirname', mode: 0o755, bytes }, { path: 'etc/ssl/certs/ca-certificates.crt', bytes }]));
+    inspectBaseLayer(baseLayer([{ path: 'usr/bin/.wh.symlink' }]), entries);
+    assert.equal(verifyNativeV5BaseClosure(entries).runtime.find(item => item.path === 'bin/sh').sha256, sha256(bytes));
+  }
+  for (const records of [
+    [{ path: 'link', kind: '1', link: '../escape' }],
+    [{ path: 'link', kind: '1', link: 'missing' }],
+    [{ path: 'a', kind: '1', link: 'b' }, { path: 'b', kind: '1', link: 'a' }],
+    [{ path: 'directory', kind: '5', mode: 0o755 }, { path: 'link', kind: '1', link: 'directory' }],
+  ]) assert.throws(() => inspectBaseLayer(baseLayer(records)), /relative path|hard link|link cycle/);
+  const entries = inspectBaseLayer(baseLayer([{ path: 'existing', bytes }])), before = new Map(entries);
+  assert.throws(() => inspectBaseLayer(baseLayer([{ path: 'existing', kind: '1', link: 'existing' }]), entries), /cannot reference itself/);
+  assert.deepEqual(entries, before);
+});
+
 test('base runtime resolves confined POSIX links and preserves directory, cycle and escape checks', async () => {
   const records = [
     { path: 'usr', kind: '5', mode: 0o755 },

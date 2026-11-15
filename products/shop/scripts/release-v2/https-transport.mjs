@@ -1,6 +1,7 @@
 import { Agent, request as httpsRequest } from 'node:https';
 import { check, digest, sha256 } from './data.mjs';
 import { assertPolicy, protocolByteLimit } from './provider-protocol-builders.mjs';
+import { isNativeFixtureObjectKey } from './native-fixture-protocol.mjs';
 
 export function validateDispatchTarget(request, policy) {
   assertPolicy(policy);
@@ -8,7 +9,13 @@ export function validateDispatchTarget(request, policy) {
   const url = new URL(request.url);
   check(url.protocol === 'https:' && url.href === request.url && !url.username && !url.password && !url.hash && !url.port && url.host === request.headers?.host, 'Exact protected HTTPS origin required');
   const root = `/client/v4/accounts/${policy.cloudflareAccountId}/workers`, paths = [];
-  const fixture=policy.nativeQualification?.fixtureLifecycle,fixtureQuery=fixture&&url.pathname===`/client/v4/accounts/${policy.cloudflareAccountId}/d1/database/${fixture.databaseId}/query`,fixtureObject=fixture&&[fixture.artworkBucket,fixture.videoBucket].some(bucket=>url.pathname.startsWith(`/client/v4/accounts/${policy.cloudflareAccountId}/r2/buckets/${bucket}/objects/`));
+  const fixture=policy.nativeQualification?.fixtureLifecycle,fixtureQuery=fixture&&url.pathname===`/client/v4/accounts/${policy.cloudflareAccountId}/d1/database/${fixture.databaseId}/query`;
+  const fixtureObject = fixture && [fixture.artworkBucket, fixture.videoBucket].some(bucket => {
+    const prefix = `/client/v4/accounts/${policy.cloudflareAccountId}/r2/buckets/${bucket}/objects/`;
+    return url.pathname.startsWith(prefix) && isNativeFixtureObjectKey(url.pathname.slice(prefix.length));
+  });
+  const serving = policy.nativeServing, servingMapping = serving && `/2015-03-31/event-source-mappings/${serving.failureMapping.id}`;
+  const servingConfiguration = serving && [serving.mainResource, serving.failureResource].some(name => url.pathname === `/2015-03-31/functions/${name}/configuration`);
   if (request.service === 'cloudflare') {
     check(url.origin === 'https://api.cloudflare.com', 'Cloudflare origin differs');
     for (const worker of policy.workers) paths.push(`${root}/scripts/${worker.name}`);
@@ -21,7 +28,8 @@ export function validateDispatchTarget(request, policy) {
     check(policy.functions.some(fn => {
       const path = `/2015-03-31/functions/${fn.name}`;
       return [path, `${path}/code`, `${path}/versions`, `${path}/aliases`, ...(policy.nativeQualification?.resources.some(resource => resource.name === fn.name) ? [`${path}/invocations`, `/2019-09-30/functions/${fn.name}/concurrency`, `/2019-09-25/functions/${fn.name}/event-invoke-config`] : [])].includes(url.pathname) || fn.aliases.some(alias => url.pathname === `${path}/aliases/${alias}`) || policy.nativeQualification?.resources.some(resource => resource.name === fn.name && resource.eventSourceMapping && url.pathname === `/2015-03-31/event-source-mappings/${resource.eventSourceMapping.id}`);
-    }) && [...url.searchParams.keys()].every(key => ['Qualifier', 'MaxItems', 'Marker'].includes(key)), 'Lambda resource or query differs');
+    }) || servingConfiguration || url.pathname === servingMapping, 'Lambda resource differs');
+    check([...url.searchParams.keys()].every(key => ['Qualifier', 'MaxItems', 'Marker'].includes(key)), 'Lambda query differs');
   } else if (request.service === 'ecr') {
     check(url.origin === `https://api.ecr.${policy.region}.amazonaws.com` && url.pathname === '/' && !url.search && request.method === 'POST' && /^AmazonEC2ContainerRegistry_V20150921\.(?:BatchCheckLayerAvailability|InitiateLayerUpload|UploadLayerPart|CompleteLayerUpload|PutImage|BatchGetImage)$/.test(request.headers['x-amz-target'] ?? ''), 'Exact protected ECR target required');
   } else if (request.service === 's3') {
@@ -34,6 +42,9 @@ export function validateDispatchTarget(request, policy) {
   check(new Set([...url.searchParams.keys()]).size === [...url.searchParams.keys()].length, 'Duplicate dispatch query');
   const query = Object.fromEntries(url.searchParams), numericPage = /^[1-9][0-9]{0,2}$/.test(query.page ?? '') && Number(query.page) <= 64;
   const operationShapes = {
+    'lambda.serving-configure': request.method === 'PUT' && !url.search && servingConfiguration,
+    'lambda.serving-event-mapping': request.method === 'GET' && !url.search && url.pathname === servingMapping,
+    'lambda.serving-update-event-mapping': request.method === 'PUT' && !url.search && url.pathname === servingMapping,
     'native.fixture-query':request.method==='POST'&&!url.search&&fixtureQuery,
     'native.fixture-read':request.method==='POST'&&!url.search&&fixtureQuery,
     'native.fixture-object-get':request.method==='GET'&&!url.search&&fixtureObject,
@@ -55,7 +66,7 @@ export function validateDispatchTarget(request, policy) {
     'worker.deployments': request.method === 'GET' && url.pathname.endsWith('/deployments') && !url.search,
     'worker.settings': request.method === 'GET' && url.pathname.endsWith('/settings') && !url.search,
     'worker.content': request.method === 'GET' && url.pathname.endsWith('/content/v2') && !url.search,
-    'worker.upload': request.method === 'POST' && url.pathname.endsWith('/versions') && (!url.search||url.search==='?bindings_inherit=strict'&&policy.workers.some(worker=>worker.bootstrapMetadata&&url.pathname.includes(`/scripts/${worker.name}/`))),
+    'worker.upload': request.method === 'POST' && url.pathname.endsWith('/versions') && (!url.search||url.search==='?bindings_inherit=strict'&&policy.workers.some(worker=>(worker.bootstrapMetadata||worker.nativeServingMetadata)&&url.pathname===`${root}/scripts/${worker.name}/versions`)),
     'worker.activate': request.method === 'POST' && url.pathname.endsWith('/deployments') && !url.search,
     'assets.session': request.method === 'POST' && url.pathname.endsWith('/assets-upload-session') && !url.search,
     'assets.upload': request.method === 'POST' && url.pathname.endsWith('/workers/assets/upload') && query.base64 === 'true' && Object.keys(query).length === 1,
@@ -73,7 +84,7 @@ export function validateDispatchTarget(request, policy) {
     'report.statuses': request.method === 'GET' && numericPage && query.per_page === '100' && Object.keys(query).length === 2,
     'report.success': request.method === 'POST' && !url.search
   };
-  check(operationShapes[request.operation] === true && request.operation.startsWith(request.service === 'cloudflare' ? request.operation.startsWith('assets.') ? 'assets.' : request.operation === 'native.observation' ? 'native.' : request.operation === 'work.query' ? 'work.' : 'worker.' : request.service === 's3' ? 'store.' : request.service === 'github' ? 'report.' : request.service === 'ecr' ? 'ecr.' : 'lambda.'), 'Dispatch operation, target or query differs');
+  check(operationShapes[request.operation] === true && request.operation.startsWith(request.service === 'cloudflare' ? request.operation.startsWith('assets.') ? 'assets.' : request.operation.startsWith('native.') ? 'native.' : request.operation === 'work.query' ? 'work.' : 'worker.' : request.service === 's3' ? 'store.' : request.service === 'github' ? 'report.' : request.service === 'ecr' ? 'ecr.' : 'lambda.'), 'Dispatch operation, target or query differs');
   const bytes = Buffer.from(request.bodyBase64, 'base64');
   check(bytes.length <= protocolByteLimit && bytes.toString('base64') === request.bodyBase64 && sha256(bytes) === request.bodySha256 && request.headers['content-length'] === String(bytes.length), 'Dispatch serialized bytes differ');
   check(typeof request.authorizationDigest === 'string' && /^[a-f0-9]{64}$/.test(request.authorizationDigest) && typeof request.headers.authorization === 'string', 'Protected provider authorization required');

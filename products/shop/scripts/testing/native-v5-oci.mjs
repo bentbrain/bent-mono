@@ -150,11 +150,25 @@ export function inspectBaseLayer(bytes, entries = new Map(), limits = {}) {
   for (const [path, item] of entries) walk(baseMemberPath(path, bound), true).item = item;
   for (const path of whiteouts) { const parts = path.split('/'), leaf = parts.pop(); walk(parts.join('/'))?.children.delete(leaf); }
   for (const path of opaque) walk(path)?.children.clear();
+  const deferredLinks = [], lookup = { get: path => walk(path)?.item };
+  const bindHardLink = item => {
+    // A hard link owns the same inode, not a live reference to its old pathname.
+    // Layer replacement unlinks that pathname without changing surviving links.
+    const inode = baseFile(lookup, hardLinkPath(item.link), { traversable: false, followFinalSymlink: false, resolvePending: true });
+    if (!inode) return false;
+    check(inode.kind === '0' || inode.kind === '2', 'Base hard link must reference a non-directory inode');
+    item.inode = Object.freeze({ ...inode }); return true;
+  };
   for (const [path, item] of additions) {
+    if (item.kind === '1') {
+      check(hardLinkPath(item.link) !== path, 'Base hard link cannot reference itself');
+      if (!bindHardLink(item)) deferredLinks.push(item);
+    }
     const current = walk(path, true, true);
     if (item.kind !== '5') current.children.clear();
     current.item = item;
   }
+  for (const item of deferredLinks) check(bindHardLink(item), 'Base hard link target is missing');
   const result = new Map(), stack = [{ path: '', current: root }];
   while (stack.length) {
     const { path, current } = stack.pop();
@@ -166,21 +180,35 @@ export function inspectBaseLayer(bytes, entries = new Map(), limits = {}) {
   baseWork.set(entries, work); return entries;
 }
 
-function baseFile(entries, input) {
+function hardLinkPath(link) {
+  baseText(link);
+  return baseMemberPath(posix.normalize(link.startsWith('/') ? link.replace(/^\/+/, '') : link));
+}
+
+function baseFile(entries, input, { traversable = true, followFinalSymlink = true, resolvePending = false } = {}) {
   let path = baseMemberPath(input);
   for (let count = 0; count < 32; count++) {
-    const parts = path.split('/'); let redirected = false;
+    const parts = path.split('/'); let redirected = false, resolved;
     for (let index = 1; index <= parts.length; index++) {
-      const key = parts.slice(0, index).join('/'), item = entries.get(key);
-      if (item && item.kind === '5') check((item.mode & 0o001) === 0o001, 'Base runtime directory is not traversable by the Lambda user');
-      if (item && ['1', '2'].includes(item.kind)) {
+      const key = parts.slice(0, index).join('/'); let item = entries.get(key);
+      if (item?.kind === '1') {
+        if (item.inode) item = item.inode;
+        else {
+          check(resolvePending, 'Unresolved base hard link');
+          path = posix.normalize(posix.join(hardLinkPath(item.link), ...parts.slice(index)));
+          baseMemberPath(path); redirected = true; break;
+        }
+      }
+      if (traversable && item?.kind === '5') check((item.mode & 0o001) === 0o001, 'Base runtime directory is not traversable by the Lambda user');
+      if (item?.kind === '2' && (followFinalSymlink || index < parts.length)) {
         baseText(item.link);
-        const target = item.link.startsWith('/') ? item.link.replace(/^\/+/, '') : item.kind === '1' ? item.link : posix.join(posix.dirname(key), item.link);
+        const target = item.link.startsWith('/') ? item.link.replace(/^\/+/, '') : posix.join(posix.dirname(key), item.link);
         path = posix.normalize(posix.join(target, ...parts.slice(index))); baseMemberPath(path); redirected = true; break;
       }
       if (item && index < parts.length) check(item.kind === '5', 'Base runtime ancestor is not a directory');
+      resolved = item;
     }
-    if (!redirected) return entries.get(path);
+    if (!redirected) return resolved;
   }
   throw Error('Base runtime link cycle');
 }

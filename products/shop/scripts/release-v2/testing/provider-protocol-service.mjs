@@ -10,7 +10,7 @@ export function transcriptSigner(policy, transform = value => value) {
   const trust = signingTrust({ policy, keys: [{ id: keyId, publicKey: keys.publicKey.export({ format: 'pem', type: 'spki' }) }] });
   const signer = async ({ request, requestDigest, policyDigest, now }) => {
     let credentialHeaders = {};
-    if (request.service === 's3' || request.service === 'lambda') {
+    if (['s3', 'lambda', 'ecr'].includes(request.service)) {
       const date = new Date(now).toISOString().replace(/[:-]|\.[0-9]{3}/g, '');
       const headers = [...Object.keys(request.headers), 'x-amz-content-sha256', 'x-amz-date', 'x-amz-security-token'].sort().join(';');
       credentialHeaders = { 'x-amz-date': date, 'x-amz-content-sha256': request.bodySha256, 'x-amz-security-token': 'transcript-session-token',

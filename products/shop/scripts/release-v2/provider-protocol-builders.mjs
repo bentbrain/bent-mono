@@ -1,7 +1,7 @@
 import { validateServingPolicy, normalizeServingMetadata } from './serving-provider.mjs';
 import { extname } from 'node:path';
 import { matchNativeTemplate, validateNativeQualificationPolicy } from './native-qualification-policy.mjs';
-import { nativeFixtureQueryData, nativeFixtureReadActions } from './native-fixture-protocol.mjs';
+import { nativeFixtureQueryData, nativeFixtureReadActions, isNativeFixtureObjectKey } from './native-fixture-protocol.mjs';
 import { check, canonical, digest, pathName, sha256, same, parseJSON } from './data.mjs';
 
 export const protocolByteLimit = 256 * 1024 * 1024;
@@ -152,7 +152,7 @@ export function requestBuilders(policy) {
   const ecr = (name, operation, target, body) => wire(policy, 'ecr', operation, 'POST', `https://api.ecr.${policy.region}.amazonaws.com/`, { registryId: policy.awsAccountId, repositoryName: repository(name), ...body }, { 'content-type': 'application/x-amz-json-1.1', 'x-amz-target': `AmazonEC2ContainerRegistry_V20150921.${target}` });
   const isolated = name => { check(policy.nativeQualification?.resources.some(resource => resource.name === name), 'Function outside isolated native qualification scope'); return fn(name); };
   const fixturePolicy=()=>{check(policy.nativeQualification?.fixtureLifecycle,'Pinned real native fixture lifecycle required');return policy.nativeQualification.fixtureLifecycle;};
-  const fixtureObject=(bucket,key)=>{const fixture=fixturePolicy();check([fixture.artworkBucket,fixture.videoBucket].includes(bucket)&&typeof key==='string'&&/^(?:designs\/[a-f0-9-]{36}\/(?:artwork\/[a-f0-9]{64}|product-images\/v[45]\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white-flat\.webp)|story-videos\/v7\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white\.mp4)$/.test(key),'Exact owned native fixture object key required');return `${cfOrigin}/r2/buckets/${bucket}/objects/${key}`;};
+  const fixtureObject=(bucket,key)=>{const fixture=fixturePolicy();check([fixture.artworkBucket,fixture.videoBucket].includes(bucket)&&isNativeFixtureObjectKey(key),'Exact owned native fixture object key required');return `${cfOrigin}/r2/buckets/${bucket}/objects/${key}`;};
   return Object.freeze({
     nativeFixtureQuery:(action,params)=>{const fixture=fixturePolicy(),body=nativeFixtureQueryData(action,params);return wire(policy,'cloudflare',nativeFixtureReadActions.includes(action)?'native.fixture-read':'native.fixture-query','POST',`${cfOrigin}/d1/database/${fixture.databaseId}/query`,body,json);},
     nativeFixtureObjectGet:(bucket,key)=>wire(policy,'cloudflare','native.fixture-object-get','GET',fixtureObject(bucket,key)),

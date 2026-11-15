@@ -7,7 +7,8 @@ const synthetic = validationEnvironment({});
 process.env.SHOP_PROTECTED_CONFIG_JSON = synthetic.SHOP_PROTECTED_CONFIG_JSON;
 const { awsAccountId: account } = JSON.parse(synthetic.SHOP_PROTECTED_CONFIG_JSON);
 const { appEnvironment } = await import('./app-environment.mjs');
-const { assertAppInvocation } = await import('./app-handler.mjs');
+const { assertAppInvocation, createAppHandler } = await import('./app-handler.mjs');
+const { createProductImageHandler } = await import('./product-image-handler.mjs');
 const { createFailureHandler } = await import('./failure-entry.mjs');
 const { validateProductImageV5Binding } = await import('./product-image-v5-handler.mjs');
 const buildId = 'a'.repeat(64), main = `arn:aws:lambda:ap-southeast-2:${account}:function:qualification-native`;
@@ -82,11 +83,55 @@ test('an installed isolated pair selects only its pinned Development callback Wo
   const binding = { schemaVersion: 1, environment: 'development', apiOrigin: pair.apiOrigin, functionArn: pair.mainFunctionArn,
     qualifiedFunctionArns: [`${pair.mainFunctionArn}:7`], buildId };
   assert.equal(validateProductImageV5Binding(binding).apiOrigin, pair.apiOrigin);
+  assert.equal(appEnvironment('development').apiOrigin, pair.apiOrigin);
+  for (const factory of [createAppHandler, createProductImageHandler, createFailureHandler]) {
+    assert.equal(typeof factory({ apiOrigin: pair.apiOrigin, buildId }), 'function');
+    for (const apiOrigin of [profile.apiOrigin, 'https://example.invalid'])
+      assert.throws(() => factory({ apiOrigin, buildId }));
+  }
   assert.throws(() => validateProductImageV5Binding({ ...binding, functionArn: main }));
   for (const apiOrigin of ['https://example.invalid', `${pair.apiOrigin}/`, 'http://forever-tee-native-qualification-proof.socialqueue.workers.dev',
     'https://forever-tee-native-qualification-proof.foreign.workers.dev', `${pair.apiOrigin}.example.invalid`])
     assert.throws(() => nativeRuntimeProfile({ ...env, SHOP_NATIVE_RUNTIME_PROFILE_JSON: JSON.stringify({ ...profile,
       qualificationPairs: [{ ...pair, apiOrigin }] }) }));
+});
+
+test('canonical callback origins remain accepted by all legacy handler constructors', () => {
+  for (const environment of ['development', 'production']) {
+    const apiOrigin = appEnvironment(environment).apiOrigin;
+    for (const factory of [createAppHandler, createProductImageHandler, createFailureHandler]) {
+      assert.equal(typeof factory({ apiOrigin, environment, buildId }), 'function');
+      assert.throws(() => factory({ apiOrigin: 'https://example.invalid', environment, buildId }));
+    }
+  }
+});
+
+test('isolated v4, video and failure handlers send only to the selected callback origin', async t => {
+  const pair = { mainFunctionArn: `${main}-candidate`, failureFunctionArn: `${main}-candidate-failure`,
+    failureQueueArn: `${profile.failureQueueArn}-candidate`, apiOrigin: 'https://forever-tee-native-qualification-proof.socialqueue.workers.dev' };
+  const env = { ...environment(), AWS_LAMBDA_FUNCTION_NAME: 'qualification-native-candidate',
+    SHOP_NATIVE_RUNTIME_PROFILE_JSON: JSON.stringify({ ...profile, qualificationPairs: [pair] }) };
+  installed(t, env);
+  const id = '11111111-1111-4111-8111-111111111111', calls = [];
+  const common = { schemaVersion: 1, jobId: id, attempt: 1, grant: 'grant.signature', artwork: { sha256: 'a'.repeat(64), size: 1 },
+    baseProductSlug: 'staple-tee', color: 'White', settings: { cropX: .5, cropY: .5, cropZoom: 1, depth: 1, placementX: .3, placementY: .3, placementWidth: .3 } };
+  const image = { ...common, kind: 'product-image', rendererVersion: 'product-images-v4', view: 'flat', printMode: 'recursive',
+    storageKey: `designs/${id}/product-images/v4/${id}/${id}/white-flat.webp` };
+  const video = { ...common, rendererVersion: 'story-video-renderer-v7', storyKey: `story-videos/v7/${id}/${id}/white.mp4` };
+  const send = async url => { calls.push(url); assert.equal(new URL(url).origin, pair.apiOrigin); return new Response(null, { status: 204 }); };
+  const invocation = { ...context(), functionName: env.AWS_LAMBDA_FUNCTION_NAME, invokedFunctionArn: `${pair.mainFunctionArn}:7` };
+  assert.equal((await createProductImageHandler({ apiOrigin: pair.apiOrigin, buildId, send })(image, invocation)).status, 'skipped');
+  assert.equal((await createAppHandler({ apiOrigin: pair.apiOrigin, buildId, send })(video, invocation)).status, 'skipped');
+  process.env.AWS_LAMBDA_FUNCTION_NAME = 'qualification-native-candidate-failure'; process.env.AWS_LAMBDA_FUNCTION_VERSION = '9';
+  const Records = [image, video].map((requestPayload, index) => ({ messageId: `synthetic-${index}`, eventSourceARN: pair.failureQueueArn,
+    body: JSON.stringify({ requestContext: { functionArn: `${pair.mainFunctionArn}:7`, condition: 'RetriesExhausted' }, requestPayload }) }));
+  assert.deepEqual(await createFailureHandler({ apiOrigin: pair.apiOrigin, send })({ Records }, {
+    ...invocation, functionName: process.env.AWS_LAMBDA_FUNCTION_NAME, functionVersion: '9', invokedFunctionArn: `${pair.failureFunctionArn}:9`,
+  }), { batchItemFailures: [] });
+  assert.deepEqual(calls, [
+    `${pair.apiOrigin}/v2/internal/product-image-jobs/${id}/claim`, `${pair.apiOrigin}/v2/internal/story-video-jobs/${id}/claim`,
+    `${pair.apiOrigin}/v2/internal/product-image-jobs/${id}/failure`, `${pair.apiOrigin}/v2/internal/story-video-jobs/${id}/failure`,
+  ]);
 });
 
 test('numbered failure adapter preserves v5 grants and rejects other source functions and queues', async t => {

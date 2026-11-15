@@ -5,6 +5,7 @@ const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const id=seed=>{const hex=sha256(seed);return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`;};
 const settings=Object.freeze({cropX:0.47,cropY:0.62,cropZoom:1.06,depth:1,placementX:0,placementY:0,placementWidth:0.08});
+export const isNativeFixtureObjectKey = key => typeof key === 'string' && /^(?:designs\/[a-f0-9-]{36}\/(?:artwork\/[a-f0-9]{64}|product-images\/v[45]\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white-flat\.webp)|story-videos\/v7\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/white\.mp4)$/.test(key);
 export const nativeFixtureSql=Object.freeze({
   design:"INSERT INTO designs(id,owner_id,artwork_key,content_type,byte_size,artwork_width,artwork_height,sha256,crop_x,crop_y,crop_zoom,placement_x,placement_y,placement_width,depth,status,version,finalized_at,created_at,updated_at) VALUES(?,?,?,'image/png',?,?,?,?,0.47,0.62,1.06,0,0,0.08,1,'ready',1,?,?,?)",
   revision:"INSERT INTO design_revisions(id,design_id,fingerprint,artwork_key,content_type,byte_size,artwork_width,artwork_height,sha256,crop_x,crop_y,crop_zoom,placement_x,placement_y,placement_width,depth,created_at) VALUES(?,?,?,?,'image/png',?,?,?,?,0.47,0.62,1.06,0,0,0.08,1,?)",
