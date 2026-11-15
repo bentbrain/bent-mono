@@ -1229,6 +1229,121 @@ void test('disconnect and revoke-all fence concurrent device redemption and refr
   assert.equal((await f.call('/api/me', { bearer: issued.access_token })).status, 200);
 });
 
+void test('token issuance failures distinguish revoked grants from unrelated server errors', async (t) => {
+  for (const scenario of ['disconnect', 'revoke-all', 'unrelated failure']) {
+    await t.test(scenario, async (t) => {
+      const f = fixture();
+      t.after(async () => {
+        await f.ready;
+        f.store.close();
+      });
+      const owner = await f.account();
+      const device = z
+        .object({ clientId: z.string(), device_code: z.string(), user_code: z.string() })
+        .parse(
+          await (
+            await f.call('/api/connections/start', {
+              method: 'POST',
+              body: { kind: 'personal', projectId: null, parentOrigin: null },
+            })
+          ).json(),
+        );
+      assert.equal(
+        (
+          await f.call('/api/connections/approve', {
+            method: 'POST',
+            cookie: owner.cookie,
+            body: { code: device.user_code, accept: true },
+          })
+        ).status,
+        200,
+      );
+      const prepare = f.store.db.prepare.bind(f.store.db);
+      const digest = crypto.subtle.digest.bind(crypto.subtle);
+      let refreshInserted = false;
+      let interleaved = false;
+      t.mock.method(f.store.db, 'prepare', (sql: string) => {
+        if (scenario === 'unrelated failure' && /^insert into "oauthAccessToken"/i.test(sql))
+          throw new Error('Synthetic unrelated access-token storage failure.');
+        const statement = prepare(sql);
+        if (/^insert into "oauthRefreshToken"/i.test(sql)) {
+          const all = statement.all.bind(statement);
+          t.mock.method(statement, 'all', (...args: Parameters<typeof statement.all>) => {
+            const rows = all(...args);
+            refreshInserted = true;
+            return rows;
+          });
+        }
+        return statement;
+      });
+      t.mock.method(
+        crypto.subtle,
+        'digest',
+        async (...args: Parameters<SubtleCrypto['digest']>) => {
+          if (scenario !== 'unrelated failure' && refreshInserted && !interleaved) {
+            interleaved = true;
+            // Complete the real revocation route during the native token hash await.
+            assert.equal(
+              (
+                await f.call(
+                  scenario === 'revoke-all'
+                    ? '/api/account/revoke-all'
+                    : `/api/account/connections/${device.clientId}`,
+                  {
+                    method: scenario === 'revoke-all' ? 'POST' : 'DELETE',
+                    cookie: owner.cookie,
+                    body: {},
+                  },
+                )
+              ).status,
+              200,
+            );
+            assert.equal(
+              z
+                .object({ count: z.number() })
+                .parse(prepare('SELECT count(*) AS count FROM oauthRefreshToken').get()).count,
+              0,
+            );
+          }
+          return digest(...args);
+        },
+      );
+      const response = await f.call('/api/auth/oauth2/token', {
+        method: 'POST',
+        body: {
+          client_id: device.clientId,
+          device_code: device.device_code,
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          resource: `${service}/api`,
+        },
+      });
+      const revoked = scenario !== 'unrelated failure';
+      assert.equal(refreshInserted, true);
+      assert.equal(interleaved, revoked);
+      assert.equal(response.status, revoked ? 400 : 500);
+      assert.equal(
+        z
+          .object({ disabled: z.number() })
+          .parse(prepare('SELECT disabled FROM oauthClient WHERE clientId=?').get(device.clientId))
+          .disabled,
+        revoked ? 1 : 0,
+      );
+      if (revoked) {
+        assert.equal(
+          z.object({ error: z.string() }).parse(await response.json()).error,
+          'invalid_grant',
+        );
+        assert.equal(
+          z
+            .object({ count: z.number() })
+            .parse(prepare('SELECT count(*) AS count FROM oauthAccessToken').get()).count,
+          0,
+        );
+      }
+    });
+  }
+});
+
 void test('account recovery fences concurrent key issuance from another browser and retains the recovery browser', async (t) => {
   for (let trial = 0; trial < 12; trial++) {
     const f = fixture();
