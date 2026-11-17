@@ -13,6 +13,7 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 | Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
 | Home | home.bent.build | apps/home |
 | Trackmap | trackmap.bent.build | apps/trackmap |
+| Fitness | fitness.bent.build | apps/fitness |
 
 `deployments.json` lists the apps and their deployment settings. Shop and Drive keep their internal packages and services under `products/`.
 
@@ -65,7 +66,7 @@ Before publishing, run the source policy check and Gitleaks, then review content
 
 Each release requires verified source, protected configuration and app-specific qualification. Shop uses paired releases, JP checks exact commits, Toolbar retains browser assets, and Home verifies compatibility between its public app and private card.
 
-The website, Stay, Collage, Drive and Trackmap use Vercel projects with their app directory as the project root and access to the workspace. Their Vercel configuration pins Bun 1.4.4 for installation and builds. The production Deployment Check requires GitHub's `Release qualification`, which passes after every root Quality job succeeds.
+The website, Stay, Collage, Drive, Trackmap and Fitness use Vercel projects with their app directory as the project root and access to the workspace. Their Vercel configuration pins Bun 1.4.4 for installation and builds. The production Deployment Check requires GitHub's `Release qualification`, which passes after every root Quality job succeeds.
 
 Use `bun run release:vercel inspect|stage|promote --app <name> --config <protected-file>` for these applications. Inspection and promotion also require `--deployment <id>`. Staging and promotion require a new `--journal <private-file>`; promotion additionally requires `--qualification <private-file>`. The protected configuration supplies `teamId`, `projectId`, `expectedProductionId` and `requiredCheckId`. Set scoped `VERCEL_TOKEN` and `VERCEL_ORG_ID` credentials through the existing protected operator environment. Keep these files, credentials and journals outside public source.
 

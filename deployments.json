@@ -83,6 +83,15 @@
       "directory": "apps/trackmap",
       "platform": "vercel",
       "project": "trackmap"
+    },
+    {
+      "name": "fitness",
+      "domains": [
+        "fitness.bent.build"
+      ],
+      "directory": "apps/fitness",
+      "platform": "vercel",
+      "project": "fitness"
     }
   ]
 }
