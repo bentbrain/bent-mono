@@ -129,8 +129,8 @@ export function Bodyweight({
           name="weight"
           type="number"
           inputMode="decimal"
-          min={displayLoad(20, settings.units)}
-          max={displayLoad(500, settings.units)}
+          min={Math.ceil(displayLoad(20, settings.units) * 10) / 10}
+          max={Math.floor(displayLoad(500, settings.units) * 10) / 10}
           step="0.1"
           required
         />

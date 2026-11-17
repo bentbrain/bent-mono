@@ -5,6 +5,7 @@ import {
   defaultSettings,
   displayLoad,
   localDate,
+  nextSession,
   progression,
   scheduled,
   settingsSchema,
@@ -157,4 +158,10 @@ test("unit round-trip and daily food totals", () => {
     calories: 550.5,
     protein: 35,
   });
+});
+
+test("an all-rest schedule has no next session", () => {
+  const settings = defaultSettings("2026-01-05", "UTC");
+  settings.schedule = settings.schedule.map(() => "rest");
+  expect(nextSession(settings, "2026-01-05", [])).toBeNull();
 });

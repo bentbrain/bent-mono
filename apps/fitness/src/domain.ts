@@ -313,6 +313,28 @@ export function scheduled(settings: Settings, date: string) {
     intro: days >= 0 && days < settings.introductionWeeks * 7,
   };
 }
+export function nextSession(
+  settings: Settings,
+  date: string,
+  records: RecordEntry[],
+) {
+  for (let offset = 0; offset < 14; offset++) {
+    const candidate = addDays(date, offset);
+    const plan = scheduled(settings, candidate);
+    if (plan.type === "rest") continue;
+    const completed = records.some(
+      (record) =>
+        "date" in record.data &&
+        record.data.date === candidate &&
+        ((record.data.kind === "workout" &&
+          Boolean(record.data.finishedAt) &&
+          plan.type === "strength") ||
+          (record.data.kind === "run" && plan.type === "run")),
+    );
+    if (!completed) return { date: candidate, plan };
+  }
+  return null;
+}
 export function createWorkout(
   settings: Settings,
   routine: Routine,

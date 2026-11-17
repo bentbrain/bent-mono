@@ -7,6 +7,8 @@ import {
   displayLoad,
   exercises,
   localDate,
+  nextSession,
+  settingsId,
   runSchema,
   scheduled,
   totals,
@@ -86,7 +88,11 @@ function Account({ owner }: { owner: string }) {
         <a className="wordmark" href="/">
           bent<span>/</span>fitness
         </a>
-        <div className="account-tools">
+        <div
+          className="account-tools"
+          data-feedback-private
+          data-feedback-redact
+        >
           <span
             className={`sync-state ${sync.error ? "has-error" : ""}`}
             role="status"
@@ -135,7 +141,11 @@ function Account({ owner }: { owner: string }) {
         ))}
       </nav>
       <main className="content">
-        <div className="date-control">
+        <div
+          className="date-control"
+          data-feedback-private
+          data-feedback-redact
+        >
           <label htmlFor="view-date">Your day</label>
           <input
             id="view-date"
@@ -221,7 +231,10 @@ function Account({ owner }: { owner: string }) {
             )}
             {tab === "settings" && (
               <SettingsEditor
-                key={settings.startDate + settings.units}
+                key={`${sync.records.find((r) => r.id === settingsId)?.revision ?? 0}:${sync.editorReset}`}
+                revision={
+                  sync.records.find((r) => r.id === settingsId)?.revision ?? 0
+                }
                 settings={settings}
                 sync={sync}
               />
@@ -284,24 +297,10 @@ function Today({
     (r) => r.data.kind === "workout" && !r.data.finishedAt,
   );
   const today = scheduled(settings, date);
-  let nextDate = date;
-  for (let i = 0; i < 14; i++) {
-    const plan = scheduled(settings, nextDate);
-    const already = sync.records.some(
-      (r) =>
-        (r.data.kind === "workout" &&
-          r.data.finishedAt &&
-          plan.type === "strength" &&
-          r.data.date === nextDate) ||
-        (r.data.kind === "run" &&
-          plan.type === "run" &&
-          r.data.date === nextDate),
-    );
-    if (plan.type !== "rest" && !already) break;
-    nextDate = addDays(nextDate, 1);
-  }
-  const next = scheduled(settings, nextDate),
-    food = totals(sync.records, date);
+  const upcoming = nextSession(settings, date, sync.records);
+  const nextDate = upcoming?.date ?? date;
+  const next = upcoming?.plan;
+  const food = totals(sync.records, date);
   const [runOpen, setRunOpen] = useState(false),
     [runError, setRunError] = useState("");
   if (active?.data.kind === "workout")
@@ -323,44 +322,79 @@ function Today({
         }).format(new Date(date + "T12:00:00Z"))}
       </p>
       <h1>Keep showing up.</h1>
-      <p className="subtitle">{settings.goal}</p>
-      <div className="hero card" data-feedback-redact data-feedback-private>
-        <div className="hero-top">
-          <span className="tag">
-            {nextDate === date ? "Up next" : "Next session · " + nextDate}
-          </span>
-          <span>
-            {next.type === "strength" ? "~ 60 min" : "Conversational pace"}
-          </span>
+      <p className="subtitle" data-feedback-redact data-feedback-private>
+        {settings.goal}
+      </p>
+      {next ? (
+        <div className="hero card" data-feedback-redact data-feedback-private>
+          <div className="hero-top">
+            <span className="tag">
+              {nextDate === date ? "Up next" : "Next session · " + nextDate}
+            </span>
+            <span>
+              {next.type === "strength" ? "~ 60 min" : "Conversational pace"}
+            </span>
+          </div>
+          <h2>{next.type === "strength" ? next.routine?.name : "Easy run"}</h2>
+          <p>
+            {today.type === "rest"
+              ? "Rest today. Let your next session come to you."
+              : next.type === "strength"
+                ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · 2 sets each" : "Full session"}`
+                : "Keep it comfortable enough to talk in sentences."}
+          </p>
+          <Button
+            appearance="primary"
+            onClick={() => {
+              if (next.type === "strength" && next.routine)
+                sync.put(
+                  createWorkout(
+                    settings,
+                    next.routine,
+                    nextDate,
+                    next.intro,
+                    sync.records,
+                  ),
+                );
+              else setRunOpen(true);
+            }}
+          >
+            {next.type === "strength" ? "Start workout" : "Log run"}{" "}
+            <span aria-hidden>↗</span>
+          </Button>
         </div>
-        <h2>{next.type === "strength" ? next.routine?.name : "Easy run"}</h2>
-        <p>
-          {today.type === "rest"
-            ? "Rest today. Let your next session come to you."
-            : next.type === "strength"
-              ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · 2 sets each" : "Full session"}`
-              : "Keep it comfortable enough to talk in sentences."}
-        </p>
-        <Button
-          appearance="primary"
-          onClick={() => {
-            if (next.type === "strength" && next.routine)
-              sync.put(
-                createWorkout(
-                  settings,
-                  next.routine,
-                  nextDate,
-                  next.intro,
-                  sync.records,
-                ),
-              );
-            else setRunOpen(true);
-          }}
-        >
-          {next.type === "strength" ? "Start workout" : "Log run"}{" "}
-          <span aria-hidden>↗</span>
-        </Button>
-      </div>
+      ) : (
+        <div className="hero card" data-feedback-redact data-feedback-private>
+          <span className="tag">Your schedule</span>
+          <h2>No session scheduled</h2>
+          <p>
+            Choose training days in Settings, or record an activity for this
+            date.
+          </p>
+          {settings.routines.map((routine) => (
+            <Button
+              key={routine.id}
+              appearance="outline"
+              onClick={() =>
+                sync.put(
+                  createWorkout(
+                    settings,
+                    routine,
+                    date,
+                    today.intro,
+                    sync.records,
+                  ),
+                )
+              }
+            >
+              Start {routine.name}
+            </Button>
+          ))}
+          <Button appearance="outline" onClick={() => setRunOpen(true)}>
+            Record an unscheduled run
+          </Button>
+        </div>
+      )}
       {runOpen && (
         <form
           className="card form-grid"
@@ -426,7 +460,9 @@ function Today({
       )}
       <div className="section-heading">
         <h2>Next seven days</h2>
-        <span className="muted">{settings.timezone}</span>
+        <span className="muted" data-feedback-private data-feedback-redact>
+          {settings.timezone}
+        </span>
       </div>
       <div className="week" data-feedback-redact data-feedback-private>
         {Array.from({ length: 7 }, (_, i) => {

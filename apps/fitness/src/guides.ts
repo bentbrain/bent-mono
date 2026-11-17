@@ -46,8 +46,8 @@ export const guides: Guide[] = [
     ],
     avoid:
       "Keep shoulders level. Record the dumbbell weight and the reps for each side.",
-    video: "6TSP1TRMUzs",
-    credit: "Scott Herman · One-arm dumbbell row",
+    video: "KRN38chlkds",
+    credit: "Scott Herman · Dumbbell single-arm row on bench",
   },
   {
     id: "rdl",

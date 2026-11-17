@@ -16,11 +16,13 @@ export function useSync(owner: string, transport: Transport) {
   const [conflict, setConflict] = useState<
     (SaveResult & { status: "conflict" }) | null
   >(null);
+  const [editorReset, setEditorReset] = useState(0);
   const [saving, setSaving] = useState(false);
   const [online, setOnline] = useState(true);
   const queue = useRef<Pending[]>([]),
     cloud = useRef<RecordEntry[]>([]),
     busy = useRef(false),
+    conflictId = useRef<string | null>(null),
     needsRefresh = useRef(false);
   const prefix = `fitness:pending:v1:${owner}:`;
   const readPending = useCallback(() => {
@@ -104,6 +106,7 @@ export function useSync(owner: string, transport: Transport) {
         const item = queue.current[0];
         const result = await transport.save(item.request);
         if (result.status === "conflict") {
+          conflictId.current = item.request.id;
           setConflict(result);
           setError(
             "This record changed on another device. Review both versions before continuing.",
@@ -148,7 +151,11 @@ export function useSync(owner: string, transport: Transport) {
       });
     return next;
   }, records);
-  function put(data: Entity | null, id: string = crypto.randomUUID()) {
+  function put(
+    data: Entity | null,
+    id: string = crypto.randomUUID(),
+    expectedRevision?: number,
+  ) {
     if (!ready || conflict) {
       setError(
         "Load your data and resolve conflicting changes before editing.",
@@ -160,6 +167,12 @@ export function useSync(owner: string, transport: Transport) {
     const revision = previous
       ? previous.request.revision + 1
       : (cloud.current.find((r) => r.id === id)?.revision ?? 0);
+    if (expectedRevision !== undefined && revision !== expectedRevision) {
+      setError(
+        "This editor has an older version. Reopen Settings to load the current values before saving.",
+      );
+      return false;
+    }
     const request = mutationSchema.parse({
       id,
       data,
@@ -188,18 +201,24 @@ export function useSync(owner: string, transport: Transport) {
       await reload();
       setReady(true);
       setError("");
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load your account.");
+      return false;
     }
   }
   async function useCloud() {
-    const id = queue.current[0]?.request.id;
+    const id = conflictId.current;
+    if (!id) return;
     for (const item of queue.current.filter((p) => p.request.id === id))
       localStorage.removeItem(prefix + item.request.operationId);
     queue.current = readPending();
     setPending(queue.current);
-    await retry();
-    setConflict(null);
+    if (await retry()) {
+      setEditorReset((value) => value + 1);
+      conflictId.current = null;
+      setConflict(null);
+    }
   }
   function draftExport() {
     const browserDrafts: { key: string; raw: string | null }[] = [];
@@ -216,6 +235,7 @@ export function useSync(owner: string, transport: Transport) {
   }
   return {
     records: visible,
+    editorReset,
     ready,
     error,
     conflict,

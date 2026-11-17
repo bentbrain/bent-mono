@@ -65,11 +65,7 @@ export async function saveRecord(
       throw new Error("Settings must remain available.");
     if (current && request.data && current.data.kind !== request.data.kind)
       throw new Error("Record type cannot change.");
-    if (
-      current?.data.kind === "workout" &&
-      current.data.finishedAt &&
-      request.data
-    )
+    if (current?.data.kind === "workout" && current.data.finishedAt)
       throw new Error("Completed workouts keep their original results.");
     const nextRevision = revision + 1;
     const data = request.data;

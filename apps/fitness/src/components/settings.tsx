@@ -15,9 +15,11 @@ import { SelectField, TextField } from "./fields";
 import { deletePhoto, listPhotos, uploadPhoto } from "../server/photos";
 export function SettingsEditor({
   settings,
+  revision,
   sync,
 }: {
   settings: Settings;
+  revision: number;
   sync: Sync;
 }) {
   const [draft, setDraft] = useState(settings),
@@ -50,7 +52,7 @@ export function SettingsEditor({
             setError(result.error.issues[0]?.message ?? "Check your settings.");
             return;
           }
-          if (sync.put(result.data, settingsId)) {
+          if (sync.put(result.data, settingsId, revision)) {
             setNotice("Settings queued for saving.");
             setError("");
           }

@@ -11,9 +11,9 @@
     "build": "vite build && tsc --noEmit",
     "typecheck": "bun scripts/routes.ts && tsc --noEmit",
     "lint": "eslint src tests e2e scripts *.ts",
-    "test": "bun test tests --exclude '*.integration.test.ts'",
+    "test": "bun test tests/domain.test.ts",
     "test:integration": "bun test tests/*.integration.test.ts",
-    "knip": "knip",
+    "knip": "bun scripts/routes.ts && knip",
     "test:browser": "playwright test",
     "db:migrate": "bun scripts/migrate.ts"
   },

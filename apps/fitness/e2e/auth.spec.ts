@@ -104,7 +104,17 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .getByRole("spinbutton", { name: "Goblet squat set 2 weight", exact: true })
     .fill("9");
   await expect(page.getByRole("status").first()).toContainText("Offline");
+  await page
+    .reload({ waitUntil: "domcontentloaded", timeout: 15000 })
+    .catch((error: unknown) => {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes("ERR_INTERNET_DISCONNECTED")
+      )
+        throw error;
+    });
   await page.context().setOffline(false);
+  await page.goto("/");
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page.reload();
   await expect(
@@ -208,7 +218,123 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .getByRole("button", { name: "Use cloud version for this record" })
     .click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await pageA2.getByRole("button", { name: "Settings", exact: true }).click();
+  await pageA2
+    .getByLabel("Goal", { exact: true })
+    .fill("Synthetic private cloud goal");
+  await pageA2
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(pageA2.getByRole("status").first()).toHaveText("Saved");
+  await page.getByLabel("Goal", { exact: true }).fill("Stale device goal");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Review the conflict" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Use cloud version for this record" })
+    .click();
+  await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Synthetic private cloud goal",
+  );
+  await page.getByLabel("Display units").selectOption("lb");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await pageA2.reload();
+  await pageA2.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(pageA2.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Synthetic private cloud goal",
+  );
   await contextA2.close();
+  await page.getByRole("button", { name: "Body", exact: true }).click();
+  const pounds = page.getByLabel("Weight · lb", { exact: true });
+  await pounds.fill("154.3");
+  expect(
+    await pounds.evaluate(
+      (element) =>
+        element instanceof HTMLInputElement && element.checkValidity(),
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Save weigh-in" }).click();
+  await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await page.getByText("All weigh-ins", { exact: true }).click();
+  await expect(
+    page.locator(".list-row").getByText("154.3 lb", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  for (let day = 0; day < 7; day++)
+    await page.locator(`#day-${day}`).selectOption("rest");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Today", exact: true })
+    .click();
+  await page.getByText("Discard this workout", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Discard draft", exact: true })
+    .click();
+  await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await expect(
+    page.getByRole("heading", { name: "No session scheduled" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Log run", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Record an unscheduled run", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Record your run" }),
+  ).toBeVisible();
+  // Keep the hosted loader intact and intercept only its isolated panel UI.
+  // Its real selection handler must redact the goal and remove it from ancestor context.
+  await page.route("https://toolbar.bent.build/toolbar?**", async (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<pre id="context"></pre><script>addEventListener('message',event=>{if(event.data.type==='feedback:selected')document.querySelector('#context').textContent=JSON.stringify(event.data.context)});</script>`,
+    }),
+  );
+  await page.reload();
+  await expect(page.locator(".subtitle")).toHaveText(
+    "Synthetic private cloud goal",
+  );
+  const panel = page
+    .frames()
+    .find((frame) =>
+      frame.url().startsWith("https://toolbar.bent.build/toolbar?"),
+    );
+  if (!panel) throw new Error("Toolbar panel did not load.");
+  await expect(panel.locator("#context")).toBeAttached();
+  for (const selector of [".subtitle", ".content > section"]) {
+    await panel.evaluate(() =>
+      window.parent.postMessage(
+        { type: "feedback:select" },
+        "http://localhost:3025",
+      ),
+    );
+    await expect(page.locator("html")).toHaveCSS("cursor", "crosshair");
+    await page.locator(selector).dispatchEvent("click");
+    await expect(panel.locator("#context")).not.toContainText(
+      "Synthetic private cloud goal",
+    );
+    await expect(panel.locator("#context")).toContainText(
+      selector === ".subtitle" ? '"tag":"p"' : '"tag":"section"',
+    );
+    if (selector === ".subtitle")
+      await expect(panel.locator("#context")).toContainText(
+        "[Private element]",
+      );
+  }
+
   const contextB = await browser.newContext({
     baseURL: "http://localhost:3025",
   });

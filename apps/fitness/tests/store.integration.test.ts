@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { database } from "../src/server/db";
 import { loadRecords, saveRecord } from "../src/server/store";
-import { defaultSettings, settingsId } from "../src/domain";
+import { createWorkout, defaultSettings, settingsId } from "../src/domain";
 const configured = Boolean(process.env.FITNESS_TEST_DATABASE_URL);
+if (process.env.CI && !configured)
+  throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");
 if (configured)
   process.env.DATABASE_URL = process.env.FITNESS_TEST_DATABASE_URL;
 beforeAll(async () => {
@@ -109,5 +111,45 @@ test.skipIf(!configured)(
         })
       ).status,
     ).toBe("saved");
+  },
+);
+
+test.skipIf(!configured)(
+  "completed workouts reject edits, deletion and replacement",
+  async () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    const routine = settings.routines[0];
+    if (!routine) throw new Error("Missing routine");
+    const workout = createWorkout(settings, routine, "2026-01-05", true, []);
+    workout.exercises.forEach((exercise) =>
+      exercise.sets.forEach((set) => {
+        set.done = true;
+      }),
+    );
+    workout.finishedAt = new Date().toISOString();
+    const id = crypto.randomUUID();
+    expect(
+      (
+        await saveRecord(ownerA, {
+          id,
+          operationId: crypto.randomUUID(),
+          revision: 0,
+          data: workout,
+        })
+      ).status,
+    ).toBe("saved");
+    for (const data of [null, { ...workout, notes: "Changed result" }]) {
+      await expect(
+        saveRecord(ownerA, {
+          id,
+          operationId: crypto.randomUUID(),
+          revision: 1,
+          data,
+        }),
+      ).rejects.toThrow("Completed workouts keep their original results.");
+    }
+    expect(
+      (await loadRecords(ownerA)).find((entry) => entry.id === id)?.data,
+    ).toEqual(workout);
   },
 );
