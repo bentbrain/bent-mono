@@ -10,6 +10,15 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const fail = message => { throw new Error(message); };
 const identifiers = { team: /^team_[A-Za-z0-9-]+$/, prj: /^prj_[A-Za-z0-9-]+$/, dpl: /^dpl_[A-Za-z0-9-]+$/, chk: /^chk_[A-Za-z0-9-]+$/ };
 const id = (value, prefix) => typeof value === "string" && identifiers[prefix].test(value);
+const validProductionAnchor = config =>
+  (config.firstRelease === undefined || typeof config.firstRelease === "boolean") &&
+  (config.firstRelease === true ? config.expectedProductionId === null : id(config.expectedProductionId, "dpl"));
+function productionId(project) {
+  const target = project.targets?.production;
+  if (target === undefined || target === null) return null;
+  if (!id(target.id, "dpl")) fail("Malformed current production target.");
+  return target.id;
+}
 const canonical = value => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 
@@ -21,7 +30,7 @@ export function configurationHash(project, checks) {
 
 export function validateTarget({ app, config, project, deployment, deploymentId, sha, inspection = false }) {
   if (!/^[a-f0-9]{40}$/.test(sha) || !id(config.teamId, "team") || !id(config.projectId, "prj") ||
-      !id(config.expectedProductionId, "dpl") || !id(config.requiredCheckId, "chk")) fail("Invalid protected release configuration.");
+      !validProductionAnchor(config) || !id(config.requiredCheckId, "chk")) fail("Invalid protected release configuration.");
   if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
       project.rootDirectory !== app.directory || project.nodeVersion !== "24.x" || project.sourceFilesOutsideRootDirectory !== true ||
       project.link?.type !== "github" || project.link.org !== "bentbrain" || project.link.repo !== "bent-mono" ||
@@ -31,8 +40,8 @@ export function validateTarget({ app, config, project, deployment, deploymentId,
       deployment.gitSource?.type !== "github" || deployment.gitSource.sha !== sha || deployment.gitSource.ref !== "main" ||
       deployment.gitSource.repoId !== project.link.repoId || deployment.meta?.githubCommitOrg !== "bentbrain" ||
       deployment.meta.githubCommitRepo !== "bent-mono" || deployment.meta.githubCommitSha !== sha) fail("Deployment is not the exact qualified production source.");
-  if (project.targets?.production?.id !== config.expectedProductionId &&
-      !(inspection && project.targets?.production?.id === deployment.id)) fail("Current production changed.");
+  if (productionId(project) !== config.expectedProductionId &&
+      !(inspection && productionId(project) === deployment.id)) fail("Current production changed.");
 }
 
 export function validateRuntime(receipt, { app, deployment, sha, fingerprint, now = Date.now() }) {
@@ -117,7 +126,7 @@ async function releaseJournal(path) {
 
 export async function releaseVercel({ action, app, config, deploymentId, receipt, journalPath, sha }, { vercel, qualify, checkout }) {
   if (!["inspect", "stage", "promote"].includes(action) || app.platform !== "vercel" || !id(config.projectId, "prj") ||
-      !id(config.teamId, "team") || !id(config.expectedProductionId, "dpl") || !id(config.requiredCheckId, "chk") ||
+      !id(config.teamId, "team") || !validProductionAnchor(config) || !id(config.requiredCheckId, "chk") ||
       (action !== "stage" && !id(deploymentId, "dpl")) ||
       (action !== "inspect" && (typeof journalPath !== "string" || !isAbsolute(journalPath)))) fail("Unsupported release target, journal or action.");
   await checkout(sha);
@@ -127,7 +136,7 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
     if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
         project.rootDirectory !== app.directory || project.autoAssignCustomDomains !== false ||
         project.nodeVersion !== "24.x" || project.sourceFilesOutsideRootDirectory !== true || project.link?.type !== "github" ||
-        project.targets?.production?.id !== config.expectedProductionId || project.link?.org !== "bentbrain" ||
+        productionId(project) !== config.expectedProductionId || project.link?.org !== "bentbrain" ||
         project.link.repo !== "bent-mono" || project.link.productionBranch !== "main") fail("Stage requires the frozen monorepo project with automatic assignment disabled.");
   }
   const definitions = await vercel(`/v2/projects/${config.projectId}/checks`);
@@ -164,11 +173,20 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   ]);
   requiredPolicy(config, finalDefinitions.checks);
   if (inventoryHead(finalInventoryHead) !== inventory.head) fail("Production deployment inventory changed during admission.");
+  if (config.firstRelease === true) {
+    const onlyCandidate = inventory.deployments.length === 1 && (() => {
+      const item = inventory.deployments[0];
+      return (item.uid ?? item.id) === deploymentId && (!item.uid || !item.id || item.uid === item.id);
+    })();
+    if (action === "stage" ? inventory.deployments.length !== 0 : !onlyCandidate) {
+      fail("First release requires empty production history before staging and only its candidate before promotion.");
+    }
+  }
   if (inventory.deployments.some(item =>
     ["INITIALIZING", "QUEUED", "BUILDING"].includes(item.state) ||
     (action === "promote" && item.created > deployment.createdAt))) fail("Production has concurrent or newer deployment work, or an incomplete inventory.");
   if (configurationHash(finalProject, finalDefinitions.checks) !== fingerprint ||
-      finalProject.targets?.production?.id !== config.expectedProductionId ||
+      productionId(finalProject) !== config.expectedProductionId ||
       finalProject.autoAssignCustomDomains !== false ||
       (finalProject.lastAliasRequest && finalProject.lastAliasRequest.jobStatus !== "success")) fail("Release settings or production changed during admission.");
   if (action === "promote") {

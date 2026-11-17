@@ -59,6 +59,88 @@ async function trial(action, change, verify) {
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
+function firstRelease(f, options) {
+  options.config = { ...config, firstRelease: true, expectedProductionId: null };
+  f.state.project.targets = {};
+  if (options.action === "stage") f.state.inventory = [];
+}
+
+test("first release stages once from empty history with the existing release gates", async () => {
+  await trial("stage", () => {}, async (f, options) => {
+    firstRelease(f, options);
+    await releaseVercel(options, f);
+    assert.equal(f.state.qualifications, 2);
+    assert.deepEqual(f.state.posts, [{ path: "/v13/deployments", body: {
+      name: app.project, project: config.projectId, target: "production",
+      gitSource: { type: "github", repoId: 123, ref: "main", sha },
+    } }]);
+    await assert.rejects(releaseVercel(options, f), /EEXIST/);
+    assert.equal(f.state.posts.length, 1);
+  });
+});
+
+test("first release promotes only its qualified candidate before production is assigned", async () => {
+  for (const identity of ["uid", "id"]) await trial("promote", () => {}, async (f, options) => {
+    firstRelease(f, options);
+    f.state.inventory = [{ [identity]: "dpl_candidate", created: 10, state: "READY" }];
+    await releaseVercel(options, f);
+    assert.deepEqual(f.state.posts, [{ path: "/v10/projects/prj_fixture/promote/dpl_candidate", body: {} }]);
+  });
+});
+
+test("first-release anchors require an explicit flag and null production ID", async () => {
+  for (const anchor of [
+    { expectedProductionId: null }, { firstRelease: false, expectedProductionId: null },
+    { firstRelease: "true", expectedProductionId: null }, { firstRelease: true },
+    { firstRelease: true, expectedProductionId: "dpl_original" },
+  ]) await trial("stage", () => {}, async (f, options) => {
+    firstRelease(f, options);
+    options.config = { projectId: config.projectId, teamId: config.teamId, requiredCheckId: config.requiredCheckId, ...anchor };
+    await assert.rejects(releaseVercel(options, f), /Unsupported release target/);
+    assert.equal(f.state.posts.length, 0);
+  });
+});
+
+test("first staging rejects existing targets, history and admission races", async () => {
+  const cases = [
+    f => { f.state.project.targets.production = { id: "dpl_original" }; },
+    f => { f.state.project.targets.production = {}; },
+    ...["READY", "CANCELED", "ERROR", "BUILDING"].map(state => f => {
+      f.state.inventory = [{ uid: "dpl_old", created: 1, state }];
+    }),
+    f => { f.state.duringFinalQualification = s => { s.project.targets.production = { id: "dpl_new" }; }; },
+    f => { f.state.duringFinalQualification = s => { s.inventory.push({ uid: "dpl_new", created: 1, state: "READY" }); }; },
+  ];
+  for (const mutate of cases) await trial("stage", () => {}, async (f, options) => {
+    firstRelease(f, options); mutate(f);
+    await assert.rejects(releaseVercel(options, f));
+    assert.equal(f.state.posts.length, 0);
+    await assert.rejects(readFile(options.journalPath), /ENOENT/);
+  });
+});
+
+test("first promotion retains source, native-check and runtime admission", async () => {
+  const cases = [
+    f => { f.state.rejectQuality = true; },
+    f => { f.state.project.autoAssignCustomDomains = true; },
+    f => { f.state.project.targets.production = { id: "dpl_candidate" }; },
+    f => { f.state.definitions = []; },
+    f => { f.state.deployment.gitSource.sha = "b".repeat(40); },
+    f => { f.receipt.checks.guestEditorDenied = false; },
+    f => { f.state.inventory = []; },
+    f => { f.state.inventory = [{ uid: "dpl_other", created: 1, state: "READY" }]; },
+    f => { f.state.inventory.push({ uid: "dpl_old", created: 1, state: "CANCELED" }); },
+    f => { f.state.inventory[0].id = "dpl_other"; },
+    f => { f.state.runs = [{ checkId: config.requiredCheckId, deploymentId: "dpl_candidate", projectId: config.projectId,
+      ownerId: config.teamId, status: "completed", conclusion: "failed" }]; },
+  ];
+  for (const mutate of cases) await trial("promote", () => {}, async (f, options) => {
+    firstRelease(f, options); mutate(f);
+    await assert.rejects(releaseVercel(options, f));
+    assert.equal(f.state.posts.length, 0);
+  });
+});
+
 test("manual staged promotion uses genuine source qualification without manufacturing a Vercel result", async () => {
   await trial("promote", () => {}, async (f, options) => {
     const result = await releaseVercel(options, f);
