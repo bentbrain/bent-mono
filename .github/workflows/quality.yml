@@ -16,7 +16,7 @@ jobs:
   release-qualification:
     name: Release qualification
     if: always()
-    needs: [checks, browser, shop, public-source, secrets, dependencies, codeql]
+    needs: [checks, browser, public-source, secrets, dependencies, codeql]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,7 +26,7 @@ jobs:
         run: |
           node --input-type=module -e '
             const jobs = JSON.parse(process.env.QUALITY_RESULTS);
-            const expected = ["checks", "browser", "shop", "public-source", "secrets", "dependencies", "codeql"];
+            const expected = ["checks", "browser", "public-source", "secrets", "dependencies", "codeql"];
             if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
                 Object.values(jobs).some(job => job.result !== "success")) {
               throw new Error("Every Quality job must succeed before production release");
@@ -111,43 +111,6 @@ jobs:
           path: apps/jp/artifacts/browser/
           if-no-files-found: error
           retention-days: 14
-  shop:
-    name: shop
-    runs-on: ubuntu-24.04
-    container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
-      options: --ipc=host --init
-      volumes:
-        - /usr/bin/gh:/usr/local/bin/gh:ro
-        - /usr/bin/zip:/usr/bin/zip:ro
-        - /usr/bin/unzip:/usr/bin/unzip:ro
-    defaults:
-      run:
-        shell: bash
-    timeout-minutes: 45
-    steps:
-      - name: Trust the mounted checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-        working-directory: .
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - id: scope
-        run: node scripts/ci-scope.mjs
-      - name: Install pinned Terraform for backend schema regression
-        if: steps.scope.outputs.full == 'true'
-        run: |
-          archive="$RUNNER_TEMP/terraform_1.12.2_linux_amd64.zip"
-          curl --fail --silent --show-error --location --output "$archive" https://releases.hashicorp.com/terraform/1.12.2/terraform_1.12.2_linux_amd64.zip
-          printf '%s  %s\n' '1eaed12ca41fcfe094da3d76a7e9aa0639ad3409c43be0103ee9f5a1ff4b7437' "$archive" | sha256sum --check --status
-          mkdir "$RUNNER_TEMP/shop-trust-terraform"
-          unzip -q "$archive" -d "$RUNNER_TEMP/shop-trust-terraform"
-      - run: node scripts/install-browsers.mjs shop
-      - run: |
-          export SHOP_TRUST_SCHEMA_TERRAFORM="$RUNNER_TEMP/shop-trust-terraform/terraform"
-          node scripts/ci-check.mjs shop
   public-source:
     name: public-source
     runs-on: ubuntu-latest

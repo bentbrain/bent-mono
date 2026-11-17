@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const REPOSITORY = "bentbrain/bent-mono";
 const WORKFLOW = ".github/workflows/quality.yml";
 const SHA = /^[a-f0-9]{40}$/;
-const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser", "shop",
+const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser",
   "public-source", "secret-scan", "dependencies", "CodeQL", "Release qualification"];
 const fail = message => { throw new Error(message); };
 

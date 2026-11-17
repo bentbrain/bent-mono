@@ -71,8 +71,7 @@ export function workspaceScope(
       )
         .split("\0")
         .filter(Boolean);
-      // Root automation/configuration affects every product. Product-level Shop
-      // scripts and relative renderer imports also require all Shop consumers.
+      // Root automation/configuration affects every product.
       const rootChanged = files.some(
         (file) =>
           file !== "bun.lock" &&
@@ -83,16 +82,6 @@ export function workspaceScope(
           TURBO_SCM_BASE: range.base,
           TURBO_SCM_HEAD: range.head,
         });
-        if (
-          files.some((file) => file.startsWith("products/shop/")) ||
-          selected.some((item) => item.path.startsWith("products/shop"))
-        ) {
-          selected = all.filter(
-            (item) =>
-              item.path.startsWith("products/shop") ||
-              selected.some((affected) => affected.name === item.name),
-          );
-        }
         // Product-root automation is not a dependency of each nested package.
         // Include those children when their containing workspace is affected.
         const parents = selected;
@@ -130,7 +119,7 @@ if (
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      ["apps/jp", "apps/trackmap", "products/shop"]
+      ["apps/jp", "apps/trackmap"]
         .map(
           (directory) =>
             `${directory.split("/").at(-1)}=${includesPath(scope, directory)}`,

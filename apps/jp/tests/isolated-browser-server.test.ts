@@ -339,9 +339,6 @@ void test('monorepo fixture copies manifests, patched sources and shared package
     assert.ok(sourcePaths.includes('packages/ui/tsconfig.json'));
     assert.ok(sourcePaths.includes('packages/design-tokens/src'));
     assert.ok(sourcePaths.includes('apps/jp/patches/emdash@1.2.0.patch'));
-    assert.ok(
-      sourcePaths.some((path) => path.startsWith('products/shop/patches/')),
-    );
     assert.ok(sourcePaths.includes('apps/stay/package.json'));
     assert.equal(new Set(sourcePaths).size, sourcePaths.length);
     assert.ok(

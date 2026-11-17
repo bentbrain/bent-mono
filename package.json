@@ -15,8 +15,7 @@
     "products/*/workers/*",
     "products/*/plugins/*",
     "products/*/tooling/*",
-    "packages/*",
-    "products/shop/shopify/notifications"
+    "packages/*"
   ],
   "scripts": {
     "dev": "turbo run dev",
@@ -123,7 +122,6 @@
     "seroval@>=1 <1.7.7": "1.7.7"
   },
   "patchedDependencies": {
-    "@shopify/hydrogen@0.0.0-preview-116d5d7-20260730141607": "products/shop/patches/@shopify__hydrogen@0.0.0-preview-116d5d7-20260730141607.patch",
     "emdash@1.2.0": "apps/jp/patches/emdash@1.2.0.patch"
   }
 }

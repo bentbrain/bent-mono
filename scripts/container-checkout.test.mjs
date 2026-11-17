@@ -40,10 +40,6 @@ test("the container checkout step admits only its exact mounted workspace", cont
 
 test("all container jobs establish workspace trust before checkout and source commands", () => {
   const paths = [".github/workflows/quality.yml"];
-  for (const name of ["deploy.yml", "native-development.yml", "web-production.yml", "preview-smoke.yml", "ci.yml"]) {
-    if (name !== "ci.yml") paths.push(`.github/workflows/${name}`);
-    paths.push(`products/shop/.github/workflows/${name}`);
-  }
   let containers = 0;
   for (const path of paths) {
     for (const block of read(path).split(/\n  [a-zA-Z][\w-]*:\n/)) {
@@ -52,15 +48,11 @@ test("all container jobs establish workspace trust before checkout and source co
       assert(block.includes(`    steps:\n      - name: Trust the mounted checkout\n        run: ${trust}\n        working-directory: .\n`), path);
     }
   }
-  assert.equal(containers, 13);
+  assert.equal(containers, 1);
 });
 
 test("pinned browser containers mount trusted archive tools at the absolute caller paths", () => {
   const workflows = [".github/workflows/quality.yml"];
-  for (const name of ["deploy.yml", "native-development.yml", "web-production.yml", "preview-smoke.yml", "ci.yml"]) {
-    if (name !== "ci.yml") workflows.push(`.github/workflows/${name}`);
-    workflows.push(`products/shop/.github/workflows/${name}`);
-  }
   let containers = 0;
   for (const path of workflows) {
     for (const block of read(path).split(/\n  [a-zA-Z][\w-]*:\n/)) {
@@ -70,7 +62,5 @@ test("pinned browser containers mount trusted archive tools at the absolute call
         assert.ok(block.includes(`        - /usr/bin/${executable}:/usr/bin/${executable}:ro\n`), `${path}: ${executable}`);
     }
   }
-  assert.equal(containers, 13);
-  for (const file of ["package-source.mjs", "package-app-source.mjs"])
-    assert.match(read(`products/shop/workers/video-renderer/aws-lambda/${file}`), /execFile\)\("\/usr\/bin\/zip",/);
+  assert.equal(containers, 1);
 });

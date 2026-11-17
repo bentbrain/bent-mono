@@ -7,7 +7,6 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 | Website | bent.build, www.bent.build | apps/www |
 | Blog | jp.bent.build | apps/jp |
 | Stay guide | stay.bent.build | apps/stay |
-| Shop | shop.bent.build | products/shop/apps/web |
 | Feedback toolbar | toolbar.bent.build | apps/toolbar |
 | Collage | maya-collage.bent.build, maya-collages.bent.build | apps/collage |
 | Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
@@ -15,7 +14,7 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 | Trackmap | trackmap.bent.build | apps/trackmap |
 | Fitness | fitness.bent.build | apps/fitness |
 
-`deployments.json` lists the apps and their deployment settings. Shop and Drive keep their internal packages and services under `products/`.
+`deployments.json` lists the apps and their deployment settings. Drive keeps its internal packages and services under `products/`.
 
 ## Development
 
@@ -32,11 +31,11 @@ bun run test:workspace
 
 Run app commands from their directories or use Bun workspace filters. Each app's example environment file describes its configuration. Store credentials and production content in the app's protected environment and storage.
 
-The root `bun.lock` manages workspace dependencies. The AWS Lambda renderer image uses its own frozen npm lock as a production image input. Changes to that image's installer require renderer qualification.
+The root `bun.lock` manages workspace dependencies.
 
-CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Shop also runs web unit tests, cart and purchase-readiness contracts, renderer tests and a mobile upload-to-cart browser smoke test with synthetic fixtures. Weekly and manually dispatched Quality runs execute the full regression suite. Root automation changes and incomplete comparison history trigger validation of every workspace.
+CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Weekly and manually dispatched Quality runs execute the full regression suite. Root automation changes and incomplete comparison history trigger validation of every workspace.
 
-Every CI run includes full CodeQL analysis. Code outside Shop requires zero raw findings. Shop's intentional network and file transfers have individual review records bound to their source, guards, tests and complete analysis traces. The gate rejects unknown findings and stale records, and retains the original report. Independent review of the exact head and current base is required before merge or a native false-positive dismissal. Production releases have their own qualification checks.
+Every CI run includes full CodeQL analysis with zero raw findings required across application and shared code. Both security suites run in full, and the original report is retained. Independent review of the exact head and current base is required before merge. Production releases have their own qualification checks.
 
 ## Trackmap
 
@@ -58,13 +57,13 @@ Trackmap uses the shared Vercel release route from `apps/trackmap`, with Node 24
 
 Stay loads guide content, photos and home-control configuration from private Blob storage after authorization. Public previews use synthetic fixtures. Production serves content only after a successful private-storage load. Saving requires a production content source and editor authorization.
 
-Home uses protected build configuration for its location, device bindings and private release settings. Shop uses protected configuration for account identities, release records and infrastructure bindings. Example files document the required fields with synthetic values.
+Home uses protected build configuration for its location, device bindings and private release settings. Example files document the required fields with synthetic values.
 
 Before publishing, run the source policy check and Gitleaks, then review content and binary assets for private information.
 
 ## Releases
 
-Each release requires verified source, protected configuration and app-specific qualification. Shop uses paired releases, JP checks exact commits, Toolbar retains browser assets, and Home verifies compatibility between its public app and private card.
+Each release requires verified source, protected configuration and app-specific qualification. JP checks exact commits, Toolbar retains browser assets, and Home verifies compatibility between its public app and private card.
 
 The website, Stay, Collage, Drive, Trackmap and Fitness use Vercel projects with their app directory as the project root and access to the workspace. Their Vercel configuration pins Bun 1.4.4 for installation and builds. The production Deployment Check requires GitHub's `Release qualification`, which passes after every root Quality job succeeds.
 
@@ -82,6 +81,6 @@ Manual promotion checks GitHub's authoritative results directly. Vercel's import
 
 JP and Toolbar use root deployment workflows controlled by `JP_DEPLOYMENT_ENABLED` and `TOOLBAR_DEPLOYMENT_ENABLED`. Credentials belong in the `jp-production` and `toolbar-production` protected environments. Both routes verify current main, the complete Quality run, and the merged PR's exact-head security and independent review. JP preserves its Worker secrets and requires an up-to-date database schema. Toolbar publishes and verifies retained frontend assets before activating its Worker.
 
-Home uses `bun run release:both` from `apps/home`, with its location, device bindings and private release settings in protected configuration. The paired release checks the exact public source revision before advancing the private card. Shop uses protected `Preview` and `Production` environments, immutable artifacts and full release qualification. Its workflow templates are activated through the product's deployment tooling.
+Home uses `bun run release:both` from `apps/home`, with its location, device bindings and private release settings in protected configuration. The paired release checks the exact public source revision before advancing the private card.
 
 Release from a clean, committed tree after its checks pass. Review evidence belongs to its exact revision. Preserve existing private content during setup, and run production migrations through their reviewed release procedure.
