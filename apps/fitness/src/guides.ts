@@ -1,6 +1,7 @@
 export type Guide = {
   id: string;
   setup: string;
+  illustrationAlt: string;
   steps: string[];
   avoid: string;
   video: string;
@@ -9,6 +10,8 @@ export type Guide = {
 export const guides: Guide[] = [
   {
     id: "squat",
+    illustrationAlt:
+      "Goblet squat from the front and side, showing standing, squatting and returning to standing.",
     setup:
       "Use one light dumbbell held close to your chest. Stand with feet around shoulder width.",
     steps: [
@@ -23,6 +26,8 @@ export const guides: Guide[] = [
   },
   {
     id: "bench",
+    illustrationAlt:
+      "Flat dumbbell bench press from the side and head end, showing setup, lowering and pressing with visible elbow joints.",
     setup:
       "Set the bench flat. Sit with dumbbells resting on your thighs, then lie back carefully with feet planted.",
     steps: [
@@ -37,6 +42,8 @@ export const guides: Guide[] = [
   },
   {
     id: "row",
+    illustrationAlt:
+      "Bench-supported one-arm row from the side and rear three-quarter angle, showing setup, pulling and lowering with both feet on the floor.",
     setup:
       "Place one hand on a stable bench. Stagger your feet, hinge at the hips and hold a dumbbell in the free hand.",
     steps: [
@@ -51,6 +58,8 @@ export const guides: Guide[] = [
   },
   {
     id: "rdl",
+    illustrationAlt:
+      "Dumbbell Romanian deadlift from the side and front three-quarter angle, showing standing, hinging at the hips and standing again.",
     setup:
       "Stand tall with a dumbbell in each hand, feet hip width apart and knees softly bent.",
     steps: [
@@ -65,6 +74,8 @@ export const guides: Guide[] = [
   },
   {
     id: "raise",
+    illustrationAlt:
+      "Dumbbell lateral raise from the front and side three-quarter angle, showing setup, raising with soft elbows and lowering.",
     setup:
       "Stand with very light dumbbells beside your thighs, elbows slightly bent and trunk steady.",
     steps: [
@@ -78,6 +89,8 @@ export const guides: Guide[] = [
   },
   {
     id: "plank",
+    illustrationAlt:
+      "Forearm plank from the side and front three-quarter angle, showing kneeling setup, a straight-body hold and lowering the knees to finish.",
     setup:
       "Rest on forearms with elbows beneath shoulders. Extend your legs, balancing on your toes.",
     steps: [
@@ -92,6 +105,8 @@ export const guides: Guide[] = [
   },
   {
     id: "split",
+    illustrationAlt:
+      "Stationary split squat from the side and front three-quarter angle, showing setup, lowering and rising with both feet on the floor.",
     setup:
       "Take a stationary staggered stance with both feet on the floor, wide enough side to side to balance. Practise without weights first.",
     steps: [
@@ -106,6 +121,8 @@ export const guides: Guide[] = [
   },
   {
     id: "incline",
+    illustrationAlt:
+      "Low-incline dumbbell press from the side and head end, showing setup, lowering and pressing on a low-angle bench.",
     setup:
       "Set the bench to a low incline, around 15–30 degrees. Plant feet and support your head and upper back.",
     steps: [
@@ -120,6 +137,8 @@ export const guides: Guide[] = [
   },
   {
     id: "press",
+    illustrationAlt:
+      "Seated dumbbell shoulder press from the front and side, showing shoulder-level setup, overhead pressing with soft elbows and lowering against a tall backrest.",
     setup:
       "Sit against an upright bench backrest, feet flat. Bring light dumbbells to shoulder level.",
     steps: [
@@ -134,6 +153,8 @@ export const guides: Guide[] = [
   },
   {
     id: "curl",
+    illustrationAlt:
+      "Dumbbell hammer curl from the front and side, showing setup, curling with palms facing inward and lowering.",
     setup:
       "Stand with a dumbbell in each hand, palms facing inward and elbows beside your ribs.",
     steps: [

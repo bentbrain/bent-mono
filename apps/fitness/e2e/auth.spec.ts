@@ -130,6 +130,24 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(
     page.getByRole("link", { name: /Watch tutorial/ }).first(),
   ).toHaveAttribute("href", "https://www.youtube.com/watch?v=MeIiIdhvXT4");
+  const illustrated = page.locator(".exercise-illustration img").first();
+  await expect(illustrated).toHaveAttribute(
+    "src",
+    "/exercise-guides/squat.png",
+  );
+  await expect
+    .poll(() =>
+      illustrated.evaluate(
+        (element) =>
+          element instanceof HTMLImageElement &&
+          element.complete &&
+          element.naturalWidth > 0,
+      ),
+    )
+    .toBe(true);
+  await expect(
+    page.locator(".exercise-illustration a").first(),
+  ).toHaveAttribute("target", "_blank");
   await page.screenshot({
     path: `private/screenshots/workout-${info.project.name}.png`,
     fullPage: true,

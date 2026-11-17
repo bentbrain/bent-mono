@@ -250,20 +250,9 @@ function Account({ owner }: { owner: string }) {
                   Read the setup, practise with a light weight, then open the
                   tutorial for a demonstration.
                 </p>
-                <a
-                  href="/exercise-guide-v2.png"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <img
-                    className="guide-sheet"
-                    src="/exercise-guide-v2.png"
-                    alt="Ten exercise illustrations, including dumbbell movements and a forearm plank"
-                  />
-                </a>
                 <p className="muted">
-                  AI-generated reference illustration. Use the written steps and
-                  video demonstrations for technique.
+                  Each exercise has an illustrated sequence from two angles.
+                  Open an illustration at full size to inspect the positions.
                 </p>
                 {exercises.map((e) => (
                   <article className="card" key={e.id}>

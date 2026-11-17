@@ -510,11 +510,11 @@ legend {
   font-size: 0.75rem;
   word-break: break-word;
 }
-.guide-sheet {
+.exercise-illustration img {
   display: block;
   width: 100%;
   height: auto;
-  margin: 25px 0;
+  margin: 16px 0 8px;
 }
 .guide {
   background: #f0f3ed;
@@ -839,4 +839,18 @@ legend {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+
+.exercise-illustration {
+  margin: 20px 0;
+  max-width: 680px;
+}
+.exercise-illustration a {
+  display: block;
+}
+.exercise-illustration figcaption {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #616963;
 }
