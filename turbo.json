@@ -333,6 +333,10 @@
     "format:check": {
       "cache": false
     },
+    "@bent/fitness#test:integration": {
+      "passThroughEnv": ["FITNESS_TEST_DATABASE_URL"],
+      "cache": false
+    },
     "test:integration": {
       "cache": false
     },

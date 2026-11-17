@@ -7,7 +7,7 @@ const applications =
   group === "shop"
     ? ["products/shop/apps/web"]
     : group === "browser"
-      ? ["apps/jp", "apps/toolbar", "apps/trackmap"]
+      ? ["apps/jp", "apps/toolbar", "apps/trackmap", "apps/fitness"]
       : null;
 if (!applications) throw new Error("Select browser or shop.");
 const selected = applications.filter((directory) => includesPath(scope, directory));

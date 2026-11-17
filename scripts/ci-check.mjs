@@ -39,6 +39,7 @@ const env = {
       regions: ["sea1"],
     }),
   ).toString("base64"),
+  FITNESS_TEST_DATABASE_URL: process.env.PAYLOAD_MIGRATION_TEST_DATABASE_URI ?? "",
   PUBLIC_HOME_LATITUDE: "0",
   PUBLIC_HOME_LONGITUDE: "0",
   PUBLIC_HOME_BALCONY_BEARING: "90",
@@ -61,6 +62,7 @@ function application(directory, script, overrides) {
 }
 
 if (task === "browser") {
+  application("apps/fitness", "test:browser", { VITE_CLERK_PUBLISHABLE_KEY: "", CLERK_SECRET_KEY: "", DATABASE_URL: "", FITNESS_ALLOWED_EMAILS: "" });
   application("apps/trackmap", "build");
   application("apps/trackmap", "test:browser");
   application("apps/jp", "test:e2e:coverage");
