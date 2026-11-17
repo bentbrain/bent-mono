@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "tanstack-start",
+  "git": { "deploymentEnabled": false },
   "installCommand": "node ../../scripts/vercel-bun.mjs install --frozen-lockfile",
   "buildCommand": "node ../../scripts/vercel-bun.mjs run build",
   "headers": [
