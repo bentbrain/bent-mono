@@ -82,7 +82,12 @@ function ExerciseDetail({
       </p>
     );
   return (
-    <div className="exercise-detail" data-feedback-id={`guide-${id}`}>
+    <div
+      className="exercise-detail"
+      data-feedback-id={`guide-${id}`}
+      data-feedback-private
+      data-feedback-redact
+    >
       <figure className="exercise-illustration">
         <a
           href={`/exercise-guides/${guide.id}.png`}
@@ -246,7 +251,7 @@ export function ExercisesScreen({ exercise }: { exercise?: string }) {
     ]),
   ];
   return (
-    <section>
+    <section data-feedback-private data-feedback-redact>
       <header className="page-head">
         <p className="eyebrow">Learn the movements</p>
         <h1>Exercises</h1>

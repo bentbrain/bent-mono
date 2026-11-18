@@ -15,6 +15,7 @@ import {
 } from "../domain";
 import type { DayActivity, RecordEntry, Settings } from "../domain";
 import { elapsedSeconds, formatDuration } from "../timing";
+import { weeklySummary } from "../progress";
 import { useAccount } from "./account-context";
 import { DateBar } from "./date-bar";
 import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
@@ -367,18 +368,9 @@ function WeekTotals({
   records: RecordEntry[];
 }) {
   const { settings, today, date } = useAccount();
-  const activity = completedActivity(records);
-  const days = Array.from({ length: 7 }, (_, i) =>
-    dayInfo(settings, activity, addDays(monday, i), today),
-  );
-  const count = (type: "strength" | "run") => ({
-    planned: days.filter((d) => d.plan.type === type).length,
-    done: days.filter((d) =>
-      type === "strength" ? d.done?.strength : d.done?.run,
-    ).length,
-  });
-  const strength = count("strength");
-  const runs = count("run");
+  const summary = weeklySummary(settings, records, monday, 1)[0];
+  const strength = summary?.strength ?? { done: 0, planned: 0 };
+  const runs = summary?.runs ?? { done: 0, planned: 0 };
   const food = totals(records, date);
   return (
     <section className="week-totals" aria-label="Week totals">
@@ -394,7 +386,7 @@ function WeekTotals({
               <strong>{value.done}</strong> of {value.planned} planned
               <span className="pips" aria-hidden="true">
                 {Array.from(
-                  { length: Math.max(value.planned, value.done) },
+                  { length: Math.min(7, Math.max(value.planned, value.done)) },
                   (_, i) => (
                     <i key={i} className={i < value.done ? "is-on" : ""} />
                   ),

@@ -649,6 +649,31 @@ describe("progress", () => {
       },
     ]);
   });
+  test("weekly progress counts separate sessions recorded on the same day", () => {
+    const records: RecordEntry[] = [
+      entry(completedWorkout("2026-01-05")),
+      entry(completedWorkout("2026-01-05", 1)),
+      entry({
+        kind: "run",
+        date: "2026-01-06",
+        minutes: 20,
+        distanceKm: 3,
+        notes: "Morning",
+      }),
+      entry({
+        kind: "run",
+        date: "2026-01-06",
+        minutes: 15,
+        distanceKm: 2,
+        notes: "Evening",
+      }),
+    ];
+    expect(weeklySummary(settings, records, "2026-01-08", 1)[0]).toEqual({
+      monday: "2026-01-05",
+      strength: { done: 2, planned: 3 },
+      runs: { done: 2, planned: 2 },
+    });
+  });
   test("strength series keep exercise variants apart and use the weaker side", () => {
     const first = completedWorkout("2026-01-05", 0, 8);
     const later = completedWorkout("2026-01-07", 0, 10);

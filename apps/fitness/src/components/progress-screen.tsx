@@ -207,14 +207,17 @@ export function ProgressScreen() {
     .slice(0, 5);
   const shown = (kg: number) =>
     `${(Math.round(displayLoad(kg, settings.units) * 10) / 10).toFixed(1)} ${settings.units}`;
-  const maxPlanned = Math.max(
-    1,
-    ...weeks.map((w) =>
-      Math.max(
-        w.strength.planned,
-        w.strength.done,
-        w.runs.planned,
-        w.runs.done,
+  const maxPlanned = Math.min(
+    7,
+    Math.max(
+      1,
+      ...weeks.map((w) =>
+        Math.max(
+          w.strength.planned,
+          w.strength.done,
+          w.runs.planned,
+          w.runs.done,
+        ),
       ),
     ),
   );
@@ -251,7 +254,12 @@ export function ProgressScreen() {
                     <td key={index}>
                       <span className="pips" aria-hidden="true">
                         {Array.from(
-                          { length: Math.max(count.planned, count.done, 1) },
+                          {
+                            length: Math.min(
+                              7,
+                              Math.max(count.planned, count.done, 1),
+                            ),
+                          },
                           (_, i) => (
                             <i
                               key={i}
@@ -269,7 +277,10 @@ export function ProgressScreen() {
                           {
                             length:
                               maxPlanned -
-                              Math.max(count.planned, count.done, 1),
+                              Math.min(
+                                7,
+                                Math.max(count.planned, count.done, 1),
+                              ),
                           },
                           (_, i) => (
                             <i key={`pad-${i}`} className="is-pad" />

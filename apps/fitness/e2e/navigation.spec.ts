@@ -403,6 +403,22 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
 test("toolbar configure, navigation and selection redact private activity URL parameters", async ({
   page,
 }) => {
+  const privateRoutine = "Synthetic private teaching plan";
+  await page.getByRole("link", { name: "Edit repeating week" }).click();
+  await page.locator(".routine-editor > summary").first().click();
+  await page
+    .getByLabel("Routine name", { exact: true })
+    .first()
+    .fill(privateRoutine);
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Week", exact: true })
+    .click();
+  await page.locator("#view-date").fill("2026-01-05");
   await page.route("https://toolbar.bent.build/toolbar?**", async (route) =>
     route.fulfill({
       contentType: "text/html",
@@ -458,6 +474,37 @@ test("toolbar configure, navigation and selection redact private activity URL pa
   await expect(payloads).toContainText("[Private element]");
   for (const secret of ["2026-01-05", routineId, workoutId])
     await expect(payloads).not.toContainText(secret);
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Exercises", exact: true })
+    .click();
+  for (const target of [".exercise-tile .tile-text small", ".content"]) {
+    await panel.evaluate(() =>
+      window.parent.postMessage(
+        { type: "feedback:select" },
+        "http://localhost:3025",
+      ),
+    );
+    await expect(page.locator("html")).toHaveCSS("cursor", "crosshair");
+    await page.locator(target).first().dispatchEvent("click");
+    await expect(payloads).not.toContainText(privateRoutine);
+  }
+  await page
+    .locator(".exercise-tile")
+    .filter({ hasText: "Goblet squat" })
+    .click();
+  await expect(page).toHaveURL(/guides\?exercise=squat/);
+  for (const target of [".exercise-detail .fact-list", ".content"]) {
+    await panel.evaluate(() =>
+      window.parent.postMessage(
+        { type: "feedback:select" },
+        "http://localhost:3025",
+      ),
+    );
+    await expect(page.locator("html")).toHaveCSS("cursor", "crosshair");
+    await page.locator(target).dispatchEvent("click");
+    await expect(payloads).not.toContainText(privateRoutine);
+  }
 });
 
 async function openBodyweight(page: Page) {

@@ -1,10 +1,4 @@
-import {
-  addDays,
-  completedActivity,
-  mondayOf,
-  scheduled,
-  trainingRecords,
-} from "./domain";
+import { addDays, mondayOf, scheduled, trainingRecords } from "./domain";
 import type { Exercise, RecordEntry, Settings, Workout } from "./domain";
 
 export type WeekSummary = {
@@ -24,7 +18,16 @@ export function weeklySummary(
   today: string,
   weeks: number,
 ): WeekSummary[] {
-  const activity = completedActivity(records);
+  const activity = new Map<string, { strength: number; runs: number }>();
+  for (const record of trainingRecords(records)) {
+    const data = record.data;
+    if (data.kind !== "run" && !(data.kind === "workout" && data.finishedAt))
+      continue;
+    const day = activity.get(data.date) ?? { strength: 0, runs: 0 };
+    if (data.kind === "run") day.runs++;
+    else day.strength++;
+    activity.set(data.date, day);
+  }
   const current = mondayOf(today);
   return Array.from({ length: weeks }, (_, index) => {
     const monday = addDays(current, (index - weeks + 1) * 7);
@@ -41,8 +44,8 @@ export function weeklySummary(
       const done = activity.get(day);
       if (plan === "strength") summary.strength.planned++;
       if (plan === "run") summary.runs.planned++;
-      if (done?.strength) summary.strength.done++;
-      if (done?.run) summary.runs.done++;
+      summary.strength.done += done?.strength ?? 0;
+      summary.runs.done += done?.runs ?? 0;
     }
     return summary;
   });
