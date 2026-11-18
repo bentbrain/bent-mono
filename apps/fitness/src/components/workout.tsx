@@ -10,14 +10,19 @@ import {
 import type { RecordEntry, Settings, Workout } from "../domain";
 import type { Sync } from "../sync";
 import { ExerciseGuide } from "./guide";
+import { elapsedSeconds, formatDuration, remainingRest } from "../timing";
 export function WorkoutEditor({
   entry,
   settings,
   sync,
+  onFinish,
+  onDiscard,
 }: {
   entry: RecordEntry & { data: Workout };
   settings: Settings;
   sync: Sync;
+  onFinish: () => void;
+  onDiscard: () => void;
 }) {
   const workout = entry.data;
   const [now, setNow] = useState(() => Date.now());
@@ -26,13 +31,23 @@ export function WorkoutEditor({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const rest = Math.max(0, Math.ceil(((workout.restUntil ?? 0) - now) / 1000));
+  const rest = remainingRest(workout.restUntil, now);
+  const elapsed = elapsedSeconds(workout.startedAt, now);
+  const restDuration =
+    workout.exercises.find((exercise) => exercise.sets.some((set) => !set.done))
+      ?.prescription.rest ??
+    workout.exercises.at(-1)?.prescription.rest ??
+    120;
   function update(data: Workout) {
+    setNow(Date.now());
     const result = workoutSchema.safeParse(data);
     if (result.success) {
-      sync.put(result.data, entry.id);
+      const saved = sync.put(result.data, entry.id);
       setMessage("");
-    } else setMessage(result.error.issues[0]?.message ?? "Check your results.");
+      return saved;
+    }
+    setMessage(result.error.issues[0]?.message ?? "Check your results.");
+    return false;
   }
   const done = workout.exercises.reduce(
     (n, e) => n + e.sets.filter((s) => s.done).length,
@@ -44,7 +59,7 @@ export function WorkoutEditor({
       <div className="section-heading">
         <div>
           <p className="eyebrow">In progress · {workout.date}</p>
-          <h2>{workout.name}</h2>
+          <h1>{workout.name}</h1>
         </div>
         <strong>
           {done}/{count} sets
@@ -54,17 +69,50 @@ export function WorkoutEditor({
         Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
         reserve. Weights are for one dumbbell; each side has its own reps.
       </p>
-      <div className="rest-timer" role="timer" aria-label="Rest timer">
-        <span>Rest</span>
-        <strong>
-          {Math.floor(rest / 60)}:{String(rest % 60).padStart(2, "0")}
-        </strong>
-        <Button
-          appearance="ghost"
-          onClick={() => update({ ...workout, restUntil: null })}
+      <div className="workout-timing">
+        <div
+          className="elapsed-timer"
+          role="timer"
+          aria-label="Workout elapsed time"
         >
-          Skip
-        </Button>
+          <span>Workout elapsed</span>
+          <strong>{formatDuration(elapsed)}</strong>
+          <small>Running since you started this session</small>
+        </div>
+        <div className="rest-timer-panel">
+          <div className="rest-timer" role="timer" aria-label="Rest timer">
+            <div>
+              <span>Rest between sets</span>
+              <strong>{rest > 0 ? formatDuration(rest) : "Not running"}</strong>
+            </div>
+            <div className="timer-actions">
+              <Button
+                appearance="ghost"
+                onClick={() =>
+                  update({
+                    ...workout,
+                    restUntil: Date.now() + restDuration * 1000,
+                  })
+                }
+              >
+                {rest > 0 ? "Restart" : "Start"} {formatDuration(restDuration)}{" "}
+                rest
+              </Button>
+              {rest > 0 && (
+                <Button
+                  appearance="ghost"
+                  onClick={() => update({ ...workout, restUntil: null })}
+                >
+                  Skip rest
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="timer-help">
+            Rest starts automatically when you mark a set Done. You can also
+            start it here.
+          </p>
+        </div>
       </div>
       {workout.exercises.map((e, ei) => {
         const p = e.prescription,
@@ -235,13 +283,16 @@ export function WorkoutEditor({
       <Button
         appearance="primary"
         disabled={done !== count}
-        onClick={() =>
-          update({
-            ...workout,
-            finishedAt: new Date().toISOString(),
-            restUntil: null,
-          })
-        }
+        onClick={() => {
+          if (
+            update({
+              ...workout,
+              finishedAt: new Date().toISOString(),
+              restUntil: null,
+            })
+          )
+            onFinish();
+        }}
       >
         Finish workout
       </Button>
@@ -252,7 +303,12 @@ export function WorkoutEditor({
       <details>
         <summary>Discard this workout</summary>
         <p>This removes the draft. Completed history stays available.</p>
-        <Button appearance="outline" onClick={() => sync.put(null, entry.id)}>
+        <Button
+          appearance="outline"
+          onClick={() => {
+            if (sync.put(null, entry.id)) onDiscard();
+          }}
+        >
           Discard draft
         </Button>
       </details>

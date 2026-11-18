@@ -19,6 +19,8 @@ The app checks the signed-in account and invitation on every server operation. S
 
 Start with the included A/B dumbbell templates, then edit your schedule, targets, equipment and prescriptions in Settings. The introduction uses two sets per exercise for the configured number of weeks. Weights mean one dumbbell. Rows and split squats record both sides; planks record seconds. Progression suggestions require all prescribed sets to reach the top of the range with control and at least two reps in reserve. Add confirmed dumbbell sizes to get suggestions based on available weights.
 
+Open the workout plan from Today to review exercises and instructions. Press Start workout when you are ready to train. This creates a recoverable draft and starts the elapsed timer. Rest starts when you mark a set Done, or you can start and skip it from the rest controls. Both timers use saved timestamps and continue across navigation and reloads. Today, plans, active workouts and the other sections have their own URLs and support browser Back and Forward.
+
 Each included exercise has setup instructions, form cues, a YouTube tutorial and a six-panel illustration showing the movement from two angles. Open an illustration at full size to inspect the positions. The illustrations are AI-generated references. Read the written instructions and watch the demonstration before trying a new movement. Start light and stop if a movement hurts.
 
 Food entries track calories and protein. Save regular meals for reuse. Weigh-ins use one current value per date; the chart shows the latest 60 recorded dates and an average of the latest seven weigh-ins. Compare trends over several weeks when adjusting food targets.

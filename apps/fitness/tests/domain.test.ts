@@ -13,6 +13,7 @@ import {
   totals,
   workoutSchema,
 } from "../src/domain";
+import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
 import type { RecordEntry } from "../src/domain";
 describe("plan dates and snapshots", () => {
   const settings = defaultSettings("2026-01-05", "Australia/Brisbane");
@@ -164,4 +165,18 @@ test("an all-rest schedule has no next session", () => {
   const settings = defaultSettings("2026-01-05", "UTC");
   settings.schedule = settings.schedule.map(() => "rest");
   expect(nextSession(settings, "2026-01-05", [])).toBeNull();
+});
+
+test("session and rest timers use saved deadlines across navigation and reload", () => {
+  const start = "2026-01-05T08:00:00.000Z";
+  const now = Date.parse(start);
+  expect(elapsedSeconds(start, now + 7200500)).toBe(7200);
+  expect(elapsedSeconds(start, now - 1000)).toBe(0);
+  expect(remainingRest(now + 120000, now + 1001)).toBe(119);
+  expect(remainingRest(now + 120000, now + 121000)).toBe(0);
+  expect(remainingRest(null, now)).toBe(0);
+  expect(formatDuration(0)).toBe("0:00");
+  expect(formatDuration(75)).toBe("1:15");
+  expect(formatDuration(3661)).toBe("1:01:01");
+  expect(formatDuration(-1)).toBe("0:00");
 });

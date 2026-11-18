@@ -141,7 +141,7 @@ small,
   flex-direction: column;
   gap: 8px;
 }
-.navigation button {
+.navigation a {
   border: 0;
   background: none;
   text-align: left;
@@ -151,12 +151,12 @@ small,
   gap: 15px;
   font-size: 0.87rem;
 }
-.navigation button[aria-current] {
+.navigation a[aria-current] {
   color: var(--accent);
   background: #e9eeff;
   font-weight: 600;
 }
-.navigation button span {
+.navigation a span {
   font-size: 1.2rem;
   min-width: 20px;
 }
@@ -625,28 +625,106 @@ legend {
   background: #edf5eb;
   border-color: #c5d8be;
 }
-.rest-timer {
+.back-link {
+  display: inline-block;
+  margin-bottom: 24px;
+  color: var(--accent);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.navigation a {
+  text-decoration: none;
+}
+.active-workout {
+  border-left: 3px solid var(--accent);
+}
+.active-workout h2 {
+  margin: 16px 0 8px;
+}
+.active-workout p {
+  margin-bottom: 18px;
+}
+.plan-summary p {
+  margin-bottom: 16px;
+}
+.plan-summary .muted {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+.plan-exercise .exercise-title {
+  margin-bottom: 12px;
+}
+.plan-exercise h2 {
+  font-size: 1.05rem;
+}
+.workout-timing {
   position: sticky;
-  top: 10px;
+  top: 8px;
   z-index: 5;
+  margin: 24px 0;
+  box-shadow: 0 3px 12px #19261d12;
+}
+.elapsed-timer {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: #eef2ff;
+  border: 1px solid #cbd5f3;
+}
+.elapsed-timer > span {
+  font-size: 0.8rem;
+}
+.elapsed-timer strong {
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  color: var(--accent);
+}
+.elapsed-timer small {
+  width: 100%;
+  color: #5c655e;
+  font-size: 0.7rem;
+}
+.rest-timer-panel {
+  background: #19261d;
+  color: white;
+}
+.rest-timer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  background: #19261d;
-  color: white;
-  padding: 8px 18px;
-  border: 1px solid #19261d;
+  gap: 12px;
+  padding: 12px 18px;
 }
-.rest-timer > span {
+.rest-timer > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+.rest-timer span {
   font-size: 0.75rem;
 }
 .rest-timer strong {
   font-family: var(--mono);
-  font-size: 1.4rem;
+  font-size: 1.25rem;
 }
 .rest-timer .bent-button {
   color: #b9d3ff;
+  font-size: 0.75rem;
+  padding: 8px 10px;
+}
+.timer-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.timer-help {
+  margin: 0;
+  padding: 0 18px 12px;
+  color: #d1dcd3;
+  font-size: 0.72rem;
+  line-height: 1.5;
 }
 .error {
   padding: 18px;
@@ -714,7 +792,7 @@ legend {
     z-index: 20;
     gap: 0;
   }
-  .navigation button {
+  .navigation a {
     display: flex;
     flex: 1;
     flex-direction: column;
@@ -724,7 +802,7 @@ legend {
     font-size: 0.6rem;
     min-height: 54px;
   }
-  .navigation button span {
+  .navigation a span {
     font-size: 1.25rem;
     text-align: center;
   }

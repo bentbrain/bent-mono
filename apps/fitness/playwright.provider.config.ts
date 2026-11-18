@@ -2,6 +2,6 @@ import { defineConfig } from "@playwright/test";
 import config from "./playwright.config";
 export default defineConfig({
   ...config,
-  testMatch: "auth.spec.ts",
+  testMatch: ["auth.spec.ts", "navigation.spec.ts"],
   timeout: 120000,
 });

@@ -73,7 +73,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(page.locator("[data-feedback-host]")).toBeAttached();
   await page.locator("#view-date").fill("2026-01-05");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByLabel("Plan start date").fill("2026-01-05");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
@@ -81,13 +81,16 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("button", { name: "Today", exact: true })
+    .getByRole("link", { name: "Today", exact: true })
     .click();
   await mkdir("private/screenshots", { recursive: true });
   await page.screenshot({
     path: `private/screenshots/today-${info.project.name}.png`,
     fullPage: true,
   });
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
   await page.getByRole("button", { name: "Start workout" }).click();
   await expect(
     page.getByRole("heading", { name: "Strength A", exact: true }),
@@ -116,6 +119,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await page.context().setOffline(false);
   await page.goto("/");
   await expect(page.getByRole("status").first()).toHaveText("Saved");
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
   await page.reload();
   await expect(
     page.getByRole("spinbutton", {
@@ -152,18 +156,18 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     path: `private/screenshots/workout-${info.project.name}.png`,
     fullPage: true,
   });
+  await page.getByRole("link", { name: "Food", exact: true }).click();
   await page.locator("#view-date").fill("2026-01-05");
-  await page.getByRole("button", { name: "Food", exact: true }).click();
   await page.getByLabel("Meal or snack").fill("Synthetic lunch");
   await page.getByLabel("Calories · kcal").fill("600");
   await page.getByLabel("Protein · g", { exact: true }).fill("35");
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("button", { name: "Body", exact: true }).click();
+  await page.getByRole("link", { name: "Body", exact: true }).click();
   await page.getByLabel("Weight · kg", { exact: true }).fill("70");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByLabel("Upload equipment photo").setInputFiles({
     name: "synthetic-equipment.png",
     mimeType: "image/png",
@@ -215,18 +219,22 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await pageA2.goto("/");
   await clerk.signIn({ page: pageA2, emailAddress: syntheticEmails[0] ?? "" });
   await pageA2.reload();
+  await pageA2
+    .getByRole("link", { name: "Resume workout", exact: true })
+    .click();
   await expect(
     pageA2.getByRole("spinbutton", {
       name: "Goblet squat set 2 weight",
       exact: true,
     }),
   ).toHaveValue("9");
+  await pageA2.getByRole("link", { name: "Body", exact: true }).click();
   await pageA2.locator("#view-date").fill("2026-01-05");
-  await pageA2.getByRole("button", { name: "Body", exact: true }).click();
+  await expect(pageA2.locator("#weight-date")).toHaveValue("2026-01-05");
   await pageA2.getByLabel("Weight · kg", { exact: true }).fill("71");
   await pageA2.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(pageA2.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("button", { name: "Body", exact: true }).click();
+  await page.getByRole("link", { name: "Body", exact: true }).click();
   await page.getByLabel("Weight · kg", { exact: true }).fill("72");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(
@@ -236,8 +244,8 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .getByRole("button", { name: "Use cloud version for this record" })
     .click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await pageA2.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await pageA2.getByRole("link", { name: "Settings", exact: true }).click();
   await pageA2
     .getByLabel("Goal", { exact: true })
     .fill("Synthetic private cloud goal");
@@ -265,12 +273,12 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await pageA2.reload();
-  await pageA2.getByRole("button", { name: "Settings", exact: true }).click();
+  await pageA2.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(pageA2.getByLabel("Goal", { exact: true })).toHaveValue(
     "Synthetic private cloud goal",
   );
   await contextA2.close();
-  await page.getByRole("button", { name: "Body", exact: true }).click();
+  await page.getByRole("link", { name: "Body", exact: true }).click();
   const pounds = page.getByLabel("Weight · lb", { exact: true });
   await pounds.fill("154.3");
   expect(
@@ -285,7 +293,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(
     page.locator(".list-row").getByText("154.3 lb", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   for (let day = 0; day < 7; day++)
     await page.locator(`#day-${day}`).selectOption("rest");
   await page
@@ -294,8 +302,9 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("button", { name: "Today", exact: true })
+    .getByRole("link", { name: "Today", exact: true })
     .click();
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
   await page.getByText("Discard this workout", { exact: true }).click();
   await page
     .getByRole("button", { name: "Discard draft", exact: true })
@@ -308,10 +317,10 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     page.getByRole("button", { name: "Log run", exact: true }),
   ).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Record an unscheduled run", exact: true })
+    .getByRole("link", { name: "Record an unscheduled run", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Record your run" }),
+    page.getByRole("heading", { name: "Record your completed run" }),
   ).toBeVisible();
   // Keep the hosted loader intact and intercept only its isolated panel UI.
   // Its real selection handler must redact the goal and remove it from ancestor context.
@@ -321,6 +330,10 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
       body: `<pre id="context"></pre><script>addEventListener('message',event=>{if(event.data.type==='feedback:selected')document.querySelector('#context').textContent=JSON.stringify(event.data.context)});</script>`,
     }),
   );
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "Today", exact: true })
+    .click();
   await page.reload();
   await expect(page.locator(".subtitle")).toHaveText(
     "Synthetic private cloud goal",

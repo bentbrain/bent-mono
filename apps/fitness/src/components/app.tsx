@@ -1,23 +1,27 @@
 import { useEffect, useState } from "react";
+import {
+  Link,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useSearch,
+} from "@tanstack/react-router";
+import { AccountContext, useAccount } from "./account-context";
 import { UserButton, SignInButton, useAuth } from "@clerk/tanstack-react-start";
 import { Button } from "@bent/ui/button";
 import {
   addDays,
-  createWorkout,
   displayLoad,
   exercises,
   localDate,
   nextSession,
   settingsId,
-  runSchema,
   scheduled,
   totals,
 } from "../domain";
-import type { RecordEntry, Settings } from "../domain";
 import { load, save } from "../server/functions";
 import { useSync } from "../sync";
-import { download, TextField } from "./fields";
-import { WorkoutEditor } from "./workout";
+import { download } from "./fields";
 import { Nutrition } from "./nutrition";
 import { Bodyweight } from "./bodyweight";
 import { Onboarding, SettingsEditor } from "./settings";
@@ -27,7 +31,6 @@ const transport = {
   save: (request: Parameters<typeof save>[0]["data"]) =>
     save({ data: request }),
 };
-type Tab = "today" | "food" | "body" | "history" | "settings" | "guides";
 export function AuthenticatedApp() {
   const { userId, isLoaded } = useAuth();
   if (!isLoaded) return <p className="loading">Loading account…</p>;
@@ -69,10 +72,16 @@ function Welcome() {
 }
 function Account({ owner }: { owner: string }) {
   const sync = useSync(owner, transport);
-  const [tab, setTab] = useState<Tab>("today");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { date: selectedDate } = useSearch({ from: "/_app" });
+  const dateDestinations: (
+    "/" | "/food" | "/body" | "/history" | "/settings" | "/guides"
+  )[] = ["/", "/food", "/body", "/history", "/settings", "/guides"];
+  const dateDestination =
+    dateDestinations.find((path) => path === location.pathname) ?? "/";
   const settings =
     sync.settings?.kind === "settings" ? sync.settings : undefined;
-  const [selectedDate, setSelectedDate] = useState("");
   const [today, setToday] = useState(() => localDate("UTC"));
   useEffect(() => {
     if (!settings) return;
@@ -113,50 +122,80 @@ function Account({ owner }: { owner: string }) {
         </div>
       </header>
       <nav className="navigation" aria-label="Main navigation">
-        {[
-          { id: "today", name: "Today", icon: "◷" },
-          { id: "food", name: "Food", icon: "+" },
-          { id: "body", name: "Body", icon: "↗" },
-          { id: "history", name: "History", icon: "≡" },
-          { id: "settings", name: "Settings", icon: "⚙" },
-        ].map((item) => (
-          <button
-            key={item.id}
-            aria-current={tab === item.id ? "page" : undefined}
-            onClick={() => {
-              if (
-                item.id === "today" ||
-                item.id === "food" ||
-                item.id === "body" ||
-                item.id === "history" ||
-                item.id === "settings"
+        {(
+          [
+            { to: "/", name: "Today", icon: "◷" },
+            { to: "/food", name: "Food", icon: "+" },
+            { to: "/body", name: "Body", icon: "↗" },
+            { to: "/history", name: "History", icon: "≡" },
+            { to: "/settings", name: "Settings", icon: "⚙" },
+          ] satisfies {
+            to: "/" | "/food" | "/body" | "/history" | "/settings";
+            name: string;
+            icon: string;
+          }[]
+        ).map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            search={{ date: selectedDate }}
+            activeOptions={{ exact: true }}
+            aria-current={
+              (
+                item.to === "/"
+                  ? location.pathname === "/" ||
+                    ["/plan/", "/workouts/", "/runs/"].some((prefix) =>
+                      location.pathname.startsWith(prefix),
+                    )
+                  : location.pathname === item.to
               )
-                setTab(item.id);
-              window.scrollTo(0, 0);
-            }}
+                ? "page"
+                : undefined
+            }
           >
             <span aria-hidden>{item.icon}</span>
             {item.name}
-          </button>
+          </Link>
         ))}
       </nav>
       <main className="content">
-        <div
-          className="date-control"
-          data-feedback-private
-          data-feedback-redact
-        >
-          <label htmlFor="view-date">Your day</label>
-          <input
-            id="view-date"
-            type="date"
-            value={date}
-            onChange={(e) => setSelectedDate(e.target.value)}
-          />
-          {selectedDate && (
-            <button onClick={() => setSelectedDate("")}>Today</button>
+        {!location.pathname.startsWith("/plan/") &&
+          !location.pathname.startsWith("/workouts/") &&
+          !location.pathname.startsWith("/runs/") && (
+            <div
+              className="date-control"
+              data-feedback-private
+              data-feedback-redact
+            >
+              <label htmlFor="view-date">Your day</label>
+              <input
+                id="view-date"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  void navigate({
+                    to: dateDestination,
+                    search: { date: value || undefined },
+                    replace: true,
+                  });
+                }}
+              />
+              {selectedDate && (
+                <button
+                  onClick={() =>
+                    void navigate({
+                      to: dateDestination,
+                      search: {},
+                      replace: true,
+                    })
+                  }
+                >
+                  Today
+                </button>
+              )}
+            </div>
           )}
-        </div>
         {sync.error && (
           <div className="error" role="alert">
             <p>{sync.error}</p>
@@ -214,55 +253,9 @@ function Account({ owner }: { owner: string }) {
         ) : !settings ? (
           <Onboarding sync={sync} />
         ) : (
-          <>
-            {tab === "today" && (
-              <Today
-                sync={sync}
-                date={date}
-                settings={settings}
-                guides={() => setTab("guides")}
-              />
-            )}
-            {tab === "food" && (
-              <Nutrition sync={sync} date={date} settings={settings} />
-            )}
-            {tab === "body" && (
-              <Bodyweight sync={sync} date={date} settings={settings} />
-            )}
-            {tab === "settings" && (
-              <SettingsEditor
-                key={`${sync.records.find((r) => r.id === settingsId)?.revision ?? 0}:${sync.editorReset}`}
-                revision={
-                  sync.records.find((r) => r.id === settingsId)?.revision ?? 0
-                }
-                settings={settings}
-                sync={sync}
-              />
-            )}
-            {tab === "history" && (
-              <History records={sync.records} settings={settings} />
-            )}
-            {tab === "guides" && (
-              <section>
-                <p className="eyebrow">Learn the movements</p>
-                <h1>Exercise guides</h1>
-                <p>
-                  Read the setup, practise with a light weight, then open the
-                  tutorial for a demonstration.
-                </p>
-                <p className="muted">
-                  Each exercise has an illustrated sequence from two angles.
-                  Open an illustration at full size to inspect the positions.
-                </p>
-                {exercises.map((e) => (
-                  <article className="card" key={e.id}>
-                    <h2>{e.name}</h2>
-                    <ExerciseGuide id={e.id} />
-                  </article>
-                ))}
-              </section>
-            )}
-          </>
+          <AccountContext.Provider value={{ sync, settings, date }}>
+            <Outlet />
+          </AccountContext.Provider>
         )}
       </main>
       <footer className="app-footer">
@@ -271,17 +264,8 @@ function Account({ owner }: { owner: string }) {
     </div>
   );
 }
-function Today({
-  sync,
-  date,
-  settings,
-  guides,
-}: {
-  sync: ReturnType<typeof useSync>;
-  date: string;
-  settings: Settings;
-  guides: () => void;
-}) {
+export function TodayScreen() {
+  const { sync, date, settings } = useAccount();
   const active = sync.records.find(
     (r) => r.data.kind === "workout" && !r.data.finishedAt,
   );
@@ -290,16 +274,6 @@ function Today({
   const nextDate = upcoming?.date ?? date;
   const next = upcoming?.plan;
   const food = totals(sync.records, date);
-  const [runOpen, setRunOpen] = useState(false),
-    [runError, setRunError] = useState("");
-  if (active?.data.kind === "workout")
-    return (
-      <WorkoutEditor
-        entry={{ ...active, data: active.data }}
-        settings={settings}
-        sync={sync}
-      />
-    );
   return (
     <section>
       <p className="eyebrow">
@@ -314,6 +288,25 @@ function Today({
       <p className="subtitle" data-feedback-redact data-feedback-private>
         {settings.goal}
       </p>
+      {active?.data.kind === "workout" && (
+        <aside
+          className="card active-workout"
+          data-feedback-redact
+          data-feedback-private
+        >
+          <span className="tag">Workout in progress · {active.data.date}</span>
+          <h2>{active.data.name}</h2>
+          <p>Resume when you are ready, or keep looking through your plan.</p>
+          <Link
+            className="bent-button bent-button--outline"
+            to="/workouts/$workoutId"
+            params={{ workoutId: active.id }}
+            search={{ date }}
+          >
+            Resume workout
+          </Link>
+        </aside>
+      )}
       {next ? (
         <div className="hero card" data-feedback-redact data-feedback-private>
           <div className="hero-top">
@@ -332,25 +325,25 @@ function Today({
                 ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · 2 sets each" : "Full session"}`
                 : "Keep it comfortable enough to talk in sentences."}
           </p>
-          <Button
-            appearance="primary"
-            onClick={() => {
-              if (next.type === "strength" && next.routine)
-                sync.put(
-                  createWorkout(
-                    settings,
-                    next.routine,
-                    nextDate,
-                    next.intro,
-                    sync.records,
-                  ),
-                );
-              else setRunOpen(true);
-            }}
-          >
-            {next.type === "strength" ? "Start workout" : "Log run"}{" "}
-            <span aria-hidden>↗</span>
-          </Button>
+          {next.type === "strength" && next.routine ? (
+            <Link
+              className="bent-button bent-button--primary"
+              to="/plan/$date/$routineId"
+              params={{ date: nextDate, routineId: next.routine.id }}
+              search={{ date }}
+            >
+              View workout plan <span aria-hidden>↗</span>
+            </Link>
+          ) : (
+            <Link
+              className="bent-button bent-button--primary"
+              to="/runs/$date"
+              params={{ date: nextDate }}
+              search={{ date }}
+            >
+              View run plan <span aria-hidden>↗</span>
+            </Link>
+          )}
         </div>
       ) : (
         <div className="hero card" data-feedback-redact data-feedback-private>
@@ -361,91 +354,25 @@ function Today({
             date.
           </p>
           {settings.routines.map((routine) => (
-            <Button
+            <Link
               key={routine.id}
-              appearance="outline"
-              onClick={() =>
-                sync.put(
-                  createWorkout(
-                    settings,
-                    routine,
-                    date,
-                    today.intro,
-                    sync.records,
-                  ),
-                )
-              }
+              className="bent-button bent-button--outline"
+              to="/plan/$date/$routineId"
+              params={{ date, routineId: routine.id }}
+              search={{ date }}
             >
-              Start {routine.name}
-            </Button>
+              View {routine.name} plan
+            </Link>
           ))}
-          <Button appearance="outline" onClick={() => setRunOpen(true)}>
+          <Link
+            className="bent-button bent-button--outline"
+            to="/runs/$date"
+            params={{ date }}
+            search={{ date }}
+          >
             Record an unscheduled run
-          </Button>
+          </Link>
         </div>
-      )}
-      {runOpen && (
-        <form
-          className="card form-grid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const f = new FormData(e.currentTarget);
-            const result = runSchema.safeParse({
-              kind: "run",
-              date: f.get("date"),
-              minutes: Number(f.get("minutes")),
-              distanceKm: Number(f.get("distance")),
-              notes: f.get("notes"),
-            });
-            if (!result.success) {
-              setRunError("Enter a valid date, duration and distance.");
-              return;
-            }
-            if (sync.put(result.data)) {
-              setRunOpen(false);
-              setRunError("");
-            }
-          }}
-        >
-          <h2>Record your run</h2>
-          <TextField
-            label="Date"
-            id="run-date"
-            name="date"
-            type="date"
-            defaultValue={nextDate}
-            required
-          />
-          <TextField
-            label="Duration · minutes"
-            id="run-minutes"
-            name="minutes"
-            type="number"
-            min="1"
-            max="1440"
-            required
-          />
-          <TextField
-            label="Distance · km"
-            id="run-distance"
-            name="distance"
-            type="number"
-            min="0"
-            max="500"
-            step="0.01"
-            required
-          />
-          <TextField
-            label="Notes"
-            id="run-notes"
-            name="notes"
-            maxLength={2000}
-          />
-          <Button type="submit" appearance="primary">
-            Save run
-          </Button>
-          {runError && <p role="alert">{runError}</p>}
-        </form>
       )}
       <div className="section-heading">
         <h2>Next seven days</h2>
@@ -497,20 +424,20 @@ function Today({
           Every exercise has setup instructions, form cues and a video
           demonstration.
         </p>
-        <Button appearance="outline" onClick={guides}>
-          Open exercise guides ↗
-        </Button>
+        <Link
+          className="bent-button bent-button--outline"
+          to="/guides"
+          search={{ date }}
+        >
+          Open exercise guides <span aria-hidden>↗</span>
+        </Link>
       </div>
     </section>
   );
 }
-function History({
-  records,
-  settings,
-}: {
-  records: RecordEntry[];
-  settings: Settings;
-}) {
+export function HistoryScreen() {
+  const { sync, settings } = useAccount();
+  const records = sync.records;
   const sessions = records
     .filter(
       (r) =>
@@ -560,6 +487,50 @@ function History({
           </article>
         ) : null,
       )}
+    </section>
+  );
+}
+
+export function FoodScreen() {
+  const { sync, date, settings } = useAccount();
+  return <Nutrition sync={sync} date={date} settings={settings} />;
+}
+export function BodyScreen() {
+  const { sync, date, settings } = useAccount();
+  return <Bodyweight key={date} sync={sync} date={date} settings={settings} />;
+}
+export function SettingsScreen() {
+  const { sync, settings } = useAccount();
+  const revision =
+    sync.records.find((record) => record.id === settingsId)?.revision ?? 0;
+  return (
+    <SettingsEditor
+      key={`${revision}:${sync.editorReset}`}
+      revision={revision}
+      settings={settings}
+      sync={sync}
+    />
+  );
+}
+export function GuidesScreen() {
+  return (
+    <section>
+      <p className="eyebrow">Learn the movements</p>
+      <h1>Exercise guides</h1>
+      <p>
+        Read the setup, practise with a light weight, then open the tutorial for
+        a demonstration.
+      </p>
+      <p className="muted">
+        Each exercise has an illustrated sequence from two angles. Open an
+        illustration at full size to inspect the positions.
+      </p>
+      {exercises.map((exercise) => (
+        <article className="card" key={exercise.id}>
+          <h2>{exercise.name}</h2>
+          <ExerciseGuide id={exercise.id} />
+        </article>
+      ))}
     </section>
   );
 }
