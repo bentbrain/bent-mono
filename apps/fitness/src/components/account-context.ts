@@ -6,6 +6,9 @@ export const AccountContext = createContext<
       sync: Sync;
       settings: Settings;
       date: string;
+      today: string;
+      owner: string;
+      setInputPending: (pending: boolean) => void;
     }
   | undefined
 >(undefined);

@@ -169,7 +169,7 @@ export function useSync(owner: string, transport: Transport) {
       : (cloud.current.find((r) => r.id === id)?.revision ?? 0);
     if (expectedRevision !== undefined && revision !== expectedRevision) {
       setError(
-        "This editor has an older version. Reopen Settings to load the current values before saving.",
+        "This record changed since you opened it. Reopen it to load the current version before saving.",
       );
       return false;
     }

@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Button } from "@bent/ui/button";
-import { displayLoad, toKg, weightSchema } from "../domain";
+import {
+  displayLoad,
+  formatDate,
+  formatShortDate,
+  toKg,
+  weightSchema,
+} from "../domain";
 import type { Settings } from "../domain";
 import type { Sync } from "../sync";
 import { TextField } from "./fields";
@@ -21,8 +27,13 @@ export function Bodyweight({
     (w, i) => weights.findLastIndex((v) => v.date === w.date) === i,
   );
   const points = daily.slice(-60);
-  const min = Math.min(...points.map((w) => w.kg)) - 0.5,
-    max = Math.max(...points.map((w) => w.kg)) + 0.5;
+  const lowest = Math.min(...points.map((w) => w.kg)),
+    highest = Math.max(...points.map((w) => w.kg));
+  const min = lowest - 0.5,
+    max = highest + 0.5;
+  const rounded = (kg: number) =>
+    (Math.round(displayLoad(kg, settings.units) * 10) / 10).toFixed(1);
+  const shown = (kg: number) => `${rounded(kg)} ${settings.units}`;
   const first = points[0],
     last = points.at(-1);
   const x = (date: string) =>
@@ -32,7 +43,14 @@ export function Bodyweight({
           (Date.parse(last.date) - Date.parse(first.date))) *
           540
       : 300;
-  const y = (kg: number) => 180 - ((kg - min) / (max - min)) * 140;
+  const y = (kg: number) => 175 - ((kg - min) / (max - min)) * 125;
+  const trend = points.map((point, index) => {
+    const window = points.slice(Math.max(0, index - 6), index + 1);
+    return {
+      date: point.date,
+      kg: window.reduce((sum, item) => sum + item.kg, 0) / window.length,
+    };
+  });
   const recent = daily.slice(-7);
   const average = recent.length
     ? recent.reduce((n, w) => n + w.kg, 0) / recent.length
@@ -44,24 +62,41 @@ export function Bodyweight({
       <div className="card">
         <p className="eyebrow">Latest 7 weigh-ins · average</p>
         <strong className="big-number">
-          {average ? displayLoad(average, settings.units) : "—"}{" "}
+          {average !== null ? rounded(average) : "—"}{" "}
           <small>{settings.units}</small>
         </strong>
         {points.length ? (
           <svg
             className="weight-chart"
-            viewBox="0 0 600 225"
+            viewBox="0 0 600 250"
             role="img"
-            aria-label={`Bodyweight across ${points.length} recorded dates. Full values are listed below.`}
+            aria-label={`Bodyweight across ${points.length} recorded dates, from ${shown(lowest)} to ${shown(highest)}. All weigh-ins are listed below.`}
           >
-            <line
-              x1="30"
-              x2="570"
-              y1="180"
-              y2="180"
-              stroke="currentColor"
-              opacity=".2"
-            />
+            {[
+              { kg: highest, name: "High" },
+              { kg: lowest, name: "Low" },
+            ]
+              .slice(0, lowest === highest ? 1 : 2)
+              .map((line) => (
+                <g key={line.name}>
+                  <line
+                    x1="30"
+                    x2="570"
+                    y1={y(line.kg)}
+                    y2={y(line.kg)}
+                    stroke="currentColor"
+                    opacity=".25"
+                    strokeDasharray="2 6"
+                  />
+                  <text
+                    x="570"
+                    y={line.name === "High" ? y(line.kg) - 10 : y(line.kg) + 28}
+                    textAnchor="end"
+                  >
+                    {line.name} {shown(line.kg)}
+                  </text>
+                </g>
+              ))}
             <polyline
               points={points.map((w) => `${x(w.date)},${y(w.kg)}`).join(" ")}
               fill="none"
@@ -77,20 +112,35 @@ export function Bodyweight({
                 fill="var(--accent)"
               />
             ))}
-            <text x="30" y="212">
-              {first?.date}
+            <polyline
+              points={trend
+                .map((point) => `${x(point.date)},${y(point.kg)}`)
+                .join(" ")}
+              fill="none"
+              stroke="#435c46"
+              strokeWidth="4"
+              strokeDasharray="8 5"
+            />
+            <text x="30" y="240">
+              {first ? formatShortDate(first.date) : ""}
             </text>
-            <text x="570" y="212" textAnchor="end">
-              {last?.date}
-            </text>
-            <text x="30" y="22">
-              {displayLoad(max, settings.units)} {settings.units}
+            <text x="570" y="240" textAnchor="end">
+              {last && last.date !== first?.date
+                ? formatShortDate(last.date)
+                : ""}
             </text>
           </svg>
         ) : (
           <p>Add your first weigh-in to start the chart.</p>
         )}
       </div>
+      {points.length > 0 && (
+        <p className="chart-legend">
+          Blue line: each weigh-in. Dashed green line: average of up to 7
+          weigh-ins ending on that date. Dotted lines mark your highest and
+          lowest weigh-ins in this view.
+        </p>
+      )}
       <form
         className="card form-grid"
         onSubmit={(e) => {
@@ -143,11 +193,18 @@ export function Bodyweight({
         <summary>All weigh-ins</summary>
         {[...daily].reverse().map((w) => (
           <div className="list-row" key={w.id}>
-            <span>{w.date}</span>
+            <span>{formatDate(w.date)}</span>
             <strong>
               {displayLoad(w.kg, settings.units)} {settings.units}
             </strong>
-            <Button appearance="ghost" onClick={() => sync.put(null, w.id)}>
+            <Button
+              appearance="ghost"
+              aria-label={`Remove weigh-in ${formatDate(w.date)}`}
+              onClick={() =>
+                window.confirm(`Remove weigh-in for ${formatDate(w.date)}?`) &&
+                sync.put(null, w.id)
+              }
+            >
               Remove
             </Button>
           </div>

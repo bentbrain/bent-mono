@@ -4,6 +4,7 @@ import {
   Outlet,
   useLocation,
   useNavigate,
+  useRouter,
   useSearch,
 } from "@tanstack/react-router";
 import { AccountContext, useAccount } from "./account-context";
@@ -11,12 +12,16 @@ import { UserButton, SignInButton, useAuth } from "@clerk/tanstack-react-start";
 import { Button } from "@bent/ui/button";
 import {
   addDays,
-  displayLoad,
+  completedActivity,
+  dateSearch,
   exercises,
+  formatDate,
+  formatShortDate,
   localDate,
   nextSession,
-  settingsId,
   scheduled,
+  sessionMinutes,
+  settingsId,
   totals,
 } from "../domain";
 import { load, save } from "../server/functions";
@@ -25,6 +30,7 @@ import { download } from "./fields";
 import { Nutrition } from "./nutrition";
 import { Bodyweight } from "./bodyweight";
 import { Onboarding, SettingsEditor } from "./settings";
+import { History } from "./history";
 import { ExerciseGuide } from "./guide";
 const transport = {
   load: () => load(),
@@ -53,7 +59,9 @@ function Welcome() {
         trend.
       </p>
       <SignInButton mode="modal">
-        <Button appearance="primary">Sign in to your plan ↗</Button>
+        <Button appearance="primary">
+          Sign in to your plan <span aria-hidden>→</span>
+        </Button>
       </SignInButton>
       <p className="muted">
         Invited accounts only. Your training and nutrition stay private.
@@ -70,33 +78,61 @@ function Welcome() {
     </main>
   );
 }
+const datedPages = ["/", "/food", "/body"] as const;
+const navigation = [
+  { to: "/", name: "Today", icon: "◷" },
+  { to: "/food", name: "Food", icon: "+" },
+  { to: "/body", name: "Body", icon: "∿" },
+  { to: "/history", name: "History", icon: "≡" },
+  { to: "/guides", name: "Guides", icon: "?" },
+  { to: "/settings", name: "Settings", icon: "⚙" },
+] satisfies {
+  to: "/" | "/food" | "/body" | "/history" | "/settings" | "/guides";
+  name: string;
+  icon: string;
+}[];
+function browserTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
 function Account({ owner }: { owner: string }) {
   const sync = useSync(owner, transport);
   const location = useLocation();
   const navigate = useNavigate();
   const { date: selectedDate } = useSearch({ from: "/_app" });
-  const dateDestinations: (
-    "/" | "/food" | "/body" | "/history" | "/settings" | "/guides"
-  )[] = ["/", "/food", "/body", "/history", "/settings", "/guides"];
-  const dateDestination =
-    dateDestinations.find((path) => path === location.pathname) ?? "/";
   const settings =
     sync.settings?.kind === "settings" ? sync.settings : undefined;
-  const [today, setToday] = useState(() => localDate("UTC"));
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!settings) return;
-    const tick = () => setToday(localDate(settings.timezone));
-    tick();
-    const timer = setInterval(tick, 30000);
+    const timer = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(timer);
-  }, [settings]);
+  }, []);
+  const today = localDate(
+    settings?.timezone ?? browserTimezone(),
+    new Date(now),
+  );
   const date = selectedDate || today;
+  const datedPage = datedPages.find((path) => path === location.pathname);
+  const [inputPending, setInputPending] = useState(false);
+  const router = useRouter();
+  useEffect(
+    () =>
+      // Move focus to the new page heading after in-app navigation.
+      router.subscribe("onRendered", (event) => {
+        if (!event.pathChanged || !event.fromLocation) return;
+        const heading = document.querySelector(".content h1");
+        if (heading instanceof HTMLElement) {
+          heading.tabIndex = -1;
+          heading.focus({ preventScroll: true });
+        }
+      }),
+    [router],
+  );
   return (
     <div className="app-shell">
       <header className="app-header">
-        <a className="wordmark" href="/">
+        <Link className="wordmark" to="/" search={{}}>
           bent<span>/</span>fitness
-        </a>
+        </Link>
         <div
           className="account-tools"
           data-feedback-private
@@ -112,39 +148,30 @@ function Account({ owner }: { owner: string }) {
                 ? "Saving…"
                 : sync.error
                   ? "Needs attention"
-                  : sync.pending
-                    ? `${sync.pending} pending`
-                    : sync.ready
-                      ? "Saved"
-                      : "Loading…"}
+                  : inputPending
+                    ? "Unsaved input on device"
+                    : sync.pending
+                      ? `${sync.pending} pending`
+                      : sync.ready
+                        ? "Saved"
+                        : "Loading…"}
           </span>
           <UserButton />
         </div>
       </header>
       <nav className="navigation" aria-label="Main navigation">
-        {(
-          [
-            { to: "/", name: "Today", icon: "◷" },
-            { to: "/food", name: "Food", icon: "+" },
-            { to: "/body", name: "Body", icon: "↗" },
-            { to: "/history", name: "History", icon: "≡" },
-            { to: "/settings", name: "Settings", icon: "⚙" },
-          ] satisfies {
-            to: "/" | "/food" | "/body" | "/history" | "/settings";
-            name: string;
-            icon: string;
-          }[]
-        ).map((item) => (
+        {navigation.map((item) => (
           <Link
             key={item.to}
             to={item.to}
-            search={{ date: selectedDate }}
+            search={{}}
             activeOptions={{ exact: true }}
             aria-current={
               (
                 item.to === "/"
-                  ? location.pathname === "/" ||
-                    ["/plan", "/workout", "/run"].includes(location.pathname)
+                  ? ["/", "/plan", "/workout", "/run"].includes(
+                      location.pathname,
+                    )
                   : location.pathname === item.to
               )
                 ? "page"
@@ -157,7 +184,7 @@ function Account({ owner }: { owner: string }) {
         ))}
       </nav>
       <main className="content">
-        {!["/plan", "/workout", "/run"].includes(location.pathname) && (
+        {datedPage && settings && (
           <div
             className="date-control"
             data-feedback-private
@@ -168,29 +195,24 @@ function Account({ owner }: { owner: string }) {
               id="view-date"
               type="date"
               value={date}
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(event) =>
                 void navigate({
-                  to: dateDestination,
-                  search: { date: value || undefined },
-                  replace: true,
-                });
-              }}
+                  to: datedPage,
+                  search: dateSearch(event.target.value || today, today),
+                })
+              }
             />
-            {selectedDate && (
-              <button
-                onClick={() =>
-                  void navigate({
-                    to: dateDestination,
-                    search: {},
-                    replace: true,
-                  })
-                }
-              >
-                Today
-              </button>
-            )}
           </div>
+        )}
+        {datedPage && settings && date !== today && (
+          <p className="date-banner" data-feedback-private data-feedback-redact>
+            <span>
+              Viewing {formatDate(date)}. New entries here use this date.
+            </span>{" "}
+            <Link to={datedPage} search={{}}>
+              Return to today
+            </Link>
+          </p>
         )}
         {sync.error && (
           <div className="error" role="alert">
@@ -200,16 +222,14 @@ function Account({ owner }: { owner: string }) {
                 Retry connection
               </Button>
             )}
-            {(sync.pending > 0 || sync.error) && (
-              <Button
-                appearance="outline"
-                onClick={() =>
-                  download("fitness-pending.json", sync.draftExport())
-                }
-              >
-                Export pending changes
-              </Button>
-            )}
+            <Button
+              appearance="outline"
+              onClick={() =>
+                download("fitness-pending.json", sync.draftExport())
+              }
+            >
+              Export pending changes
+            </Button>
           </div>
         )}
         {sync.conflict && (
@@ -249,7 +269,9 @@ function Account({ owner }: { owner: string }) {
         ) : !settings ? (
           <Onboarding sync={sync} />
         ) : (
-          <AccountContext.Provider value={{ sync, settings, date }}>
+          <AccountContext.Provider
+            value={{ sync, settings, date, today, owner, setInputPending }}
+          >
             <Outlet />
           </AccountContext.Provider>
         )}
@@ -261,61 +283,78 @@ function Account({ owner }: { owner: string }) {
   );
 }
 export function TodayScreen() {
-  const { sync, date, settings } = useAccount();
+  const { sync, date, today, settings } = useAccount();
   const active = sync.records.find(
     (r) => r.data.kind === "workout" && !r.data.finishedAt,
   );
-  const today = scheduled(settings, date);
+  const plan = scheduled(settings, date);
+  const recorded = completedActivity(sync.records).get(date);
   const upcoming = nextSession(settings, date, sync.records);
-  const nextDate = upcoming?.date ?? date;
-  const next = upcoming?.plan;
   const food = totals(sync.records, date);
+  const isToday = date === today;
+  const onDay = isToday ? "today" : `on ${formatDate(date)}`;
+  const next = upcoming?.plan;
+  const nextDate = upcoming?.date ?? date;
+  const tag =
+    nextDate !== date
+      ? `Next session · ${formatDate(nextDate)}`
+      : isToday
+        ? "Up next · Today"
+        : date < today
+          ? `Not recorded · ${formatDate(date)}`
+          : `Planned · ${formatDate(date)}`;
   return (
-    <section>
+    <section data-feedback-private data-feedback-redact>
       <p className="eyebrow">
-        {new Intl.DateTimeFormat("en", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          timeZone: "UTC",
-        }).format(new Date(date + "T12:00:00Z"))}
+        {isToday ? "Today · " : ""}
+        {formatDate(date)}
       </p>
       <h1>Keep showing up.</h1>
-      <p className="subtitle" data-feedback-redact data-feedback-private>
-        {settings.goal}
-      </p>
-      {active?.data.kind === "workout" && (
-        <aside
-          className="card active-workout"
-          data-feedback-redact
-          data-feedback-private
-        >
-          <span className="tag">Workout in progress · {active.data.date}</span>
+      <p className="subtitle">{settings.goal}</p>
+      {recorded && (
+        <p className="card recorded">
+          {recorded.strength && recorded.run
+            ? "Strength and run"
+            : recorded.strength
+              ? "Strength workout"
+              : "Run"}{" "}
+          recorded {onDay}.{" "}
+          <Link to="/history" search={dateSearch(date, today)}>
+            View results
+          </Link>
+        </p>
+      )}
+      {active?.data.kind === "workout" ? (
+        <aside className="card active-workout">
+          <span className="tag">
+            Workout in progress · {formatDate(active.data.date)}
+          </span>
           <h2>{active.data.name}</h2>
-          <p>Resume when you are ready, or keep looking through your plan.</p>
+          <p>Your timers and results are saved. Pick up where you left off.</p>
           <Link
-            className="bent-button bent-button--outline"
+            className="bent-button bent-button--primary"
             to="/workout"
-            search={{ date, workoutId: active.id }}
+            search={{ workoutId: active.id }}
           >
             Resume workout
           </Link>
         </aside>
-      )}
-      {next ? (
-        <div className="hero card" data-feedback-redact data-feedback-private>
+      ) : next ? (
+        <div className="hero card">
           <div className="hero-top">
-            <span className="tag">
-              {nextDate === date ? "Up next" : "Next session · " + nextDate}
-            </span>
+            <span className="tag">{tag}</span>
             <span>
-              {next.type === "strength" ? "~ 60 min" : "Conversational pace"}
+              {next.type === "strength" && next.routine
+                ? `About ${sessionMinutes(next.routine, next.intro)} min`
+                : "Conversational pace"}
             </span>
           </div>
           <h2>{next.type === "strength" ? next.routine?.name : "Easy run"}</h2>
           <p>
-            {today.type === "rest"
-              ? "Rest today. Let your next session come to you."
+            {nextDate !== date
+              ? plan.type === "rest"
+                ? `Rest ${onDay}. Your next session is on ${formatDate(nextDate)}.`
+                : `Your session ${onDay} is recorded. Next is on ${formatDate(nextDate)}.`
               : next.type === "strength"
                 ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · up to 2 sets each" : "Full session"}`
                 : "Keep it comfortable enough to talk in sentences."}
@@ -324,22 +363,25 @@ export function TodayScreen() {
             <Link
               className="bent-button bent-button--primary"
               to="/plan"
-              search={{ date: nextDate, routineId: next.routine.id }}
+              search={{
+                ...dateSearch(nextDate, today),
+                routineId: next.routine.id,
+              }}
             >
-              View workout plan <span aria-hidden>↗</span>
+              View workout plan <span aria-hidden>→</span>
             </Link>
           ) : (
             <Link
               className="bent-button bent-button--primary"
               to="/run"
-              search={{ date: nextDate }}
+              search={dateSearch(nextDate, today)}
             >
-              View run plan <span aria-hidden>↗</span>
+              View run plan <span aria-hidden>→</span>
             </Link>
           )}
         </div>
       ) : (
-        <div className="hero card" data-feedback-redact data-feedback-private>
+        <div className="hero card">
           <span className="tag">Your schedule</span>
           <h2>No session scheduled</h2>
           <p>
@@ -351,7 +393,7 @@ export function TodayScreen() {
               key={routine.id}
               className="bent-button bent-button--outline"
               to="/plan"
-              search={{ date, routineId: routine.id }}
+              search={{ ...dateSearch(date, today), routineId: routine.id }}
             >
               View {routine.name} plan
             </Link>
@@ -359,44 +401,19 @@ export function TodayScreen() {
           <Link
             className="bent-button bent-button--outline"
             to="/run"
-            search={{ date }}
+            search={dateSearch(date, today)}
           >
             Record an unscheduled run
           </Link>
         </div>
       )}
       <div className="section-heading">
-        <h2>Next seven days</h2>
-        <span className="muted" data-feedback-private data-feedback-redact>
-          {settings.timezone}
-        </span>
+        <h2>Your week</h2>
+        <span className="muted">{settings.timezone}</span>
       </div>
-      <div className="week" data-feedback-redact data-feedback-private>
-        {Array.from({ length: 7 }, (_, i) => {
-          const d = addDays(date, i),
-            plan = scheduled(settings, d);
-          return (
-            <div key={d} className={i === 0 ? "current" : ""}>
-              <span>
-                {new Date(d + "T12:00:00Z").toLocaleDateString("en", {
-                  weekday: "short",
-                  timeZone: "UTC",
-                })}
-              </span>
-              <strong>
-                {plan.type === "strength"
-                  ? plan.routine?.name.replace("Strength ", "")
-                  : plan.type === "run"
-                    ? "Run"
-                    : "Rest"}
-              </strong>
-              <small>{d.slice(8)}</small>
-            </div>
-          );
-        })}
-      </div>
-      <h2>Today's fuel</h2>
-      <div className="metrics card" data-feedback-redact data-feedback-private>
+      <Schedule date={date} />
+      <h2>{isToday ? "Today's fuel" : `Fuel · ${formatDate(date)}`}</h2>
+      <div className="metrics card">
         <div>
           <strong>{Math.round(food.calories)}</strong>
           <span> / {settings.calories} kcal</span>
@@ -418,73 +435,124 @@ export function TodayScreen() {
         <Link
           className="bent-button bent-button--outline"
           to="/guides"
-          search={{ date }}
+          search={{}}
         >
-          Open exercise guides <span aria-hidden>↗</span>
+          Open exercise guides <span aria-hidden>→</span>
         </Link>
       </div>
     </section>
   );
 }
-export function HistoryScreen() {
-  const { sync, settings } = useAccount();
-  const records = sync.records;
-  const sessions = records
-    .filter(
-      (r) =>
-        (r.data.kind === "workout" && r.data.finishedAt) ||
-        r.data.kind === "run",
-    )
-    .sort((a, b) =>
-      "date" in a.data && "date" in b.data
-        ? b.data.date.localeCompare(a.data.date)
-        : 0,
-    );
+function Schedule({ date }: { date: string }) {
+  const { settings, sync, today } = useAccount();
+  const activity = completedActivity(sync.records);
+  const monday = addDays(
+    date,
+    -((new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7),
+  );
   return (
-    <section data-feedback-redact data-feedback-private>
-      <p className="eyebrow">Your work, recorded</p>
-      <h1>History</h1>
-      {sessions.length === 0 && (
-        <p>Your completed workouts and runs will appear here.</p>
-      )}
-      {sessions.map((r) =>
-        r.data.kind === "workout" ? (
-          <details className="card" key={r.id}>
-            <summary>
-              {r.data.date} · {r.data.name}
-            </summary>
-            {r.data.exercises.map((e, i) => (
-              <div className="history-exercise" key={i}>
-                <strong>{e.prescription.name}</strong>
-                <p>
-                  {e.sets
-                    .map(
-                      (s) =>
-                        `${displayLoad(s.loadKg, settings.units)} ${settings.units} × ${s.value}${e.prescription.side ? ` / ${s.right}` : ""}${e.prescription.mode === "seconds" ? " seconds" : ""}`,
-                    )
-                    .join(" · ")}
-                </p>
-              </div>
-            ))}
-            <p>{r.data.notes}</p>
-          </details>
-        ) : r.data.kind === "run" ? (
-          <article className="card" key={r.id}>
-            <h2>{r.data.date} · Run</h2>
-            <p>
-              {r.data.minutes} min · {r.data.distanceKm} km
-            </p>
-            <p>{r.data.notes}</p>
-          </article>
-        ) : null,
-      )}
-    </section>
+    <nav className="schedule-browser" aria-label="Training week">
+      <p className="schedule-range">
+        Week of {formatShortDate(monday)} to{" "}
+        {formatShortDate(addDays(monday, 6))}
+      </p>
+      <div className="schedule-controls">
+        <Link to="/" search={dateSearch(addDays(date, -7), today)}>
+          <span aria-hidden>←</span> Previous week
+        </Link>
+        <Link to="/" search={dateSearch(addDays(date, 7), today)}>
+          Next week <span aria-hidden>→</span>
+        </Link>
+      </div>
+      <ol className="schedule-days">
+        {Array.from({ length: 7 }, (_, i) => {
+          const day = addDays(monday, i);
+          const plan = scheduled(settings, day);
+          const done = activity.get(day);
+          const completed =
+            plan.type === "strength"
+              ? done?.strength
+              : plan.type === "run"
+                ? done?.run
+                : false;
+          const other = !completed && (done?.strength || done?.run);
+          const name =
+            plan.type === "strength"
+              ? (plan.routine?.name ?? "Strength")
+              : plan.type === "run"
+                ? "Easy run"
+                : "Rest";
+          const status = completed
+            ? "Done"
+            : other
+              ? "Activity recorded"
+              : plan.type === "rest"
+                ? "Rest day"
+                : day < today
+                  ? "Not recorded"
+                  : "Planned";
+          const state =
+            completed || other
+              ? "done"
+              : day < today && plan.type !== "rest"
+                ? "missed"
+                : "planned";
+          const content = (
+            <>
+              <span>
+                {formatShortDate(day)}
+                {day === today ? " · Today" : ""}
+              </span>
+              <strong>{name}</strong>
+              <small className={`status-${state}`}>{status}</small>
+              <span aria-hidden>→</span>
+            </>
+          );
+          const props = {
+            className: `schedule-day ${day === today ? "current" : ""} ${day === date ? "selected" : ""}`,
+            "aria-current": day === date ? ("date" as const) : undefined,
+            "aria-label": `${formatDate(day)}${day === today ? ", today" : ""}: ${name}, ${status}`,
+          };
+          return (
+            <li key={day}>
+              {completed || other ? (
+                <Link {...props} to="/history" search={dateSearch(day, today)}>
+                  {content}
+                </Link>
+              ) : plan.type === "strength" && plan.routine ? (
+                <Link
+                  {...props}
+                  to="/plan"
+                  search={{
+                    ...dateSearch(day, today),
+                    routineId: plan.routine.id,
+                  }}
+                >
+                  {content}
+                </Link>
+              ) : plan.type === "run" ? (
+                <Link {...props} to="/run" search={dateSearch(day, today)}>
+                  {content}
+                </Link>
+              ) : (
+                <Link {...props} to="/" search={dateSearch(day, today)}>
+                  {content}
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
+export function HistoryScreen() {
+  return <History />;
+}
 export function FoodScreen() {
   const { sync, date, settings } = useAccount();
-  return <Nutrition sync={sync} date={date} settings={settings} />;
+  return <Nutrition key={date} sync={sync} date={date} settings={settings} />;
 }
 export function BodyScreen() {
   const { sync, date, settings } = useAccount();
@@ -496,7 +564,7 @@ export function SettingsScreen() {
     sync.records.find((record) => record.id === settingsId)?.revision ?? 0;
   return (
     <SettingsEditor
-      key={`${revision}:${sync.editorReset}`}
+      key={sync.editorReset}
       revision={revision}
       settings={settings}
       sync={sync}

@@ -1,7 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   addDays,
+  completedActivity,
+  correctionProblem,
   createWorkout,
+  dateSearch,
+  formatDate,
+  formatShortDate,
+  lastExercise,
+  sessionMinutes,
+  setResult,
+  trainingRecords,
   defaultSettings,
   effectivePrescription,
   displayLoad,
@@ -15,6 +24,7 @@ import {
   workoutSchema,
 } from "../src/domain";
 import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
+import { applyText, savedText } from "../src/components/workout-inputs";
 import type { RecordEntry } from "../src/domain";
 describe("plan dates and snapshots", () => {
   const settings = defaultSettings("2026-01-05", "Australia/Brisbane");
@@ -197,4 +207,223 @@ test("introductory previews and workout snapshots respect one-set prescriptions"
     expected,
   );
   expect(effectivePrescription({ ...first, sets: 3 }, false).sets).toBe(3);
+});
+
+function completedWorkout(date: string, routineIndex = 0, load = 10) {
+  const settings = defaultSettings("2026-01-05", "UTC");
+  const routine = settings.routines[routineIndex];
+  if (!routine) throw new Error("Missing template");
+  const workout = createWorkout(settings, routine, date, false, []);
+  workout.startedAt = `${date}T07:00:00.000Z`;
+  workout.finishedAt = `${date}T07:45:00.000Z`;
+  for (const exercise of workout.exercises)
+    for (const set of exercise.sets) {
+      set.done = true;
+      set.loadKg = exercise.prescription.mode === "seconds" ? 0 : load;
+      set.value = exercise.prescription.max;
+      set.right = exercise.prescription.side ? exercise.prescription.max : null;
+      set.rir = 2;
+    }
+  return workoutSchema.parse(workout);
+}
+function entry(data: RecordEntry["data"], id = crypto.randomUUID()) {
+  return { id, revision: 1, updatedAt: "2026-01-05T08:00:00.000Z", data };
+}
+
+describe("skipped sets", () => {
+  test("a workout can finish with skipped sets but not with unhandled sets", () => {
+    const workout = completedWorkout("2026-01-05");
+    const first = workout.exercises[0]?.sets[0];
+    if (!first) throw new Error("Missing set");
+    first.done = false;
+    first.skipped = true;
+    expect(workoutSchema.safeParse(workout).success).toBe(true);
+    first.skipped = false;
+    expect(workoutSchema.safeParse(workout).error?.issues[0]?.message).toBe(
+      "Complete or skip every set before finishing.",
+    );
+    first.done = true;
+    first.skipped = true;
+    expect(workoutSchema.safeParse(workout).success).toBe(false);
+  });
+  test("skipped sets block a weight increase and keep the done set load", () => {
+    const workout = completedWorkout("2026-01-05", 0, 10);
+    const squat = workout.exercises.find((e) => e.prescription.id === "squat");
+    if (!squat) throw new Error("Missing exercise");
+    expect(progression(squat.prescription, squat, [10, 12]).loadKg).toBe(12);
+    const skipped = {
+      ...squat,
+      sets: squat.sets.map((set, i) =>
+        i === 0 ? { ...set, done: false, skipped: true, loadKg: 4 } : set,
+      ),
+    };
+    const advice = progression(squat.prescription, skipped, [10, 12]);
+    expect(advice.loadKg).toBe(10);
+    expect(advice.text).toContain("Repeat the load");
+  });
+  test("last time ignores exercises that were skipped entirely", () => {
+    const earlier = completedWorkout("2026-01-05", 0, 8);
+    const later = completedWorkout("2026-01-07", 0, 10);
+    for (const exercise of later.exercises)
+      if (exercise.prescription.id === "squat")
+        exercise.sets = exercise.sets.map((set) => ({
+          ...set,
+          done: false,
+          skipped: true,
+        }));
+    const records = [entry(earlier), entry(later)];
+    expect(lastExercise(records, "squat")?.sets[0]?.loadKg).toBe(8);
+    expect(lastExercise(records, "bench")?.sets[0]?.loadKg).toBe(10);
+  });
+});
+
+describe("workout corrections", () => {
+  test("corrections replace or hide the original in history and progression", () => {
+    const original = completedWorkout("2026-01-05", 0, 10);
+    const id = crypto.randomUUID();
+    const corrected = structuredClone(original);
+    for (const set of corrected.exercises[0]?.sets ?? []) set.loadKg = 6;
+    const records: RecordEntry[] = [
+      entry(original, id),
+      entry({
+        kind: "workoutCorrection",
+        workoutId: id,
+        replacement: corrected,
+        reason: "Entered the wrong weight",
+      }),
+    ];
+    const projected = trainingRecords(records);
+    expect(projected).toHaveLength(1);
+    expect(projected[0]?.id).toBe(id);
+    expect(lastExercise(records, "squat")?.sets[0]?.loadKg).toBe(6);
+    const removed: RecordEntry[] = [
+      entry(original, id),
+      entry({
+        kind: "workoutCorrection",
+        workoutId: id,
+        replacement: null,
+        reason: "Removed from history",
+      }),
+    ];
+    expect(trainingRecords(removed)).toEqual([]);
+    expect(lastExercise(removed, "squat")).toBeUndefined();
+    expect(completedActivity(removed).size).toBe(0);
+    expect(completedActivity(records).get("2026-01-05")).toEqual({
+      strength: true,
+      run: false,
+    });
+  });
+  test("a correction can change the date, results and notes only", () => {
+    const original = completedWorkout("2026-01-05");
+    const allowed = structuredClone(original);
+    allowed.date = "2026-01-04";
+    allowed.notes = "Corrected";
+    for (const set of allowed.exercises[1]?.sets ?? []) set.value = 9;
+    expect(correctionProblem(original, allowed)).toBeNull();
+    const changes: ((w: typeof original) => void)[] = [
+      (w) => (w.routineId = "00000000-0000-4000-8000-00000000000b"),
+      (w) => (w.startedAt = "2026-01-05T06:00:00.000Z"),
+      (w) => (w.finishedAt = "2026-01-05T09:00:00.000Z"),
+      (w) => (w.restUntil = 1),
+      (w) => w.exercises.pop(),
+      (w) => {
+        const p = w.exercises[0]?.prescription;
+        if (p) p.max = 30;
+      },
+    ];
+    for (const change of changes) {
+      const replacement = structuredClone(original);
+      change(replacement);
+      expect(correctionProblem(original, replacement)).toBe(
+        "A correction can change the workout date, set results and notes only.",
+      );
+    }
+  });
+  test("a scheduled day is done only by matching training", () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    const run = entry({
+      kind: "run",
+      date: "2026-01-05",
+      minutes: 20,
+      distanceKm: 3,
+      notes: "",
+    });
+    expect(nextSession(settings, "2026-01-05", [run])?.date).toBe("2026-01-05");
+    const workout = entry(completedWorkout("2026-01-05"));
+    expect(nextSession(settings, "2026-01-05", [workout])?.date).toBe(
+      "2026-01-06",
+    );
+  });
+});
+
+test("dates, set results and session estimates read plainly", () => {
+  expect(formatDate("2026-11-20")).toBe("Fri 20 Nov 2026");
+  expect(formatShortDate("2026-11-20")).toBe("Fri 20 Nov");
+  expect(dateSearch("2026-11-18", "2026-11-18")).toEqual({ date: undefined });
+  expect(dateSearch("2026-11-20", "2026-11-18")).toEqual({
+    date: "2026-11-20",
+  });
+  const settings = defaultSettings("2026-01-05", "UTC");
+  const [a] = settings.routines;
+  if (!a) throw new Error("Missing template");
+  const plank = a.exercises.find((e) => e.id === "plank");
+  const row = a.exercises.find((e) => e.id === "row");
+  if (!plank || !row) throw new Error("Missing exercise");
+  const set = {
+    loadKg: 0,
+    value: 40,
+    right: null,
+    done: true,
+    skipped: false,
+    rir: 2,
+    controlled: true,
+  };
+  expect(setResult(set, plank, "kg")).toBe("40 seconds");
+  expect(
+    setResult({ ...set, loadKg: 10, value: 12, right: 11 }, row, "kg"),
+  ).toBe("10 kg × 12 left / 11 right");
+  expect(setResult({ ...set, skipped: true, done: false }, row, "kg")).toBe(
+    "Skipped",
+  );
+  const intro = sessionMinutes(a, true);
+  const full = sessionMinutes(a, false);
+  expect(intro % 5).toBe(0);
+  expect(intro).toBeLessThan(full);
+  expect(intro).toBeGreaterThanOrEqual(20);
+  expect(full).toBeLessThanOrEqual(90);
+});
+
+describe("typed workout values", () => {
+  const settings = defaultSettings("2026-01-05", "UTC");
+  const routine = settings.routines[0];
+  if (!routine) throw new Error("Missing template");
+  const workout = createWorkout(settings, routine, "2026-01-05", false, []);
+  test("valid text updates only its own field", () => {
+    const next = applyText(workout, "0:1:value", "12", "kg");
+    if (!next || typeof next === "string") throw new Error("Expected update");
+    expect(next.exercises[0]?.sets[1]?.value).toBe(12);
+    expect(next.exercises[0]?.sets[0]?.value).toBe(
+      workout.exercises[0]?.sets[0]?.value,
+    );
+    const pounds = applyText(workout, "0:0:loadKg", "22.05", "lb");
+    if (!pounds || typeof pounds === "string")
+      throw new Error("Expected update");
+    expect(pounds.exercises[0]?.sets[0]?.loadKg).toBeCloseTo(10, 1);
+    expect(savedText(pounds, "0:0:loadKg", "lb")).toBe("22.05");
+  });
+  test("empty, partial and out-of-range text is kept as an error", () => {
+    expect(applyText(workout, "0:0:value", "", "kg")).toBe(
+      "Enter reps as a number of 0 or more.",
+    );
+    expect(applyText(workout, "0:0:value", "9.5", "kg")).toBe(
+      "Enter reps as a whole number.",
+    );
+    expect(applyText(workout, "0:0:rir", "11", "kg")).toBe(
+      "Enter reps left as a whole number from 0 to 10.",
+    );
+    expect(applyText(workout, "0:0:loadKg", "1001", "kg")).toBe(
+      "Enter a weight up to 1000 kg.",
+    );
+    expect(applyText(workout, "40:0:value", "9", "kg")).toBeNull();
+  });
 });

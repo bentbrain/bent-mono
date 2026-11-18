@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { PlanScreen } from "../components/activity-pages";
 export const Route = createFileRoute("/_app/plan")({
+  head: () => ({ meta: [{ title: "Workout plan · Fitness · bent.build" }] }),
   validateSearch: (search: Record<string, unknown>) => ({
     routineId: z.string().uuid().catch("").parse(search.routineId),
   }),

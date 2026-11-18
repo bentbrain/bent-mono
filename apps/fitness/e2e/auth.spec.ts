@@ -73,6 +73,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(page.locator("[data-feedback-host]")).toBeAttached();
   await page.locator("#view-date").fill("2026-01-05");
+  await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByLabel("Plan start date").fill("2026-01-05");
   await page
@@ -83,6 +84,8 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .getByRole("navigation")
     .getByRole("link", { name: "Today", exact: true })
     .click();
+  await page.locator("#view-date").fill("2026-01-05");
+  await expect(page).toHaveURL(/date=2026-01-05/);
   await mkdir("private/screenshots", { recursive: true });
   await page.screenshot({
     path: `private/screenshots/today-${info.project.name}.png`,
@@ -91,7 +94,9 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await page
     .getByRole("link", { name: "View workout plan", exact: true })
     .click();
-  await page.getByRole("button", { name: "Start workout" }).click();
+  await page
+    .getByRole("button", { name: "Log workout for Mon 5 Jan 2026" })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Strength A", exact: true }),
   ).toBeVisible();
@@ -127,10 +132,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
       exact: true,
     }),
   ).toHaveValue("9");
-  await page
-    .getByText("How to do this exercise", { exact: true })
-    .first()
-    .click();
+  await page.getByText("Goblet squat guide", { exact: true }).first().click();
   await expect(
     page.getByRole("link", { name: /Watch tutorial/ }).first(),
   ).toHaveAttribute("href", "https://www.youtube.com/watch?v=MeIiIdhvXT4");
@@ -157,13 +159,22 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     fullPage: true,
   });
   await page.getByRole("link", { name: "Food", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Food" }),
+  ).toBeVisible();
   await page.locator("#view-date").fill("2026-01-05");
+  await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Meal or snack").fill("Synthetic lunch");
   await page.getByLabel("Calories · kcal").fill("600");
   await page.getByLabel("Protein · g", { exact: true }).fill("35");
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page.getByRole("link", { name: "Body", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Bodyweight" }),
+  ).toBeVisible();
+  await page.locator("#view-date").fill("2026-01-05");
+  await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Weight · kg", { exact: true }).fill("70");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
@@ -229,12 +240,21 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     }),
   ).toHaveValue("9");
   await pageA2.getByRole("link", { name: "Body", exact: true }).click();
+  await expect(
+    pageA2.getByRole("heading", { level: 1, name: "Bodyweight" }),
+  ).toBeVisible();
   await pageA2.locator("#view-date").fill("2026-01-05");
+  await expect(pageA2).toHaveURL(/date=2026-01-05/);
   await expect(pageA2.locator("#weight-date")).toHaveValue("2026-01-05");
   await pageA2.getByLabel("Weight · kg", { exact: true }).fill("71");
   await pageA2.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(pageA2.getByRole("status").first()).toHaveText("Saved");
   await page.getByRole("link", { name: "Body", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Bodyweight" }),
+  ).toBeVisible();
+  await page.locator("#view-date").fill("2026-01-05");
+  await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Weight · kg", { exact: true }).fill("72");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(
@@ -306,6 +326,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .click();
   await page.getByRole("link", { name: "Resume workout", exact: true }).click();
   await page.getByText("Discard this workout", { exact: true }).click();
+  page.once("dialog", (dialog) => void dialog.accept());
   await page
     .getByRole("button", { name: "Discard draft", exact: true })
     .click();

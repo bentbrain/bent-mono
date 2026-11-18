@@ -1,16 +1,20 @@
+import { exercises } from "../domain";
 import { guides } from "../guides";
 export function ExerciseGuide({ id }: { id: string }) {
   const guide = guides.find((g) => g.id === id);
   if (!guide)
     return (
       <p>
-        Add setup and form notes to your custom exercise name. Use a familiar
-        movement and a light practice set.
+        Use a familiar movement and a light practice set. Ask a qualified
+        trainer for setup and form guidance.
       </p>
     );
   return (
     <details className="guide" data-feedback-id={`guide-${id}`}>
-      <summary>How to do this exercise</summary>
+      <summary>
+        {exercises.find((exercise) => exercise.id === id)?.name ?? "Exercise"}{" "}
+        guide
+      </summary>
       <p>{guide.setup}</p>
       <ol>
         {guide.steps.map((s) => (

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useBlocker } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import {
   defaultSettings,
@@ -10,9 +11,98 @@ import {
   toKg,
 } from "../domain";
 import type { Settings } from "../domain";
+import type { z } from "zod";
 import type { Sync } from "../sync";
-import { SelectField, TextField } from "./fields";
+import { download, SelectField, TextField } from "./fields";
 import { deletePhoto, listPhotos, uploadPhoto } from "../server/photos";
+function formatDumbbells(values: number[], units: Settings["units"]) {
+  return values.map((value) => displayLoad(value, units)).join(", ");
+}
+function parseDumbbells(text: string, units: Settings["units"]) {
+  const parts = text
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const values = parts.map((part) => toKg(Number(part), units));
+  if (
+    values.some((value) => !Number.isFinite(value) || value <= 0 || value > 200)
+  )
+    return {
+      error: `Enter dumbbell sizes as positive numbers separated by commas, for example 5, 7.5, 10. Each size can be up to ${Math.floor(displayLoad(200, units))} ${units}.`,
+    };
+  if (values.length > 60) return { error: "Enter up to 60 dumbbell sizes." };
+  return { values: [...new Set(values)].sort((a, b) => a - b) };
+}
+const fieldHelp: Partial<Record<string, { id: string; text: string }>> = {
+  goal: { id: "goal", text: "Goal: enter up to 160 characters." },
+  timezone: {
+    id: "timezone",
+    text: "Timezone: choose a timezone such as Australia/Brisbane.",
+  },
+  age: {
+    id: "age",
+    text: "Age: enter a whole number from 16 to 120, or leave it empty.",
+  },
+  heightCm: {
+    id: "height",
+    text: "Height: enter 80 to 250 cm, or leave it empty.",
+  },
+  calories: {
+    id: "calories",
+    text: "Daily calorie trial: enter a whole number from 800 to 10000 kcal.",
+  },
+  protein: {
+    id: "protein",
+    text: "Daily protein target: enter 20 to 400 g.",
+  },
+  startDate: { id: "start-date", text: "Plan start date: choose a date." },
+  introductionWeeks: {
+    id: "introduction",
+    text: "Introduction: enter a whole number of weeks from 0 to 8.",
+  },
+};
+const exerciseHelp: Partial<Record<string, { id: string; text: string }>> = {
+  sets: { id: "sets", text: "enter 1 to 8 sets." },
+  min: { id: "min", text: "enter a minimum from 1 to 600." },
+  max: { id: "max", text: "enter a maximum from 1 to 600." },
+  rest: { id: "rest", text: "enter 15 to 600 seconds of rest." },
+};
+/** Turns a settings validation issue into a sentence and the field to fix. */
+function describeIssue(
+  issue: z.core.$ZodIssue | undefined,
+  draft: Settings,
+): { text: string; id?: string } {
+  const [field, index, part, exerciseIndex, exerciseField] = issue?.path ?? [];
+  if (field === "routines" && typeof index === "number") {
+    const routine = draft.routines[index];
+    const name = routine?.name.trim() || `Routine ${index + 1}`;
+    if (part === "name")
+      return {
+        id: `routine-${index}`,
+        text: `${name}: enter a routine name of up to 160 characters.`,
+      };
+    if (part === "exercises" && typeof exerciseIndex === "number") {
+      const exercise = routine?.exercises[exerciseIndex];
+      const help =
+        typeof exerciseField === "string"
+          ? exerciseHelp[exerciseField]
+          : undefined;
+      return {
+        id: `${help?.id ?? "min"}-${index}-${exerciseIndex}`,
+        text: `${name}, ${exercise?.name ?? `exercise ${exerciseIndex + 1}`}: ${help?.text ?? "use a minimum above 0 that is no larger than the maximum."}`,
+      };
+    }
+    return { text: `${name}: keep 1 to 15 exercises.` };
+  }
+  if (field === "routines") return { text: "Keep 1 to 8 routines." };
+  if (field === "equipment" && typeof index === "number")
+    return {
+      id: `equipment-${index}`,
+      text: "Equipment: enter a name of up to 160 characters and notes of up to 500.",
+    };
+  const help = typeof field === "string" ? fieldHelp[field] : undefined;
+  return help ?? { text: "Check the highlighted settings and try again." };
+}
 export function SettingsEditor({
   settings,
   revision,
@@ -29,6 +119,34 @@ export function SettingsEditor({
     [],
   );
   const [uploading, setUploading] = useState(false);
+  const [originRevision, setOriginRevision] = useState(revision);
+  const [savedDraft, setSavedDraft] = useState(settings);
+  const [dumbbellText, setDumbbellText] = useState(() =>
+    formatDumbbells(settings.dumbbellsKg, settings.units),
+  );
+  const [dumbbellError, setDumbbellError] = useState("");
+  const [errorField, setErrorField] = useState<string>();
+  const [exporting, setExporting] = useState(false);
+  const summary = useRef<HTMLDivElement>(null);
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(savedDraft) ||
+    dumbbellText !== formatDumbbells(savedDraft.dumbbellsKg, savedDraft.units);
+  useBlocker({
+    shouldBlockFn: () =>
+      dirty &&
+      !window.confirm("Leave Settings and discard your unsaved changes?"),
+    enableBeforeUnload: dirty,
+  });
+  function showError(message: string, field?: string) {
+    setError(message);
+    setErrorField(field);
+    requestAnimationFrame(() => summary.current?.focus());
+  }
+  function goToField(id: string) {
+    const element = document.getElementById(id);
+    element?.closest("details")?.setAttribute("open", "");
+    element?.focus();
+  }
   useEffect(() => {
     void listPhotos()
       .then(setPhotos)
@@ -47,15 +165,35 @@ export function SettingsEditor({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          const result = settingsSchema.safeParse(draft);
-          if (!result.success) {
-            setError(result.error.issues[0]?.message ?? "Check your settings.");
+          const dumbbells = parseDumbbells(dumbbellText, draft.units);
+          if (!dumbbells.values) {
+            setDumbbellError(dumbbells.error);
+            showError(dumbbells.error, "dumbbells");
             return;
           }
-          if (sync.put(result.data, settingsId, revision)) {
+          setDumbbellError("");
+          const result = settingsSchema.safeParse({
+            ...draft,
+            dumbbellsKg: dumbbells.values,
+          });
+          if (!result.success) {
+            const issue = describeIssue(result.error.issues[0], draft);
+            showError(issue.text, issue.id);
+            return;
+          }
+          if (sync.put(result.data, settingsId, originRevision)) {
+            setOriginRevision(originRevision + 1);
+            setDraft(result.data);
+            setSavedDraft(result.data);
+            setDumbbellText(
+              formatDumbbells(result.data.dumbbellsKg, result.data.units),
+            );
             setNotice("Settings queued for saving.");
             setError("");
-          }
+          } else
+            showError(
+              "Settings changed on another device or need attention. Check the message at the top of the page.",
+            );
         }}
       >
         <div className="card form-grid">
@@ -114,9 +252,13 @@ export function SettingsEditor({
             label="Display units"
             id="units"
             value={draft.units}
-            onChange={(e) =>
-              update({ units: e.target.value === "lb" ? "lb" : "kg" })
-            }
+            onChange={(e) => {
+              const units = e.target.value === "lb" ? "lb" : "kg";
+              const parsed = parseDumbbells(dumbbellText, draft.units);
+              if (parsed.values)
+                setDumbbellText(formatDumbbells(parsed.values, units));
+              update({ units });
+            }}
           >
             <option value="kg">Kilograms</option>
             <option value="lb">Pounds</option>
@@ -160,8 +302,12 @@ export function SettingsEditor({
         </div>
         <h2>Weekly schedule</h2>
         <p>
-          Strength sessions alternate through your routines from the plan start
-          date.
+          Strength days take turns through your routines in calendar order,
+          counted from the plan start date. A missed day keeps its routine, so
+          the next strength day still moves on to the next routine. To catch up,
+          open the missed day in Your week and choose Do this workout today.
+          Changing the start date can change which routine falls on each future
+          day. Recorded workouts keep their results.
         </p>
         <div className="schedule-editor">
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, i) => (
@@ -194,19 +340,21 @@ export function SettingsEditor({
         <TextField
           label={`Dumbbell sizes · ${draft.units}, comma separated`}
           id="dumbbells"
-          defaultValue={draft.dumbbellsKg
-            .map((v) => displayLoad(v, draft.units))
-            .join(", ")}
-          key={draft.units}
-          onBlur={(e) => {
-            const values = e.target.value.trim()
-              ? e.target.value
-                  .split(",")
-                  .map((v) => toKg(Number(v.trim()), draft.units))
-              : [];
-            update({ dumbbellsKg: values });
+          value={dumbbellText}
+          inputMode="decimal"
+          aria-invalid={Boolean(dumbbellError)}
+          aria-describedby={dumbbellError ? "dumbbell-error" : undefined}
+          onChange={(e) => {
+            setDumbbellText(e.target.value);
+            setDumbbellError("");
+            setNotice("Unsaved settings");
           }}
         />
+        {dumbbellError && (
+          <p className="field-error" role="alert" id="dumbbell-error">
+            {dumbbellError}
+          </p>
+        )}
         {draft.equipment.map((item, i) => (
           <div className="equipment-editor card" key={item.id}>
             <TextField
@@ -237,6 +385,7 @@ export function SettingsEditor({
             <Button
               appearance="ghost"
               onClick={() =>
+                window.confirm(`Remove ${item.name} from your equipment?`) &&
                 update({ equipment: draft.equipment.filter((_, j) => i !== j) })
               }
             >
@@ -291,16 +440,44 @@ export function SettingsEditor({
                   });
                 }
                 return (
-                  <fieldset key={ei}>
+                  <fieldset key={`${ex.id}:${ei}`}>
                     <legend>
                       {ei + 1}. {ex.name}
                     </legend>
-                    <TextField
-                      label="Exercise name"
-                      id={`name-${ri}-${ei}`}
-                      value={ex.name}
-                      readOnly
-                    />
+                    <div className="row">
+                      <Button
+                        appearance="ghost"
+                        aria-label={`Move ${ex.name} up`}
+                        disabled={ei === 0}
+                        onClick={() => {
+                          const next = [...routine.exercises];
+                          const before = next[ei - 1];
+                          if (before) {
+                            next[ei - 1] = ex;
+                            next[ei] = before;
+                            changeRoutine({ ...routine, exercises: next });
+                          }
+                        }}
+                      >
+                        Move up
+                      </Button>
+                      <Button
+                        appearance="ghost"
+                        aria-label={`Move ${ex.name} down`}
+                        disabled={ei === routine.exercises.length - 1}
+                        onClick={() => {
+                          const next = [...routine.exercises];
+                          const after = next[ei + 1];
+                          if (after) {
+                            next[ei + 1] = ex;
+                            next[ei] = after;
+                            changeRoutine({ ...routine, exercises: next });
+                          }
+                        }}
+                      >
+                        Move down
+                      </Button>
+                    </div>
                     <div className="prescription-grid">
                       <TextField
                         label="Sets"
@@ -372,6 +549,9 @@ export function SettingsEditor({
                     <Button
                       appearance="ghost"
                       onClick={() =>
+                        window.confirm(
+                          `Remove ${ex.name} from this routine?`,
+                        ) &&
                         changeRoutine({
                           ...routine,
                           exercises: routine.exercises.filter(
@@ -391,7 +571,10 @@ export function SettingsEditor({
                 value=""
                 onChange={(e) => {
                   const ex = exercises.find((v) => v.id === e.target.value);
-                  if (ex)
+                  if (
+                    ex &&
+                    !routine.exercises.some((item) => item.id === ex.id)
+                  )
                     changeRoutine({
                       ...routine,
                       exercises: [...routine.exercises, { ...ex }],
@@ -400,14 +583,26 @@ export function SettingsEditor({
               >
                 <option value="">Choose exercise</option>
                 {exercises.map((ex) => (
-                  <option key={ex.id} value={ex.id}>
+                  <option
+                    key={ex.id}
+                    value={ex.id}
+                    disabled={routine.exercises.some(
+                      (item) => item.id === ex.id,
+                    )}
+                  >
                     {ex.name}
+                    {routine.exercises.some((item) => item.id === ex.id)
+                      ? " · already in this routine"
+                      : ""}
                   </option>
                 ))}
               </SelectField>
               <Button
                 appearance="ghost"
                 onClick={() =>
+                  window.confirm(
+                    `Remove ${routine.name}? Recorded workouts keep their original exercises.`,
+                  ) &&
                   update({
                     routines: draft.routines.filter((_, i) => i !== ri),
                   })
@@ -439,7 +634,28 @@ export function SettingsEditor({
           <Button type="submit" appearance="primary">
             Save settings
           </Button>
-          <span role="status">{notice}</span>
+          <span role="status">
+            {notice === "Settings queued for saving."
+              ? sync.error
+                ? "Settings need attention. See the save error above."
+                : sync.pending || sync.saving
+                  ? "Settings pending sync."
+                  : "Settings saved."
+              : notice}
+          </span>
+          <div
+            className="settings-error"
+            ref={summary}
+            tabIndex={-1}
+            role={error ? "alert" : undefined}
+          >
+            {error && <p>{error}</p>}
+            {error && errorField && (
+              <Button appearance="ghost" onClick={() => goToField(errorField)}>
+                Go to this setting
+              </Button>
+            )}
+          </div>
         </div>
       </form>
       <h2>Private equipment photos</h2>
@@ -513,8 +729,10 @@ export function SettingsEditor({
             <figcaption>{p.name}</figcaption>
             <Button
               appearance="ghost"
+              aria-label={`Remove photo ${p.name}`}
               onClick={async () => {
                 try {
+                  if (!window.confirm(`Remove photo ${p.name}?`)) return;
                   await deletePhoto({ data: p.id });
                   setPhotos(await listPhotos());
                 } catch {
@@ -531,21 +749,38 @@ export function SettingsEditor({
       {sync.pending > 0 ? (
         <p role="status">Finish syncing to export your account.</p>
       ) : (
-        <a
-          className="bent-button bent-button--outline export-link"
-          href="/api/export"
+        <Button
+          appearance="outline"
+          disabled={exporting}
+          onClick={async () => {
+            setExporting(true);
+            setError("");
+            try {
+              const response = await fetch("/api/export");
+              if (!response.ok)
+                throw Error(
+                  "Export could not be loaded. Check your connection and retry.",
+                );
+              const text = await response.text();
+              JSON.parse(text);
+              download("fitness-export.json", text);
+            } catch {
+              showError(
+                "Export did not finish. No file was saved. Check your connection and try again.",
+              );
+            } finally {
+              setExporting(false);
+            }
+          }}
         >
-          Export account data and photos
-        </a>
+          {exporting
+            ? "Preparing complete export…"
+            : "Export account data and photos"}
+        </Button>
       )}
       <p className="muted">
         Finish syncing before exporting. Store your export privately.
       </p>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
     </section>
   );
 }

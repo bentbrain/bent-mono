@@ -5,8 +5,11 @@ import {
   recordSchema,
   resultSchema,
   settingsId,
+  settingsSchema,
+  localDate,
+  correctionProblem,
 } from "../domain";
-import type { Mutation, RecordEntry, SaveResult } from "../domain";
+import type { Mutation, RecordEntry, SaveResult, Workout } from "../domain";
 import { z } from "zod";
 const rowSchema = z.object({
   id: z.string(),
@@ -67,6 +70,52 @@ export async function saveRecord(
       throw new Error("Record type cannot change.");
     if (current?.data.kind === "workout" && current.data.finishedAt)
       throw new Error("Completed workouts keep their original results.");
+    let original: Workout | null = null;
+    if (request.data?.kind === "workoutCorrection") {
+      const correction = request.data;
+      if (
+        current?.data.kind === "workoutCorrection" &&
+        current.data.workoutId !== correction.workoutId
+      )
+        throw new Error("A correction stays linked to its original workout.");
+      const [originalRow] =
+        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${correction.workoutId} AND deleted=false`;
+      const target = originalRow ? entry(originalRow).data : null;
+      if (target?.kind !== "workout" || !target.finishedAt)
+        throw new Error("Choose one of your completed workouts to correct.");
+      original = target;
+      const problem = correction.replacement
+        ? correctionProblem(target, correction.replacement)
+        : null;
+      if (problem) throw new Error(problem);
+      const [other] =
+        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workoutCorrection' AND data->>'workoutId'=${correction.workoutId} AND id<>${request.id}`;
+      if (other) return { status: "conflict", current: entry(other) };
+    }
+    // Completed activity cannot be dated after the owner's current day.
+    // Records keep a date they already had, so existing drafts stay editable.
+    const activity =
+      request.data?.kind === "workoutCorrection"
+        ? request.data.replacement
+        : request.data?.kind === "workout" || request.data?.kind === "run"
+          ? request.data
+          : null;
+    const previousDate =
+      original?.date ??
+      (current?.data.kind === "workout" || current?.data.kind === "run"
+        ? current.data.date
+        : null);
+    if (activity && activity.date !== previousDate) {
+      const [configuration] =
+        await sql`SELECT data FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
+      const timezone = configuration
+        ? settingsSchema.parse(configuration.data).timezone
+        : "UTC";
+      if (activity.date > localDate(timezone))
+        throw new Error(
+          "Record training on today or an earlier date. Future plans are for previewing.",
+        );
+    }
     const nextRevision = revision + 1;
     const data = request.data;
     const [saved] =

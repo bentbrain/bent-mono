@@ -1,16 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@bent/ui/button";
 import {
   displayLoad,
+  formatDate,
   lastExercise,
   progression,
-  toKg,
-  workoutSchema,
+  setResult,
 } from "../domain";
 import type { RecordEntry, Settings, Workout } from "../domain";
+import { useAccount } from "./account-context";
 import type { Sync } from "../sync";
 import { ExerciseGuide } from "./guide";
 import { elapsedSeconds, formatDuration, remainingRest } from "../timing";
+import { fieldKey, setKeys, useWorkoutInputs } from "./workout-inputs";
+import type { NumberField, WorkoutInputs } from "./workout-inputs";
+
+type SetEntry = Workout["exercises"][number]["sets"][number];
+const restNoticeSeconds = 10 * 60;
+
 export function WorkoutEditor({
   entry,
   settings,
@@ -25,17 +32,55 @@ export function WorkoutEditor({
   onDiscard: () => void;
 }) {
   const workout = entry.data;
+  const { owner, setInputPending } = useAccount();
+  const inputs = useWorkoutInputs({
+    workout,
+    units: settings.units,
+    storageKey: workoutInputKey(owner, entry.id),
+    save: (next) => sync.put(next, entry.id),
+  });
+  useEffect(() => {
+    setInputPending(inputs.pending);
+  }, [inputs.pending, setInputPending]);
+  useEffect(() => () => setInputPending(false), [setInputPending]);
   const [now, setNow] = useState(() => Date.now());
-  const [message, setMessage] = useState("");
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   const rest = remainingRest(workout.restUntil, now);
   const elapsed = elapsedSeconds(workout.startedAt, now);
+  const runningDeadline = useRef<number | null>(null);
+  const [endedDeadline, setEndedDeadline] = useState<number | null>(null);
+  useEffect(() => {
+    if (rest > 0) runningDeadline.current = workout.restUntil;
+    else if (
+      workout.restUntil !== null &&
+      runningDeadline.current === workout.restUntil
+    ) {
+      runningDeadline.current = null;
+      setEndedDeadline(workout.restUntil);
+      navigator.vibrate?.([200, 100, 200]);
+    }
+  }, [rest, workout.restUntil]);
+  const restDone =
+    endedDeadline !== null &&
+    endedDeadline === workout.restUntil &&
+    now - endedDeadline < restNoticeSeconds * 1000;
+  const sets = workout.exercises.flatMap((exercise) =>
+    exercise.sets.map((set, index) => ({
+      set,
+      index,
+      name: exercise.prescription.name,
+    })),
+  );
+  const nextSet = sets.find((item) => !item.set.done && !item.set.skipped);
+  const completed = sets.filter((item) => item.set.done).length;
+  const skipped = sets.filter((item) => item.set.skipped).length;
   const suggestedRest =
-    workout.exercises.find((exercise) => exercise.sets.some((set) => !set.done))
-      ?.prescription.rest ??
+    workout.exercises.find((exercise) =>
+      exercise.sets.some((set) => !set.done && !set.skipped),
+    )?.prescription.rest ??
     workout.exercises.at(-1)?.prescription.rest ??
     120;
   const [restDuration, setRestDuration] = useState(suggestedRest);
@@ -49,272 +94,117 @@ export function WorkoutEditor({
       ...workout.exercises.map((exercise) => exercise.prescription.rest),
     ]),
   ].sort((a, b) => a - b);
-  function update(data: Workout) {
+  function setRest(restUntil: number | null) {
     setNow(Date.now());
-    const result = workoutSchema.safeParse(data);
-    if (result.success) {
-      const saved = sync.put(result.data, entry.id);
-      setMessage("");
-      return saved;
-    }
-    setMessage(result.error.issues[0]?.message ?? "Check your results.");
-    return false;
+    inputs.commit({
+      keys: [],
+      change: (current) => ({ ...current, restUntil }),
+      place: "timer",
+    });
   }
-  const done = workout.exercises.reduce(
-    (n, e) => n + e.sets.filter((s) => s.done).length,
-    0,
-  );
-  const count = workout.exercises.reduce((n, e) => n + e.sets.length, 0);
+  const history = sync.records.filter((record) => record.id !== entry.id);
   return (
     <section data-feedback-redact data-feedback-private>
       <div className="section-heading">
         <div>
-          <p className="eyebrow">In progress · {workout.date}</p>
+          <p className="eyebrow">In progress · {formatDate(workout.date)}</p>
           <h1>{workout.name}</h1>
         </div>
-        <strong>
-          {done}/{count} sets
+        <strong className="set-count">
+          {completed}/{sets.length} sets done
+          {skipped > 0 && <small> · {skipped} skipped</small>}
         </strong>
       </div>
       <p>
         Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
         reserve. Weights are for one dumbbell; each side has its own reps.
       </p>
-      <div className="workout-timing">
-        <div
-          className="elapsed-timer"
-          role="timer"
-          aria-label="Workout elapsed time"
-        >
-          <span>Workout elapsed</span>
-          <strong>{formatDuration(elapsed)}</strong>
-          <small>Running since you started this session</small>
+      <div className={`workout-timing ${restDone ? "rest-finished" : ""}`}>
+        <div className="timing-row">
+          <div role="timer" aria-label="Workout elapsed time">
+            <span>Elapsed</span> <strong>{formatDuration(elapsed)}</strong>
+          </div>
+          <div role="timer" aria-label="Rest timer">
+            <span>Rest</span>{" "}
+            <strong>
+              {rest > 0
+                ? formatDuration(rest)
+                : restDone
+                  ? "Rest done"
+                  : "Not running"}
+            </strong>
+          </div>
+          {rest > 0 && (
+            <Button appearance="ghost" onClick={() => setRest(null)}>
+              Skip rest
+            </Button>
+          )}
         </div>
-        <div className="rest-timer-panel">
-          <div className="rest-timer" role="timer" aria-label="Rest timer">
-            <div>
-              <span>Rest between sets</span>
-              <strong>{rest > 0 ? formatDuration(rest) : "Not running"}</strong>
-            </div>
-            <div className="timer-actions">
-              <label>
-                New rest length
-                <select
-                  aria-label="New rest length"
-                  value={restDuration}
-                  onChange={(event) =>
-                    setRestDuration(Number(event.target.value))
-                  }
-                >
-                  {restChoices.map((seconds) => (
-                    <option key={seconds} value={seconds}>
-                      {formatDuration(seconds)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button
-                appearance="ghost"
-                onClick={() =>
-                  update({
-                    ...workout,
-                    restUntil: Date.now() + restDuration * 1000,
-                  })
+        <p className="rest-announcement" role="status">
+          {restDone
+            ? `Rest done.${nextSet ? ` Next: ${nextSet.name}, set ${nextSet.index + 1}.` : " Every set is handled."}`
+            : ""}
+        </p>
+        <details className="rest-controls">
+          <summary>Rest controls</summary>
+          <div className="timer-actions">
+            <label>
+              New rest length
+              <select
+                aria-label="New rest length"
+                value={restDuration}
+                onChange={(event) =>
+                  setRestDuration(Number(event.target.value))
                 }
               >
-                Start new {formatDuration(restDuration)} rest
-              </Button>
-              {rest > 0 && (
-                <Button
-                  appearance="ghost"
-                  onClick={() => update({ ...workout, restUntil: null })}
-                >
-                  Skip rest
-                </Button>
-              )}
-            </div>
+                {restChoices.map((seconds) => (
+                  <option key={seconds} value={seconds}>
+                    {formatDuration(seconds)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              appearance="ghost"
+              onClick={() => setRest(Date.now() + restDuration * 1000)}
+            >
+              Start new {formatDuration(restDuration)} rest
+            </Button>
           </div>
-          <p className="timer-help">
-            Rest starts automatically when you mark a set Done. You can also
-            start it here.
+          <p>
+            Rest starts when you mark a set Done. Your elapsed timer runs from
+            the session start.
           </p>
-        </div>
+        </details>
+        {inputs.message?.place === "timer" && (
+          <p className="timer-error" role="alert">
+            {inputs.message.text}
+          </p>
+        )}
       </div>
-      {workout.exercises.map((e, ei) => {
-        const p = e.prescription,
-          previous = lastExercise(
-            sync.records.filter((r) => r.id !== entry.id),
-            p.id,
-          );
-        const advice = progression(p, previous, settings.dumbbellsKg);
-        function change(
-          si: number,
-          patch: Partial<Workout["exercises"][number]["sets"][number]>,
-        ) {
-          update({
-            ...workout,
-            restUntil: patch.done
-              ? Date.now() + p.rest * 1000
-              : workout.restUntil,
-            exercises: workout.exercises.map((item, i) =>
-              i !== ei
-                ? item
-                : {
-                    ...item,
-                    sets: item.sets.map((set, j) =>
-                      j === si ? { ...set, ...patch } : set,
-                    ),
-                  },
-            ),
-          });
-        }
-        return (
-          <article className="exercise" key={ei}>
-            <div className="exercise-title">
-              <span className="number">{String(ei + 1).padStart(2, "0")}</span>
-              <div>
-                <h3>{p.name}</h3>
-                <p>
-                  {p.sets} × {p.min}–{p.max}{" "}
-                  {p.mode === "seconds"
-                    ? "seconds"
-                    : `reps${p.side ? " / side" : ""}`}{" "}
-                  · {p.rest}s rest
-                </p>
-              </div>
-            </div>
-            <ExerciseGuide id={p.id} />
-            <p className="previous">
-              Last time:{" "}
-              {previous
-                ? previous.sets
-                    .map(
-                      (s) =>
-                        `${displayLoad(s.loadKg, settings.units)} ${settings.units} × ${s.value}${p.side ? ` / ${s.right}` : ""}${p.mode === "seconds" ? "s" : ""}`,
-                    )
-                    .join(" · ")
-                : "Your first recorded session"}
-            </p>
-            <p className="suggestion">{advice.text}</p>
-            <div className="sets">
-              {e.sets.map((set, si) => (
-                <div className={`set ${set.done ? "is-done" : ""}`} key={si}>
-                  <span className="set-index">{si + 1}</span>
-                  {p.mode === "reps" && (
-                    <label>
-                      <span>{settings.units} / dumbbell</span>
-                      <input
-                        aria-label={`${p.name} set ${si + 1} weight`}
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        max="1000"
-                        step="0.25"
-                        value={displayLoad(set.loadKg, settings.units)}
-                        onChange={(ev) =>
-                          change(si, {
-                            loadKg: toKg(
-                              Number(ev.target.value),
-                              settings.units,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
-                  )}
-                  <label>
-                    <span>
-                      {p.mode === "seconds"
-                        ? "Seconds"
-                        : p.side
-                          ? "Left reps"
-                          : "Reps"}
-                    </span>
-                    <input
-                      aria-label={`${p.name} set ${si + 1} ${p.mode === "seconds" ? "seconds" : "reps"}`}
-                      type="number"
-                      inputMode="numeric"
-                      min="1"
-                      max="600"
-                      value={set.value}
-                      onChange={(ev) =>
-                        change(si, { value: Number(ev.target.value) })
-                      }
-                    />
-                  </label>
-                  {p.side && (
-                    <label>
-                      <span>Right reps</span>
-                      <input
-                        aria-label={`${p.name} set ${si + 1} right reps`}
-                        type="number"
-                        inputMode="numeric"
-                        min="1"
-                        max="600"
-                        value={set.right ?? 0}
-                        onChange={(ev) =>
-                          change(si, { right: Number(ev.target.value) })
-                        }
-                      />
-                    </label>
-                  )}
-                  {p.mode === "reps" && (
-                    <label className="reserve">
-                      <span>Reps left</span>
-                      <input
-                        aria-label={`${p.name} set ${si + 1} reps in reserve`}
-                        type="number"
-                        min="0"
-                        max="10"
-                        value={set.rir}
-                        onChange={(ev) =>
-                          change(si, { rir: Number(ev.target.value) })
-                        }
-                      />
-                    </label>
-                  )}
-                  <label className="check-form">
-                    <input
-                      type="checkbox"
-                      checked={set.controlled}
-                      onChange={(ev) =>
-                        change(si, { controlled: ev.target.checked })
-                      }
-                    />
-                    Controlled
-                  </label>
-                  <Button
-                    appearance={set.done ? "primary" : "outline"}
-                    aria-label={`${p.name} set ${si + 1} ${set.done ? "completed" : "complete"}`}
-                    aria-pressed={set.done}
-                    onClick={() => change(si, { done: !set.done })}
-                  >
-                    {set.done ? "✓" : "Done"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </article>
-        );
-      })}
-      <label className="bent-field">
-        Session notes
-        <textarea
-          value={workout.notes}
-          maxLength={2000}
-          onChange={(e) => update({ ...workout, notes: e.target.value })}
-        />
-      </label>
-      {message && <p role="alert">{message}</p>}
+      <InputNotices inputs={inputs} />
+      <ExerciseList
+        workout={workout}
+        settings={settings}
+        inputs={inputs}
+        history={history}
+        startRest
+      />
+      <NotesField inputs={inputs} />
+      {inputs.message?.place === "finish" && (
+        <p role="alert">{inputs.message.text}</p>
+      )}
       <Button
         appearance="primary"
-        disabled={done !== count}
+        disabled={nextSet !== undefined}
         onClick={() => {
           if (
-            update({
-              ...workout,
-              finishedAt: new Date().toISOString(),
-              restUntil: null,
+            inputs.commit({
+              change: (current) => ({
+                ...current,
+                finishedAt: new Date().toISOString(),
+                restUntil: null,
+              }),
             })
           )
             onFinish();
@@ -323,8 +213,8 @@ export function WorkoutEditor({
         Finish workout
       </Button>
       <p className="muted">
-        Finish after completing every set. Results sync when the save status
-        says Saved.
+        Mark each set Done or Skipped to finish. Skipped sets do not count
+        towards a weight increase. Results sync when the save status says Saved.
       </p>
       <details>
         <summary>Discard this workout</summary>
@@ -332,7 +222,15 @@ export function WorkoutEditor({
         <Button
           appearance="outline"
           onClick={() => {
-            if (sync.put(null, entry.id)) onDiscard();
+            if (
+              window.confirm(
+                "Discard this unfinished workout and the values typed on this device?",
+              ) &&
+              sync.put(null, entry.id)
+            ) {
+              inputs.clear();
+              onDiscard();
+            }
           }}
         >
           Discard draft
@@ -340,4 +238,288 @@ export function WorkoutEditor({
       </details>
     </section>
   );
+}
+
+export function workoutInputKey(owner: string, workoutId: string) {
+  return `bent:fitness:inputs:v1:${owner}:${workoutId}`;
+}
+
+export function InputNotices({ inputs }: { inputs: WorkoutInputs }) {
+  return (
+    <>
+      {inputs.pending && (
+        <p className="input-notice" role="status">
+          Typed values are kept on this device. They save to your account when
+          you leave the set, press Done or Skip, or leave this page.
+        </p>
+      )}
+      {inputs.held.length > 0 && (
+        <p className="input-notice" role="alert">
+          A highlighted value changed on another device. Your typed value is
+          still here. Leave the field to save it, or retype the saved value.
+        </p>
+      )}
+      {inputs.storageError && <p role="alert">{inputs.storageError}</p>}
+    </>
+  );
+}
+
+export function NotesField({ inputs }: { inputs: WorkoutInputs }) {
+  return (
+    <label className="bent-field">
+      Session notes
+      <textarea
+        value={inputs.text("notes")}
+        maxLength={2000}
+        aria-invalid={inputs.held.includes("notes") || undefined}
+        onChange={(event) => inputs.setText("notes", event.target.value)}
+        onBlur={() => inputs.commit({ keys: ["notes"], place: "notes" })}
+      />
+      {inputs.message?.place === "notes" && (
+        <span role="alert">{inputs.message.text}</span>
+      )}
+    </label>
+  );
+}
+
+export function ExerciseList({
+  workout,
+  settings,
+  inputs,
+  history,
+  startRest,
+}: {
+  workout: Workout;
+  settings: Settings;
+  inputs: WorkoutInputs;
+  /** Earlier workouts for "Last time" and weight advice. */
+  history?: RecordEntry[];
+  /** Start the rest timer when a set is marked Done. */
+  startRest?: boolean;
+}) {
+  return workout.exercises.map((exercise, ei) => {
+    const p = exercise.prescription;
+    const previous = history ? lastExercise(history, p.id) : undefined;
+    const advice = history
+      ? progression(p, previous, settings.dumbbellsKg)
+      : undefined;
+    function act(si: number, set: SetEntry, change: Partial<SetEntry>) {
+      inputs.commit({
+        keys: setKeys(ei, si),
+        dropInvalid: change.skipped === true,
+        place: `${ei}:${si}`,
+        change: (current) => ({
+          ...current,
+          restUntil:
+            startRest && change.done && !set.done
+              ? Date.now() + p.rest * 1000
+              : current.restUntil,
+          exercises: current.exercises.map((item, i) =>
+            i !== ei
+              ? item
+              : {
+                  ...item,
+                  sets: item.sets.map((value, j) =>
+                    j === si ? { ...value, ...change } : value,
+                  ),
+                },
+          ),
+        }),
+      });
+    }
+    function numberInput(
+      si: number,
+      field: NumberField,
+      label: string,
+      attributes: {
+        inputMode: "decimal" | "numeric";
+        max: number;
+        step: string;
+      },
+    ) {
+      const key = fieldKey(ei, si, field);
+      const invalid = Boolean(inputs.errors[key]) || inputs.held.includes(key);
+      return (
+        <input
+          aria-label={label}
+          type="number"
+          inputMode={attributes.inputMode}
+          min={0}
+          max={attributes.max}
+          step={attributes.step}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? `${key}-error` : undefined}
+          value={inputs.text(key)}
+          onChange={(event) => inputs.setText(key, event.target.value)}
+        />
+      );
+    }
+    return (
+      <article className="exercise" key={ei}>
+        <div className="exercise-title">
+          <span className="number">{String(ei + 1).padStart(2, "0")}</span>
+          <div>
+            <h3>{p.name}</h3>
+            <p>
+              {p.sets} × {p.min}–{p.max}{" "}
+              {p.mode === "seconds"
+                ? "seconds"
+                : `reps${p.side ? " / side" : ""}`}{" "}
+              · {formatDuration(p.rest)} rest
+            </p>
+          </div>
+        </div>
+        <ExerciseGuide id={p.id} />
+        {history && (
+          <p className="previous">
+            Last time:{" "}
+            {previous
+              ? previous.sets
+                  .map((s) =>
+                    setResult(s, previous.prescription, settings.units),
+                  )
+                  .join(" · ")
+              : "Your first recorded session"}
+          </p>
+        )}
+        {advice && <p className="suggestion">{advice.text}</p>}
+        <div className="sets">
+          {exercise.sets.map((set, si) => {
+            const name = `${p.name} set ${si + 1}`;
+            const problems = setKeys(ei, si).flatMap((key) =>
+              inputs.errors[key] ? [{ key, text: inputs.errors[key] }] : [],
+            );
+            return (
+              <div
+                className={`set ${set.done ? "is-done" : ""} ${set.skipped ? "is-skipped" : ""}`}
+                key={si}
+                onBlur={(event) => {
+                  const next = event.relatedTarget;
+                  if (
+                    next instanceof Node &&
+                    event.currentTarget.contains(next)
+                  )
+                    return;
+                  inputs.commit({
+                    keys: setKeys(ei, si),
+                    place: `${ei}:${si}`,
+                  });
+                }}
+              >
+                <span className="set-index">{si + 1}</span>
+                {p.mode === "reps" && (
+                  <label>
+                    <span>{settings.units} / dumbbell</span>
+                    {numberInput(si, "loadKg", `${name} weight`, {
+                      inputMode: "decimal",
+                      max: Math.floor(displayLoad(1000, settings.units)),
+                      step: "any",
+                    })}
+                  </label>
+                )}
+                <label>
+                  <span>
+                    {p.mode === "seconds"
+                      ? p.side
+                        ? "Left seconds"
+                        : "Seconds"
+                      : p.side
+                        ? "Left reps"
+                        : "Reps"}
+                  </span>
+                  {numberInput(
+                    si,
+                    "value",
+                    `${name} ${p.mode === "seconds" ? "seconds" : "reps"}`,
+                    {
+                      inputMode: p.mode === "seconds" ? "decimal" : "numeric",
+                      max: 600,
+                      step: p.mode === "seconds" ? "any" : "1",
+                    },
+                  )}
+                </label>
+                {p.side && (
+                  <label>
+                    <span>
+                      {p.mode === "seconds" ? "Right seconds" : "Right reps"}
+                    </span>
+                    {numberInput(
+                      si,
+                      "right",
+                      `${name} right ${p.mode === "seconds" ? "seconds" : "reps"}`,
+                      {
+                        inputMode: p.mode === "seconds" ? "decimal" : "numeric",
+                        max: 600,
+                        step: p.mode === "seconds" ? "any" : "1",
+                      },
+                    )}
+                  </label>
+                )}
+                {p.mode === "reps" && (
+                  <label className="reserve">
+                    <span>Reps left</span>
+                    {numberInput(si, "rir", `${name} reps in reserve`, {
+                      inputMode: "numeric",
+                      max: 10,
+                      step: "1",
+                    })}
+                  </label>
+                )}
+                <label className="check-form">
+                  <input
+                    type="checkbox"
+                    checked={set.controlled}
+                    onChange={(event) =>
+                      act(si, set, { controlled: event.target.checked })
+                    }
+                  />
+                  Controlled
+                </label>
+                <Button
+                  appearance={set.done ? "primary" : "outline"}
+                  aria-label={`${name} ${set.done ? "completed" : "complete"}`}
+                  aria-pressed={set.done}
+                  onClick={() =>
+                    act(si, set, { done: !set.done, skipped: false })
+                  }
+                >
+                  {set.done ? "✓ Done" : "Done"}
+                </Button>
+                <Button
+                  appearance="ghost"
+                  aria-label={`${name} ${set.skipped ? "skipped" : "skip"}`}
+                  aria-pressed={set.skipped}
+                  onClick={() =>
+                    act(si, set, { skipped: !set.skipped, done: false })
+                  }
+                >
+                  {set.skipped ? "Skipped" : "Skip"}
+                </Button>
+                {problems.map((problem) => (
+                  <p
+                    className="set-error"
+                    id={`${problem.key}-error`}
+                    key={problem.key}
+                    role="alert"
+                  >
+                    {problem.text}
+                  </p>
+                ))}
+                {inputs.held.some((key) => setKeys(ei, si).includes(key)) && (
+                  <p className="set-error">
+                    Saved on another device since you typed here.
+                  </p>
+                )}
+                {inputs.message?.place === `${ei}:${si}` && (
+                  <p className="set-error" role="alert">
+                    {inputs.message.text}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </article>
+    );
+  });
 }
