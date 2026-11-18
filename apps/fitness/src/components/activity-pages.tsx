@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import { z } from "zod";
-import { createWorkout, runSchema, scheduled } from "../domain";
+import {
+  createWorkout,
+  effectivePrescription,
+  runSchema,
+  scheduled,
+} from "../domain";
 import { useAccount } from "./account-context";
 import { ExerciseGuide } from "./guide";
 import { TextField } from "./fields";
@@ -34,9 +39,8 @@ export function PlanScreen({
       sync.put(createWorkout(settings, routine, date, intro, sync.records), id)
     ) {
       void navigate({
-        to: "/workouts/$workoutId",
-        params: { workoutId: id },
-        search: { date },
+        to: "/workout",
+        search: { date, workoutId: id },
       });
     } else setStarting(false);
   }
@@ -53,7 +57,7 @@ export function PlanScreen({
       <h1>{routine.name}</h1>
       <p className="subtitle">
         {routine.exercises.length} exercises ·{" "}
-        {intro ? "Introduction · 2 sets each" : "Full session"}
+        {intro ? "Introduction · up to 2 sets each" : "Full session"}
       </p>
       <div className="card plan-summary">
         <p>
@@ -72,9 +76,8 @@ export function PlanScreen({
             </p>
             <Link
               className="bent-button bent-button--primary"
-              to="/workouts/$workoutId"
-              params={{ workoutId: active.id }}
-              search={{ date }}
+              to="/workout"
+              search={{ date, workoutId: active.id }}
             >
               Resume workout
             </Link>
@@ -91,26 +94,31 @@ export function PlanScreen({
           </>
         )}
       </div>
-      {routine.exercises.map((exercise, index) => (
-        <article className="card plan-exercise" key={exercise.id}>
-          <div className="exercise-title">
-            <span className="number">{String(index + 1).padStart(2, "0")}</span>
-            <div>
-              <h2>{exercise.name}</h2>
-              <p>
-                {intro ? 2 : exercise.sets} × {exercise.min}–{exercise.max}{" "}
-                {exercise.mode === "seconds"
-                  ? "seconds"
-                  : exercise.side
-                    ? "reps / side"
-                    : "reps"}{" "}
-                · {formatDuration(exercise.rest)} rest
-              </p>
+      {routine.exercises.map((prescription, index) => {
+        const exercise = effectivePrescription(prescription, intro);
+        return (
+          <article className="card plan-exercise" key={exercise.id}>
+            <div className="exercise-title">
+              <span className="number">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <h2>{exercise.name}</h2>
+                <p>
+                  {exercise.sets} × {exercise.min}–{exercise.max}{" "}
+                  {exercise.mode === "seconds"
+                    ? "seconds"
+                    : exercise.side
+                      ? "reps / side"
+                      : "reps"}{" "}
+                  · {formatDuration(exercise.rest)} rest
+                </p>
+              </div>
             </div>
-          </div>
-          <ExerciseGuide id={exercise.id} />
-        </article>
-      ))}
+            <ExerciseGuide id={exercise.id} />
+          </article>
+        );
+      })}
     </section>
   );
 }

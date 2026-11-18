@@ -33,11 +33,22 @@ export function WorkoutEditor({
   }, []);
   const rest = remainingRest(workout.restUntil, now);
   const elapsed = elapsedSeconds(workout.startedAt, now);
-  const restDuration =
+  const suggestedRest =
     workout.exercises.find((exercise) => exercise.sets.some((set) => !set.done))
       ?.prescription.rest ??
     workout.exercises.at(-1)?.prescription.rest ??
     120;
+  const [restDuration, setRestDuration] = useState(suggestedRest);
+  const restChoices = [
+    ...new Set([
+      30,
+      60,
+      90,
+      120,
+      180,
+      ...workout.exercises.map((exercise) => exercise.prescription.rest),
+    ]),
+  ].sort((a, b) => a - b);
   function update(data: Workout) {
     setNow(Date.now());
     const result = workoutSchema.safeParse(data);
@@ -86,6 +97,22 @@ export function WorkoutEditor({
               <strong>{rest > 0 ? formatDuration(rest) : "Not running"}</strong>
             </div>
             <div className="timer-actions">
+              <label>
+                New rest length
+                <select
+                  aria-label="New rest length"
+                  value={restDuration}
+                  onChange={(event) =>
+                    setRestDuration(Number(event.target.value))
+                  }
+                >
+                  {restChoices.map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {formatDuration(seconds)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <Button
                 appearance="ghost"
                 onClick={() =>
@@ -95,8 +122,7 @@ export function WorkoutEditor({
                   })
                 }
               >
-                {rest > 0 ? "Restart" : "Start"} {formatDuration(restDuration)}{" "}
-                rest
+                Start new {formatDuration(restDuration)} rest
               </Button>
               {rest > 0 && (
                 <Button

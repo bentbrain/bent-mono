@@ -3,6 +3,7 @@ import {
   addDays,
   createWorkout,
   defaultSettings,
+  effectivePrescription,
   displayLoad,
   localDate,
   nextSession,
@@ -179,4 +180,21 @@ test("session and rest timers use saved deadlines across navigation and reload",
   expect(formatDuration(75)).toBe("1:15");
   expect(formatDuration(3661)).toBe("1:01:01");
   expect(formatDuration(-1)).toBe("0:00");
+});
+
+test("introductory previews and workout snapshots respect one-set prescriptions", () => {
+  const settings = defaultSettings("2026-01-05", "UTC");
+  const routine = settings.routines[0];
+  const first = routine?.exercises[0];
+  if (!routine || !first) throw new Error("Missing template");
+  first.sets = 1;
+  const expected = routine.exercises.map((exercise) =>
+    effectivePrescription(exercise, true),
+  );
+  const workout = createWorkout(settings, routine, "2026-01-05", true, []);
+  expect(expected[0]?.sets).toBe(1);
+  expect(workout.exercises.map((exercise) => exercise.prescription)).toEqual(
+    expected,
+  );
+  expect(effectivePrescription({ ...first, sets: 3 }, false).sets).toBe(3);
 });

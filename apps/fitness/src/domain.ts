@@ -335,6 +335,15 @@ export function nextSession(
   }
   return null;
 }
+export function effectivePrescription(
+  exercise: Exercise,
+  intro: boolean,
+): Exercise {
+  return {
+    ...exercise,
+    sets: intro ? Math.min(2, exercise.sets) : exercise.sets,
+  };
+}
 export function createWorkout(
   settings: Settings,
   routine: Routine,
@@ -352,7 +361,7 @@ export function createWorkout(
     notes: "",
     restUntil: null,
     exercises: routine.exercises.map((p) => {
-      const prescription = { ...p, sets: intro ? Math.min(2, p.sets) : p.sets };
+      const prescription = effectivePrescription(p, intro);
       const previous = lastExercise(history, p.id);
       const suggestion = progression(p, previous, settings.dumbbellsKg);
       return {

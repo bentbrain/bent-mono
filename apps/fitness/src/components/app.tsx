@@ -144,9 +144,7 @@ function Account({ owner }: { owner: string }) {
               (
                 item.to === "/"
                   ? location.pathname === "/" ||
-                    ["/plan/", "/workouts/", "/runs/"].some((prefix) =>
-                      location.pathname.startsWith(prefix),
-                    )
+                    ["/plan", "/workout", "/run"].includes(location.pathname)
                   : location.pathname === item.to
               )
                 ? "page"
@@ -159,43 +157,41 @@ function Account({ owner }: { owner: string }) {
         ))}
       </nav>
       <main className="content">
-        {!location.pathname.startsWith("/plan/") &&
-          !location.pathname.startsWith("/workouts/") &&
-          !location.pathname.startsWith("/runs/") && (
-            <div
-              className="date-control"
-              data-feedback-private
-              data-feedback-redact
-            >
-              <label htmlFor="view-date">Your day</label>
-              <input
-                id="view-date"
-                type="date"
-                value={date}
-                onChange={(e) => {
-                  const value = e.target.value;
+        {!["/plan", "/workout", "/run"].includes(location.pathname) && (
+          <div
+            className="date-control"
+            data-feedback-private
+            data-feedback-redact
+          >
+            <label htmlFor="view-date">Your day</label>
+            <input
+              id="view-date"
+              type="date"
+              value={date}
+              onChange={(e) => {
+                const value = e.target.value;
+                void navigate({
+                  to: dateDestination,
+                  search: { date: value || undefined },
+                  replace: true,
+                });
+              }}
+            />
+            {selectedDate && (
+              <button
+                onClick={() =>
                   void navigate({
                     to: dateDestination,
-                    search: { date: value || undefined },
+                    search: {},
                     replace: true,
-                  });
-                }}
-              />
-              {selectedDate && (
-                <button
-                  onClick={() =>
-                    void navigate({
-                      to: dateDestination,
-                      search: {},
-                      replace: true,
-                    })
-                  }
-                >
-                  Today
-                </button>
-              )}
-            </div>
-          )}
+                  })
+                }
+              >
+                Today
+              </button>
+            )}
+          </div>
+        )}
         {sync.error && (
           <div className="error" role="alert">
             <p>{sync.error}</p>
@@ -299,9 +295,8 @@ export function TodayScreen() {
           <p>Resume when you are ready, or keep looking through your plan.</p>
           <Link
             className="bent-button bent-button--outline"
-            to="/workouts/$workoutId"
-            params={{ workoutId: active.id }}
-            search={{ date }}
+            to="/workout"
+            search={{ date, workoutId: active.id }}
           >
             Resume workout
           </Link>
@@ -322,24 +317,22 @@ export function TodayScreen() {
             {today.type === "rest"
               ? "Rest today. Let your next session come to you."
               : next.type === "strength"
-                ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · 2 sets each" : "Full session"}`
+                ? `${next.routine?.exercises.length ?? 0} exercises · ${next.intro ? "Introduction · up to 2 sets each" : "Full session"}`
                 : "Keep it comfortable enough to talk in sentences."}
           </p>
           {next.type === "strength" && next.routine ? (
             <Link
               className="bent-button bent-button--primary"
-              to="/plan/$date/$routineId"
-              params={{ date: nextDate, routineId: next.routine.id }}
-              search={{ date }}
+              to="/plan"
+              search={{ date: nextDate, routineId: next.routine.id }}
             >
               View workout plan <span aria-hidden>↗</span>
             </Link>
           ) : (
             <Link
               className="bent-button bent-button--primary"
-              to="/runs/$date"
-              params={{ date: nextDate }}
-              search={{ date }}
+              to="/run"
+              search={{ date: nextDate }}
             >
               View run plan <span aria-hidden>↗</span>
             </Link>
@@ -357,17 +350,15 @@ export function TodayScreen() {
             <Link
               key={routine.id}
               className="bent-button bent-button--outline"
-              to="/plan/$date/$routineId"
-              params={{ date, routineId: routine.id }}
-              search={{ date }}
+              to="/plan"
+              search={{ date, routineId: routine.id }}
             >
               View {routine.name} plan
             </Link>
           ))}
           <Link
             className="bent-button bent-button--outline"
-            to="/runs/$date"
-            params={{ date }}
+            to="/run"
             search={{ date }}
           >
             Record an unscheduled run

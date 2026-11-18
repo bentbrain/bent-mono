@@ -73,7 +73,7 @@ test("plan preview is read-only and browser back returns to Today", async ({
   await page
     .getByRole("link", { name: "View workout plan", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/plan\/2026-01-05\//);
+  await expect(page).toHaveURL(/\/plan\?date=2026-01-05&routineId=/);
   await expect(
     page.getByRole("heading", { name: "Strength A", exact: true }),
   ).toBeVisible();
@@ -108,7 +108,7 @@ test("plan preview is read-only and browser back returns to Today", async ({
   await expect(
     page.getByRole("heading", { name: "Strength A", exact: true }),
   ).toBeVisible();
-  await page.goto("/plan/not-a-date/missing");
+  await page.goto("/plan?date=not-a-date&routineId=missing");
   await expect(
     page.getByRole("heading", { name: "Plan unavailable" }),
   ).toBeVisible();
@@ -154,7 +154,7 @@ test("starting a workout runs elapsed time and preserves timers and draft across
   await page
     .getByRole("button", { name: "Start workout", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/workouts\//);
+  await expect(page).toHaveURL(/\/workout\?date=/);
   const url = page.url();
   const elapsed = page.getByRole("timer", {
     name: "Workout elapsed time",
@@ -172,7 +172,7 @@ test("starting a workout runs elapsed time and preserves timers and draft across
     fullPage: false,
   });
   await page
-    .getByRole("button", { name: "Start 2:00 rest", exact: true })
+    .getByRole("button", { name: "Start new 2:00 rest", exact: true })
     .click();
   await expect(rest).not.toContainText("Not running");
   await page.screenshot({
@@ -187,7 +187,23 @@ test("starting a workout runs elapsed time and preserves timers and draft across
     .getByRole("button", { name: "Goblet squat set 1 complete", exact: true })
     .click();
   await expect(rest).not.toContainText("Not running");
+  for (const set of [1, 2])
+    await page
+      .getByRole("button", {
+        name: `Dumbbell Romanian deadlift set ${set} complete`,
+        exact: true,
+      })
+      .click();
+  await expect(rest.locator("strong")).toHaveText(/^(2:00|1:\d{2})$/);
+  await page.getByLabel("New rest length", { exact: true }).selectOption("75");
+  await page
+    .getByRole("button", { name: "Start new 1:15 rest", exact: true })
+    .click();
+  await expect(rest.locator("strong")).toHaveText(/^1:(1[0-5]|0\d)$/);
   await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.reload();
+  await expect(rest.locator("strong")).toHaveText(/^1:\d{2}$/);
+  await expect(page.getByRole("button", { name: /Restart/ })).toHaveCount(0);
   const before = exportSchema.parse(
     await (await page.request.get("/api/export")).json(),
   );
@@ -234,7 +250,7 @@ test("finishing a workout opens history and browser Back keeps it completed", as
   await page
     .getByRole("button", { name: "Start workout", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/workouts\//);
+  await expect(page).toHaveURL(/\/workout\?date=/);
   const workoutUrl = page.url();
   const sets = page.getByRole("button", { name: / set \d+ complete$/ });
   await expect(sets).toHaveCount(12);
@@ -257,4 +273,98 @@ test("finishing a workout opens history and browser Back keeps it completed", as
   await expect(
     page.getByRole("heading", { name: "Workout completed", exact: true }),
   ).toBeVisible();
+});
+
+test("introductory plan matches a custom one-set workout", async ({ page }) => {
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.locator(".routine-editor > summary").first().click();
+  await page.getByLabel("Sets", { exact: true }).first().fill("1");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "Today", exact: true })
+    .click();
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
+  await expect(page.locator(".plan-exercise").first()).toContainText(
+    "1 × 8–12 reps",
+  );
+  await expect(page.locator(".subtitle")).toContainText("up to 2 sets each");
+  await page
+    .getByRole("button", { name: "Start workout", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Goblet squat set 1 complete",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Goblet squat set 2 complete",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(page.locator(".section-heading")).toContainText("0/11 sets");
+});
+
+test("toolbar configure, navigation and selection redact private activity URL parameters", async ({
+  page,
+}) => {
+  await page.route("https://toolbar.bent.build/toolbar?**", async (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<pre id="messages">[]</pre><script>const messages=[];addEventListener('message',event=>{messages.push(event.data);document.querySelector('#messages').textContent=JSON.stringify(messages)});parent.postMessage({type:'feedback:ready'},'http://localhost:3025');</script>`,
+    }),
+  );
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
+  const plan = new URL(page.url());
+  const routineId = plan.searchParams.get("routineId");
+  if (!routineId) throw Error("Missing synthetic routine ID");
+  await page.reload();
+  const panel = page
+    .frames()
+    .find((frame) =>
+      frame.url().startsWith("https://toolbar.bent.build/toolbar?"),
+    );
+  if (!panel) throw Error("Toolbar panel did not load");
+  const payloads = panel.locator("#messages");
+  await expect(payloads).toContainText("feedback:configure");
+  await expect(payloads).toContainText('"url":"http://localhost:3025/plan"');
+  await panel.evaluate(() =>
+    window.parent.postMessage(
+      { type: "feedback:select" },
+      "http://localhost:3025",
+    ),
+  );
+  await expect(page.locator("html")).toHaveCSS("cursor", "crosshair");
+  await page.locator(".plan-preview").dispatchEvent("click");
+  await expect(payloads).toContainText("feedback:selected");
+  await page
+    .getByRole("button", { name: "Start workout", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/workout\?date=/);
+  const workoutId = new URL(page.url()).searchParams.get("workoutId");
+  if (!workoutId) throw Error("Missing synthetic workout ID");
+  await expect(payloads).toContainText("feedback:navigation");
+  await expect(payloads).toContainText('"url":"http://localhost:3025/workout"');
+  for (const secret of ["2026-01-05", routineId, workoutId])
+    await expect(payloads).not.toContainText(secret);
+  await panel.evaluate(() =>
+    window.parent.postMessage(
+      { type: "feedback:select" },
+      "http://localhost:3025",
+    ),
+  );
+  await expect(page.locator("html")).toHaveCSS("cursor", "crosshair");
+  await page.locator(".content > section").dispatchEvent("click");
+  await expect(payloads).toContainText("[Private element]");
+  for (const secret of ["2026-01-05", routineId, workoutId])
+    await expect(payloads).not.toContainText(secret);
 });
