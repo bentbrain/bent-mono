@@ -253,15 +253,22 @@ export class WorkoutInputStorage {
         recordKey,
         JSON.stringify({ field, entry, writtenAt: Date.now() }),
       );
+      // Keep ownership immediately, even if a later append fails. A retry,
+      // save or Skip must still be able to remove this successful append.
+      this.observed.set(field, [
+        ...(this.observed.get(field) ?? []),
+        recordKey,
+      ]);
       replacements.set(field, recordKey);
     }
     for (const [field, keys] of this.observed) {
       if (field in next && !replacements.has(field)) continue;
-      for (const recordKey of keys) this.storage.removeItem(recordKey);
-      this.observed.delete(field);
+      const replacement = replacements.get(field);
+      for (const recordKey of keys)
+        if (recordKey !== replacement) this.storage.removeItem(recordKey);
+      if (replacement) this.observed.set(field, [replacement]);
+      else this.observed.delete(field);
     }
-    for (const [field, recordKey] of replacements)
-      this.observed.set(field, [recordKey]);
     for (const { key, raw } of this.migrations)
       if (this.storage.getItem(key) === raw) this.storage.removeItem(key);
     this.migrations = [];

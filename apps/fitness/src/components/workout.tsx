@@ -277,9 +277,28 @@ export function InputNotices({ inputs }: { inputs: WorkoutInputs }) {
           it is in {inputs.units}, then leave the set to save it.
         </p>
       )}
-      {inputs.storageError && <p role="alert">{inputs.storageError}</p>}
+      <StorageNotice message={inputs.storageError} />
     </>
   );
+}
+
+function StorageNotice({ message }: { message: string }) {
+  const [previous, setPrevious] = useState(message);
+  useEffect(() => {
+    if (message) setPrevious(message);
+  }, [message]);
+  // Keep the warning's space after recovery so a blur-triggered save cannot
+  // move a set button between pointer down and click.
+  const text = message || previous;
+  return text ? (
+    <p
+      role={message ? "alert" : undefined}
+      aria-hidden={!message}
+      style={{ visibility: message ? "visible" : "hidden" }}
+    >
+      {text}
+    </p>
+  ) : null;
 }
 
 export function NotesField({ inputs }: { inputs: WorkoutInputs }) {

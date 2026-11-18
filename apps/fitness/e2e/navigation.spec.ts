@@ -1563,6 +1563,72 @@ test("correction saves explain unhandled sets and keep typed changes when the cl
   expect(failures).toEqual([]);
 });
 
+test("a partial migration failure cannot restore input after Skip", async ({
+  page,
+}, info) => {
+  const workoutId = await startPastWorkout(page);
+  const owner = await ownerId(page);
+  const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+  const before = await workoutData(page, workoutId);
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
+  await keepTypedValues(page, key, {
+    "0:0:value": {
+      text: "",
+      base: String(before.exercises[0]?.sets[0]?.value),
+      units: "kg",
+    },
+    "0:1:value": {
+      text: "",
+      base: String(before.exercises[0]?.sets[1]?.value),
+      units: "kg",
+    },
+  });
+  await page.evaluate((prefix) => {
+    const original = Storage.prototype.setItem;
+    let appends = 0;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith(`${prefix}:entry:`) && ++appends === 2)
+        throw new DOMException("Storage is full", "QuotaExceededError");
+      return original.call(this, key, value);
+    };
+  }, key);
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
+  await page.getByLabel("Session notes").fill("Partial recovery");
+  await expect(
+    page.getByText("Typed values could not be kept on this device.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  for (const set of [1, 2])
+    await page
+      .getByRole("button", {
+        name: `Goblet squat set ${set} skip`,
+        exact: true,
+      })
+      .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  expect(await storedTypedValues(page, key)).toEqual({});
+  await page.screenshot({
+    path: `../../private/fitness-redesign/sol04-after-${info.project.name}.png`,
+  });
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const set of [1, 2]) {
+    await expect(
+      page.getByRole("spinbutton", {
+        name: `Goblet squat set ${set} reps`,
+        exact: true,
+      }),
+    ).not.toHaveValue("");
+    await expect(
+      page.getByRole("button", {
+        name: `Goblet squat set ${set} skipped`,
+        exact: true,
+      }),
+    ).toBeVisible();
+  }
+});
+
 test("overlapping tab writes retain both invalid fields after reload", async ({
   page,
 }) => {

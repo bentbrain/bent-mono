@@ -682,6 +682,66 @@ describe("typed values shared by open tabs", () => {
       "0:1:loadKg": { text: "12", base: null, units: null },
     });
   });
+  test("partially migrated entries stay owned when later appends fail, then disappear after removal", () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "workout",
+      JSON.stringify({
+        "0:0:value": invalid,
+        "0:1:value": invalid,
+      }),
+    );
+    const a = new WorkoutInputStorage(storage, "workout");
+    const original = storage.setItem;
+    let writes = 0;
+    storage.setItem = (key, value) => {
+      if (++writes === 2) throw Error("Quota exceeded");
+      original(key, value);
+    };
+    expect(() => a.write(a.buffer)).toThrow("Quota exceeded");
+    // Saving or skipping the retained fields removes them without another append.
+    a.write({});
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({});
+    expect(storage.length).toBe(0);
+  });
+  test("a partial multi-field write retains ownership through retry and removal", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    const original = storage.setItem;
+    let writes = 0;
+    storage.setItem = (key, value) => {
+      if (++writes === 2) throw Error("Quota exceeded");
+      original(key, value);
+    };
+    const next = { "0:0:value": invalid, "0:1:value": invalid };
+    expect(() => a.write(next)).toThrow("Quota exceeded");
+    storage.setItem = original;
+    a.write(next);
+    a.write({});
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({});
+    expect(storage.length).toBe(0);
+  });
+  test("a later cleanup failure keeps successful replacements owned", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    a.write({ "0:0:value": invalid, "0:1:value": invalid });
+    const original = storage.removeItem;
+    let removals = 0;
+    storage.removeItem = (key) => {
+      if (++removals === 2) throw Error("Storage unavailable");
+      original(key);
+    };
+    expect(() =>
+      a.write({
+        "0:0:value": { ...invalid, text: "12" },
+        "0:1:value": { ...invalid, text: "13" },
+      }),
+    ).toThrow("Storage unavailable");
+    storage.removeItem = original;
+    a.write({});
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({});
+    expect(storage.length).toBe(0);
+  });
   test("a failed storage write keeps predecessors and can retry", () => {
     const storage = memoryStorage();
     const a = new WorkoutInputStorage(storage, "workout");
