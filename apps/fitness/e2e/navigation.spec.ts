@@ -1354,3 +1354,191 @@ test("run edits keep typed changes when another tab changes or removes the run",
   expect(runs[0]?.data).toMatchObject({ minutes: 25, notes: "Local note" });
   await other.close();
 });
+
+test("correction saves explain unhandled sets and keep typed changes when the cloud version wins", async ({
+  page,
+}) => {
+  const failures: string[] = [];
+  page.on("pageerror", (error) => failures.push(error.message));
+  const status = page.locator(".sync-state");
+  const workoutId = await startPastWorkout(page);
+  const sets = page.getByRole("button", { name: / set \d+ complete$/ });
+  while ((await sets.count()) > 0) await sets.first().click();
+  await page
+    .getByRole("button", { name: "Finish workout", exact: true })
+    .click();
+  await expect(status).toHaveText("Saved", { timeout: 20000 });
+  const original = await workoutData(page, workoutId);
+  const label = "Strength A on Mon 5 Jan 2026";
+  const corrections = async () =>
+    (await records(page)).flatMap((record) =>
+      record.data.kind === "workoutCorrection"
+        ? [{ ...record, data: record.data }]
+        : [],
+    );
+  // A set with neither Done nor Skip explains the fix instead of saving.
+  await page.getByRole("button", { name: `Correct ${label}` }).click();
+  await page
+    .getByRole("button", { name: "Goblet squat set 1 completed", exact: true })
+    .click();
+  await page
+    .getByLabel("Reason for correction")
+    .fill("Entered the wrong weight");
+  await page.getByRole("button", { name: "Save correction" }).click();
+  await expect(
+    page.getByRole("alert").filter({
+      hasText:
+        "Mark Goblet squat set 1 Done or Skip it before saving the correction.",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Correct Strength A" }),
+  ).toBeVisible();
+  expect(await corrections()).toEqual([]);
+  await page
+    .getByRole("button", { name: "Goblet squat set 1 complete", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save correction" }).click();
+  await expect(
+    page.getByText(`Saved corrected results for ${label}.`),
+  ).toBeVisible();
+  await expect(status).toHaveText("Saved");
+  const [first] = await corrections();
+  if (!first) throw Error("Missing synthetic correction");
+  expect(first.revision).toBe(1);
+  // The correction is edited offline, then opened again.
+  await page.context().setOffline(true);
+  await expect(status).toHaveText("Offline · pending on device");
+  await page.getByRole("button", { name: `Correct ${label}` }).click();
+  const weight = (set: number) =>
+    page.getByRole("spinbutton", {
+      name: `Goblet squat set ${set} weight`,
+      exact: true,
+    });
+  await weight(2).fill("5");
+  await page.getByRole("button", { name: "Save correction" }).click();
+  await expect(
+    page.getByText(`Saved corrected results for ${label}.`),
+  ).toBeVisible();
+  await page.getByRole("button", { name: `Correct ${label}` }).click();
+  await expect(weight(2)).toHaveValue("5");
+  await weight(1).fill("4.5");
+  // Another device saves the same correction first.
+  await withDatabase(
+    (sql) =>
+      sql`UPDATE fitness_records SET revision=revision+1, data=jsonb_set(data, '{reason}', '"Cloud reason"'), updated_at=now() WHERE id=${first.id}`,
+  );
+  await page.context().setOffline(false);
+  await expect(
+    page.getByRole("heading", { name: "Review the conflict" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Use cloud version for this record" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Review the conflict" }),
+  ).toHaveCount(0);
+  const conflict = page.locator(".edit-conflict");
+  await expect(conflict).toContainText("changed on another device");
+  await expect(conflict).toContainText("Mon 5 Jan 2026 · Cloud reason");
+  await expect(weight(1)).toHaveValue("4.5");
+  await expect(
+    page.getByRole("button", { name: "Save correction" }),
+  ).toBeDisabled();
+  await expect(status).toHaveText("Saved");
+  let [stored] = await corrections();
+  expect(stored?.revision).toBe(2);
+  expect(stored?.data.reason).toBe("Cloud reason");
+  expect(stored?.data.replacement?.exercises[0]?.sets[1]?.loadKg).toBe(0);
+  // Loading the saved version replaces the typed values, then saving keeps
+  // the cloud fields that were not edited.
+  await page.getByRole("button", { name: "Load saved version" }).click();
+  await expect(conflict).toHaveCount(0);
+  await expect(weight(1)).toHaveValue("0");
+  await expect(weight(2)).toHaveValue("0");
+  await expect(page.getByLabel("Reason for correction")).toHaveValue(
+    "Cloud reason",
+  );
+  await weight(1).fill("4.5");
+  await page.getByRole("button", { name: "Save correction" }).click();
+  await expect(
+    page.getByText(`Saved corrected results for ${label}.`),
+  ).toBeVisible();
+  await expect(status).toHaveText("Saved");
+  [stored] = await corrections();
+  expect(stored?.revision).toBe(3);
+  expect(stored?.data.reason).toBe("Cloud reason");
+  expect(stored?.data.replacement?.exercises[0]?.sets[0]?.loadKg).toBe(4.5);
+  expect(stored?.data.replacement?.exercises[0]?.sets[1]?.loadKg).toBe(0);
+  expect(await workoutData(page, workoutId)).toEqual(original);
+  expect(failures).toEqual([]);
+});
+
+test("two tabs on one workout keep each other's typed values through reloads", async ({
+  page,
+}) => {
+  const workoutId = await startPastWorkout(page);
+  const owner = await ownerId(page);
+  const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+  const stored = async () =>
+    z
+      .record(z.string(), z.object({ text: z.string() }))
+      .parse(
+        JSON.parse(
+          (await page.evaluate((key) => localStorage.getItem(key), key)) ??
+            "{}",
+        ),
+      );
+  const path = new URL(page.url()).pathname + new URL(page.url()).search;
+  const other = await openSecondTab(page, path);
+  const reps = (tab: Page, set: number) =>
+    tab.getByRole("spinbutton", {
+      name: `Goblet squat set ${set} reps`,
+      exact: true,
+    });
+  // Tab A keeps invalid text in set 1.
+  await reps(page, 1).fill("");
+  await page.locator("h1").click();
+  await expect(reps(page, 1)).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator(".sync-state")).toHaveText(
+    "Unsaved input on device",
+  );
+  // Tab B types in set 2. Both typed values stay on the device.
+  await reps(other, 2).fill("11");
+  expect(await stored()).toEqual({
+    "0:0:value": expect.objectContaining({ text: "" }),
+    "0:1:value": expect.objectContaining({ text: "11" }),
+  });
+  // Tab B saves its set. Tab A's value stays.
+  await other.locator("h1").click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  expect(await stored()).toEqual({
+    "0:0:value": expect.objectContaining({ text: "" }),
+  });
+  await other.close();
+  // Another device then saves set 1.
+  await withDatabase(
+    (sql) =>
+      sql`UPDATE fitness_records SET revision=revision+1, data=jsonb_set(data, '{exercises,0,sets,0,value}', '10'), updated_at=now() WHERE id=${workoutId}`,
+  );
+  await page.reload();
+  await expect(reps(page, 1)).toHaveValue("");
+  await expect(reps(page, 1)).toHaveAttribute("aria-invalid", "true");
+  await expect(
+    page.getByText("A highlighted value changed on another device.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(reps(page, 2)).toHaveValue("11");
+  let saved = await workoutData(page, workoutId);
+  expect(saved.exercises[0]?.sets[0]?.value).toBe(10);
+  expect(saved.exercises[0]?.sets[1]?.value).toBe(11);
+  // Saving the held field is a deliberate choice.
+  await reps(page, 1).fill("9");
+  await page.locator("h1").click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  saved = await workoutData(page, workoutId);
+  expect(saved.exercises[0]?.sets[0]?.value).toBe(9);
+  expect(saved.exercises[0]?.sets[1]?.value).toBe(11);
+  expect(await stored()).toEqual({});
+});

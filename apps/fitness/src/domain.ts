@@ -608,3 +608,36 @@ export function correctionProblem(original: Workout, replacement: Workout) {
     ? null
     : "A correction can change the workout date, set results and notes only.";
 }
+
+/**
+ * Builds the completed workout a correction saves from the edited results.
+ * Returns a message instead when a set still needs Done or Skip, or when the
+ * edit changes more than a correction can.
+ */
+export function correctionReplacement(
+  original: Workout,
+  draft: Workout,
+  date: string,
+): { replacement: Workout } | { problem: string } {
+  const candidate = {
+    ...draft,
+    date,
+    finishedAt: original.finishedAt,
+    restUntil: null,
+  };
+  for (const exercise of candidate.exercises) {
+    const index = exercise.sets.findIndex((set) => !set.done && !set.skipped);
+    if (index >= 0)
+      return {
+        problem: `Mark ${exercise.prescription.name} set ${index + 1} Done or Skip it before saving the correction.`,
+      };
+  }
+  const parsed = workoutSchema.safeParse(candidate);
+  if (!parsed.success)
+    return {
+      problem:
+        parsed.error.issues[0]?.message ?? "Check the corrected results.",
+    };
+  const problem = correctionProblem(original, parsed.data);
+  return problem ? { problem } : { replacement: parsed.data };
+}

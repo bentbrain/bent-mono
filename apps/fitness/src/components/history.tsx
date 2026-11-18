@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import {
-  correctionProblem,
+  correctionReplacement,
   formatDate,
   setResult,
   trainingRecords,
@@ -11,6 +11,8 @@ import type { RecordEntry, Workout } from "../domain";
 import { useAccount } from "./account-context";
 import { ExerciseList, InputNotices, NotesField } from "./workout";
 import { useWorkoutInputs } from "./workout-inputs";
+import { correctionStatus, EditConflict } from "./record-edit";
+import type { OpenedCorrection } from "./record-edit";
 
 type WorkoutEntry = RecordEntry & { data: Workout };
 type CorrectionEntry = RecordEntry & {
@@ -230,6 +232,27 @@ export function History() {
   );
 }
 
+/** The correction values an editor opens with. */
+function openCorrection(
+  original: WorkoutEntry,
+  correction?: { id: string; revision: number; data: CorrectionEntry["data"] },
+) {
+  const workout: Workout = {
+    ...(correction?.data.replacement ?? original.data),
+    finishedAt: null,
+    restUntil: null,
+  };
+  return {
+    version: {
+      id: correction?.id ?? crypto.randomUUID(),
+      revision: correction?.revision ?? 0,
+      data: correction?.data ?? null,
+    } satisfies OpenedCorrection,
+    workout,
+    reason: correction?.data.reason ?? "",
+  };
+}
+
 function CorrectionEditor({
   original,
   correction,
@@ -240,22 +263,16 @@ function CorrectionEditor({
   onClose: (message: string) => void;
 }) {
   const { sync, settings, today } = useAccount();
-  // Saving checks the correction is unchanged since this editor opened.
-  const [opened] = useState(() => ({
-    id: correction?.id ?? crypto.randomUUID(),
-    revision: correction?.revision ?? 0,
-    workout: {
-      ...(correction?.data.replacement ?? original.data),
-      finishedAt: null,
-      restUntil: null,
-    },
-    reason: correction?.data.reason ?? "",
-  }));
+  // Saving checks the correction still matches the version this editor opened.
+  const [opened, setOpened] = useState(() =>
+    openCorrection(original, correction),
+  );
   const [draft, setDraft] = useState<Workout>(opened.workout);
   const latest = useRef(draft);
   const [reason, setReason] = useState(opened.reason);
   const [date, setDate] = useState(opened.workout.date);
   const [error, setError] = useState("");
+  const [checked, setChecked] = useState<"changed" | "removed">();
   const [closing, setClosing] = useState(false);
   const inputs = useWorkoutInputs({
     workout: draft,
@@ -267,6 +284,29 @@ function CorrectionEditor({
       return true;
     },
   });
+  /** A saved correction for this workout under another ID. */
+  function otherCorrection(id: string) {
+    const other = sync.records.find(
+      (record) =>
+        record.data.kind === "workoutCorrection" &&
+        record.data.workoutId === original.id &&
+        record.id !== id,
+    );
+    return other?.data.kind === "workoutCorrection"
+      ? { ...other, data: other.data }
+      : undefined;
+  }
+  const live = sync.records.find((record) => record.id === opened.version.id);
+  const liveOther = otherCorrection(opened.version.id);
+  const derived = correctionStatus(
+    opened.version,
+    { revision: live?.revision ?? 0, data: live?.data ?? null },
+    liveOther,
+  );
+  const status = derived === "current" ? checked : derived;
+  const saved =
+    liveOther?.data ??
+    (live?.data.kind === "workoutCorrection" ? live.data : undefined);
   const dirty =
     !closing &&
     (inputs.pending ||
@@ -281,7 +321,21 @@ function CorrectionEditor({
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
   const label = `${original.data.name} on ${formatDate(original.data.date)}`;
-  function save() {
+  /** The newest saved correction for this workout, including other tabs. */
+  function savedVersion(): OpenedCorrection | undefined {
+    const other = otherCorrection(opened.version.id);
+    if (other)
+      return { id: other.id, revision: other.revision, data: other.data };
+    const current = sync.latest(opened.version.id);
+    return current.data?.kind === "workoutCorrection"
+      ? {
+          id: opened.version.id,
+          revision: current.revision,
+          data: current.data,
+        }
+      : undefined;
+  }
+  function save(target: OpenedCorrection) {
     if (!reason.trim()) {
       setError("Enter a short reason for the correction.");
       return;
@@ -291,26 +345,19 @@ function CorrectionEditor({
       return;
     }
     if (!inputs.commit({ change: (workout) => ({ ...workout, date }) })) return;
-    const current = sync.records.find(
-      (record) =>
-        record.data.kind === "workoutCorrection" &&
-        record.data.workoutId === original.id,
-    );
-    if (current && current.id !== opened.id) {
-      setError(
-        "This workout was corrected on another device. Cancel and open it again to review the latest results.",
-      );
+    const result = correctionReplacement(original.data, latest.current, date);
+    if ("problem" in result) {
+      setError(result.problem);
       return;
     }
-    const replacement: Workout = {
-      ...latest.current,
-      date,
-      finishedAt: original.data.finishedAt,
-      restUntil: null,
-    };
-    const problem = correctionProblem(original.data, replacement);
-    if (problem) {
-      setError(problem);
+    const state = correctionStatus(
+      target,
+      sync.latest(target.id),
+      otherCorrection(target.id),
+    );
+    if (state !== "current") {
+      setChecked(state);
+      setError("");
       return;
     }
     if (
@@ -318,11 +365,11 @@ function CorrectionEditor({
         {
           kind: "workoutCorrection",
           workoutId: original.id,
-          replacement,
+          replacement: result.replacement,
           reason: reason.trim(),
         },
-        opened.id,
-        opened.revision,
+        target.id,
+        target.revision,
       )
     ) {
       setClosing(true);
@@ -331,6 +378,28 @@ function CorrectionEditor({
       setError(
         "This correction could not be saved. Check the message above, then cancel and reopen the workout.",
       );
+  }
+  /** Replaces the typed values with the saved correction. */
+  function loadSaved() {
+    const next = savedVersion();
+    if (!next?.data) return;
+    if (!next.data.replacement) {
+      setClosing(true);
+      inputs.clear();
+      onClose(
+        `${label} was removed from History on another device. Restore it from Removed workouts to correct it.`,
+      );
+      return;
+    }
+    const version = openCorrection(original, { ...next, data: next.data });
+    setOpened(version);
+    inputs.clear();
+    latest.current = version.workout;
+    setDraft(version.workout);
+    setReason(version.reason);
+    setDate(version.workout.date);
+    setChecked(undefined);
+    setError("");
   }
   return (
     <section data-feedback-private data-feedback-redact>
@@ -375,9 +444,37 @@ function CorrectionEditor({
       {inputs.message?.place === "finish" && (
         <p role="alert">{inputs.message.text}</p>
       )}
+      {status && (
+        <EditConflict
+          status={status}
+          noun="correction"
+          current={
+            saved
+              ? saved.replacement
+                ? `${formatDate(saved.replacement.date)} · ${saved.reason}`
+                : "removed from History"
+              : undefined
+          }
+          onKeepMine={() => {
+            const next = savedVersion();
+            if (!next) return;
+            setOpened((value) => ({ ...value, version: next }));
+            setChecked(undefined);
+            save(next);
+          }}
+          onUseCurrent={loadSaved}
+          onSaveAsNew={() =>
+            save({ id: crypto.randomUUID(), revision: 0, data: null })
+          }
+        />
+      )}
       {error && <p role="alert">{error}</p>}
       <div className="row history-actions">
-        <Button appearance="primary" onClick={save}>
+        <Button
+          appearance="primary"
+          disabled={Boolean(status)}
+          onClick={() => save(opened.version)}
+        >
           Save correction
         </Button>
         <Button

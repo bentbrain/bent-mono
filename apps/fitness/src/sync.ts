@@ -185,12 +185,19 @@ export function useSync(owner: string, transport: Transport) {
       );
       return false;
     }
-    const request = mutationSchema.parse({
+    const parsed = mutationSchema.safeParse({
       id,
       data,
       revision,
       operationId: crypto.randomUUID(),
     });
+    if (!parsed.success) {
+      setError(
+        `This change was not saved. ${parsed.error.issues[0]?.message ?? "Check the values and try again."}`,
+      );
+      return false;
+    }
+    const request = parsed.data;
     const item = {
       request,
       at: Math.max(Date.now(), (queue.current.at(-1)?.at ?? 0) + 1),

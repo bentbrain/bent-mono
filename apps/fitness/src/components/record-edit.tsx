@@ -22,6 +22,31 @@ export function editStatus(
     : "changed";
 }
 
+/** A workout correction an editor opened. A new correction has no data. */
+export type OpenedCorrection = {
+  id: string;
+  revision: number;
+  data: Extract<Entity, { kind: "workoutCorrection" }> | null;
+};
+
+/**
+ * Whether a correction still matches the version its editor opened. Another
+ * correction for the same workout, or a correction saved under the opened ID,
+ * counts as a change.
+ */
+export function correctionStatus(
+  opened: OpenedCorrection,
+  current: { revision: number; data: Entity | null },
+  other: { id: string } | undefined,
+): "current" | "changed" | "removed" {
+  if (other && other.id !== opened.id) return "changed";
+  if (!opened.data)
+    return current.data || current.revision !== opened.revision
+      ? "changed"
+      : "current";
+  return editStatus({ ...opened, data: opened.data }, current);
+}
+
 /**
  * Explains that another device changed or removed the record being edited.
  * The form keeps the person's typed values until they choose what to save.

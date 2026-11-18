@@ -3,6 +3,7 @@ import {
   addDays,
   completedActivity,
   correctionProblem,
+  correctionReplacement,
   createWorkout,
   dateSearch,
   formatDate,
@@ -28,12 +29,13 @@ import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
 import {
   applyText,
   holdInBackground,
+  mergeStored,
   migrateLegacy,
   savedBase,
   savedText,
   shownText,
 } from "../src/components/workout-inputs";
-import { editStatus } from "../src/components/record-edit";
+import { correctionStatus, editStatus } from "../src/components/record-edit";
 import type { RecordEntry } from "../src/domain";
 describe("plan dates and snapshots", () => {
   const settings = defaultSettings("2026-01-05", "Australia/Brisbane");
@@ -512,5 +514,93 @@ describe("record editors", () => {
     expect(editStatus(opened, { revision: 3, data: null })).toBe("removed");
     expect(editStatus(opened, undefined)).toBe("removed");
     expect(editStatus(undefined, undefined)).toBe("current");
+  });
+});
+
+describe("correction saves", () => {
+  const original = completedWorkout("2026-01-05");
+  const draft = { ...structuredClone(original), finishedAt: null };
+  test("a set without Done or Skip explains what to fix instead of saving", () => {
+    const unhandled = structuredClone(draft);
+    const set = unhandled.exercises[0]?.sets[1];
+    if (!set) throw new Error("Missing set");
+    set.done = false;
+    expect(correctionReplacement(original, unhandled, "2026-01-05")).toEqual({
+      problem:
+        "Mark Goblet squat set 2 Done or Skip it before saving the correction.",
+    });
+    set.skipped = true;
+    const result = correctionReplacement(original, unhandled, "2026-01-04");
+    if (!("replacement" in result)) throw new Error(result.problem);
+    expect(result.replacement.finishedAt).toBe(original.finishedAt);
+    expect(result.replacement.date).toBe("2026-01-04");
+    expect(workoutSchema.safeParse(result.replacement).success).toBe(true);
+  });
+  test("a correction keeps the original prescription", () => {
+    const changed = structuredClone(draft);
+    const prescription = changed.exercises[0]?.prescription;
+    if (!prescription) throw new Error("Missing exercise");
+    prescription.max = 30;
+    expect(correctionReplacement(original, changed, "2026-01-05")).toEqual({
+      problem:
+        "A correction can change the workout date, set results and notes only.",
+    });
+  });
+  test("a cloud version at the same revision blocks a stale correction save", () => {
+    const workoutId = crypto.randomUUID();
+    const local = {
+      kind: "workoutCorrection" as const,
+      workoutId,
+      replacement: original,
+      reason: "Offline edit",
+    };
+    const cloud = { ...local, reason: "Other device", replacement: draft };
+    // Opened while the offline edit was pending as revision 2.
+    const opened = { id: "c", revision: 2, data: local };
+    expect(
+      correctionStatus(opened, { revision: 2, data: local }, undefined),
+    ).toBe("current");
+    // After choosing the cloud version, revision 2 holds other results.
+    expect(
+      correctionStatus(opened, { revision: 2, data: cloud }, undefined),
+    ).toBe("changed");
+    expect(
+      correctionStatus(opened, { revision: 3, data: null }, undefined),
+    ).toBe("removed");
+    const fresh = { id: "n", revision: 0, data: null };
+    expect(
+      correctionStatus(fresh, { revision: 0, data: null }, undefined),
+    ).toBe("current");
+    // Another device corrected the same workout under its own ID.
+    expect(
+      correctionStatus(fresh, { revision: 0, data: null }, { id: "c" }),
+    ).toBe("changed");
+  });
+});
+
+describe("typed values shared by open tabs", () => {
+  const invalid = { text: "", base: "8", units: "kg" as const };
+  const typed = { text: "12", base: "8", units: "kg" as const };
+  test("one tab's write keeps values another tab is holding", () => {
+    // Tab A holds invalid text. Tab B, opened earlier, types in another set.
+    const stored = { "0:0:value": invalid };
+    const merged = mergeStored(stored, {}, { "0:1:value": typed });
+    expect(merged).toEqual({ "0:0:value": invalid, "0:1:value": typed });
+    // B saves its set. A's held value stays.
+    expect(mergeStored(merged, { "0:1:value": typed }, {})).toEqual({
+      "0:0:value": invalid,
+    });
+  });
+  test("a tab removes a field only while it holds the stored value", () => {
+    const newer = { ...typed, text: "13" };
+    expect(
+      mergeStored({ "0:1:value": newer }, { "0:1:value": typed }, {}),
+    ).toEqual({ "0:1:value": newer });
+  });
+  test("values moving from an earlier key are written in full", () => {
+    const held = { text: "12", base: null, units: null };
+    expect(
+      mergeStored({}, { "0:1:loadKg": held }, { "0:1:loadKg": held }, true),
+    ).toEqual({ "0:1:loadKg": held });
   });
 });

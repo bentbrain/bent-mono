@@ -191,6 +191,35 @@ export function holdInBackground(
   return entry.base === null || savedBase(workout, key) !== entry.base;
 }
 
+const sameEntry = (a: Buffered | undefined, b: Buffered | undefined) =>
+  a !== undefined &&
+  b !== undefined &&
+  a.text === b.text &&
+  a.base === b.base &&
+  a.units === b.units;
+
+/**
+ * Merges one editor's buffer change into the values stored for the workout.
+ * Other open tabs share the stored values, so an editor writes only the
+ * fields it changed and removes a field only while it still holds the value
+ * this editor typed. `ownAll` writes every field the editor holds, for values
+ * moving from an earlier storage key.
+ */
+export function mergeStored(
+  stored: InputBuffer,
+  previous: InputBuffer,
+  next: InputBuffer,
+  ownAll = false,
+): InputBuffer {
+  const merged = { ...stored };
+  for (const [key, entry] of Object.entries(next))
+    if (ownAll || !sameEntry(previous[key], entry)) merged[key] = entry;
+  for (const key of Object.keys(previous))
+    if (!(key in next) && sameEntry(merged[key], previous[key]))
+      delete merged[key];
+  return merged;
+}
+
 type CommitOptions = {
   /** Keys to save. Every buffered key is saved when omitted. */
   keys?: string[];
@@ -234,13 +263,22 @@ export function useWorkoutInputs({
     latest.current = { workout, buffer, save, units };
   });
   const write = useCallback(
-    (next: InputBuffer) => {
+    (next: InputBuffer, replace = false) => {
+      const previous = latest.current.buffer;
       latest.current = { ...latest.current, buffer: next };
       setBuffer(next);
       if (!storageKey) return;
       try {
-        if (Object.keys(next).length)
-          localStorage.setItem(storageKey, JSON.stringify(next));
+        const merged = replace
+          ? next
+          : mergeStored(
+              readStored(storageKey, bufferSchema) ?? {},
+              previous,
+              next,
+              legacyKept.current,
+            );
+        if (Object.keys(merged).length)
+          localStorage.setItem(storageKey, JSON.stringify(merged));
         else localStorage.removeItem(storageKey);
         // The values now live under the current key.
         if (legacyKept.current && legacyStorageKey) {
@@ -367,8 +405,9 @@ export function useWorkoutInputs({
       Object.fromEntries(Object.entries(current).filter(([k]) => k !== key)),
     );
   }
+  /** Removes every typed value for this workout, in every tab. */
   function clear() {
-    write({});
+    write({}, true);
     setErrors({});
     setHeld([]);
   }
