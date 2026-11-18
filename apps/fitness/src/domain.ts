@@ -67,6 +67,7 @@ const setSchema = z
     value: finite.max(600),
     right: finite.max(600).nullable(),
     done: z.boolean(),
+    skipped: z.boolean().default(false),
     rir: z.number().int().min(0).max(10),
     controlled: z.boolean(),
   })
@@ -102,6 +103,11 @@ export const workoutSchema = z
           message: "Set count must match the workout prescription.",
         });
       for (const s of e.sets) {
+        if (s.done && s.skipped)
+          ctx.addIssue({
+            code: "custom",
+            message: "A set can be completed or skipped, not both.",
+          });
         if (
           e.prescription.mode === "reps" &&
           (!Number.isInteger(s.value) ||
@@ -122,10 +128,13 @@ export const workoutSchema = z
           });
       }
     }
-    if (w.finishedAt && w.exercises.some((e) => e.sets.some((s) => !s.done)))
+    if (
+      w.finishedAt &&
+      w.exercises.some((e) => e.sets.some((s) => !s.done && !s.skipped))
+    )
       ctx.addIssue({
         code: "custom",
-        message: "Complete every set before finishing.",
+        message: "Complete or skip every set before finishing.",
       });
   });
 export type Workout = z.infer<typeof workoutSchema>;
@@ -162,6 +171,19 @@ export const runSchema = z
     notes: z.string().max(2000),
   })
   .strict();
+const correctionSchema = z
+  .object({
+    kind: z.literal("workoutCorrection"),
+    workoutId: identifier,
+    replacement: workoutSchema.nullable(),
+    reason: label,
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.replacement === null || value.replacement.finishedAt !== null,
+    "A correction must contain a completed workout.",
+  );
 const entitySchema = z.discriminatedUnion("kind", [
   settingsSchema,
   workoutSchema,
@@ -169,6 +191,7 @@ const entitySchema = z.discriminatedUnion("kind", [
   regularSchema,
   weightSchema,
   runSchema,
+  correctionSchema,
 ]);
 export type Entity = z.infer<typeof entitySchema>;
 export const recordSchema = z.object({
@@ -178,6 +201,20 @@ export const recordSchema = z.object({
   updatedAt: z.string(),
 });
 export type RecordEntry = z.infer<typeof recordSchema>;
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  return value;
+}
+/** Compares record data regardless of property order. */
+export function sameData(a: unknown, b: unknown) {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
 export const mutationSchema = z
   .object({
     operationId: identifier,
@@ -284,6 +321,10 @@ export function addDays(date: string, days: number) {
     .toISOString()
     .slice(0, 10);
 }
+/** The Monday that starts the week containing `date`. */
+export function mondayOf(date: string) {
+  return addDays(date, -((new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7));
+}
 function dayDifference(a: string, b: string) {
   return Math.round(
     (Date.parse(a + "T12:00:00Z") - Date.parse(b + "T12:00:00Z")) / 86400000,
@@ -313,27 +354,48 @@ export function scheduled(settings: Settings, date: string) {
     intro: days >= 0 && days < settings.introductionWeeks * 7,
   };
 }
+export type DayActivity = { strength: boolean; run: boolean };
+/** Completed training per date, using corrected workout results. */
+export function completedActivity(records: RecordEntry[]) {
+  const days = new Map<string, DayActivity>();
+  for (const record of trainingRecords(records)) {
+    const data = record.data;
+    if (data.kind !== "run" && !(data.kind === "workout" && data.finishedAt))
+      continue;
+    const day = days.get(data.date) ?? { strength: false, run: false };
+    if (data.kind === "run") day.run = true;
+    else day.strength = true;
+    days.set(data.date, day);
+  }
+  return days;
+}
 export function nextSession(
   settings: Settings,
   date: string,
   records: RecordEntry[],
 ) {
+  const activity = completedActivity(records);
   for (let offset = 0; offset < 14; offset++) {
     const candidate = addDays(date, offset);
     const plan = scheduled(settings, candidate);
     if (plan.type === "rest") continue;
-    const completed = records.some(
-      (record) =>
-        "date" in record.data &&
-        record.data.date === candidate &&
-        ((record.data.kind === "workout" &&
-          Boolean(record.data.finishedAt) &&
-          plan.type === "strength") ||
-          (record.data.kind === "run" && plan.type === "run")),
-    );
+    const day = activity.get(candidate);
+    const completed =
+      plan.type === "strength"
+        ? day?.strength
+        : plan.type === "run" && day?.run;
     if (!completed) return { date: candidate, plan };
   }
   return null;
+}
+export function effectivePrescription(
+  exercise: Exercise,
+  intro: boolean,
+): Exercise {
+  return {
+    ...exercise,
+    sets: intro ? Math.min(2, exercise.sets) : exercise.sets,
+  };
 }
 export function createWorkout(
   settings: Settings,
@@ -352,7 +414,7 @@ export function createWorkout(
     notes: "",
     restUntil: null,
     exercises: routine.exercises.map((p) => {
-      const prescription = { ...p, sets: intro ? Math.min(2, p.sets) : p.sets };
+      const prescription = effectivePrescription(p, intro);
       const previous = lastExercise(history, p.id);
       const suggestion = progression(p, previous, settings.dumbbellsKg);
       return {
@@ -362,6 +424,7 @@ export function createWorkout(
           value: p.min,
           right: p.side ? p.min : null,
           done: false,
+          skipped: false,
           rir: 3,
           controlled: true,
         })),
@@ -370,15 +433,13 @@ export function createWorkout(
   });
 }
 export function lastExercise(history: RecordEntry[], id: string) {
-  return history
-    .filter((r) => r.data.kind === "workout" && r.data.finishedAt)
-    .sort((a, b) =>
-      b.data.kind === "workout" && a.data.kind === "workout"
-        ? (b.data.finishedAt ?? "").localeCompare(a.data.finishedAt ?? "")
-        : 0,
+  return trainingRecords(history)
+    .flatMap((r) =>
+      r.data.kind === "workout" && r.data.finishedAt ? [r.data] : [],
     )
-    .flatMap((r) => (r.data.kind === "workout" ? r.data.exercises : []))
-    .find((e) => e.prescription.id === id);
+    .sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""))
+    .flatMap((workout) => workout.exercises)
+    .find((e) => e.prescription.id === id && e.sets.some((set) => set.done));
 }
 export function progression(
   p: Exercise,
@@ -387,7 +448,10 @@ export function progression(
 ) {
   if (!previous)
     return { text: "Start light. Keep 2–3 reps in reserve.", loadKg: null };
-  const load = previous.sets[0]?.loadKg ?? 0;
+  const load =
+    previous.sets.find((set) => set.done)?.loadKg ??
+    previous.sets[0]?.loadKg ??
+    0;
   const eligible =
     previous.prescription.mode === p.mode &&
     previous.prescription.side === p.side &&
@@ -437,4 +501,147 @@ export function totals(records: RecordEntry[], date: string) {
         : a,
     { calories: 0, protein: 0 },
   );
+}
+
+function dateParts(date: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).formatToParts(new Date(date + "T12:00:00Z"));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return {
+    weekday: part("weekday"),
+    day: part("day"),
+    month: part("month"),
+    year: part("year"),
+  };
+}
+/** "Fri 20 Nov 2026" */
+export function formatDate(date: string) {
+  const { weekday, day, month, year } = dateParts(date);
+  return `${weekday} ${day} ${month} ${year}`;
+}
+/** "Fri 20 Nov" */
+export function formatShortDate(date: string) {
+  const { weekday, day, month } = dateParts(date);
+  return `${weekday} ${day} ${month}`;
+}
+/** Omits the date from a URL when it is today, so saved links stay current. */
+export function dateSearch(date: string, today: string) {
+  return { date: date === today ? undefined : date };
+}
+export function sessionMinutes(routine: Routine, intro: boolean) {
+  const seconds = routine.exercises.reduce((total, item) => {
+    const e = effectivePrescription(item, intro);
+    const work = e.mode === "seconds" ? e.max : e.max * 3 * (e.side ? 2 : 1);
+    return total + e.sets * work + Math.max(0, e.sets - 1) * e.rest + 60;
+  }, 300);
+  return Math.ceil(seconds / 300) * 5;
+}
+export function setResult(
+  set: Workout["exercises"][number]["sets"][number],
+  exercise: Exercise,
+  units: Settings["units"],
+) {
+  if (set.skipped) return "Skipped";
+  if (exercise.mode === "seconds")
+    return exercise.side
+      ? `${set.value} s left / ${set.right ?? 0} s right`
+      : `${set.value} seconds`;
+  const load = `${displayLoad(set.loadKg, units)} ${units}`;
+  return exercise.side
+    ? `${load} × ${set.value} left / ${set.right ?? 0} right`
+    : `${load} × ${set.value} reps`;
+}
+
+/**
+ * Projects workout corrections over the original completed workouts.
+ * Originals stay unchanged in storage and exports; history, schedules and
+ * weight suggestions use the projected results.
+ */
+export function trainingRecords(records: RecordEntry[]): RecordEntry[] {
+  const corrections = new Map<string, Workout | null>();
+  for (const record of records)
+    if (record.data.kind === "workoutCorrection")
+      corrections.set(record.data.workoutId, record.data.replacement);
+  return records.flatMap((record) => {
+    if (record.data.kind === "workoutCorrection") return [];
+    if (record.data.kind !== "workout" || !corrections.has(record.id))
+      return [record];
+    const replacement = corrections.get(record.id);
+    return replacement ? [{ ...record, data: replacement }] : [];
+  });
+}
+
+const prescriptionKeys = [
+  "id",
+  "name",
+  "sets",
+  "min",
+  "max",
+  "mode",
+  "side",
+  "rest",
+] satisfies (keyof Exercise)[];
+/**
+ * A correction can change a completed workout's date, set results and notes.
+ * Returns a reason when the replacement changes anything else.
+ */
+export function correctionProblem(original: Workout, replacement: Workout) {
+  const sameSession =
+    replacement.routineId === original.routineId &&
+    replacement.name === original.name &&
+    replacement.startedAt === original.startedAt &&
+    replacement.finishedAt === original.finishedAt &&
+    replacement.restUntil === null &&
+    replacement.exercises.length === original.exercises.length &&
+    replacement.exercises.every((exercise, index) => {
+      const before = original.exercises[index]?.prescription;
+      return (
+        before !== undefined &&
+        prescriptionKeys.every(
+          (key) => exercise.prescription[key] === before[key],
+        )
+      );
+    });
+  return sameSession
+    ? null
+    : "A correction can change the workout date, set results and notes only.";
+}
+
+/**
+ * Builds the completed workout a correction saves from the edited results.
+ * Returns a message instead when a set still needs Done or Skip, or when the
+ * edit changes more than a correction can.
+ */
+export function correctionReplacement(
+  original: Workout,
+  draft: Workout,
+  date: string,
+): { replacement: Workout } | { problem: string } {
+  const candidate = {
+    ...draft,
+    date,
+    finishedAt: original.finishedAt,
+    restUntil: null,
+  };
+  for (const exercise of candidate.exercises) {
+    const index = exercise.sets.findIndex((set) => !set.done && !set.skipped);
+    if (index >= 0)
+      return {
+        problem: `Mark ${exercise.prescription.name} set ${index + 1} Done or Skip it before saving the correction.`,
+      };
+  }
+  const parsed = workoutSchema.safeParse(candidate);
+  if (!parsed.success)
+    return {
+      problem:
+        parsed.error.issues[0]?.message ?? "Check the corrected results.",
+    };
+  const problem = correctionProblem(original, parsed.data);
+  return problem ? { problem } : { replacement: parsed.data };
 }

@@ -151,6 +151,22 @@ export function useSync(owner: string, transport: Transport) {
       });
     return next;
   }, records);
+  /**
+   * The newest version of a record on this device, including changes another
+   * tab queued. A removed or unknown record has no data.
+   */
+  function latest(id: string): { revision: number; data: Entity | null } {
+    const previous = readPending()
+      .filter((p) => p.request.id === id)
+      .at(-1);
+    if (previous)
+      return {
+        revision: previous.request.revision + 1,
+        data: previous.request.data,
+      };
+    const record = cloud.current.find((r) => r.id === id);
+    return { revision: record?.revision ?? 0, data: record?.data ?? null };
+  }
   function put(
     data: Entity | null,
     id: string = crypto.randomUUID(),
@@ -162,23 +178,26 @@ export function useSync(owner: string, transport: Transport) {
       );
       return false;
     }
-    const latest = readPending();
-    const previous = latest.filter((p) => p.request.id === id).at(-1);
-    const revision = previous
-      ? previous.request.revision + 1
-      : (cloud.current.find((r) => r.id === id)?.revision ?? 0);
+    const { revision } = latest(id);
     if (expectedRevision !== undefined && revision !== expectedRevision) {
       setError(
-        "This editor has an older version. Reopen Settings to load the current values before saving.",
+        "This record changed since you opened it. Reopen it to load the current version before saving.",
       );
       return false;
     }
-    const request = mutationSchema.parse({
+    const parsed = mutationSchema.safeParse({
       id,
       data,
       revision,
       operationId: crypto.randomUUID(),
     });
+    if (!parsed.success) {
+      setError(
+        `This change was not saved. ${parsed.error.issues[0]?.message ?? "Check the values and try again."}`,
+      );
+      return false;
+    }
+    const request = parsed.data;
     const item = {
       request,
       at: Math.max(Date.now(), (queue.current.at(-1)?.at ?? 0) + 1),
@@ -243,6 +262,7 @@ export function useSync(owner: string, transport: Transport) {
     saving,
     online,
     put,
+    latest,
     retry,
     useCloud,
     draftExport,

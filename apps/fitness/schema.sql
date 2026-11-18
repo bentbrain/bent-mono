@@ -31,3 +31,4 @@ CREATE TABLE IF NOT EXISTS fitness_photos (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_weight_date ON fitness_records(owner_id, (data->>'date')) WHERE deleted=false AND data->>'kind'='weight';
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_active_workout ON fitness_records(owner_id) WHERE deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(owner_id, (data->>'workoutId')) WHERE deleted=false AND data->>'kind'='workoutCorrection';
