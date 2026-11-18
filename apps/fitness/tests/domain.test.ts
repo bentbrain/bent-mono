@@ -742,6 +742,74 @@ describe("typed values shared by open tabs", () => {
     expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({});
     expect(storage.length).toBe(0);
   });
+  test("returning to the previous text after failed cleanup reconciles storage", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    const previous = { "0:0:value": invalid };
+    a.write(previous);
+    const original = storage.removeItem;
+    storage.removeItem = () => {
+      throw Error("Storage unavailable");
+    };
+    expect(() => a.write({ "0:0:value": { ...invalid, text: "13" } })).toThrow(
+      "Storage unavailable",
+    );
+    storage.removeItem = original;
+    a.write(previous);
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual(
+      previous,
+    );
+    expect(storage.length).toBe(1);
+  });
+  test("recovery converges to the requested text after each partial storage failure", () => {
+    const values: Record<string, Buffered>[] = [
+      {},
+      { "0:0:value": invalid },
+      { "0:0:value": { ...invalid, text: "13" } },
+      { "0:0:value": invalid, "0:1:value": invalid },
+      { "0:0:value": { ...invalid, text: "13" }, "0:1:value": invalid },
+    ];
+    for (const migrate of [false, true])
+      for (const initial of values)
+        for (const attempted of values)
+          for (const desired of values)
+            for (let failure = 1; failure <= 6; failure++) {
+              const storage = memoryStorage();
+              if (migrate) storage.setItem("workout", JSON.stringify(initial));
+              const a = new WorkoutInputStorage(storage, "workout");
+              if (!migrate) a.write(initial);
+              const set = storage.setItem;
+              const remove = storage.removeItem;
+              let operations = 0;
+              const maybeFail = () => {
+                if (++operations === failure)
+                  throw Error("Simulated storage failure");
+              };
+              storage.setItem = (key, value) => {
+                maybeFail();
+                set(key, value);
+              };
+              storage.removeItem = (key) => {
+                maybeFail();
+                remove(key);
+              };
+              try {
+                a.write(attempted);
+              } catch (error) {
+                expect(error instanceof Error && error.message).toBe(
+                  "Simulated storage failure",
+                );
+              }
+              storage.setItem = set;
+              storage.removeItem = remove;
+              a.write(desired);
+              expect(
+                new WorkoutInputStorage(storage, "workout").buffer,
+              ).toEqual(desired);
+              a.write({});
+              expect(storage.length).toBe(0);
+            }
+  });
   test("a failed storage write keeps predecessors and can retry", () => {
     const storage = memoryStorage();
     const a = new WorkoutInputStorage(storage, "workout");

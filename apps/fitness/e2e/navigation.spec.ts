@@ -1563,6 +1563,50 @@ test("correction saves explain unhandled sets and keep typed changes when the cl
   expect(failures).toEqual([]);
 });
 
+test("returning to invalid text after a cleanup failure never saves the abandoned number", async ({
+  page,
+}) => {
+  const workoutId = await startPastWorkout(page);
+  const owner = await ownerId(page);
+  const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+  const before = await workoutData(page, workoutId);
+  const reps = page.getByRole("spinbutton", {
+    name: "Goblet squat set 1 reps",
+    exact: true,
+  });
+  await reps.fill("");
+  await page.evaluate((prefix) => {
+    const original = Storage.prototype.removeItem;
+    let failed = false;
+    Storage.prototype.removeItem = function (key) {
+      if (!failed && key.startsWith(`${prefix}:entry:`)) {
+        failed = true;
+        throw new DOMException("Storage is unavailable", "SecurityError");
+      }
+      return original.call(this, key);
+    };
+  }, key);
+  await reps.fill("13");
+  await expect(
+    page.getByText("Typed values could not be kept on this device.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  // Return to the earlier invalid value without blurring or saving 13.
+  await reps.fill("");
+  await expect(
+    page.getByText("Typed values could not be kept on this device.", {
+      exact: false,
+    }),
+  ).toBeHidden();
+  await page.reload();
+  await expect(reps).toHaveValue("");
+  await expect(reps).toHaveAttribute("aria-invalid", "true");
+  expect(
+    (await workoutData(page, workoutId)).exercises[0]?.sets[0]?.value,
+  ).toBe(before.exercises[0]?.sets[0]?.value);
+});
+
 test("a partial migration failure cannot restore input after Skip", async ({
   page,
 }, info) => {

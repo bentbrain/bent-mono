@@ -191,6 +191,7 @@ export class WorkoutInputStorage {
   readonly buffer: InputBuffer;
   private observed = new Map<string, string[]>();
   private previous: InputBuffer;
+  private reconcile = false;
   private migrations: { key: string; raw: string }[] = [];
   constructor(
     private storage: InputStorage,
@@ -242,11 +243,26 @@ export class WorkoutInputStorage {
     }
   }
   write(next: InputBuffer) {
+    try {
+      this.persist(next);
+      this.reconcile = false;
+    } catch (error) {
+      // A failed transaction may have appended or removed some entries.
+      // Even text equal to the last successful write must be reconciled.
+      this.reconcile = true;
+      throw error;
+    }
+  }
+  private persist(next: InputBuffer) {
     // Append every changed entry before removing its predecessors. If storage
     // fills up, the older retained values remain available for recovery.
     const replacements = new Map<string, string>();
     for (const [field, entry] of Object.entries(next)) {
-      if (!this.migrations.length && sameEntry(this.previous[field], entry))
+      if (
+        !this.reconcile &&
+        !this.migrations.length &&
+        sameEntry(this.previous[field], entry)
+      )
         continue;
       const recordKey = `${this.key}:entry:${crypto.randomUUID()}`;
       this.storage.setItem(
