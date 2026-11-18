@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
   clerk,
   clerkSetup,
@@ -6,11 +7,22 @@ import {
 } from "@clerk/testing/playwright";
 import { mkdir } from "node:fs/promises";
 import { database } from "../src/server/db";
+import { settleWrites, trackWrites } from "./quiescence";
 import { z } from "zod";
 const syntheticEmails = [
   "fitness-a+clerk_test@example.com",
   "fitness-b+clerk_test@example.com",
 ];
+async function openBodyweight(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Progress", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Progress sections" })
+    .getByRole("link", { name: "Bodyweight", exact: true })
+    .click();
+}
 test.beforeEach(async () => {
   if (!process.env.CLERK_SECRET_KEY?.startsWith("sk_test_"))
     throw new Error("Provider checks require a Clerk development application.");
@@ -31,6 +43,9 @@ test.beforeEach(async () => {
     }
   }
 });
+test.afterEach(async ({ context }) => {
+  await settleWrites(context);
+});
 test.afterAll(async () => {
   await database().end();
 });
@@ -38,7 +53,8 @@ test.afterAll(async () => {
 test.beforeAll(async () => {
   await clerkSetup({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY });
 });
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  trackWrites(context);
   await setupClerkTestingToken({ page });
 });
 test("real accounts sync workout drafts, food and weight and isolate photos and exports", async ({
@@ -57,7 +73,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Your next good habit." }),
+    page.getByRole("heading", { name: "Plan the week. Log every set." }),
   ).toBeVisible();
   await clerk.signIn({
     page,
@@ -68,13 +84,13 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   const setup = page.getByRole("button", { name: "Set up my plan" });
   if (await setup.isVisible()) await setup.click();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(page.locator("[data-feedback-host]")).toBeAttached();
   await page.locator("#view-date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Edit repeating week" }).click();
   await page.getByLabel("Plan start date").fill("2026-01-05");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
@@ -82,7 +98,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("link", { name: "Today", exact: true })
+    .getByRole("link", { name: "Week", exact: true })
     .click();
   await page.locator("#view-date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
@@ -132,7 +148,13 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
       exact: true,
     }),
   ).toHaveValue("9");
-  await page.getByText("Goblet squat guide", { exact: true }).first().click();
+  await page
+    .getByRole("button", { name: "How to do Goblet squat", exact: true })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "Goblet squat" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("link", { name: /Watch tutorial/ }).first(),
   ).toHaveAttribute("href", "https://www.youtube.com/watch?v=MeIiIdhvXT4");
@@ -158,6 +180,14 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     path: `private/screenshots/workout-${info.project.name}.png`,
     fullPage: true,
   });
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("spinbutton", {
+      name: "Goblet squat set 2 weight",
+      exact: true,
+    }),
+  ).toHaveValue("9");
   await page.getByRole("link", { name: "Food", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "Food" }),
@@ -169,7 +199,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await page.getByLabel("Protein · g", { exact: true }).fill("35");
   await page.getByRole("button", { name: "Add food", exact: true }).click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("link", { name: "Body", exact: true }).click();
+  await openBodyweight(page);
   await expect(
     page.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
@@ -239,7 +269,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
       exact: true,
     }),
   ).toHaveValue("9");
-  await pageA2.getByRole("link", { name: "Body", exact: true }).click();
+  await openBodyweight(pageA2);
   await expect(
     pageA2.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
@@ -249,7 +279,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await pageA2.getByLabel("Weight · kg", { exact: true }).fill("71");
   await pageA2.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(pageA2.getByRole("status").first()).toHaveText("Saved");
-  await page.getByRole("link", { name: "Body", exact: true }).click();
+  await openBodyweight(page);
   await expect(
     page.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
@@ -298,7 +328,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     "Synthetic private cloud goal",
   );
   await contextA2.close();
-  await page.getByRole("link", { name: "Body", exact: true }).click();
+  await openBodyweight(page);
   const pounds = page.getByLabel("Weight · lb", { exact: true });
   await pounds.fill("154.3");
   expect(
@@ -314,6 +344,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     page.locator(".list-row").getByText("154.3 lb", { exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: /Repeating week and routines/ }).click();
   for (let day = 0; day < 7; day++)
     await page.locator(`#day-${day}`).selectOption("rest");
   await page
@@ -322,7 +353,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("link", { name: "Today", exact: true })
+    .getByRole("link", { name: "Week", exact: true })
     .click();
   await page.getByRole("link", { name: "Resume workout", exact: true }).click();
   await page.getByText("Discard this workout", { exact: true }).click();
@@ -332,7 +363,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .click();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(
-    page.getByRole("heading", { name: "No session scheduled" }),
+    page.getByText("No training days are scheduled.", { exact: false }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Log run", exact: true }),
@@ -353,7 +384,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   );
   await page
     .getByRole("navigation")
-    .getByRole("link", { name: "Today", exact: true })
+    .getByRole("link", { name: "Week", exact: true })
     .click();
   await page.reload();
   await expect(page.locator(".subtitle")).toHaveText(

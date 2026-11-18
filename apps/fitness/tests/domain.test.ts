@@ -17,6 +17,7 @@ import {
   effectivePrescription,
   displayLoad,
   localDate,
+  mondayOf,
   nextSession,
   progression,
   scheduled,
@@ -25,6 +26,12 @@ import {
   totals,
   workoutSchema,
 } from "../src/domain";
+import {
+  dailyWeights,
+  strengthSeries,
+  weeklySummary,
+  weightTrend,
+} from "../src/progress";
 import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
 import {
   applyText,
@@ -602,5 +609,106 @@ describe("typed values shared by open tabs", () => {
     expect(
       mergeStored({}, { "0:1:loadKg": held }, { "0:1:loadKg": held }, true),
     ).toEqual({ "0:1:loadKg": held });
+  });
+});
+
+describe("progress", () => {
+  const settings = defaultSettings("2026-01-05", "UTC");
+  test("weeks count planned sessions from the plan start and skip removed workouts", () => {
+    const kept = entry(completedWorkout("2026-01-05"));
+    const removedId = crypto.randomUUID();
+    const records: RecordEntry[] = [
+      kept,
+      entry(completedWorkout("2026-01-07", 1), removedId),
+      entry({
+        kind: "workoutCorrection",
+        workoutId: removedId,
+        replacement: null,
+        reason: "Removed from history",
+      }),
+      entry({
+        kind: "run",
+        date: "2026-01-06",
+        minutes: 20,
+        distanceKm: 3,
+        notes: "",
+      }),
+    ];
+    expect(mondayOf("2026-01-07")).toBe("2026-01-05");
+    expect(mondayOf("2026-01-11")).toBe("2026-01-05");
+    expect(weeklySummary(settings, records, "2026-01-08", 2)).toEqual([
+      {
+        monday: "2025-12-29",
+        strength: { done: 0, planned: 0 },
+        runs: { done: 0, planned: 0 },
+      },
+      {
+        monday: "2026-01-05",
+        strength: { done: 1, planned: 3 },
+        runs: { done: 1, planned: 2 },
+      },
+    ]);
+  });
+  test("strength series keep exercise variants apart and use the weaker side", () => {
+    const first = completedWorkout("2026-01-05", 0, 8);
+    const later = completedWorkout("2026-01-07", 0, 10);
+    const row = later.exercises.find((e) => e.prescription.id === "row");
+    const set = row?.sets[0];
+    if (!set) throw new Error("Missing row");
+    set.right = 9;
+    // A plank logged as reps after a settings change is a separate variant.
+    const variant = structuredClone(later);
+    variant.date = "2026-01-09";
+    variant.finishedAt = "2026-01-09T07:45:00.000Z";
+    for (const exercise of variant.exercises)
+      if (exercise.prescription.id === "plank")
+        exercise.prescription.mode = "reps";
+    const series = strengthSeries([entry(variant), entry(later), entry(first)]);
+    const rows = series.find((s) => s.key === "row:reps:sides");
+    expect(rows?.points.map((p) => [p.date, p.loadKg, p.value])).toEqual([
+      ["2026-01-05", 8, 15],
+      ["2026-01-07", 10, 15],
+      ["2026-01-09", 10, 15],
+    ]);
+    const timed = series.find((s) => s.key === "plank:seconds:single");
+    const counted = series.find((s) => s.key === "plank:reps:single");
+    expect(timed?.points).toHaveLength(2);
+    expect(counted?.points).toHaveLength(1);
+    // At equal loads the set with more reps on its weaker side counts.
+    expect(
+      strengthSeries([entry(later)]).find((s) => s.key === "row:reps:sides")
+        ?.points[0]?.value,
+    ).toBe(15);
+    // A heavier set counts, with the reps of its weaker side.
+    set.loadKg = 12;
+    expect(
+      strengthSeries([entry(later)]).find((s) => s.key === "row:reps:sides")
+        ?.points[0],
+    ).toEqual({ date: "2026-01-07", loadKg: 12, value: 9 });
+  });
+  test("bodyweight compares averages only with earlier weigh-ins", () => {
+    const weights = (count: number) =>
+      dailyWeights(
+        Array.from({ length: count }, (_, i) =>
+          entry({ kind: "weight", date: addDays("2026-01-01", i), kg: 70 + i }),
+        ),
+      );
+    expect(weightTrend([])).toEqual({
+      average: null,
+      count: 0,
+      change: null,
+      comparedCount: 0,
+    });
+    expect(weightTrend(weights(3))).toMatchObject({
+      average: 71,
+      change: null,
+    });
+    // Latest 7: 73..79 (avg 76). The 3 before: 70..72 (avg 71).
+    expect(weightTrend(weights(10))).toEqual({
+      average: 76,
+      count: 7,
+      change: 5,
+      comparedCount: 3,
+    });
   });
 });

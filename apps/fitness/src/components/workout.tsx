@@ -10,7 +10,7 @@ import {
 import type { RecordEntry, Settings, Workout } from "../domain";
 import { useAccount } from "./account-context";
 import type { Sync } from "../sync";
-import { ExerciseGuide } from "./guide";
+import { ExerciseHelp, prescriptionText } from "./exercises";
 import { elapsedSeconds, formatDuration, remainingRest } from "../timing";
 import { fieldKey, setKeys, useWorkoutInputs } from "./workout-inputs";
 import type { NumberField, WorkoutInputs } from "./workout-inputs";
@@ -106,7 +106,7 @@ export function WorkoutEditor({
   const history = sync.records.filter((record) => record.id !== entry.id);
   return (
     <section data-feedback-redact data-feedback-private>
-      <div className="section-heading">
+      <div className="session-head">
         <div>
           <p className="eyebrow">In progress · {formatDate(workout.date)}</p>
           <h1>{workout.name}</h1>
@@ -116,10 +116,6 @@ export function WorkoutEditor({
           {skipped > 0 && <small> · {skipped} skipped</small>}
         </strong>
       </div>
-      <p>
-        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
-        reserve. Weights are for one dumbbell; each side has its own reps.
-      </p>
       <div className={`workout-timing ${restDone ? "rest-finished" : ""}`}>
         <div className="timing-row">
           <div role="timer" aria-label="Workout elapsed time">
@@ -141,48 +137,57 @@ export function WorkoutEditor({
             </Button>
           )}
         </div>
+        <div className="session-progress" aria-hidden="true">
+          <span
+            style={{
+              width: `${((completed + skipped) / sets.length) * 100}%`,
+            }}
+          />
+        </div>
         <p className="rest-announcement" role="status">
           {restDone
             ? `Rest done.${nextSet ? ` Next: ${nextSet.name}, set ${nextSet.index + 1}.` : " Every set is handled."}`
             : ""}
         </p>
-        <details className="rest-controls">
-          <summary>Rest controls</summary>
-          <div className="timer-actions">
-            <label>
-              New rest length
-              <select
-                aria-label="New rest length"
-                value={restDuration}
-                onChange={(event) =>
-                  setRestDuration(Number(event.target.value))
-                }
-              >
-                {restChoices.map((seconds) => (
-                  <option key={seconds} value={seconds}>
-                    {formatDuration(seconds)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              appearance="ghost"
-              onClick={() => setRest(Date.now() + restDuration * 1000)}
-            >
-              Start new {formatDuration(restDuration)} rest
-            </Button>
-          </div>
-          <p>
-            Rest starts when you mark a set Done. Your elapsed timer runs from
-            the session start.
-          </p>
-        </details>
         {inputs.message?.place === "timer" && (
           <p className="timer-error" role="alert">
             {inputs.message.text}
           </p>
         )}
       </div>
+      <details className="rest-controls">
+        <summary>Rest controls</summary>
+        <div className="timer-actions">
+          <label>
+            New rest length
+            <select
+              aria-label="New rest length"
+              value={restDuration}
+              onChange={(event) => setRestDuration(Number(event.target.value))}
+            >
+              {restChoices.map((seconds) => (
+                <option key={seconds} value={seconds}>
+                  {formatDuration(seconds)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            appearance="ghost"
+            onClick={() => setRest(Date.now() + restDuration * 1000)}
+          >
+            Start new {formatDuration(restDuration)} rest
+          </Button>
+        </div>
+        <p>
+          Rest starts when you mark a set Done. Your elapsed timer runs from the
+          session start.
+        </p>
+      </details>
+      <p className="session-guidance">
+        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
+        reserve. Weights are for one dumbbell; each side has its own reps.
+      </p>
       <InputNotices inputs={inputs} />
       <ExerciseList
         workout={workout}
@@ -192,31 +197,34 @@ export function WorkoutEditor({
         startRest
       />
       <NotesField inputs={inputs} />
-      {inputs.message?.place === "finish" && (
-        <p role="alert">{inputs.message.text}</p>
-      )}
-      <Button
-        appearance="primary"
-        disabled={nextSet !== undefined}
-        onClick={() => {
-          if (
-            inputs.commit({
-              change: (current) => ({
-                ...current,
-                finishedAt: new Date().toISOString(),
-                restUntil: null,
-              }),
-            })
-          )
-            onFinish();
-        }}
-      >
-        Finish workout
-      </Button>
-      <p className="muted">
-        Mark each set Done or Skipped to finish. Skipped sets do not count
-        towards a weight increase. Results sync when the save status says Saved.
-      </p>
+      <div className="finish-bar">
+        {inputs.message?.place === "finish" && (
+          <p role="alert">{inputs.message.text}</p>
+        )}
+        <Button
+          appearance="primary"
+          disabled={nextSet !== undefined}
+          onClick={() => {
+            if (
+              inputs.commit({
+                change: (current) => ({
+                  ...current,
+                  finishedAt: new Date().toISOString(),
+                  restUntil: null,
+                }),
+              })
+            )
+              onFinish();
+          }}
+        >
+          Finish workout
+        </Button>
+        <p className="muted">
+          Mark each set Done or Skipped to finish. Skipped sets do not count
+          towards a weight increase. Results sync when the save status says
+          Saved.
+        </p>
+      </div>
       <details>
         <summary>Discard this workout</summary>
         <p>This removes the draft. Completed history stays available.</p>
@@ -252,12 +260,11 @@ export function legacyWorkoutInputKey(owner: string, workoutId: string) {
 export function InputNotices({ inputs }: { inputs: WorkoutInputs }) {
   return (
     <>
-      {inputs.pending && (
-        <p className="input-notice" role="status">
-          Typed values are kept on this device. They save to your account when
-          you leave the set, press Done or Skip, or leave this page.
-        </p>
-      )}
+      {/* Always shown, so saving a field never moves the controls below. */}
+      <p className="input-help">
+        Typed values stay on this device until you leave the set, press Done or
+        Skip, or leave this page. Then they save to your account.
+      </p>
       {inputs.held.some((key) => !inputs.unconfirmed.includes(key)) && (
         <p className="input-notice" role="alert">
           A highlighted value changed on another device. Your typed value is
@@ -308,6 +315,11 @@ export function ExerciseList({
   /** Start the rest timer when a set is marked Done. */
   startRest?: boolean;
 }) {
+  const current = startRest
+    ? workout.exercises.findIndex((exercise) =>
+        exercise.sets.some((set) => !set.done && !set.skipped),
+      )
+    : -1;
   return workout.exercises.map((exercise, ei) => {
     const p = exercise.prescription;
     const previous = history ? lastExercise(history, p.id) : undefined;
@@ -369,21 +381,21 @@ export function ExerciseList({
       );
     }
     return (
-      <article className="exercise" key={ei}>
+      <article
+        className={`exercise${ei === current ? " is-current" : ""}`}
+        key={ei}
+      >
         <div className="exercise-title">
           <span className="number">{String(ei + 1).padStart(2, "0")}</span>
           <div>
-            <h3>{p.name}</h3>
-            <p>
-              {p.sets} × {p.min}–{p.max}{" "}
-              {p.mode === "seconds"
-                ? "seconds"
-                : `reps${p.side ? " / side" : ""}`}{" "}
-              · {formatDuration(p.rest)} rest
-            </p>
+            <h3>
+              {p.name}
+              {ei === current && <span className="current-tag">Current</span>}
+            </h3>
+            <p>{prescriptionText(p)}</p>
           </div>
+          <ExerciseHelp id={p.id} />
         </div>
-        <ExerciseGuide id={p.id} />
         {history && (
           <p className="previous">
             Last time:{" "}
@@ -479,36 +491,38 @@ export function ExerciseList({
                     })}
                   </label>
                 )}
-                <label className="check-form">
-                  <input
-                    type="checkbox"
-                    checked={set.controlled}
-                    onChange={(event) =>
-                      act(si, set, { controlled: event.target.checked })
+                <div className="set-actions">
+                  <label className="check-form">
+                    <input
+                      type="checkbox"
+                      checked={set.controlled}
+                      onChange={(event) =>
+                        act(si, set, { controlled: event.target.checked })
+                      }
+                    />
+                    Controlled
+                  </label>
+                  <Button
+                    appearance={set.done ? "primary" : "outline"}
+                    aria-label={`${name} ${set.done ? "completed" : "complete"}`}
+                    aria-pressed={set.done}
+                    onClick={() =>
+                      act(si, set, { done: !set.done, skipped: false })
                     }
-                  />
-                  Controlled
-                </label>
-                <Button
-                  appearance={set.done ? "primary" : "outline"}
-                  aria-label={`${name} ${set.done ? "completed" : "complete"}`}
-                  aria-pressed={set.done}
-                  onClick={() =>
-                    act(si, set, { done: !set.done, skipped: false })
-                  }
-                >
-                  {set.done ? "✓ Done" : "Done"}
-                </Button>
-                <Button
-                  appearance="ghost"
-                  aria-label={`${name} ${set.skipped ? "skipped" : "skip"}`}
-                  aria-pressed={set.skipped}
-                  onClick={() =>
-                    act(si, set, { skipped: !set.skipped, done: false })
-                  }
-                >
-                  {set.skipped ? "Skipped" : "Skip"}
-                </Button>
+                  >
+                    {set.done ? "✓ Done" : "Done"}
+                  </Button>
+                  <Button
+                    appearance="ghost"
+                    aria-label={`${name} ${set.skipped ? "skipped" : "skip"}`}
+                    aria-pressed={set.skipped}
+                    onClick={() =>
+                      act(si, set, { skipped: !set.skipped, done: false })
+                    }
+                  >
+                    {set.skipped ? "Skipped" : "Skip"}
+                  </Button>
+                </div>
                 {problems.map((problem) => (
                   <p
                     className="set-error"

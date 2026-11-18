@@ -9,12 +9,17 @@ import { mkdir } from "node:fs/promises";
 import postgres from "postgres";
 import { z } from "zod";
 import { localDate, recordSchema } from "../src/domain";
+import { settleWrites, trackWrites } from "./quiescence";
 const email = "fitness-a+clerk_test@example.com";
 const exportSchema = z.object({ records: z.array(recordSchema) });
+test.afterEach(async ({ context }) => {
+  await settleWrites(context);
+});
 test.beforeAll(async () => {
   await clerkSetup({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY });
 });
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, context }) => {
+  trackWrites(context);
   page.setDefaultTimeout(10000);
   const secret = process.env.CLERK_SECRET_KEY;
   const url = process.env.DATABASE_URL;
@@ -47,7 +52,7 @@ test.beforeEach(async ({ page }) => {
   const setup = page.getByRole("button", { name: "Set up my plan" });
   if (await setup.isVisible()) await setup.click();
   await expect(page.locator(".sync-state")).toHaveText("Saved");
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Edit repeating week" }).click();
   await page.getByLabel("Plan start date").fill("2026-01-05");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
@@ -55,7 +60,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("link", { name: "Today", exact: true })
+    .getByRole("link", { name: "Week", exact: true })
     .click();
   await page.locator("#view-date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
@@ -64,7 +69,7 @@ test("plan preview is read-only and browser back returns to Today", async ({
   page,
 }, info) => {
   await mkdir("private/screenshots", { recursive: true });
-  await page.getByRole("heading", { name: "Keep showing up." }).click();
+  await page.getByRole("heading", { level: 1, name: "Your week" }).click();
   await page.screenshot({
     path: `private/screenshots/today-preview-${info.project.name}.png`,
     fullPage: true,
@@ -83,7 +88,7 @@ test("plan preview is read-only and browser back returns to Today", async ({
   await expect(page.getByRole("timer")).toHaveCount(0);
   await expect(
     page.locator(".plan-exercise").filter({ hasText: "Supported one-arm row" }),
-  ).toContainText("2 × 10–15 reps / side");
+  ).toContainText("2 × 10–15 reps each side");
   await expect(
     page.locator(".plan-exercise").filter({ hasText: "Forearm plank" }),
   ).toContainText("2 × 20–40 seconds");
@@ -109,7 +114,7 @@ test("plan preview is read-only and browser back returns to Today", async ({
   ).toBeVisible();
   await page.goBack();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   await page.goForward();
   await expect(
@@ -138,7 +143,7 @@ test("main navigation returns to today and the date picker adds browser history 
   await expect(page.locator(".date-banner")).toHaveCount(0);
   await expect(
     page.getByRole("navigation").locator("[aria-current=page]"),
-  ).toHaveText("+Food");
+  ).toHaveText("Food");
   await expect(page).toHaveTitle("Food · Fitness · bent.build");
   await expect(page.locator("h1")).toBeFocused();
   const today = await page.locator("#view-date").inputValue();
@@ -151,14 +156,14 @@ test("main navigation returns to today and the date picker adds browser history 
     "Viewing Tue 6 Jan 2026",
   );
   await expect(
-    page.getByRole("heading", { name: "Food · Tue 6 Jan 2026" }),
+    page.getByRole("heading", { name: "Logged on Tue 6 Jan 2026" }),
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/food$/);
   await expect(page.locator("#view-date")).toHaveValue(today);
   await page.goBack();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   await expect(page.locator("#view-date")).toHaveValue("2026-01-05");
   await page.goForward();
@@ -169,16 +174,16 @@ test("main navigation returns to today and the date picker adds browser history 
     .getByRole("link", { name: "Return to today", exact: true })
     .click();
   await expect(page).toHaveURL(/\/food$/);
-  await page.getByRole("link", { name: "Today", exact: true }).click();
-  await page.getByRole("link", { name: "Open exercise guides" }).click();
+  await page.getByRole("link", { name: "Week", exact: true }).click();
+  await page.getByRole("link", { name: "Exercises", exact: true }).click();
   await expect(page).toHaveURL(/\/guides/);
   await expect(page.locator("#view-date")).toHaveCount(0);
   await expect(
     page.getByRole("navigation").locator("[aria-current=page]"),
-  ).toHaveText("?Guides");
+  ).toHaveText("Exercises");
   await page.goBack();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   await page.locator(".wordmark").click();
   await expect(page).toHaveURL(/\/$/);
@@ -197,6 +202,8 @@ test("starting a workout runs elapsed time and preserves timers and draft across
     .click();
   await expect(page).toHaveURL(/\/workout\?workoutId=/);
   const url = page.url();
+  const planPath =
+    "/plan?date=2026-01-05&routineId=00000000-0000-4000-8000-00000000000a";
   const elapsed = page.getByRole("timer", {
     name: "Workout elapsed time",
     exact: true,
@@ -251,9 +258,9 @@ test("starting a workout runs elapsed time and preserves timers and draft across
   const before = exportSchema.parse(
     await (await page.request.get("/api/export")).json(),
   );
-  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   // While a workout is active, Today shows only the resume card.
   await expect(
@@ -262,6 +269,10 @@ test("starting a workout runs elapsed time and preserves timers and draft across
   await page
     .getByRole("link", { name: "Mon 5 Jan 2026: Strength A, Not recorded" })
     .click();
+  await expect(
+    page.getByRole("link", { name: "View workout plan", exact: true }),
+  ).toHaveCount(0);
+  await page.goto(planPath);
   await expect(
     page.getByRole("button", {
       name: "Log workout for Mon 5 Jan 2026",
@@ -291,7 +302,7 @@ test("starting a workout runs elapsed time and preserves timers and draft across
     .getByRole("button", { name: "Discard draft", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Keep showing up." }),
+    page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
   await page.goBack();
   await expect(
@@ -348,6 +359,7 @@ test("finishing a workout opens history and browser Back keeps it completed", as
 
 test("introductory plan matches a custom one-set workout", async ({ page }) => {
   await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: /Repeating week and routines/ }).click();
   await page.locator(".routine-editor > summary").first().click();
   await page.getByLabel("Sets", { exact: true }).first().fill("1");
   await page
@@ -356,7 +368,7 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await page
     .getByRole("navigation")
-    .getByRole("link", { name: "Today", exact: true })
+    .getByRole("link", { name: "Week", exact: true })
     .click();
   await page.locator("#view-date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
@@ -385,7 +397,7 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
       exact: true,
     }),
   ).toHaveCount(0);
-  await expect(page.locator(".section-heading")).toContainText("0/11 sets");
+  await expect(page.locator(".set-count")).toContainText("0/11 sets");
 });
 
 test("toolbar configure, navigation and selection redact private activity URL parameters", async ({
@@ -448,6 +460,16 @@ test("toolbar configure, navigation and selection redact private activity URL pa
     await expect(payloads).not.toContainText(secret);
 });
 
+async function openBodyweight(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Progress", exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Progress sections" })
+    .getByRole("link", { name: "Bodyweight", exact: true })
+    .click();
+}
 async function records(page: Page) {
   return exportSchema.parse(
     await (await page.request.get("/api/export")).json(),
@@ -540,6 +562,15 @@ test("week days link to each day, and future plans start today", async ({
   await week
     .getByRole("link", { name: "Wed 7 Jan 2026: Strength B, Not recorded" })
     .click();
+  await expect(page).toHaveURL(/\/\?date=2026-01-07$/);
+  await expect(
+    week.getByRole("link", {
+      name: "Wed 7 Jan 2026: Strength B, Not recorded",
+    }),
+  ).toHaveAttribute("aria-current", "page");
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/plan\?date=2026-01-07&routineId=/);
   await expect(
     page.getByRole("heading", { name: "Strength B", exact: true }),
@@ -551,6 +582,7 @@ test("week days link to each day, and future plans start today", async ({
   await week
     .getByRole("link", { name: "Tue 6 Jan 2026: Easy run, Not recorded" })
     .click();
+  await page.getByRole("link", { name: "Record run", exact: true }).click();
   await expect(page).toHaveURL(/\/run\?date=2026-01-06/);
   await expect(page.getByLabel("Date", { exact: true })).toHaveValue(
     "2026-01-06",
@@ -570,6 +602,9 @@ test("week days link to each day, and future plans start today", async ({
     .getByRole("link", { name: /^Wed 9 Jan 2030: Strength [AB], Planned$/ })
     .click();
   await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Do this workout today", exact: true })
     .click();
   await expect(page).toHaveURL(/\/workout\?workoutId=[^&]+$/);
@@ -585,7 +620,7 @@ test("week days link to each day, and future plans start today", async ({
   await page.getByRole("link", { name: "Food", exact: true }).click();
   await expect(page).toHaveURL(/\/food$/);
   await expect(page.locator(".date-banner")).toHaveCount(0);
-  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await page.getByRole("link", { name: "Week", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Resume workout", exact: true }),
   ).toBeVisible();
@@ -704,7 +739,7 @@ test("typed values recovered on this device save automatically unless they chang
 }) => {
   const workoutId = await startPastWorkout(page);
   const owner = await ownerId(page);
-  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
   // Simulate a closed tab that kept typed values without saving them.
   await keepTypedValues(page, `bent:fitness:inputs:v2:${owner}:${workoutId}`, {
     "0:0:value": { text: "11", base: "8", units: "kg" },
@@ -771,7 +806,7 @@ test("history corrects, removes and restores workouts without changing the origi
     .fill("Entered the wrong weight");
   // Leaving with unsaved correction changes asks first.
   page.once("dialog", (dialog) => void dialog.dismiss());
-  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await page.getByRole("link", { name: "Week", exact: true }).click();
   await expect(page).toHaveURL(/\/history/);
   await page.getByRole("button", { name: "Save correction" }).click();
   await expect(page.locator(".sync-state")).toHaveText("Saved");
@@ -823,6 +858,7 @@ test("history corrects, removes and restores workouts without changing the origi
   await page
     .getByRole("link", { name: "Mon 5 Jan 2026: Strength A, Done" })
     .click();
+  await page.getByRole("link", { name: "View results", exact: true }).click();
   await expect(page).toHaveURL(/\/history\?date=2026-01-05/);
   // Runs can be edited and removed.
   await page.goto("/run?date=2026-01-06");
@@ -847,7 +883,9 @@ test("settings confirm saves, explain errors, warn before losing edits and expor
 }) => {
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveTitle("Settings · Fitness · bent.build");
-  await expect(page.getByText(/Strength days take turns/)).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Repeating week and routines/ }),
+  ).toBeVisible();
   const goal = page.getByLabel("Goal", { exact: true });
   await goal.fill("Synthetic stronger goal");
   const save = page.getByRole("button", { name: "Save settings", exact: true });
@@ -874,6 +912,9 @@ test("settings confirm saves, explain errors, warn before losing edits and expor
   await expect(page.locator(".save-settings [role=status]")).toHaveText(
     "Settings saved.",
   );
+  await page.getByRole("link", { name: /Repeating week and routines/ }).click();
+  await expect(page).toHaveTitle("Repeating week · Fitness · bent.build");
+  await expect(page.getByText(/Strength days take turns/)).toBeVisible();
   await page.locator(".routine-editor > summary").first().click();
   const routine = page.locator(".routine-editor").first();
   await expect(
@@ -972,7 +1013,7 @@ test("food entries can be edited and removed, and the body chart labels recorded
     page.locator(".list-row", { hasText: /synthetic oats/ }),
   ).toHaveCount(0);
   await expect(page.locator(".sync-state")).toHaveText("Saved");
-  await page.getByRole("link", { name: "Body", exact: true }).click();
+  await openBodyweight(page);
   for (const [date, kg] of [
     ["2026-01-05", "70"],
     ["2026-01-06", "71.2"],
@@ -1019,7 +1060,7 @@ test("recovered weights keep the units they were typed in when units change else
   expect(zero.exercises[0]?.sets[0]?.loadKg).toBe(0);
   expect(zero.exercises[0]?.sets[1]?.loadKg).toBe(0);
   // 10 kg was typed before the tab closed. The units then change to lb.
-  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
   await keepTypedValues(page, key, {
     "0:0:loadKg": { text: "10", base: "0", units: "kg" },
   });
@@ -1034,7 +1075,7 @@ test("recovered weights keep the units they were typed in when units change else
   await expect(first).toHaveValue("22.05");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   // 22 lb was typed before the tab closed. The units then change to kg.
-  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
   await keepTypedValues(page, key, {
     "0:1:loadKg": { text: "22", base: "0", units: "lb" },
   });
@@ -1050,7 +1091,7 @@ test("recovered weights keep the units they were typed in when units change else
   await expect(first).toHaveValue("10");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   // Values kept without units save other fields and hold the weight.
-  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await page.getByRole("link", { name: "Back to week", exact: true }).click();
   const before = await workoutData(page, workoutId);
   const legacy = `bent:fitness:inputs:v1:${owner}:${workoutId}`;
   await keepTypedValues(page, legacy, {
@@ -1112,15 +1153,21 @@ test("sections open offline on their first visit and typed workout values save a
   await expect(status).toHaveText("Unsaved input on device");
   await page.context().setOffline(true);
   await expect(status).toHaveText("Offline · pending on device");
+  // The longest save status fits without widening the page.
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   const sections = [
-    ["History", "History"],
-    ["Guides", "Exercise guides"],
-    ["Body", "Bodyweight"],
-    ["Food", "Food"],
-  ] as const;
-  for (const [name, heading] of sections) {
+    { nav: "Main navigation", name: "Progress", heading: "Progress" },
+    { nav: "Progress sections", name: "Sessions", heading: "History" },
+    { nav: "Progress sections", name: "Bodyweight", heading: "Bodyweight" },
+    { nav: "Main navigation", name: "Exercises", heading: "Exercises" },
+    { nav: "Main navigation", name: "Food", heading: "Food" },
+    { nav: "Main navigation", name: "Week", heading: "Your week" },
+  ];
+  for (const { nav, name, heading } of sections) {
     await page
-      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("navigation", { name: nav })
       .getByRole("link", { name, exact: true })
       .click();
     await expect(
@@ -1541,4 +1588,265 @@ test("two tabs on one workout keep each other's typed values through reloads", a
   expect(saved.exercises[0]?.sets[0]?.value).toBe(9);
   expect(saved.exercises[0]?.sets[1]?.value).toBe(11);
   expect(await stored()).toEqual({});
+});
+
+test("the week board selects days in place, keeps date context and starts today's workout", async ({
+  page,
+}) => {
+  const before = await records(page);
+  const week = page.getByRole("navigation", { name: "Training week" });
+  await expect(page.locator(".week-totals")).toContainText("0 of 3 planned");
+  // A rest day explains what comes next without starting anything.
+  await week
+    .getByRole("link", { name: "Thu 8 Jan 2026: Rest, Rest day" })
+    .click();
+  await expect(page).toHaveURL(/\/\?date=2026-01-08$/);
+  await expect(page.locator(".date-banner")).toContainText(
+    "Viewing Thu 8 Jan 2026",
+  );
+  const panel = page.locator(".now-panel");
+  await expect(panel.getByRole("heading", { name: "Rest" })).toBeVisible();
+  await expect(panel).toContainText("Next: Fri 9 Jan 2026 · Strength A");
+  // A planned strength day lists its exercises with guides.
+  await week
+    .getByRole("link", { name: "Fri 9 Jan 2026: Strength A, Not recorded" })
+    .click();
+  await expect(page).toHaveURL(/\/\?date=2026-01-09$/);
+  const agenda = page.getByRole("region", { name: "Strength A exercises" });
+  await expect(agenda.getByRole("listitem")).toHaveCount(6);
+  await agenda
+    .getByRole("button", { name: "How to do Goblet squat", exact: true })
+    .click();
+  const sheet = page.getByRole("dialog", { name: "Goblet squat" });
+  await expect(sheet).toContainText("Strength A · 3 × 8–12 reps · 2:00 rest");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(page).toHaveURL(/\/\?date=2026-01-09$/);
+  await page.goBack();
+  await expect(panel.getByRole("heading", { name: "Rest" })).toBeVisible();
+  await page.goForward();
+  await expect(agenda.getByRole("listitem")).toHaveCount(6);
+  // Browsing days changes nothing in the account.
+  expect(await records(page)).toEqual(before);
+  // Today offers Start workout directly from the week.
+  await page.getByRole("link", { name: "Return to today" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  const start = page.getByRole("button", {
+    name: "Start workout",
+    exact: true,
+  });
+  const settings = before.find((record) => record.data.kind === "settings");
+  if (settings?.data.kind !== "settings") throw Error("Missing settings");
+  const today = localDate(settings.data.timezone);
+  const weekday = new Date(today + "T12:00:00Z").getUTCDay();
+  // The default plan trains on Monday, Wednesday and Friday.
+  if (![1, 3, 5].includes(weekday)) {
+    await expect(start).toHaveCount(0);
+    return;
+  }
+  await start.click();
+  await expect(page).toHaveURL(/\/workout\?workoutId=/);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const workoutId = new URL(page.url()).searchParams.get("workoutId") ?? "";
+  expect((await workoutData(page, workoutId)).date).toBe(today);
+});
+
+test("plan actions stay in reach and exercise guides keep session values", async ({
+  page,
+}, info) => {
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
+  const log = page.getByRole("button", {
+    name: "Log workout for Mon 5 Jan 2026",
+    exact: true,
+  });
+  const box = await log.boundingBox();
+  const viewport = page.viewportSize();
+  if (!box || !viewport) throw Error("Missing layout");
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  await page.screenshot({
+    path: `private/screenshots/plan-actions-${info.project.name}.png`,
+  });
+  // The library and detail pages.
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Exercises", exact: true })
+    .click();
+  await expect(page.locator(".exercise-tile")).toHaveCount(10);
+  await page.getByRole("link", { name: /^Supported one-arm row/ }).click();
+  await expect(page).toHaveURL(/\/guides\?exercise=row$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Supported one-arm row" }),
+  ).toBeVisible();
+  await expect(page.locator(".fact-list")).toContainText(
+    "Log the reps for your left and right side separately.",
+  );
+  await expect(page.locator(".fact-list")).toContainText(
+    "Strength A · 3 × 10–15 reps each side · 2:00 rest",
+  );
+  await expect(
+    page.getByRole("link", { name: /Watch tutorial/ }),
+  ).toHaveAttribute("href", "https://www.youtube.com/watch?v=KRN38chlkds");
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Exercises" }),
+  ).toBeVisible();
+  // A guide opened mid-session leaves typed values and timers in place.
+  await page.goto("/?date=2026-01-05");
+  const workoutId = await startPastWorkout(page);
+  const weight = page.getByRole("spinbutton", {
+    name: "Goblet squat set 1 weight",
+    exact: true,
+  });
+  await weight.fill("7");
+  const help = page.getByRole("button", {
+    name: "How to do Goblet squat",
+    exact: true,
+  });
+  const before = await help.boundingBox();
+  // Leaving the field saves it without moving the controls.
+  await page.locator("h1").click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  expect((await help.boundingBox())?.y).toBe(before?.y);
+  await weight.fill("7.5");
+  await help.click();
+  const sheet = page.getByRole("dialog", { name: "Goblet squat" });
+  await expect(sheet.locator(".exercise-illustration img")).toHaveAttribute(
+    "src",
+    "/exercise-guides/squat.png",
+  );
+  await sheet.getByRole("button", { name: "Close guide" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`workoutId=${workoutId}`));
+  await expect(weight).toHaveValue("7.5");
+  await expect(
+    page.getByRole("timer", { name: "Workout elapsed time" }),
+  ).toBeVisible();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  expect(
+    (await workoutData(page, workoutId)).exercises[0]?.sets[0]?.loadKg,
+  ).toBe(7.5);
+});
+
+test("food steps between days, adds saved meals in one tap and compares the week", async ({
+  page,
+}) => {
+  await page.goto("/food?date=2026-01-05");
+  await page.getByLabel("Meal or snack").fill("Synthetic oats");
+  await page.getByLabel("Calories · kcal").fill("350");
+  await page.getByLabel("Protein · g", { exact: true }).fill("12");
+  await page.getByLabel("Save as a regular meal").check();
+  await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await expect(page.locator(".food-totals")).toContainText("350");
+  await expect(page.locator(".food-totals")).toContainText("kcal left");
+  await page.getByRole("link", { name: "Next day, Tue 6 Jan 2026" }).click();
+  await expect(page).toHaveURL(/\/food\?date=2026-01-06$/);
+  await expect(page.locator(".food-screen > .entries")).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Add Synthetic oats to Tue 6 Jan 2026" })
+    .click();
+  await expect(
+    page.getByText("Added Synthetic oats for Tue 6 Jan 2026."),
+  ).toBeVisible();
+  await expect(page.locator(".food-screen > .entries .list-row")).toHaveCount(
+    1,
+  );
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const strip = page.getByRole("list", {
+    name: "Calories for the last 7 days",
+  });
+  await expect(
+    strip.getByRole("link", { name: "Mon 5 Jan 2026: 350 kcal" }),
+  ).toBeVisible();
+  await strip.getByRole("link", { name: "Mon 5 Jan 2026: 350 kcal" }).click();
+  await expect(page).toHaveURL(/\/food\?date=2026-01-05$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/food\?date=2026-01-06$/);
+  const meals = (await records(page)).filter((r) => r.data.kind === "meal");
+  expect(
+    meals.map((r) => r.data.kind === "meal" && r.data.date).sort(),
+  ).toEqual(["2026-01-05", "2026-01-06"]);
+});
+
+test("progress starts empty, then compares sessions, strength and bodyweight from records", async ({
+  page,
+}) => {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Progress", exact: true })
+    .click();
+  await expect(page).toHaveTitle("Progress · Fitness · bent.build");
+  await expect(
+    page.getByText("Finish a workout to start tracking each exercise.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("No weigh-ins yet.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Your completed workouts and runs will appear here."),
+  ).toBeVisible();
+  // One finished workout.
+  await page.goto("/?date=2026-01-05");
+  const workoutId = await startPastWorkout(page);
+  const sets = page.getByRole("button", { name: / set \d+ complete$/ });
+  while ((await sets.count()) > 0) await sets.first().click();
+  await page
+    .getByRole("button", { name: "Finish workout", exact: true })
+    .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved", {
+    timeout: 20000,
+  });
+  await page.goto("/progress");
+  const squat = page.locator(".strength-card", { hasText: "Goblet squat" });
+  await expect(squat).toContainText("One session so far: 0 kg × 8");
+  await expect(page.locator(".strength-card")).toHaveCount(6);
+  await expect(page.locator(".session-list")).toContainText("Strength A");
+  // A later session with a heavier squat, as saved by another device.
+  const first = await workoutData(page, workoutId);
+  const later = structuredClone(first);
+  later.date = "2026-01-07";
+  for (const set of later.exercises[0]?.sets ?? []) set.loadKg = 2;
+  const owner = await ownerId(page);
+  await withDatabase(
+    (sql) =>
+      sql`INSERT INTO fitness_records(owner_id,id,revision,data,deleted) VALUES(${owner},${crypto.randomUUID()},1,${sql.json(later)},false)`,
+  );
+  await page.reload();
+  await expect(squat).toContainText("+2 kg since Mon 5 Jan");
+  await expect(squat).toContainText("Heaviest completed set, kg per dumbbell");
+  await expect(squat.getByRole("img")).toHaveAttribute(
+    "aria-label",
+    /2 sessions from 0 kg × 8 to 2 kg × 8/,
+  );
+  // Timed and sided exercises stay separate and show the weaker side.
+  await expect(
+    page.locator(".strength-card", { hasText: "Supported one-arm row" }),
+  ).toContainText("each side");
+  // Bodyweight compares averages only with enough weigh-ins.
+  await openBodyweight(page);
+  await page.locator("#weight-date").fill("2026-01-05");
+  await page.getByLabel("Weight · kg", { exact: true }).fill("70");
+  await page.getByRole("button", { name: "Save weigh-in" }).click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page
+    .getByRole("navigation", { name: "Progress sections" })
+    .getByRole("link", { name: "Overview", exact: true })
+    .click();
+  await expect(page.locator(".weight-summary")).toContainText("70.0 kg");
+  await expect(page.locator(".weight-summary")).toContainText(
+    "Record more than 7 weigh-ins to compare averages.",
+  );
+  await page
+    .getByRole("navigation", { name: "Progress sections" })
+    .getByRole("link", { name: "Sessions", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/history$/);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Main navigation" })
+      .locator("[aria-current=page]"),
+  ).toHaveText("Progress");
 });

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { TodayScreen } from "../components/app";
+import { WeekScreen } from "../components/week";
 export const Route = createFileRoute("/_app/")({
-  head: () => ({ meta: [{ title: "Today · Fitness · bent.build" }] }),
-  component: TodayScreen,
+  head: () => ({ meta: [{ title: "Week · Fitness · bent.build" }] }),
+  component: WeekScreen,
 });

@@ -11,6 +11,7 @@ import type { RecordEntry, Workout } from "../domain";
 import { useAccount } from "./account-context";
 import { ExerciseList, InputNotices, NotesField } from "./workout";
 import { useWorkoutInputs } from "./workout-inputs";
+import { ProgressTabs } from "./progress-screen";
 import { correctionStatus, EditConflict } from "./record-edit";
 import type { OpenedCorrection } from "./record-edit";
 
@@ -101,11 +102,16 @@ export function History() {
   }
   return (
     <section data-feedback-private data-feedback-redact>
-      <p className="eyebrow">Your work, recorded</p>
-      <h1>History</h1>
+      <header className="page-head">
+        <p className="eyebrow">Progress</p>
+        <h1>History</h1>
+      </header>
+      <ProgressTabs />
       <p role="status">{notice}</p>
       {!sessions.length && (
-        <p>Your completed workouts and runs will appear here.</p>
+        <p className="empty">
+          Your completed workouts and runs will appear here.
+        </p>
       )}
       {sessions.map((record) => {
         const label = `${record.data.kind === "run" ? "Easy run" : record.data.name} on ${formatDate(record.data.date)}`;
@@ -206,7 +212,7 @@ export function History() {
       })}
       {removed.length > 0 && (
         <>
-          <h2>Removed workouts</h2>
+          <h2 className="section-label">Removed workouts</h2>
           <p className="muted">
             These workouts are hidden from History, your schedule and weight
             suggestions. Your account export keeps the original results.
@@ -409,7 +415,7 @@ function CorrectionEditor({
       <h1 ref={heading} tabIndex={-1}>
         Correct {original.data.name}
       </h1>
-      <p>
+      <p className="lede">
         Your corrected results replace the originals in History, your schedule
         and future weight suggestions. Your account export keeps the original
         results, and you can restore them at any time.

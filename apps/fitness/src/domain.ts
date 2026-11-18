@@ -321,6 +321,10 @@ export function addDays(date: string, days: number) {
     .toISOString()
     .slice(0, 10);
 }
+/** The Monday that starts the week containing `date`. */
+export function mondayOf(date: string) {
+  return addDays(date, -((new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7));
+}
 function dayDifference(a: string, b: string) {
   return Math.round(
     (Date.parse(a + "T12:00:00Z") - Date.parse(b + "T12:00:00Z")) / 86400000,

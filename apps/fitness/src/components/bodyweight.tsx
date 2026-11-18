@@ -9,7 +9,9 @@ import {
 } from "../domain";
 import type { Settings } from "../domain";
 import type { Sync } from "../sync";
+import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
+import { ProgressTabs } from "./progress-screen";
 export function Bodyweight({
   sync,
   date,
@@ -57,8 +59,12 @@ export function Bodyweight({
     : null;
   return (
     <section data-feedback-redact data-feedback-private>
-      <p className="eyebrow">The longer view</p>
-      <h1>Bodyweight</h1>
+      <header className="page-head">
+        <p className="eyebrow">Progress</p>
+        <h1>Bodyweight</h1>
+      </header>
+      <ProgressTabs />
+      <DateBar path="/body" step />
       <div className="card">
         <p className="eyebrow">Latest 7 weigh-ins · average</p>
         <strong className="big-number">
@@ -117,8 +123,8 @@ export function Bodyweight({
                 .map((point) => `${x(point.date)},${y(point.kg)}`)
                 .join(" ")}
               fill="none"
-              stroke="#435c46"
-              strokeWidth="4"
+              stroke="currentColor"
+              strokeWidth="3"
               strokeDasharray="8 5"
             />
             <text x="30" y="240">
@@ -136,7 +142,7 @@ export function Bodyweight({
       </div>
       {points.length > 0 && (
         <p className="chart-legend">
-          Blue line: each weigh-in. Dashed green line: average of up to 7
+          Blue line: each weigh-in. Dashed black line: average of up to 7
           weigh-ins ending on that date. Dotted lines mark your highest and
           lowest weigh-ins in this view.
         </p>

@@ -17,7 +17,7 @@ test("fails closed without provider configuration and serves installation assets
   expect((await manifest.json()).display).toBe("standalone");
 });
 
-test("serves the ten multi-angle exercise illustrations", async ({
+test("serves the ten multi-angle exercise illustrations and their thumbnails", async ({
   request,
 }) => {
   for (const exercise of [
@@ -38,5 +38,9 @@ test("serves the ten multi-angle exercise illustrations", async ({
     expect((await response.body()).subarray(0, 8).toString("hex")).toBe(
       "89504e470d0a1a0a",
     );
+    const thumb = await request.get(`/exercise-guides/thumbs/${exercise}.jpg`);
+    expect(thumb.status()).toBe(200);
+    expect(thumb.headers()["content-type"]).toContain("image/jpeg");
+    expect((await thumb.body()).byteLength).toBeLessThan(60000);
   }
 });

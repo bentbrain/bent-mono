@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
-import { mealSchema, regularSchema, totals, formatDate } from "../domain";
+import {
+  addDays,
+  dateSearch,
+  formatDate,
+  formatShortDate,
+  mealSchema,
+  regularSchema,
+  totals,
+} from "../domain";
 import type { Entity, Settings } from "../domain";
 import type { Sync } from "../sync";
+import { useAccount } from "./account-context";
+import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
+import { Icon } from "./icons";
 import { EditConflict, editStatus } from "./record-edit";
 import type { Opened } from "./record-edit";
 type Meal = Extract<Entity, { kind: "meal" }>;
@@ -16,6 +28,7 @@ export function Nutrition({
   date: string;
   settings: Settings;
 }) {
+  const { today } = useAccount();
   const [error, setError] = useState("");
   const total = totals(sync.records, date);
   const [notice, setNotice] = useState("");
@@ -100,34 +113,101 @@ export function Nutrition({
   }
   const shown = editing?.data;
   const saved = live?.data.kind === "meal" ? live.data : undefined;
+  const regulars = sync.records.flatMap((record) =>
+    record.data.kind === "regular" ? [{ ...record, data: record.data }] : [],
+  );
+  const left = {
+    calories: Math.round(settings.calories - total.calories),
+    protein: Math.round(settings.protein - total.protein),
+  };
+  const recentDays = Array.from({ length: 7 }, (_, i) => addDays(date, i - 6));
+  const highest = Math.max(
+    settings.calories,
+    ...recentDays.map((day) => totals(sync.records, day).calories),
+  );
   return (
-    <section data-feedback-redact data-feedback-private>
-      <p className="eyebrow">Fuel your day</p>
-      <h1>Food</h1>
-      <p className="subtitle">{formatDate(date)}</p>
-      <p role="status">{notice}</p>
-      <div className="metrics">
-        <div>
+    <section className="food-screen" data-feedback-redact data-feedback-private>
+      <header className="page-head">
+        <p className="eyebrow">Calories and protein</p>
+        <h1>Food</h1>
+      </header>
+      <DateBar path="/food" step />
+      <div
+        className="food-totals"
+        aria-label={`Totals for ${formatDate(date)}`}
+      >
+        <div className="food-total">
           <strong>{Math.round(total.calories)}</strong>
-          <span> / {settings.calories} kcal</span>
-          <progress value={total.calories} max={settings.calories} />
+          <span>of {settings.calories} kcal</span>
+          <progress
+            value={Math.min(total.calories, settings.calories)}
+            max={settings.calories}
+          />
+          <small>
+            {left.calories >= 0
+              ? `${left.calories} kcal left`
+              : `${-left.calories} kcal over`}
+          </small>
         </div>
-        <div>
+        <div className="food-total">
           <strong>{Math.round(total.protein)}g</strong>
-          <span> / {settings.protein}g protein</span>
-          <progress value={total.protein} max={settings.protein} />
+          <span>of {settings.protein}g protein</span>
+          <progress
+            value={Math.min(total.protein, settings.protein)}
+            max={settings.protein}
+          />
+          <small>
+            {left.protein > 0
+              ? `${left.protein}g to go`
+              : "Protein target reached"}
+          </small>
         </div>
       </div>
-      <h2>{editing ? "Edit food" : "Quick entry"}</h2>
+      <p role="status" className="food-notice">
+        {notice}
+      </p>
+      <h2 className="section-label">Saved meals</h2>
+      {regulars.length ? (
+        <ul className="quick-meals">
+          {regulars.map((r) => (
+            <li key={r.id}>
+              <button
+                type="button"
+                className="quick-add"
+                aria-label={`Add ${r.data.name} to ${formatDate(date)}`}
+                onClick={() => {
+                  if (sync.put({ ...r.data, kind: "meal", date }))
+                    setNotice(`Added ${r.data.name} for ${formatDate(date)}.`);
+                }}
+              >
+                <strong>
+                  <Icon name="plus" size={14} />
+                  {r.data.name}
+                </strong>
+                <small>
+                  {Math.round(r.data.calories)} kcal ·{" "}
+                  {Math.round(r.data.protein)}g protein
+                </small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">
+          Tick Save as a regular meal when you add food to reuse it here with
+          one tap.
+        </p>
+      )}
       <form
         ref={form}
-        className="card form-grid"
+        className={`food-form${editing ? " is-editing" : ""}`}
         key={`${editing?.id ?? "new"}:${formVersion}`}
         onSubmit={(e) => {
           e.preventDefault();
           save(e.currentTarget, opened.current);
         }}
       >
+        <h2 className="section-label">{editing ? "Edit food" : "Add food"}</h2>
         <TextField
           label="Meal or snack"
           id="meal-name"
@@ -186,24 +266,25 @@ export function Nutrition({
             }}
           />
         )}
-        <Button appearance="primary" type="submit" disabled={Boolean(status)}>
-          {editing ? "Save food changes" : "Add food"}
-        </Button>
-        {editing && (
-          <Button appearance="ghost" onClick={() => open(undefined)}>
-            Cancel edit
+        <div className="form-actions">
+          <Button appearance="primary" type="submit" disabled={Boolean(status)}>
+            {editing ? "Save food changes" : "Add food"}
           </Button>
-        )}
+          {editing && (
+            <Button appearance="outline" onClick={() => open(undefined)}>
+              Cancel edit
+            </Button>
+          )}
+        </div>
         {error && <p role="alert">{error}</p>}
       </form>
-      <h2>Regular meals</h2>
-      <div className="stack">
-        {sync.records
-          .filter((r) => r.data.kind === "regular")
-          .map(
+      <h2 className="section-label">Logged on {formatDate(date)}</h2>
+      {meals.length ? (
+        <ul className="entries">
+          {meals.map(
             (r) =>
-              r.data.kind === "regular" && (
-                <div className="card row" key={r.id}>
+              r.data.kind === "meal" && (
+                <li className="list-row" key={r.id}>
                   <div>
                     <strong>{r.data.name}</strong>
                     <p>
@@ -213,79 +294,100 @@ export function Nutrition({
                   </div>
                   <Button
                     appearance="outline"
-                    aria-label={`Add ${r.data.name} to ${formatDate(date)}`}
-                    onClick={() => {
-                      if (
-                        r.data.kind === "regular" &&
-                        sync.put({ ...r.data, kind: "meal", date })
-                      )
-                        setNotice(
-                          `Added ${r.data.name} for ${formatDate(date)}.`,
-                        );
-                    }}
+                    aria-label={`Edit ${r.data.name}`}
+                    onClick={() =>
+                      r.data.kind === "meal" &&
+                      open({ id: r.id, revision: r.revision, data: r.data })
+                    }
                   >
-                    Add
+                    Edit
                   </Button>
                   <Button
                     appearance="ghost"
-                    aria-label={`Remove regular ${r.data.name}`}
+                    aria-label={`Remove ${r.data.name}`}
                     onClick={() =>
                       window.confirm(
                         `Remove ${r.data.kind === "regular" || r.data.kind === "meal" ? r.data.name : "this entry"}?`,
                       ) && sync.put(null, r.id, r.revision)
                     }
                   >
-                    ×
+                    Remove
                   </Button>
-                </div>
+                </li>
               ),
           )}
-      </div>
-      <h2>Food · {formatDate(date)}</h2>
-      {!meals.length && (
-        <p>
+        </ul>
+      ) : (
+        <p className="empty">
           No food recorded for this date. Add a meal or choose a regular meal.
         </p>
       )}
-      {meals.map(
-        (r) =>
-          r.data.kind === "meal" && (
-            <div className="list-row" key={r.id}>
-              <div>
-                <strong>{r.data.name}</strong>
-                <p>
-                  {Math.round(r.data.calories)} kcal ·{" "}
-                  {Math.round(r.data.protein)}g protein
-                </p>
-              </div>
-              <Button
-                appearance="ghost"
-                aria-label={`Edit ${r.data.name}`}
-                onClick={() =>
-                  r.data.kind === "meal" &&
-                  open({ id: r.id, revision: r.revision, data: r.data })
-                }
-              >
-                Edit
-              </Button>
-              <Button
-                appearance="ghost"
-                aria-label={`Remove ${r.data.name}`}
-                onClick={() =>
-                  window.confirm(
-                    `Remove ${r.data.kind === "regular" || r.data.kind === "meal" ? r.data.name : "this entry"}?`,
-                  ) && sync.put(null, r.id, r.revision)
-                }
-              >
-                Remove
-              </Button>
-            </div>
-          ),
-      )}
-      <p className="muted">
-        Targets are editable in Settings. Calorie and protein values come from
-        your entries.
-      </p>
+      <aside className="food-side">
+        <h2 className="section-label">Last 7 days</h2>
+        <ol className="day-strip" aria-label="Calories for the last 7 days">
+          {recentDays.map((day) => {
+            const value = totals(sync.records, day).calories;
+            return (
+              <li key={day}>
+                <Link
+                  to="/food"
+                  search={dateSearch(day, today)}
+                  aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
+                >
+                  <span className="bar">
+                    <span
+                      className="fill"
+                      style={{ height: `${(value / highest) * 100}%` }}
+                    />
+                    <i
+                      className="target"
+                      style={{
+                        bottom: `${(settings.calories / highest) * 100}%`,
+                      }}
+                    />
+                  </span>
+                  {formatShortDate(day).split(" ")[0]}
+                </Link>
+              </li>
+            );
+          })}
+        </ol>
+        <p className="measure-note">
+          Bars show calories logged each day. The dashed line is your{" "}
+          {settings.calories} kcal target.{" "}
+          <Link to="/settings" search={{}}>
+            Change targets
+          </Link>
+        </p>
+        {regulars.length > 0 && (
+          <details className="manage-meals">
+            <summary>Manage saved meals</summary>
+            <ul className="saved-list">
+              {regulars.map((r) => (
+                <li className="saved-row" key={r.id}>
+                  <div>
+                    <strong>{r.data.name}</strong>
+                    <p>
+                      {Math.round(r.data.calories)} kcal ·{" "}
+                      {Math.round(r.data.protein)}g protein
+                    </p>
+                  </div>
+                  <Button
+                    appearance="ghost"
+                    aria-label={`Remove regular ${r.data.name}`}
+                    onClick={() =>
+                      window.confirm(`Remove ${r.data.name}?`) &&
+                      sync.put(null, r.id, r.revision)
+                    }
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </aside>
     </section>
   );
 }

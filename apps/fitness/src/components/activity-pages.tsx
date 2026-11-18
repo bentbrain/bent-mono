@@ -3,7 +3,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import { z } from "zod";
 import {
-  createWorkout,
   dateSearch,
   displayLoad,
   effectivePrescription,
@@ -17,14 +16,15 @@ import {
   trainingRecords,
 } from "../domain";
 import { useAccount } from "./account-context";
-import { ExerciseGuide } from "./guide";
+import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
+import { Icon } from "./icons";
+import { useStartWorkout } from "./start-workout";
 import { TextField } from "./fields";
 import {
   legacyWorkoutInputKey,
   WorkoutEditor,
   workoutInputKey,
 } from "./workout";
-import { formatDuration } from "../timing";
 import type { Entity } from "../domain";
 import { EditConflict, editStatus } from "./record-edit";
 import type { Opened } from "./record-edit";
@@ -38,8 +38,7 @@ export function PlanScreen({
 }) {
   const { sync, settings, date: selectedDate, today } = useAccount();
   const date = suppliedDate || selectedDate;
-  const navigate = useNavigate();
-  const [starting, setStarting] = useState(false);
+  const { start, starting, active } = useStartWorkout();
   const valid = z.iso.date().safeParse(date).success;
   const planned = valid ? scheduled(settings, date) : undefined;
   const routine = routineId
@@ -52,9 +51,6 @@ export function PlanScreen({
   // A future plan is done today, so it uses today's introduction setting.
   const workoutDate = date > today ? today : date;
   const workoutIntro = scheduled(settings, workoutDate).intro;
-  const active = sync.records.find(
-    (record) => record.data.kind === "workout" && !record.data.finishedAt,
-  );
   const recorded = trainingRecords(sync.records).find(
     (record) =>
       record.data.kind === "workout" &&
@@ -62,25 +58,6 @@ export function PlanScreen({
       record.data.date === date &&
       record.data.routineId === routine.id,
   );
-  function start(day: string) {
-    if (starting || active || !routine) return;
-    setStarting(true);
-    const id = crypto.randomUUID();
-    if (
-      sync.put(
-        createWorkout(
-          settings,
-          routine,
-          day,
-          scheduled(settings, day).intro,
-          sync.records,
-        ),
-        id,
-      )
-    )
-      void navigate({ to: "/workout", search: { workoutId: id } });
-    else setStarting(false);
-  }
   const label =
     date > today
       ? "Do this workout today"
@@ -94,23 +71,24 @@ export function PlanScreen({
       data-feedback-redact
     >
       <Link className="back-link" to="/" search={dateSearch(date, today)}>
-        <span aria-hidden>←</span> Back to Today
+        <Icon name="back" size={16} /> Back to week
       </Link>
-      <p className="eyebrow">Workout plan · {formatDate(date)}</p>
-      <h1>{routine.name}</h1>
-      <p className="subtitle">
-        About {sessionMinutes(routine, intro)} min · {routine.exercises.length}{" "}
-        exercises ·{" "}
-        {intro ? "Introduction · up to 2 sets each" : "Full session"}
-      </p>
-      <div className="card plan-summary">
+      <header className="page-head">
+        <p className="eyebrow">
+          Workout plan · {formatDate(date)}
+          {date === today ? " · Today" : date > today ? " · Planned" : ""}
+        </p>
+        <h1>{routine.name}</h1>
+        <p className="subtitle">
+          About {sessionMinutes(routine, intro)} min ·{" "}
+          {routine.exercises.length} exercises ·{" "}
+          {intro ? "Introduction · up to 2 sets each" : "Full session"}
+        </p>
+      </header>
+      <div className="plan-summary input-notice">
         <p>
           Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
-          reserve.
-        </p>
-        <p>
-          Weights mean one dumbbell. Rows and split squats count each side;
-          planks count seconds.
+          reserve. Weights mean one dumbbell.
         </p>
         {recorded && (
           <p>
@@ -120,9 +98,51 @@ export function PlanScreen({
             </Link>
           </p>
         )}
+      </div>
+      <div className="plan-list">
+        {routine.exercises.map((prescription, index) => {
+          const exercise = effectivePrescription(prescription, intro);
+          const previous = lastExercise(sync.records, exercise.id);
+          const advice = progression(exercise, previous, settings.dumbbellsKg);
+          return (
+            <article className="plan-exercise" key={`${exercise.id}:${index}`}>
+              <ExerciseThumb id={exercise.id} />
+              <div>
+                <h2>
+                  <span className="number">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>{" "}
+                  {exercise.name}
+                </h2>
+                <p className="prescription">{prescriptionText(exercise)}</p>
+                <ExerciseHelp id={exercise.id} />
+              </div>
+              <div>
+                <p className="previous">
+                  Last time:{" "}
+                  {previous
+                    ? previous.sets
+                        .map((set) =>
+                          setResult(set, previous.prescription, settings.units),
+                        )
+                        .join(" · ")
+                    : "Your first recorded session"}
+                </p>
+                <p className="suggestion">
+                  {advice.text}
+                  {exercise.mode === "reps" && advice.loadKg !== null
+                    ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${settings.units} per dumbbell.`
+                    : ""}
+                </p>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <div className="action-bar">
         {active ? (
           <>
-            <p>
+            <p className="action-note">
               You have a workout in progress. Resume it when you are ready to
               train.
             </p>
@@ -139,7 +159,7 @@ export function PlanScreen({
             <Button
               appearance="primary"
               disabled={starting}
-              onClick={() => start(workoutDate)}
+              onClick={() => start(routine, workoutDate)}
             >
               {starting ? "Opening workout…" : label}
             </Button>
@@ -147,12 +167,12 @@ export function PlanScreen({
               <Button
                 appearance="outline"
                 disabled={starting}
-                onClick={() => start(today)}
+                onClick={() => start(routine, today)}
               >
                 Do this workout today
               </Button>
             )}
-            <p className="muted">
+            <p className="action-note">
               {date > today
                 ? `This starts ${routine.name} now and records it for today, ${formatDate(today)}.${workoutIntro === intro ? "" : workoutIntro ? " Today is in your introduction weeks, so each exercise has up to 2 sets." : " Today uses full sets."}`
                 : date < today
@@ -162,52 +182,6 @@ export function PlanScreen({
           </>
         )}
       </div>
-      {routine.exercises.map((prescription, index) => {
-        const exercise = effectivePrescription(prescription, intro);
-        const previous = lastExercise(sync.records, exercise.id);
-        const advice = progression(exercise, previous, settings.dumbbellsKg);
-        return (
-          <article
-            className="card plan-exercise"
-            key={`${exercise.id}:${index}`}
-          >
-            <div className="exercise-title">
-              <span className="number">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div>
-                <h2>{exercise.name}</h2>
-                <p>
-                  {exercise.sets} × {exercise.min}–{exercise.max}{" "}
-                  {exercise.mode === "seconds"
-                    ? "seconds"
-                    : exercise.side
-                      ? "reps / side"
-                      : "reps"}{" "}
-                  · {formatDuration(exercise.rest)} rest
-                </p>
-              </div>
-            </div>
-            <p className="previous">
-              Last time:{" "}
-              {previous
-                ? previous.sets
-                    .map((set) =>
-                      setResult(set, previous.prescription, settings.units),
-                    )
-                    .join(" · ")
-                : "Your first recorded session"}
-            </p>
-            <p className="suggestion">
-              {advice.text}
-              {exercise.mode === "reps" && advice.loadKg !== null
-                ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${settings.units} per dumbbell.`
-                : ""}
-            </p>
-            <ExerciseGuide id={exercise.id} />
-          </article>
-        );
-      })}
     </section>
   );
 }
@@ -228,7 +202,7 @@ export function WorkoutScreen({ workoutId }: { workoutId: string }) {
   const workoutDate = entry.data.date;
   if (entry.data.finishedAt)
     return (
-      <section>
+      <section className="page-head">
         <h1>Workout completed</h1>
         <p>
           View your results in History. Check the save status before closing the
@@ -246,7 +220,7 @@ export function WorkoutScreen({ workoutId }: { workoutId: string }) {
         to="/"
         search={dateSearch(workoutDate, today)}
       >
-        <span aria-hidden>←</span> Back to Today
+        <Icon name="back" size={16} /> Back to week
       </Link>
       <WorkoutEditor
         entry={{ ...entry, data: entry.data }}
@@ -328,15 +302,17 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
   return (
     <section data-feedback-private data-feedback-redact>
       <Link className="back-link" to="/" search={dateSearch(day, today)}>
-        <span aria-hidden>←</span> Back to Today
+        <Icon name="back" size={16} /> Back to week
       </Link>
-      <p className="eyebrow">
-        {run ? "Recorded run" : "Run plan"} · {formatDate(day)}
-      </p>
-      <h1>Easy run</h1>
-      <p className="subtitle">
-        Keep a conversational pace. You should be able to talk in sentences.
-      </p>
+      <header className="page-head">
+        <p className="eyebrow">
+          {run ? "Recorded run" : "Run plan"} · {formatDate(day)}
+        </p>
+        <h1>Easy run</h1>
+        <p className="subtitle">
+          Keep a conversational pace. You should be able to talk in sentences.
+        </p>
+      </header>
       <form
         ref={form}
         key={formVersion}
@@ -424,9 +400,9 @@ function Unavailable({ title }: { title: string }) {
   return (
     <section>
       <h1>{title}</h1>
-      <p>Open your current plan from Today.</p>
+      <p>Open your current plan from your week.</p>
       <Link to="/" search={dateSearch(date, today)}>
-        Back to Today
+        Back to week
       </Link>
     </section>
   );
