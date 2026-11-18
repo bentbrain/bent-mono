@@ -37,6 +37,7 @@ export function WorkoutEditor({
     workout,
     units: settings.units,
     storageKey: workoutInputKey(owner, entry.id),
+    legacyStorageKey: legacyWorkoutInputKey(owner, entry.id),
     save: (next) => sync.put(next, entry.id),
   });
   useEffect(() => {
@@ -241,6 +242,10 @@ export function WorkoutEditor({
 }
 
 export function workoutInputKey(owner: string, workoutId: string) {
+  return `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+}
+/** Typed values kept before units were stored with each value. */
+export function legacyWorkoutInputKey(owner: string, workoutId: string) {
   return `bent:fitness:inputs:v1:${owner}:${workoutId}`;
 }
 
@@ -253,10 +258,16 @@ export function InputNotices({ inputs }: { inputs: WorkoutInputs }) {
           you leave the set, press Done or Skip, or leave this page.
         </p>
       )}
-      {inputs.held.length > 0 && (
+      {inputs.held.some((key) => !inputs.unconfirmed.includes(key)) && (
         <p className="input-notice" role="alert">
           A highlighted value changed on another device. Your typed value is
           still here. Leave the field to save it, or retype the saved value.
+        </p>
+      )}
+      {inputs.unconfirmed.length > 0 && (
+        <p className="input-notice" role="alert">
+          A weight typed on this device is waiting for you to check it. Confirm
+          it is in {inputs.units}, then leave the set to save it.
         </p>
       )}
       {inputs.storageError && <p role="alert">{inputs.storageError}</p>}
@@ -338,7 +349,10 @@ export function ExerciseList({
       },
     ) {
       const key = fieldKey(ei, si, field);
-      const invalid = Boolean(inputs.errors[key]) || inputs.held.includes(key);
+      const invalid =
+        Boolean(inputs.errors[key]) ||
+        inputs.held.includes(key) ||
+        inputs.unconfirmed.includes(key);
       return (
         <input
           aria-label={label}
@@ -505,10 +519,19 @@ export function ExerciseList({
                     {problem.text}
                   </p>
                 ))}
-                {inputs.held.some((key) => setKeys(ei, si).includes(key)) && (
+                {setKeys(ei, si).some((key) =>
+                  inputs.unconfirmed.includes(key),
+                ) ? (
                   <p className="set-error">
-                    Saved on another device since you typed here.
+                    Check this weight is in {settings.units}, then leave the set
+                    to save it.
                   </p>
+                ) : (
+                  inputs.held.some((key) => setKeys(ei, si).includes(key)) && (
+                    <p className="set-error">
+                      Saved on another device since you typed here.
+                    </p>
+                  )
                 )}
                 {inputs.message?.place === `${ei}:${si}` && (
                   <p className="set-error" role="alert">

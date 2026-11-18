@@ -219,9 +219,14 @@ small,
   font-size: 0.66rem;
 }
 .tag {
+  display: inline-block;
+  max-width: 100%;
   border: 1px solid currentColor;
   padding: 7px 9px;
   color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.5;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -344,7 +349,8 @@ small,
 }
 .form-grid h2,
 .form-grid > label,
-.form-grid > .error {
+.form-grid > .error,
+.form-grid > .edit-conflict {
   grid-column: 1/-1;
 }
 .bent-field {
@@ -642,6 +648,19 @@ legend {
 }
 .error .bent-button {
   margin: 5px;
+}
+.edit-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #d4a997;
+  background: #fff2eb;
+  font-size: 0.85rem;
+}
+.edit-conflict p {
+  flex-basis: 100%;
+  margin: 0 0 4px;
 }
 .conflict pre {
   white-space: pre-wrap;

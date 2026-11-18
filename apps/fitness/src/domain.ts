@@ -201,6 +201,20 @@ export const recordSchema = z.object({
   updatedAt: z.string(),
 });
 export type RecordEntry = z.infer<typeof recordSchema>;
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  return value;
+}
+/** Compares record data regardless of property order. */
+export function sameData(a: unknown, b: unknown) {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
 export const mutationSchema = z
   .object({
     operationId: identifier,

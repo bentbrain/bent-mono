@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import { z } from "zod";
@@ -19,8 +19,15 @@ import {
 import { useAccount } from "./account-context";
 import { ExerciseGuide } from "./guide";
 import { TextField } from "./fields";
-import { WorkoutEditor, workoutInputKey } from "./workout";
+import {
+  legacyWorkoutInputKey,
+  WorkoutEditor,
+  workoutInputKey,
+} from "./workout";
 import { formatDuration } from "../timing";
+import type { Entity } from "../domain";
+import { EditConflict, editStatus } from "./record-edit";
+import type { Opened } from "./record-edit";
 
 export function PlanScreen({
   date: suppliedDate,
@@ -212,7 +219,9 @@ export function WorkoutScreen({ workoutId }: { workoutId: string }) {
   const finished = entry?.data.kind === "workout" && entry.data.finishedAt;
   useEffect(() => {
     // Values typed on this device are no longer needed once a workout is finished.
-    if (finished) localStorage.removeItem(workoutInputKey(owner, workoutId));
+    if (!finished) return;
+    localStorage.removeItem(workoutInputKey(owner, workoutId));
+    localStorage.removeItem(legacyWorkoutInputKey(owner, workoutId));
   }, [finished, owner, workoutId]);
   if (!entry || entry.data.kind !== "workout")
     return <Unavailable title="Workout unavailable" />;
@@ -256,15 +265,66 @@ export function WorkoutScreen({ workoutId }: { workoutId: string }) {
   );
 }
 
+type Run = Extract<Entity, { kind: "run" }>;
 export function RunScreen({ date, runId }: { date: string; runId?: string }) {
   const { sync, date: selectedDate, today } = useAccount();
-  const entry = sync.records.find((record) => record.id === runId);
-  const run = entry?.data.kind === "run" ? entry.data : undefined;
+  const live = sync.records.find((record) => record.id === runId);
+  // The run version the form opened with. Saving checks it is still current.
+  const [editing, setEditing] = useState<Opened<Run> | undefined>(() =>
+    live?.data.kind === "run"
+      ? { id: live.id, revision: live.revision, data: live.data }
+      : undefined,
+  );
+  const [formVersion, setFormVersion] = useState(0);
+  const [checked, setChecked] = useState<"changed" | "removed">();
+  const form = useRef<HTMLFormElement>(null);
+  const run = editing?.data;
+  const saved = live?.data.kind === "run" ? live.data : undefined;
+  const derived = editStatus(editing, live);
+  const status = derived === "current" ? checked : derived;
   const day = run?.date || date || selectedDate;
   const navigate = useNavigate();
   const [error, setError] = useState("");
-  if (!z.iso.date().safeParse(day).success || (runId && !run))
+  if (!z.iso.date().safeParse(day).success || (runId && !editing))
     return <Unavailable title="Run unavailable" />;
+  function savedVersion() {
+    const current = editing ? sync.latest(editing.id) : undefined;
+    return editing && current?.data?.kind === "run"
+      ? { id: editing.id, revision: current.revision, data: current.data }
+      : undefined;
+  }
+  function save(element: HTMLFormElement, target: Opened<Run> | undefined) {
+    const values = new FormData(element);
+    const result = runSchema.safeParse({
+      kind: "run",
+      date: values.get("date"),
+      minutes: Number(values.get("minutes")),
+      distanceKm: Number(values.get("distance")),
+      notes: values.get("notes"),
+    });
+    if (!result.success) {
+      setError("Enter a valid date, duration and distance.");
+      return;
+    }
+    if (result.data.date > today) {
+      setError(`Record a run on ${formatDate(today)} or an earlier date.`);
+      return;
+    }
+    if (target) {
+      const state = editStatus(target, sync.latest(target.id));
+      if (state !== "current") {
+        setChecked(state);
+        setError("");
+        return;
+      }
+    }
+    if (sync.put(result.data, target?.id, target?.revision ?? 0))
+      void navigate({
+        to: "/history",
+        search: dateSearch(result.data.date, today),
+        replace: true,
+      });
+  }
   return (
     <section data-feedback-private data-feedback-redact>
       <Link className="back-link" to="/" search={dateSearch(day, today)}>
@@ -278,33 +338,12 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
         Keep a conversational pace. You should be able to talk in sentences.
       </p>
       <form
+        ref={form}
+        key={formVersion}
         className="card form-grid"
         onSubmit={(event) => {
           event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          const result = runSchema.safeParse({
-            kind: "run",
-            date: form.get("date"),
-            minutes: Number(form.get("minutes")),
-            distanceKm: Number(form.get("distance")),
-            notes: form.get("notes"),
-          });
-          if (!result.success) {
-            setError("Enter a valid date, duration and distance.");
-            return;
-          }
-          if (result.data.date > today) {
-            setError(
-              `Record a run on ${formatDate(today)} or an earlier date.`,
-            );
-            return;
-          }
-          if (sync.put(result.data, entry?.id, entry?.revision ?? 0))
-            void navigate({
-              to: "/history",
-              search: dateSearch(result.data.date, today),
-              replace: true,
-            });
+          save(event.currentTarget, editing);
         }}
       >
         <h2>{run ? "Edit your run" : "Record your completed run"}</h2>
@@ -346,7 +385,33 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
           name="notes"
           maxLength={2000}
         />
-        <Button type="submit" appearance="primary">
+        {status && (
+          <EditConflict
+            status={status}
+            noun="run"
+            current={
+              saved
+                ? `${formatDate(saved.date)} · ${saved.minutes} min · ${saved.distanceKm} km`
+                : undefined
+            }
+            onKeepMine={() => {
+              const next = savedVersion();
+              if (!next) return;
+              setEditing(next);
+              setChecked(undefined);
+              if (form.current) save(form.current, next);
+            }}
+            onUseCurrent={() => {
+              setEditing(savedVersion());
+              setChecked(undefined);
+              setFormVersion((value) => value + 1);
+            }}
+            onSaveAsNew={() => {
+              if (form.current) save(form.current, undefined);
+            }}
+          />
+        )}
+        <Button type="submit" appearance="primary" disabled={Boolean(status)}>
           {run ? "Save run changes" : "Save run"}
         </Button>
         {error && <p role="alert">{error}</p>}

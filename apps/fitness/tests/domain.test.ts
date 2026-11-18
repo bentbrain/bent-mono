@@ -8,6 +8,7 @@ import {
   formatDate,
   formatShortDate,
   lastExercise,
+  sameData,
   sessionMinutes,
   setResult,
   trainingRecords,
@@ -24,7 +25,15 @@ import {
   workoutSchema,
 } from "../src/domain";
 import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
-import { applyText, savedText } from "../src/components/workout-inputs";
+import {
+  applyText,
+  holdInBackground,
+  migrateLegacy,
+  savedBase,
+  savedText,
+  shownText,
+} from "../src/components/workout-inputs";
+import { editStatus } from "../src/components/record-edit";
 import type { RecordEntry } from "../src/domain";
 describe("plan dates and snapshots", () => {
   const settings = defaultSettings("2026-01-05", "Australia/Brisbane");
@@ -425,5 +434,83 @@ describe("typed workout values", () => {
       "Enter a weight up to 1000 kg.",
     );
     expect(applyText(workout, "40:0:value", "9", "kg")).toBeNull();
+  });
+  test("recovered weights keep the units they were typed in", () => {
+    const empty = applyText(workout, "0:0:loadKg", "0", "kg");
+    if (!empty || typeof empty === "string") throw new Error("Expected update");
+    const base = savedBase(empty, "0:0:loadKg");
+    expect(base).toBe("0");
+    // 10 kg typed against 0 kg, restored after the display units became lb.
+    const kilograms = { text: "10", base: "0", units: "kg" as const };
+    expect(holdInBackground(empty, "0:0:loadKg", kilograms)).toBe(false);
+    expect(shownText("0:0:loadKg", kilograms, "lb")).toBe("22.05");
+    const fromKg = applyText(empty, "0:0:loadKg", kilograms.text, "kg");
+    if (!fromKg || typeof fromKg === "string")
+      throw new Error("Expected update");
+    expect(fromKg.exercises[0]?.sets[0]?.loadKg).toBe(10);
+    // 22 lb typed against 0, restored after the display units became kg.
+    const pounds = { text: "22", base: "0", units: "lb" as const };
+    expect(holdInBackground(empty, "0:0:loadKg", pounds)).toBe(false);
+    expect(shownText("0:0:loadKg", pounds, "kg")).toBe("9.98");
+    const fromLb = applyText(empty, "0:0:loadKg", pounds.text, "lb");
+    if (!fromLb || typeof fromLb === "string")
+      throw new Error("Expected update");
+    expect(fromLb.exercises[0]?.sets[0]?.loadKg).toBeCloseTo(9.979, 3);
+    // The starting point is compared in kilograms, whatever the display units.
+    expect(savedBase(fromLb, "0:0:loadKg")).toBe(
+      String(fromLb.exercises[0]?.sets[0]?.loadKg),
+    );
+    expect(holdInBackground(fromKg, "0:0:loadKg", kilograms)).toBe(true);
+  });
+  test("values kept without units hold weights for confirmation", () => {
+    const migrated = migrateLegacy({
+      "0:0:loadKg": { text: "10", base: "0" },
+      "0:0:value": { text: "9", base: "8" },
+    });
+    expect(migrated["0:0:loadKg"]).toEqual({
+      text: "10",
+      base: null,
+      units: null,
+    });
+    expect(migrated["0:0:value"]).toEqual({
+      text: "9",
+      base: "8",
+      units: null,
+    });
+    const load = migrated["0:0:loadKg"];
+    if (!load) throw new Error("Expected weight");
+    expect(holdInBackground(workout, "0:0:loadKg", load)).toBe(true);
+    expect(shownText("0:0:loadKg", load, "lb")).toBe("10");
+  });
+});
+
+describe("record editors", () => {
+  const meal = {
+    kind: "meal" as const,
+    date: "2026-01-05",
+    name: "Synthetic oats",
+    calories: 350,
+    protein: 12,
+  };
+  const opened = { id: "a", revision: 2, data: meal };
+  test("compare record data regardless of property order", () => {
+    const { kind, date, name, calories, protein } = meal;
+    expect(sameData(meal, { protein, calories, name, date, kind })).toBe(true);
+    expect(sameData(meal, { ...meal, calories: 777 })).toBe(false);
+  });
+  test("report changed and removed records", () => {
+    expect(editStatus(opened, { revision: 2, data: { ...meal } })).toBe(
+      "current",
+    );
+    expect(
+      editStatus(opened, { revision: 3, data: { ...meal, calories: 777 } }),
+    ).toBe("changed");
+    // The same revision with other data, as after loading the cloud version.
+    expect(
+      editStatus(opened, { revision: 2, data: { ...meal, name: "Other" } }),
+    ).toBe("changed");
+    expect(editStatus(opened, { revision: 3, data: null })).toBe("removed");
+    expect(editStatus(opened, undefined)).toBe("removed");
+    expect(editStatus(undefined, undefined)).toBe("current");
   });
 });

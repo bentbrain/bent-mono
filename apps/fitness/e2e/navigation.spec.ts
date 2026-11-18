@@ -469,6 +469,55 @@ async function startPastWorkout(page: Page) {
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   return workoutId;
 }
+async function ownerId(page: Page) {
+  const owner = await page.evaluate(() => {
+    const value: unknown = Reflect.get(window, "Clerk");
+    const user: unknown =
+      value && typeof value === "object" ? Reflect.get(value, "user") : null;
+    const id: unknown =
+      user && typeof user === "object" ? Reflect.get(user, "id") : null;
+    return typeof id === "string" ? id : "";
+  });
+  expect(owner).not.toBe("");
+  return owner;
+}
+async function keepTypedValues(page: Page, key: string, values: object) {
+  await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+    key,
+    value: JSON.stringify(values),
+  });
+}
+/** Runs a query against the synthetic development database. */
+async function withDatabase<T>(
+  run: (sql: postgres.Sql) => Promise<T>,
+): Promise<T> {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw Error("Dedicated development configuration is required");
+  const sql = postgres(url, { ssl: "verify-full", max: 1, prepare: false });
+  try {
+    return await run(sql);
+  } finally {
+    await sql.end();
+  }
+}
+async function openSecondTab(page: Page, path: string) {
+  const other = await page.context().newPage();
+  other.setDefaultTimeout(10000);
+  await setupClerkTestingToken({ page: other });
+  await other.goto(path);
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  return other;
+}
+async function setUnits(page: Page, units: "Kilograms" | "Pounds") {
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Display units").selectOption({ label: units });
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.goto("/?date=2026-01-05");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+}
 async function workoutData(page: Page, id: string) {
   const record = (await records(page)).find((item) => item.id === id);
   if (record?.data.kind !== "workout") throw Error("Missing workout");
@@ -654,29 +703,14 @@ test("typed values recovered on this device save automatically unless they chang
   page,
 }) => {
   const workoutId = await startPastWorkout(page);
-  const owner = await page.evaluate(() => {
-    const value: unknown = Reflect.get(window, "Clerk");
-    const user: unknown =
-      value && typeof value === "object" ? Reflect.get(value, "user") : null;
-    const id: unknown =
-      user && typeof user === "object" ? Reflect.get(user, "id") : null;
-    return typeof id === "string" ? id : "";
-  });
-  expect(owner).not.toBe("");
+  const owner = await ownerId(page);
   await page.getByRole("link", { name: "Back to Today", exact: true }).click();
   // Simulate a closed tab that kept typed values without saving them.
-  await page.evaluate(
-    ({ key }) =>
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          "0:0:value": { text: "11", base: "8" },
-          "0:1:value": { text: "12", base: "5" },
-          notes: { text: "Recovered note", base: "" },
-        }),
-      ),
-    { key: `bent:fitness:inputs:v1:${owner}:${workoutId}` },
-  );
+  await keepTypedValues(page, `bent:fitness:inputs:v2:${owner}:${workoutId}`, {
+    "0:0:value": { text: "11", base: "8", units: "kg" },
+    "0:1:value": { text: "12", base: "5", units: "kg" },
+    notes: { text: "Recovered note", base: "", units: "kg" },
+  });
   await page.getByRole("link", { name: "Resume workout", exact: true }).click();
   await expect(
     page.getByText("A highlighted value changed on another device.", {
@@ -960,4 +994,363 @@ test("food entries can be edited and removed, and the body chart labels recorded
     .getByRole("button", { name: "Remove weigh-in Tue 6 Jan 2026" })
     .click();
   await expect(chart).not.toContainText("High 71.2 kg");
+});
+
+test("recovered weights keep the units they were typed in when units change elsewhere", async ({
+  page,
+}) => {
+  const workoutId = await startPastWorkout(page);
+  const owner = await ownerId(page);
+  const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+  const first = page.getByRole("spinbutton", {
+    name: "Goblet squat set 1 weight",
+    exact: true,
+  });
+  const second = page.getByRole("spinbutton", {
+    name: "Goblet squat set 2 weight",
+    exact: true,
+  });
+  // Both sets start from a saved weight of zero.
+  await first.fill("0");
+  await second.fill("0");
+  await page.locator("h1").click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const zero = await workoutData(page, workoutId);
+  expect(zero.exercises[0]?.sets[0]?.loadKg).toBe(0);
+  expect(zero.exercises[0]?.sets[1]?.loadKg).toBe(0);
+  // 10 kg was typed before the tab closed. The units then change to lb.
+  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await keepTypedValues(page, key, {
+    "0:0:loadKg": { text: "10", base: "0", units: "kg" },
+  });
+  await setUnits(page, "Pounds");
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await workoutData(page, workoutId)).exercises[0]?.sets[0]?.loadKg,
+    )
+    .toBe(10);
+  await expect(first).toHaveValue("22.05");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  // 22 lb was typed before the tab closed. The units then change to kg.
+  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  await keepTypedValues(page, key, {
+    "0:1:loadKg": { text: "22", base: "0", units: "lb" },
+  });
+  await setUnits(page, "Kilograms");
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await workoutData(page, workoutId)).exercises[0]?.sets[1]?.loadKg,
+    )
+    .toBeCloseTo(9.979, 3);
+  await expect(second).toHaveValue("9.98");
+  await expect(first).toHaveValue("10");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  // Values kept without units save other fields and hold the weight.
+  await page.getByRole("link", { name: "Back to Today", exact: true }).click();
+  const before = await workoutData(page, workoutId);
+  const legacy = `bent:fitness:inputs:v1:${owner}:${workoutId}`;
+  await keepTypedValues(page, legacy, {
+    "0:0:value": {
+      text: "7",
+      base: String(before.exercises[0]?.sets[0]?.value),
+    },
+    "0:1:loadKg": { text: "12", base: "9.98" },
+  });
+  await page.getByRole("link", { name: "Resume workout", exact: true }).click();
+  await expect(
+    page.getByText("Confirm it is in kg, then leave the set to save it.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(second).toHaveValue("12");
+  await expect(second).toHaveAttribute("aria-invalid", "true");
+  await expect
+    .poll(
+      async () =>
+        (await workoutData(page, workoutId)).exercises[0]?.sets[0]?.value,
+    )
+    .toBe(7);
+  expect(
+    (await workoutData(page, workoutId)).exercises[0]?.sets[1]?.loadKg,
+  ).toBeCloseTo(9.979, 3);
+  const stored = await page.evaluate(
+    ({ legacy, key }) => ({
+      legacy: localStorage.getItem(legacy),
+      current: localStorage.getItem(key),
+    }),
+    { legacy, key },
+  );
+  expect(stored.legacy).toBeNull();
+  expect(JSON.parse(stored.current ?? "{}")).toEqual({
+    "0:1:loadKg": { text: "12", base: null, units: null },
+  });
+  // Leaving the set confirms the weight in the units shown beside it.
+  await second.focus();
+  await page.locator("h1").click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  expect(
+    (await workoutData(page, workoutId)).exercises[0]?.sets[1]?.loadKg,
+  ).toBe(12);
+});
+
+test("sections open offline on their first visit and typed workout values save after reconnecting", async ({
+  page,
+}) => {
+  const workoutId = await startPastWorkout(page);
+  const status = page.locator(".sync-state");
+  // A value kept only in this page shows the app was not reloaded.
+  await page.evaluate(() => Reflect.set(window, "fitnessVisit", "open"));
+  const weight = page.getByRole("spinbutton", {
+    name: "Goblet squat set 1 weight",
+    exact: true,
+  });
+  await weight.fill("9");
+  await expect(status).toHaveText("Unsaved input on device");
+  await page.context().setOffline(true);
+  await expect(status).toHaveText("Offline · pending on device");
+  const sections = [
+    ["History", "History"],
+    ["Guides", "Exercise guides"],
+    ["Body", "Bodyweight"],
+    ["Food", "Food"],
+  ] as const;
+  for (const [name, heading] of sections) {
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name, exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: heading, exact: true }),
+    ).toBeVisible();
+  }
+  expect(await page.evaluate(() => Reflect.get(window, "fitnessVisit"))).toBe(
+    "open",
+  );
+  for (let step = 0; step < sections.length; step++) await page.goBack();
+  await expect(page).toHaveURL(/\/workout\?workoutId=/);
+  await expect(weight).toHaveValue("9");
+  expect(await page.evaluate(() => Reflect.get(window, "fitnessVisit"))).toBe(
+    "open",
+  );
+  await page.context().setOffline(false);
+  await expect(status).toHaveText("Saved");
+  expect(
+    (await workoutData(page, workoutId)).exercises[0]?.sets[0]?.loadKg,
+  ).toBe(9);
+});
+
+test("food edits keep typed changes when another tab changes or removes the entry", async ({
+  page,
+}) => {
+  const status = page.locator(".sync-state");
+  await page.goto("/food?date=2026-01-05");
+  await page.getByLabel("Meal or snack").fill("Synthetic breakfast");
+  await page.getByLabel("Calories · kcal").fill("550");
+  await page.getByLabel("Protein · g", { exact: true }).fill("30");
+  await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await expect(status).toHaveText("Saved");
+  const meals = async () =>
+    (await records(page)).flatMap((record) =>
+      record.data.kind === "meal" ? [{ ...record.data, id: record.id }] : [],
+    );
+  const originalId = (await meals())[0]?.id;
+  if (!originalId) throw Error("Missing synthetic meal");
+  const other = await openSecondTab(page, "/food?date=2026-01-05");
+  // This tab changes only the name.
+  await page
+    .getByRole("button", { name: "Edit Synthetic breakfast", exact: true })
+    .click();
+  await page.getByLabel("Meal or snack").fill("Local breakfast edit");
+  // The other tab changes the calories.
+  await other
+    .getByRole("button", { name: "Edit Synthetic breakfast", exact: true })
+    .click();
+  await other.getByLabel("Calories · kcal").fill("777");
+  await other.getByRole("button", { name: "Save food changes" }).click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  const conflict = page.locator(".edit-conflict");
+  await expect(conflict).toContainText("changed on another device");
+  await expect(conflict).toContainText(
+    "Synthetic breakfast · 777 kcal · 30g protein",
+  );
+  await expect(page.getByLabel("Meal or snack")).toHaveValue(
+    "Local breakfast edit",
+  );
+  await expect(page.getByLabel("Calories · kcal")).toHaveValue("550");
+  await expect(
+    page.getByRole("button", { name: "Save food changes" }),
+  ).toBeDisabled();
+  expect((await meals())[0]).toMatchObject({
+    name: "Synthetic breakfast",
+    calories: 777,
+  });
+  // Loading the saved version replaces the typed values.
+  await page.getByRole("button", { name: "Load saved version" }).click();
+  await expect(conflict).toHaveCount(0);
+  await expect(page.getByLabel("Meal or snack")).toHaveValue(
+    "Synthetic breakfast",
+  );
+  await expect(page.getByLabel("Calories · kcal")).toHaveValue("777");
+  // Keeping typed changes over a newer version is a deliberate choice.
+  await page.getByLabel("Meal or snack").fill("Local breakfast edit");
+  await other
+    .getByRole("button", { name: "Edit Synthetic breakfast", exact: true })
+    .click();
+  await other.getByLabel("Protein · g", { exact: true }).fill("31");
+  await other.getByRole("button", { name: "Save food changes" }).click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  await expect(conflict).toContainText("777 kcal · 31g protein");
+  await page.getByRole("button", { name: "Save my changes instead" }).click();
+  await expect(
+    page.getByText("Updated Local breakfast edit for Mon 5 Jan 2026."),
+  ).toBeVisible();
+  await expect(status).toHaveText("Saved");
+  expect(await meals()).toEqual([
+    expect.objectContaining({
+      id: originalId,
+      name: "Local breakfast edit",
+      calories: 777,
+      protein: 30,
+    }),
+  ]);
+  // A removed entry stays removed unless its changes are saved as new food.
+  await page
+    .getByRole("button", { name: "Edit Local breakfast edit", exact: true })
+    .click();
+  await page.getByLabel("Calories · kcal").fill("600");
+  other.once("dialog", (dialog) => void dialog.accept());
+  await other
+    .getByRole("button", { name: "Remove Local breakfast edit", exact: true })
+    .click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  await expect(conflict).toContainText("was removed on another device");
+  await expect(page.getByLabel("Calories · kcal")).toHaveValue("600");
+  await expect(
+    page.getByRole("button", { name: "Save food changes" }),
+  ).toBeDisabled();
+  expect(await meals()).toEqual([]);
+  await page
+    .getByRole("button", { name: "Save my changes as a new food" })
+    .click();
+  await expect(
+    page.getByText("Added Local breakfast edit for Mon 5 Jan 2026."),
+  ).toBeVisible();
+  await expect(status).toHaveText("Saved");
+  const saved = await meals();
+  expect(saved).toEqual([
+    expect.objectContaining({ name: "Local breakfast edit", calories: 600 }),
+  ]);
+  expect(saved[0]?.id).not.toBe(originalId);
+  const [removed] = await withDatabase(
+    (sql) => sql`SELECT deleted FROM fitness_records WHERE id=${originalId}`,
+  );
+  expect(removed?.deleted).toBe(true);
+  await other.close();
+});
+
+test("loading the cloud version after a conflict keeps an open food edit from overwriting it", async ({
+  page,
+}) => {
+  const status = page.locator(".sync-state");
+  await page.goto("/food?date=2026-01-05");
+  await page.getByLabel("Meal or snack").fill("Synthetic lunch");
+  await page.getByLabel("Calories · kcal").fill("500");
+  await page.getByLabel("Protein · g", { exact: true }).fill("20");
+  await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await expect(status).toHaveText("Saved");
+  const meal = (await records(page)).find((r) => r.data.kind === "meal");
+  if (!meal) throw Error("Missing synthetic meal");
+  // A change queued offline, then the entry is opened again.
+  await page.context().setOffline(true);
+  await expect(status).toHaveText("Offline · pending on device");
+  const edit = page.getByRole("button", {
+    name: "Edit Synthetic lunch",
+    exact: true,
+  });
+  await edit.click();
+  await page.getByLabel("Calories · kcal").fill("510");
+  await page.getByRole("button", { name: "Save food changes" }).click();
+  await expect(page.locator(".list-row")).toContainText("510 kcal");
+  await edit.click();
+  await page.getByLabel("Meal or snack").fill("Offline lunch");
+  // Another device saves the same entry first.
+  await withDatabase(
+    (sql) =>
+      sql`UPDATE fitness_records SET revision=revision+1, data=jsonb_set(data, '{calories}', '999'), updated_at=now() WHERE id=${meal.id}`,
+  );
+  await page.context().setOffline(false);
+  await expect(
+    page.getByRole("heading", { name: "Review the conflict" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Use cloud version for this record" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Review the conflict" }),
+  ).toHaveCount(0);
+  const conflict = page.locator(".edit-conflict");
+  await expect(conflict).toContainText("Synthetic lunch · 999 kcal");
+  await expect(page.getByLabel("Meal or snack")).toHaveValue("Offline lunch");
+  await expect(
+    page.getByRole("button", { name: "Save food changes" }),
+  ).toBeDisabled();
+  await expect(status).toHaveText("Saved");
+  const stored = (await records(page)).find((r) => r.id === meal.id);
+  expect(stored?.data).toMatchObject({
+    name: "Synthetic lunch",
+    calories: 999,
+  });
+});
+
+test("run edits keep typed changes when another tab changes or removes the run", async ({
+  page,
+}) => {
+  const status = page.locator(".sync-state");
+  await page.goto("/run?date=2026-01-06");
+  await page.getByLabel("Duration · minutes").fill("25");
+  await page.getByLabel("Distance · km").fill("4");
+  await page.getByRole("button", { name: "Save run", exact: true }).click();
+  await expect(page).toHaveURL(/\/history\?date=2026-01-06/);
+  await expect(status).toHaveText("Saved");
+  const label = "Easy run on Tue 6 Jan 2026";
+  await page.getByRole("link", { name: `Edit ${label}` }).click();
+  await expect(page).toHaveURL(/runId=/);
+  const runId = new URL(page.url()).searchParams.get("runId");
+  await page.getByLabel("Notes").fill("Local note");
+  const other = await openSecondTab(
+    page,
+    new URL(page.url()).pathname + new URL(page.url()).search,
+  );
+  await other.getByLabel("Duration · minutes").fill("40");
+  await other.getByRole("button", { name: "Save run changes" }).click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  const conflict = page.locator(".edit-conflict");
+  await expect(conflict).toContainText("changed on another device");
+  await expect(conflict).toContainText("Tue 6 Jan 2026 · 40 min · 4 km");
+  await expect(page.getByLabel("Notes")).toHaveValue("Local note");
+  await expect(page.getByLabel("Duration · minutes")).toHaveValue("25");
+  await expect(
+    page.getByRole("button", { name: "Save run changes" }),
+  ).toBeDisabled();
+  // The other tab removes the run.
+  other.once("dialog", (dialog) => void dialog.accept());
+  await other.getByRole("button", { name: `Remove ${label}` }).click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  await expect(conflict).toContainText("was removed on another device");
+  await expect(page.getByLabel("Notes")).toHaveValue("Local note");
+  expect((await records(page)).some((r) => r.data.kind === "run")).toBe(false);
+  await page
+    .getByRole("button", { name: "Save my changes as a new run" })
+    .click();
+  await expect(page).toHaveURL(/\/history\?date=2026-01-06/);
+  await expect(status).toHaveText("Saved");
+  const runs = (await records(page)).filter((r) => r.data.kind === "run");
+  expect(runs).toHaveLength(1);
+  expect(runs[0]?.id).not.toBe(runId);
+  expect(runs[0]?.data).toMatchObject({ minutes: 25, notes: "Local note" });
+  await other.close();
 });

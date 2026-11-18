@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@bent/ui/button";
 import { mealSchema, regularSchema, totals, formatDate } from "../domain";
-import type { Settings } from "../domain";
+import type { Entity, Settings } from "../domain";
 import type { Sync } from "../sync";
 import { TextField } from "./fields";
+import { EditConflict, editStatus } from "./record-edit";
+import type { Opened } from "./record-edit";
+type Meal = Extract<Entity, { kind: "meal" }>;
 export function Nutrition({
   sync,
   date,
@@ -16,18 +19,87 @@ export function Nutrition({
   const [error, setError] = useState("");
   const total = totals(sync.records, date);
   const [notice, setNotice] = useState("");
-  const [editing, setEditing] = useState<string>();
-  const editedRecord = sync.records.find((record) => record.id === editing);
-  const edited = editedRecord?.data;
+  // The meal version the form opened with. Saving checks it is still current.
+  const [editing, setEditing] = useState<Opened<Meal>>();
+  const opened = useRef<Opened<Meal>>(undefined);
+  const [formVersion, setFormVersion] = useState(0);
+  const [checked, setChecked] = useState<"changed" | "removed">();
+  const live = editing
+    ? sync.records.find((record) => record.id === editing.id)
+    : undefined;
+  const derived = editStatus(editing, live);
+  const status = derived === "current" ? checked : derived;
+  const form = useRef<HTMLFormElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (!editing) return;
+    if (!editing?.id) return;
     nameInput.current?.scrollIntoView({ block: "center" });
     nameInput.current?.focus({ preventScroll: true });
-  }, [editing]);
+  }, [editing?.id, formVersion]);
   const meals = sync.records.filter(
     (record) => record.data.kind === "meal" && record.data.date === date,
   );
+  /** Opens a version in the form. `reload` replaces the typed values. */
+  function open(next: Opened<Meal> | undefined, reload = true) {
+    opened.current = next;
+    setEditing(next);
+    setChecked(undefined);
+    if (reload) setFormVersion((value) => value + 1);
+  }
+  function savedVersion() {
+    const target = opened.current;
+    const current = target ? sync.latest(target.id) : undefined;
+    return target && current?.data?.kind === "meal"
+      ? { id: target.id, revision: current.revision, data: current.data }
+      : undefined;
+  }
+  function save(element: HTMLFormElement, target: Opened<Meal> | undefined) {
+    const data = new FormData(element);
+    const result = mealSchema.safeParse({
+      kind: "meal",
+      date: target?.data.date ?? date,
+      name: data.get("name"),
+      calories: Number(data.get("calories")),
+      protein: Number(data.get("protein")),
+    });
+    if (!result.success) {
+      setError("Enter a meal name, calories and protein.");
+      return;
+    }
+    if (target) {
+      const state = editStatus(target, sync.latest(target.id));
+      if (state !== "current") {
+        setChecked(state);
+        setError("");
+        return;
+      }
+    }
+    if (!sync.put(result.data, target?.id, target?.revision ?? 0)) return;
+    const duplicate = sync.records.some(
+      (record) =>
+        record.data.kind === "regular" &&
+        record.data.name.toLowerCase() === result.data.name.toLowerCase() &&
+        record.data.calories === result.data.calories &&
+        record.data.protein === result.data.protein,
+    );
+    if (data.get("regular") && !duplicate)
+      sync.put(
+        regularSchema.parse({
+          kind: "regular",
+          name: result.data.name,
+          calories: result.data.calories,
+          protein: result.data.protein,
+        }),
+      );
+    setNotice(
+      `${target ? "Updated" : "Added"} ${result.data.name} for ${formatDate(result.data.date)}.${data.get("regular") && duplicate ? " It is already in Regular meals." : ""}`,
+    );
+    open(undefined);
+    element.reset();
+    setError("");
+  }
+  const shown = editing?.data;
+  const saved = live?.data.kind === "meal" ? live.data : undefined;
   return (
     <section data-feedback-redact data-feedback-private>
       <p className="eyebrow">Fuel your day</p>
@@ -48,48 +120,12 @@ export function Nutrition({
       </div>
       <h2>{editing ? "Edit food" : "Quick entry"}</h2>
       <form
+        ref={form}
         className="card form-grid"
-        key={editing ?? "new"}
+        key={`${editing?.id ?? "new"}:${formVersion}`}
         onSubmit={(e) => {
           e.preventDefault();
-          const form = e.currentTarget;
-          const data = new FormData(form);
-          const result = mealSchema.safeParse({
-            kind: "meal",
-            date,
-            name: data.get("name"),
-            calories: Number(data.get("calories")),
-            protein: Number(data.get("protein")),
-          });
-          if (!result.success) {
-            setError("Enter a meal name, calories and protein.");
-            return;
-          }
-          if (sync.put(result.data, editing, editedRecord?.revision ?? 0)) {
-            const duplicate = sync.records.some(
-              (record) =>
-                record.data.kind === "regular" &&
-                record.data.name.toLowerCase() ===
-                  result.data.name.toLowerCase() &&
-                record.data.calories === result.data.calories &&
-                record.data.protein === result.data.protein,
-            );
-            if (data.get("regular") && !duplicate)
-              sync.put(
-                regularSchema.parse({
-                  kind: "regular",
-                  name: result.data.name,
-                  calories: result.data.calories,
-                  protein: result.data.protein,
-                }),
-              );
-            setNotice(
-              `${editing ? "Updated" : "Added"} ${result.data.name} for ${formatDate(date)}.${data.get("regular") && duplicate ? " It is already in Regular meals." : ""}`,
-            );
-            setEditing(undefined);
-            form.reset();
-            setError("");
-          }
+          save(e.currentTarget, opened.current);
         }}
       >
         <TextField
@@ -100,12 +136,12 @@ export function Nutrition({
           required
           maxLength={160}
           placeholder="e.g. Yoghurt and berries"
-          defaultValue={edited?.kind === "meal" ? edited.name : ""}
+          defaultValue={shown?.name ?? ""}
         />
         <TextField
           label="Calories · kcal"
           id="meal-calories"
-          defaultValue={edited?.kind === "meal" ? edited.calories : ""}
+          defaultValue={shown?.calories ?? ""}
           name="calories"
           type="number"
           inputMode="decimal"
@@ -117,7 +153,7 @@ export function Nutrition({
         <TextField
           label="Protein · g"
           id="meal-protein"
-          defaultValue={edited?.kind === "meal" ? edited.protein : ""}
+          defaultValue={shown?.protein ?? ""}
           name="protein"
           type="number"
           inputMode="decimal"
@@ -129,11 +165,32 @@ export function Nutrition({
         <label>
           <input type="checkbox" name="regular" /> Save as a regular meal
         </label>
-        <Button appearance="primary" type="submit">
+        {status && (
+          <EditConflict
+            status={status}
+            noun="food"
+            current={
+              saved
+                ? `${saved.name} · ${Math.round(saved.calories)} kcal · ${Math.round(saved.protein)}g protein`
+                : undefined
+            }
+            onKeepMine={() => {
+              const next = savedVersion();
+              if (!next) return;
+              open(next, false);
+              if (form.current) save(form.current, next);
+            }}
+            onUseCurrent={() => open(savedVersion())}
+            onSaveAsNew={() => {
+              if (form.current) save(form.current, undefined);
+            }}
+          />
+        )}
+        <Button appearance="primary" type="submit" disabled={Boolean(status)}>
           {editing ? "Save food changes" : "Add food"}
         </Button>
         {editing && (
-          <Button appearance="ghost" onClick={() => setEditing(undefined)}>
+          <Button appearance="ghost" onClick={() => open(undefined)}>
             Cancel edit
           </Button>
         )}
@@ -204,7 +261,10 @@ export function Nutrition({
               <Button
                 appearance="ghost"
                 aria-label={`Edit ${r.data.name}`}
-                onClick={() => setEditing(r.id)}
+                onClick={() =>
+                  r.data.kind === "meal" &&
+                  open({ id: r.id, revision: r.revision, data: r.data })
+                }
               >
                 Edit
               </Button>
