@@ -1165,15 +1165,10 @@ test("recovered weights keep the units they were typed in when units change else
   expect(
     (await workoutData(page, workoutId)).exercises[0]?.sets[1]?.loadKg,
   ).toBeCloseTo(9.979, 3);
-  const stored = await page.evaluate(
-    ({ legacy, key }) => ({
-      legacy: localStorage.getItem(legacy),
-      current: localStorage.getItem(key),
-    }),
-    { legacy, key },
-  );
-  expect(stored.legacy).toBeNull();
-  expect(JSON.parse(stored.current ?? "{}")).toEqual({
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), legacy),
+  ).toBeNull();
+  expect(await storedTypedValues(page, key)).toEqual({
     "0:1:loadKg": { text: "12", base: null, units: null },
   });
   // Leaving the set confirms the weight in the units shown beside it.
@@ -1568,21 +1563,72 @@ test("correction saves explain unhandled sets and keep typed changes when the cl
   expect(failures).toEqual([]);
 });
 
+test("overlapping tab writes retain both invalid fields after reload", async ({
+  page,
+}) => {
+  const workoutId = await startPastWorkout(page);
+  const owner = await ownerId(page);
+  const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
+  const path = new URL(page.url()).pathname + new URL(page.url()).search;
+  const other = await openSecondTab(page, path);
+  const reps = (tab: Page, set: number) =>
+    tab.getByRole("spinbutton", {
+      name: `Goblet squat set ${set} reps`,
+      exact: true,
+    });
+  const debuggerSession = await page.context().newCDPSession(page);
+  await debuggerSession.send("Debugger.enable");
+  await page.evaluate((prefix) => {
+    const original = Storage.prototype.setItem;
+    function writeInput(storage: Storage, key: string, value: string) {
+      return original.call(storage, key, value);
+    }
+    Reflect.set(window, "fitnessPauseWrite", writeInput);
+    Storage.prototype.setItem = function (key, value) {
+      return key.startsWith(prefix)
+        ? writeInput(this, key, value)
+        : original.call(this, key, value);
+    };
+  }, key);
+  const target = await debuggerSession.send("Runtime.evaluate", {
+    expression: "window.fitnessPauseWrite",
+  });
+  const objectId = z.string().parse(target.result.objectId);
+  const breakpoint = await debuggerSession.send(
+    "Debugger.setBreakpointOnFunctionCall",
+    { objectId },
+  );
+  const paused = new Promise<void>((resolve) =>
+    debuggerSession.once("Debugger.paused", () => resolve()),
+  );
+  // A stops immediately before its storage write, after any shared reads.
+  const firstWrite = reps(page, 1).fill("");
+  try {
+    await paused;
+    await reps(other, 2).fill("");
+    await debuggerSession.send("Debugger.removeBreakpoint", {
+      breakpointId: breakpoint.breakpointId,
+    });
+    await debuggerSession.send("Debugger.resume");
+    await firstWrite;
+  } finally {
+    await debuggerSession.detach();
+  }
+  await other.close();
+  await page.reload();
+  await expect(reps(page, 1)).toHaveValue("");
+  await expect(reps(page, 2)).toHaveValue("");
+  await expect(reps(page, 1)).toHaveAttribute("aria-invalid", "true");
+  await expect(reps(page, 2)).toHaveAttribute("aria-invalid", "true");
+});
+
 test("two tabs on one workout keep each other's typed values through reloads", async ({
   page,
 }) => {
   const workoutId = await startPastWorkout(page);
   const owner = await ownerId(page);
   const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
-  const stored = async () =>
-    z
-      .record(z.string(), z.object({ text: z.string() }))
-      .parse(
-        JSON.parse(
-          (await page.evaluate((key) => localStorage.getItem(key), key)) ??
-            "{}",
-        ),
-      );
+  const stored = () => storedTypedValues(page, key);
   const path = new URL(page.url()).pathname + new URL(page.url()).search;
   const other = await openSecondTab(page, path);
   const reps = (tab: Page, set: number) =>
@@ -1897,3 +1943,36 @@ test("progress starts empty, then compares sessions, strength and bodyweight fro
       .locator("[aria-current=page]"),
   ).toHaveText("Progress");
 });
+
+async function storedTypedValues(page: Page, key: string) {
+  const raw = await page.evaluate(
+    (prefix) =>
+      Object.entries(localStorage).filter(
+        ([key]) => key === prefix || key.startsWith(`${prefix}:entry:`),
+      ),
+    key,
+  );
+  const fields: Record<
+    string,
+    { text: string; base: string | null; units: "kg" | "lb" | null }
+  > = {};
+  const entry = z.object({
+    text: z.string(),
+    base: z.string().nullable(),
+    units: z.enum(["kg", "lb"]).nullable(),
+  });
+  for (const [recordKey, value] of raw) {
+    if (recordKey === key)
+      Object.assign(
+        fields,
+        z.record(z.string(), entry).parse(JSON.parse(value)),
+      );
+    else {
+      const parsed = z
+        .object({ field: z.string(), entry })
+        .parse(JSON.parse(value));
+      fields[parsed.field] = parsed.entry;
+    }
+  }
+  return fields;
+}

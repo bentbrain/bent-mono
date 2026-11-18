@@ -34,9 +34,10 @@ import {
 } from "../src/progress";
 import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
 import {
+  type Buffered,
   applyText,
   holdInBackground,
-  mergeStored,
+  WorkoutInputStorage,
   migrateLegacy,
   savedBase,
   savedText,
@@ -586,29 +587,117 @@ describe("correction saves", () => {
 });
 
 describe("typed values shared by open tabs", () => {
-  const invalid = { text: "", base: "8", units: "kg" as const };
-  const typed = { text: "12", base: "8", units: "kg" as const };
-  test("one tab's write keeps values another tab is holding", () => {
-    // Tab A holds invalid text. Tab B, opened earlier, types in another set.
-    const stored = { "0:0:value": invalid };
-    const merged = mergeStored(stored, {}, { "0:1:value": typed });
-    expect(merged).toEqual({ "0:0:value": invalid, "0:1:value": typed });
-    // B saves its set. A's held value stays.
-    expect(mergeStored(merged, { "0:1:value": typed }, {})).toEqual({
+  const invalid = { text: "", base: "8", units: "kg" } satisfies Buffered;
+  function memoryStorage() {
+    const data = new Map<string, string>();
+    return {
+      get length() {
+        return data.size;
+      },
+      key: (index: number) => Array.from(data.keys())[index] ?? null,
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        data.set(key, value);
+      },
+      removeItem: (key: string) => {
+        data.delete(key);
+      },
+    };
+  }
+  test("overlapping writes retain both fields and each tab removes only its observed entries", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    const b = new WorkoutInputStorage(storage, "workout");
+    const original = storage.setItem;
+    let overlap = true;
+    storage.setItem = (key, value) => {
+      if (overlap) {
+        overlap = false;
+        b.write({ "0:1:value": invalid });
+      }
+      original(key, value);
+    };
+    a.write({ "0:0:value": invalid });
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
+      "0:0:value": invalid,
+      "0:1:value": invalid,
+    });
+    b.write({});
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
       "0:0:value": invalid,
     });
   });
-  test("a tab removes a field only while it holds the stored value", () => {
-    const newer = { ...typed, text: "13" };
-    expect(
-      mergeStored({ "0:1:value": newer }, { "0:1:value": typed }, {}),
-    ).toEqual({ "0:1:value": newer });
+  test("an overlapping removal cannot delete another tab's new value for the same field", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    a.write({ "0:0:value": invalid });
+    const b = new WorkoutInputStorage(storage, "workout");
+    const original = storage.removeItem;
+    let overlap = true;
+    const newer = { ...invalid, text: "13" };
+    storage.removeItem = (key) => {
+      if (overlap) {
+        overlap = false;
+        b.write({ "0:0:value": newer });
+      }
+      original(key);
+    };
+    a.write({});
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
+      "0:0:value": newer,
+    });
   });
-  test("values moving from an earlier key are written in full", () => {
-    const held = { text: "12", base: null, units: null };
-    expect(
-      mergeStored({}, { "0:1:loadKg": held }, { "0:1:loadKg": held }, true),
-    ).toEqual({ "0:1:loadKg": held });
+  test("explicit clearing preserves an update appended after its snapshot", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    a.write({ "0:0:value": invalid });
+    const b = new WorkoutInputStorage(storage, "workout");
+    const original = storage.removeItem;
+    let overlap = true;
+    storage.removeItem = (key) => {
+      if (overlap) {
+        overlap = false;
+        b.write({ "0:1:value": invalid });
+      }
+      original(key);
+    };
+    a.clear();
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
+      "0:1:value": invalid,
+    });
+  });
+  test("shared and unitless legacy snapshots migrate without losing retained text", () => {
+    const storage = memoryStorage();
+    storage.setItem("workout", JSON.stringify({ "0:0:value": invalid }));
+    storage.setItem(
+      "legacy",
+      JSON.stringify({ "0:1:loadKg": { text: "12", base: "10" } }),
+    );
+    const a = new WorkoutInputStorage(storage, "workout", "legacy");
+    a.write(a.buffer);
+    expect(storage.getItem("workout")).toBeNull();
+    expect(storage.getItem("legacy")).toBeNull();
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
+      "0:0:value": invalid,
+      "0:1:loadKg": { text: "12", base: null, units: null },
+    });
+  });
+  test("a failed storage write keeps predecessors and can retry", () => {
+    const storage = memoryStorage();
+    const a = new WorkoutInputStorage(storage, "workout");
+    a.write({ "0:0:value": invalid });
+    const original = storage.setItem;
+    storage.setItem = () => {
+      throw Error("Quota exceeded");
+    };
+    const next = { "0:0:value": { ...invalid, text: "12" } };
+    expect(() => a.write(next)).toThrow("Quota exceeded");
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual({
+      "0:0:value": invalid,
+    });
+    storage.setItem = original;
+    a.write(next);
+    expect(new WorkoutInputStorage(storage, "workout").buffer).toEqual(next);
   });
 });
 

@@ -139,32 +139,6 @@ export function applyText(
   };
 }
 
-function readStored<T>(key: string, schema: z.ZodType<T>) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw === null ? undefined : schema.parse(JSON.parse(raw));
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Reads typed values kept on this device. Weights kept without their units
- * wait for the person to confirm them instead of saving in the background.
- */
-function readBuffer(
-  storageKey: string | null,
-  legacyKey: string | null,
-): { buffer: InputBuffer; migrated: boolean } {
-  if (!storageKey) return { buffer: {}, migrated: false };
-  const stored = readStored(storageKey, bufferSchema) ?? {};
-  const legacy = legacyKey
-    ? readStored(legacyKey, legacyBufferSchema)
-    : undefined;
-  if (!legacy) return { buffer: stored, migrated: false };
-  return { buffer: { ...migrateLegacy(legacy), ...stored }, migrated: true };
-}
-
 /**
  * Moves values kept without units to the current format. Their weights have
  * an unknown starting point, so they wait for the person to confirm them.
@@ -198,26 +172,108 @@ const sameEntry = (a: Buffered | undefined, b: Buffered | undefined) =>
   a.base === b.base &&
   a.units === b.units;
 
+const storedEntrySchema = z.object({
+  field: z.string().max(40),
+  entry: bufferSchema.valueType,
+  writtenAt: z.number().finite(),
+});
+type InputStorage = Pick<
+  Storage,
+  "length" | "key" | "getItem" | "setItem" | "removeItem"
+>;
+
 /**
- * Merges one editor's buffer change into the values stored for the workout.
- * Other open tabs share the stored values, so an editor writes only the
- * fields it changed and removes a field only while it still holds the value
- * this editor typed. `ownAll` writes every field the editor holds, for values
- * moving from an earlier storage key.
+ * Each update has an immutable storage key. Editors remove only keys they
+ * have observed, so overlapping writes and removals cannot erase a new entry
+ * from another tab. The old shared snapshots are read only for migration.
  */
-export function mergeStored(
-  stored: InputBuffer,
-  previous: InputBuffer,
-  next: InputBuffer,
-  ownAll = false,
-): InputBuffer {
-  const merged = { ...stored };
-  for (const [key, entry] of Object.entries(next))
-    if (ownAll || !sameEntry(previous[key], entry)) merged[key] = entry;
-  for (const key of Object.keys(previous))
-    if (!(key in next) && sameEntry(merged[key], previous[key]))
-      delete merged[key];
-  return merged;
+export class WorkoutInputStorage {
+  readonly buffer: InputBuffer;
+  private observed = new Map<string, string[]>();
+  private previous: InputBuffer;
+  private migrations: { key: string; raw: string }[] = [];
+  constructor(
+    private storage: InputStorage,
+    private key: string,
+    legacyKey: string | null = null,
+  ) {
+    const shared = this.read(key, bufferSchema);
+    const legacy = legacyKey
+      ? this.read(legacyKey, legacyBufferSchema)
+      : undefined;
+    const records: { key: string; data: z.infer<typeof storedEntrySchema> }[] =
+      [];
+    for (let i = 0; i < storage.length; i++) {
+      const recordKey = storage.key(i);
+      if (!recordKey?.startsWith(`${key}:entry:`)) continue;
+      const raw = storage.getItem(recordKey);
+      if (raw === null) continue;
+      try {
+        const parsed = storedEntrySchema.safeParse(JSON.parse(raw));
+        if (parsed.success) records.push({ key: recordKey, data: parsed.data });
+      } catch {
+        /* An invalid entry does not hide other recoverable fields. */
+      }
+    }
+    records.sort(
+      (a, b) =>
+        a.data.writtenAt - b.data.writtenAt || a.key.localeCompare(b.key),
+    );
+    this.buffer = { ...(legacy ? migrateLegacy(legacy) : {}), ...shared };
+    for (const { key: recordKey, data } of records) {
+      this.buffer[data.field] = data.entry;
+      this.observed.set(data.field, [
+        ...(this.observed.get(data.field) ?? []),
+        recordKey,
+      ]);
+    }
+    this.previous = this.buffer;
+  }
+  private read<T>(key: string, schema: z.ZodType<T>) {
+    const raw = this.storage.getItem(key);
+    if (raw === null) return undefined;
+    try {
+      const parsed = schema.safeParse(JSON.parse(raw));
+      if (!parsed.success) return undefined;
+      this.migrations.push({ key, raw });
+      return parsed.data;
+    } catch {
+      return undefined;
+    }
+  }
+  write(next: InputBuffer) {
+    // Append every changed entry before removing its predecessors. If storage
+    // fills up, the older retained values remain available for recovery.
+    const replacements = new Map<string, string>();
+    for (const [field, entry] of Object.entries(next)) {
+      if (!this.migrations.length && sameEntry(this.previous[field], entry))
+        continue;
+      const recordKey = `${this.key}:entry:${crypto.randomUUID()}`;
+      this.storage.setItem(
+        recordKey,
+        JSON.stringify({ field, entry, writtenAt: Date.now() }),
+      );
+      replacements.set(field, recordKey);
+    }
+    for (const [field, keys] of this.observed) {
+      if (field in next && !replacements.has(field)) continue;
+      for (const recordKey of keys) this.storage.removeItem(recordKey);
+      this.observed.delete(field);
+    }
+    for (const [field, recordKey] of replacements)
+      this.observed.set(field, [recordKey]);
+    for (const { key, raw } of this.migrations)
+      if (this.storage.getItem(key) === raw) this.storage.removeItem(key);
+    this.migrations = [];
+    this.previous = next;
+  }
+  clear() {
+    // Explicit discard clears entries present now, while preserving anything
+    // another editor appends after this snapshot is taken.
+    const current = new WorkoutInputStorage(this.storage, this.key);
+    current.write({});
+    this.write({});
+  }
 }
 
 type CommitOptions = {
@@ -251,9 +307,19 @@ export function useWorkoutInputs({
   legacyStorageKey?: string | null;
   save: (workout: Workout) => boolean;
 }) {
-  const [initial] = useState(() => readBuffer(storageKey, legacyStorageKey));
-  const [buffer, setBuffer] = useState(initial.buffer);
-  const legacyKept = useRef(initial.migrated);
+  const [storage] = useState(() => {
+    if (!storageKey) return undefined;
+    try {
+      return new WorkoutInputStorage(
+        localStorage,
+        storageKey,
+        legacyStorageKey,
+      );
+    } catch {
+      return undefined;
+    }
+  });
+  const [buffer, setBuffer] = useState<InputBuffer>(storage?.buffer ?? {});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [held, setHeld] = useState<string[]>([]);
   const [message, setMessage] = useState<{ place: string; text: string }>();
@@ -264,27 +330,13 @@ export function useWorkoutInputs({
   });
   const write = useCallback(
     (next: InputBuffer, replace = false) => {
-      const previous = latest.current.buffer;
       latest.current = { ...latest.current, buffer: next };
       setBuffer(next);
       if (!storageKey) return;
       try {
-        const merged = replace
-          ? next
-          : mergeStored(
-              readStored(storageKey, bufferSchema) ?? {},
-              previous,
-              next,
-              legacyKept.current,
-            );
-        if (Object.keys(merged).length)
-          localStorage.setItem(storageKey, JSON.stringify(merged));
-        else localStorage.removeItem(storageKey);
-        // The values now live under the current key.
-        if (legacyKept.current && legacyStorageKey) {
-          localStorage.removeItem(legacyStorageKey);
-          legacyKept.current = false;
-        }
+        if (!storage) throw Error("Device storage is unavailable");
+        if (replace) storage.clear();
+        else storage.write(next);
         setStorageError("");
       } catch {
         setStorageError(
@@ -292,7 +344,7 @@ export function useWorkoutInputs({
         );
       }
     },
-    [legacyStorageKey, storageKey],
+    [storage, storageKey],
   );
   const commit = useCallback(
     (options: CommitOptions = {}) => {
