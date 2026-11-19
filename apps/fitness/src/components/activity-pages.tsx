@@ -42,7 +42,9 @@ export function PlanScreen({
   const valid = z.iso.date().safeParse(date).success;
   const planned = valid ? scheduled(settings, date) : undefined;
   const routine = routineId
-    ? settings.routines.find((item) => item.id === routineId)
+    ? planned?.type === "strength" && planned.routine?.id === routineId
+      ? planned.routine
+      : settings.routines.find((item) => item.id === routineId)
     : planned?.type === "strength"
       ? planned.routine
       : undefined;

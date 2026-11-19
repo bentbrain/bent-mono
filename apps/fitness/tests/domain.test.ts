@@ -21,6 +21,7 @@ import {
   nextSession,
   progression,
   scheduled,
+  reorganiseDays,
   settingsSchema,
   toKg,
   totals,
@@ -952,5 +953,89 @@ describe("progress", () => {
       change: 5,
       comparedCount: 3,
     });
+  });
+});
+
+describe("manual day reorganisation", () => {
+  test("moves into rest and preserves A/B identity in this and later weeks", () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    const next = reorganiseDays(
+      settings,
+      "2026-01-05",
+      "2026-01-08",
+      "2026-01-05",
+      [],
+    );
+    expect(scheduled(next, "2026-01-05").type).toBe("rest");
+    expect(scheduled(next, "2026-01-08").routine?.id).toBe(
+      scheduled(settings, "2026-01-05").routine?.id,
+    );
+    expect(scheduled(next, "2026-01-07").routine?.id).toBe(
+      scheduled(settings, "2026-01-07").routine?.id,
+    );
+    expect(scheduled(next, "2026-01-12")).toEqual(
+      scheduled(settings, "2026-01-12"),
+    );
+    expect(next.schedule).toEqual(settings.schedule);
+    expect(settings.dayPlans).toEqual({});
+  });
+  test("swaps a run and a strength day without changing their count", () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    const next = reorganiseDays(
+      settings,
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-05",
+      [],
+    );
+    expect(scheduled(next, "2026-01-05").type).toBe("run");
+    expect(scheduled(next, "2026-01-06").type).toBe("strength");
+    const back = reorganiseDays(
+      next,
+      "2026-01-06",
+      "2026-01-05",
+      "2026-01-05",
+      [],
+    );
+    expect(scheduled(back, "2026-01-05")).toEqual(
+      scheduled(settings, "2026-01-05"),
+    );
+  });
+  test("rejects past, other-week and started activity moves", () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    expect(() =>
+      reorganiseDays(settings, "2026-01-05", "2026-01-06", "2026-01-06", []),
+    ).toThrow("upcoming");
+    expect(() =>
+      reorganiseDays(settings, "2026-01-05", "2026-01-12", "2026-01-05", []),
+    ).toThrow("same week");
+    const routine = settings.routines[0];
+    if (!routine) throw Error("Missing fixture routine");
+    const record = {
+      id: crypto.randomUUID(),
+      revision: 1,
+      updatedAt: new Date().toISOString(),
+      data: createWorkout(settings, routine, "2026-01-05", false, []),
+    };
+    expect(() =>
+      reorganiseDays(settings, "2026-01-05", "2026-01-06", "2026-01-05", [
+        record,
+      ]),
+    ).toThrow("started");
+  });
+  test("old settings parse with empty dated plans and malformed overrides fail", () => {
+    const settings = defaultSettings("2026-01-05", "UTC");
+    const { dayPlans, ...legacy } = settings;
+    expect(settingsSchema.parse(legacy).dayPlans).toBeUndefined();
+    expect(dayPlans).toEqual({});
+    expect(JSON.stringify(settingsSchema.parse(legacy))).not.toContain(
+      "dayPlans",
+    );
+    expect(
+      settingsSchema.safeParse({
+        ...settings,
+        dayPlans: { oops: { type: "rest", routine: null } },
+      }).success,
+    ).toBe(false);
   });
 });

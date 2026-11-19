@@ -11,7 +11,7 @@ bun run db:migrate
 bun run dev
 ```
 
-Run commands from `apps/fitness` after the repository storage preflight. `.env.example` lists the configuration keys. Keep development and production databases and Clerk applications separate. Claim an accountless Clerk development application through Clerk before configuring production.
+Run commands from `apps/fitness`. `.env.example` lists the configuration keys. Keep development and production databases and Clerk applications separate. Claim an accountless Clerk development application through Clerk before configuring production.
 
 The app checks the signed-in account and invitation on every server operation. SQL queries include the authenticated owner ID. Record revisions detect conflicting edits, and per-account request receipts make retries idempotent. Completed workouts retain their exercise prescriptions and results. A correction is a separate record that replaces or hides one completed workout in History, the week view and weight suggestions; the original stays in the account and its export, and removing the correction restores it. Training dates cannot be later than the account's current day in its timezone. Device drafts queue cloud writes and show saving, pending, failure and conflict states. Export pending changes before choosing a cloud version in a conflict.
 
@@ -20,6 +20,8 @@ The app checks the signed-in account and invitation on every server operation. S
 The app has four sections: Week, Exercises, Food and Progress. Settings opens from the gear in the header.
 
 Week shows the seven days of the selected week. Each day is marked done, planned, not recorded or rest, with its routine or run. Select a day to see what it holds without starting anything: the plan, its exercises with a How to guide for each, and the actions for that day. Start workout begins today's session from Week or from the plan. The week totals compare completed strength sessions and runs with the plan and show the day's food.
+
+Use Reorganise week to manually move a planned workout or run to another day in the selected week. The two days swap, including rest days. Past days and days with recorded or started activity are unavailable in the move panel. The repeating schedule and recorded results stay unchanged. Dated strength plans keep their routine details from the move. Reset week to repeating plan removes that week's adjustments.
 
 Start with the included A/B dumbbell templates. Edit the training days, start date, introduction and routines in Repeating week, reached from Week or Settings. It previews the next two weeks before you save. Strength days take turns through your routines in calendar order from the plan start date, so a missed day keeps its routine. The introduction uses up to two sets per exercise for the configured number of weeks. Weights mean one dumbbell. Rows and split squats record both sides; planks record seconds. Progression suggestions require all prescribed sets to reach the top of the range with control and at least two reps in reserve. Add confirmed dumbbell sizes in Settings to get suggestions based on available weights.
 

@@ -8,7 +8,13 @@ import {
 import { mkdir } from "node:fs/promises";
 import postgres from "postgres";
 import { z } from "zod";
-import { localDate, recordSchema } from "../src/domain";
+import {
+  addDays,
+  mondayOf,
+  localDate,
+  scheduled,
+  recordSchema,
+} from "../src/domain";
 import { settleWrites, trackWrites } from "./quiescence";
 const email = "fitness-a+clerk_test@example.com";
 const exportSchema = z.object({ records: z.array(recordSchema) });
@@ -2086,3 +2092,101 @@ async function storedTypedValues(page: Page, key: string) {
   }
   return fields;
 }
+
+test("reorganise days manually preserves the next week and recovers after reload", async ({
+  page,
+}, info) => {
+  await mkdir("private/reorganise", { recursive: true });
+  await page.screenshot({
+    path: `private/reorganise/week-after-${info.project.name}.png`,
+    fullPage: true,
+  });
+  const before = exportSchema.parse(
+    await (await page.request.get("/api/export")).json(),
+  );
+  const original = before.records.find((r) => r.data.kind === "settings");
+  if (original?.data.kind !== "settings") throw Error("Missing settings");
+  const monday = addDays(mondayOf(localDate(original.data.timezone)), 7);
+  const thursday = addDays(monday, 3);
+  const routine = scheduled(original.data, monday).routine;
+  if (!routine) throw Error("Missing routine");
+  await page.locator("#view-date").fill(monday);
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const panel = page.getByRole("dialog", { name: "Move a planned session" });
+  await panel.getByLabel("Session to move").selectOption(monday);
+  await panel.getByLabel("Move to", { exact: true }).selectOption(thursday);
+  await page.screenshot({
+    path: `private/reorganise/move-${info.project.name}.png`,
+    fullPage: true,
+  });
+  await panel.getByRole("button", { name: "Apply move" }).click();
+  await expect(panel).not.toBeVisible();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const exported = exportSchema.parse(
+    await (await page.request.get("/api/export")).json(),
+  );
+  const record = exported.records.find((r) => r.data.kind === "settings");
+  if (record?.data.kind !== "settings") throw Error("Missing updated settings");
+  expect(scheduled(record.data, monday).type).toBe("rest");
+  expect(scheduled(record.data, thursday).routine?.id).toBe(routine.id);
+  expect(scheduled(record.data, addDays(monday, 7))).toEqual(
+    scheduled(original.data, addDays(monday, 7)),
+  );
+  expect(record.data.schedule).toEqual(original.data.schedule);
+  expect(exported.records.filter((r) => r.data.kind !== "settings")).toEqual(
+    before.records.filter((r) => r.data.kind !== "settings"),
+  );
+  await page.locator("#view-date").fill(thursday);
+  await page
+    .getByRole("link", { name: "View workout plan", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    routine.name,
+  );
+  await page.goBack();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Reset week to repeating plan" })
+    .click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const reset = exportSchema
+    .parse(await (await page.request.get("/api/export")).json())
+    .records.find((r) => r.data.kind === "settings");
+  if (reset?.data.kind !== "settings") throw Error("Missing reset settings");
+  expect(reset.data.dayPlans).toEqual({});
+});
+
+test("reorganise rejects a stale plan when another tab saves settings", async ({
+  page,
+  context,
+}) => {
+  const monday = addDays(mondayOf(localDate("UTC")), 7);
+  await page.locator("#view-date").fill(monday);
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const panel = page.getByRole("dialog", { name: "Move a planned session" });
+  const other = await context.newPage();
+  await other.goto("/settings");
+  await other
+    .locator("#goal")
+    .fill("Synthetic changed goal for conflict coverage");
+  await other
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(other.locator(".sync-state")).toHaveText("Saved");
+  await panel.getByRole("button", { name: "Apply move" }).click();
+  await expect(panel.getByRole("alert")).toContainText("Your plan changed");
+  const records = exportSchema.parse(
+    await (await page.request.get("/api/export")).json(),
+  ).records;
+  const record = records.find((r) => r.data.kind === "settings");
+  if (record?.data.kind !== "settings") throw Error("Missing settings");
+  expect(record.data.goal).toBe("Synthetic changed goal for conflict coverage");
+  expect(record.data.dayPlans).toEqual({});
+  await other.close();
+});

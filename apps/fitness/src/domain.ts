@@ -49,6 +49,28 @@ export const settingsSchema = z
     startDate: daySchema,
     introductionWeeks: z.number().int().min(0).max(8),
     schedule: z.array(z.enum(["strength", "run", "rest"])).length(7),
+    dayPlans: z
+      .record(
+        daySchema,
+        z
+          .object({
+            type: z.enum(["strength", "run", "rest"]),
+            routine: routineSchema.nullable(),
+          })
+          .strict()
+          .refine(
+            (plan) =>
+              plan.type === "strength"
+                ? plan.routine !== null
+                : plan.routine === null,
+            "Strength days need a routine; runs and rest days do not.",
+          ),
+      )
+      .refine(
+        (value) => Object.keys(value).length <= 180,
+        "Keep up to 180 dated plans. Reset older weeks to the repeating schedule.",
+      )
+      .optional(),
     equipment: z
       .array(
         z
@@ -269,6 +291,7 @@ export function defaultSettings(date: string, timezone: string): Settings {
     goal: "Build strength consistently",
     startDate: date,
     introductionWeeks: 2,
+    dayPlans: {},
     schedule: [
       "strength",
       "run",
@@ -330,7 +353,7 @@ function dayDifference(a: string, b: string) {
     (Date.parse(a + "T12:00:00Z") - Date.parse(b + "T12:00:00Z")) / 86400000,
   );
 }
-export function scheduled(settings: Settings, date: string) {
+function repeatingPlan(settings: Settings, date: string) {
   const days = dayDifference(date, settings.startDate);
   const weekday = (new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7;
   const type = settings.schedule[weekday] ?? "rest";
@@ -354,6 +377,68 @@ export function scheduled(settings: Settings, date: string) {
     intro: days >= 0 && days < settings.introductionWeeks * 7,
   };
 }
+/** Date-specific plans preserve routine identity without shifting later weeks. */
+export function scheduled(settings: Settings, date: string) {
+  const repeating = repeatingPlan(settings, date);
+  const override = settings.dayPlans?.[date];
+  return override
+    ? {
+        ...repeating,
+        type: override.type,
+        routine: override.routine ?? undefined,
+      }
+    : repeating;
+}
+
+/** Swap planned sessions only. Activity records and the repeating week stay unchanged. */
+export function reorganiseDays(
+  settings: Settings,
+  from: string,
+  to: string,
+  today: string,
+  records: RecordEntry[],
+): Settings {
+  daySchema.parse(from);
+  daySchema.parse(to);
+  daySchema.parse(today);
+  if (from === to) throw Error("Choose a different day.");
+  if (from < today || to < today)
+    throw Error("Choose today or an upcoming day.");
+  if (mondayOf(from) !== mondayOf(to))
+    throw Error("Choose a day in the same week.");
+  if (
+    records.some(
+      ({ data }) =>
+        (data.kind === "workout" || data.kind === "run") &&
+        (data.date === from || data.date === to),
+    )
+  )
+    throw Error(
+      "A session has already been recorded or started on one of these days. Choose another day.",
+    );
+  const source = scheduled(settings, from);
+  const destination = scheduled(settings, to);
+  if (source.type === "rest")
+    throw Error("Choose a planned workout or run to move.");
+  return settingsSchema.parse({
+    ...settings,
+    dayPlans: {
+      ...settings.dayPlans,
+      [from]: {
+        type: destination.type,
+        routine:
+          destination.type === "strength"
+            ? (destination.routine ?? null)
+            : null,
+      },
+      [to]: {
+        type: source.type,
+        routine: source.type === "strength" ? (source.routine ?? null) : null,
+      },
+    },
+  });
+}
+
 export type DayActivity = { strength: boolean; run: boolean };
 /** Completed training per date, using corrected workout results. */
 export function completedActivity(records: RecordEntry[]) {
