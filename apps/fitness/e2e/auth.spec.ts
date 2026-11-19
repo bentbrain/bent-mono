@@ -330,7 +330,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await contextA2.close();
   await openBodyweight(page);
   const pounds = page.getByLabel("Weight · lb", { exact: true });
-  await pounds.fill("154.3");
+  await pounds.fill("154.35");
   expect(
     await pounds.evaluate(
       (element) =>
@@ -341,7 +341,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page.getByText("All weigh-ins", { exact: true }).click();
   await expect(
-    page.locator(".list-row").getByText("154.3 lb", { exact: true }),
+    page.locator(".list-row").getByText("154.35 lb", { exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByRole("link", { name: /Repeating week and routines/ }).click();

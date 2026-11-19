@@ -187,7 +187,7 @@ export function Bodyweight({
           inputMode="decimal"
           min={Math.ceil(displayLoad(20, settings.units) * 10) / 10}
           max={Math.floor(displayLoad(500, settings.units) * 10) / 10}
-          step="0.1"
+          step="0.01"
           required
         />
         <Button type="submit" appearance="primary">
