@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("every inventoried bent.build application has source and a shared design dependency", () => {
   const { applications } = JSON.parse(readFileSync("deployments.json", "utf8"));
-  assert.equal(applications.length, 10);
+  assert.equal(applications.length, 9);
   const domains = new Set();
   for (const application of applications) {
     assert.ok(existsSync(`${application.directory}/package.json`), application.name);
@@ -21,7 +21,7 @@ test("every inventoried bent.build application has source and a shared design de
 
 test("public imports have provenance without importing private histories", () => {
   const { imports } = JSON.parse(readFileSync("SOURCE_PROVENANCE.json", "utf8"));
-  assert.equal(imports.length, 8);
+  assert.equal(imports.length, 7);
   for (const source of imports) {
     assert.match(source.revision, /^[a-f0-9]{40}$/);
     assert.ok(!existsSync(`${source.destination}/.git`));

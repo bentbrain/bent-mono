@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { includesPath, workspaceScope } from "./ci-scope.mjs";
-import { validationEnvironment } from "../products/shop/scripts/validation-environment.mjs";
 
 const scope = workspaceScope();
 const affected = (directory) => includesPath(scope, directory);
@@ -17,13 +16,12 @@ const allowed = [
   "build",
   "test:integration",
   "browser",
-  "shop",
 ];
 if (!allowed.includes(task)) throw new Error("Select a known workspace check.");
 
 // Disposable CI fixtures only. This runner never reads a production environment.
 const env = {
-  ...validationEnvironment(process.env),
+  ...process.env,
   CI: "true",
   SKIP_ENV_VALIDATION: "1",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
@@ -71,13 +69,6 @@ if (task === "browser") {
   application("apps/toolbar", "test:e2e");
   application("apps/home", "build");
   application("apps/home", "test:worker");
-} else if (task === "shop") {
-  if (scope.full) {
-    application("products/shop", "test:pipeline");
-    application("products/shop", "test:e2e:local");
-  } else {
-    application("products/shop", "test:smoke");
-  }
 } else {
   if (task === "lint") {
     application("apps/toolbar", "format:check");
@@ -90,14 +81,7 @@ if (task === "browser") {
       "scripts/workspace.test.mjs",
       "scripts/ci-scope.test.mjs",
     ]);
-  const packages = scope.packages.filter(
-    (item) =>
-      !(
-        task === "test" &&
-        !scope.full &&
-        item.path.startsWith("products/shop")
-      ),
-  );
+  const packages = scope.packages;
   if (packages.length)
     run(resolve("node_modules/.bin/turbo"), [
       "run",
@@ -106,7 +90,6 @@ if (task === "browser") {
       "--concurrency=2",
       ...packages.map((item) => `--filter=${item.name}`),
     ]);
-  if (task === "test" && !scope.full) application("products/shop", "test:core");
   if (task === "build") {
     application("apps/home", "build:card");
     application("apps/toolbar", "worker:check");

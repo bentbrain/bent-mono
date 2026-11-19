@@ -97,32 +97,11 @@ test("every active browser job pins the official image to its installed Playwrig
     assert(text.includes(`    container:\n      image: ${imageName(version)}@sha256:${pins[version]}\n      options: --ipc=host --init\n`));
     assert(text.includes("    defaults:\n      run:\n        shell: bash\n"));
   };
-  requireImage(job(".github/workflows/quality.yml", "shop"), version);
   requireImage(job(".github/workflows/quality.yml", "browser"), "1.64.1");
   for (const directory of ["apps/jp", "apps/toolbar", "apps/trackmap"]) {
     assert.equal(JSON.parse(read(`${directory}/package.json`)).devDependencies["@playwright/test"].replace(/^\^/, ""), "1.64.1");
   }
-  assert.equal(JSON.parse(read("products/shop/apps/web/package.json")).devDependencies["@playwright/test"], version);
-  for (const [name, jobs] of Object.entries({ "deploy.yml": ["validate", "e2e"], "native-development.yml": ["check"], "web-production.yml": ["validate"], "preview-smoke.yml": ["smoke"] })) {
-    assert.equal(read(`.github/workflows/${name}`), read(`products/shop/.github/workflows/${name}`));
-    for (const jobName of jobs) {
-      const config = job(`.github/workflows/${name}`, jobName);
-      requireImage(config, version);
-      assert(config.includes("        shell: bash\n        working-directory: products/shop\n"));
-    }
+  for (const directory of ["apps/jp", "apps/toolbar", "apps/trackmap", "apps/fitness"]) {
+    assert(read("scripts/install-browsers.mjs").includes(`"${directory}"`));
   }
-  requireImage(job("products/shop/.github/workflows/ci.yml", "browser"), version);
-});
-
-test("release and fallback browser installers use the shared version guard", () => {
-  for (const [file, job] of [["deploy.yml", "e2e"], ["preview-smoke.yml", "smoke"]]) {
-    const steps = read(`.github/workflows/${file}`).split(`\n  ${job}:\n`)[1];
-    assert(steps.includes("      - run: node ../../scripts/install-playwright.mjs apps/web chromium"));
-    assert(!steps.includes("install --with-deps"));
-  }
-  const action = read("products/shop/.github/actions/check/action.yml");
-  const install = action.split("    - name: Install local browser and OS dependencies\n")[1].split("    - name:")[0];
-  assert(install.includes("      run: node ../../../../scripts/install-playwright.mjs . chromium"));
-  assert(install.includes("      working-directory: products/shop/apps/web"));
-  assert(read("scripts/install-browsers.mjs").includes("installPlaywright(application,"));
 });
