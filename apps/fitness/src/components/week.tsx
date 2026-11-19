@@ -22,6 +22,8 @@ import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
 import { Icon } from "./icons";
 import { useStartWorkout } from "./start-workout";
 
+import { ReorganiseWeek } from "./reorganise-week";
+
 type DayState = "done" | "missed" | "planned" | "rest";
 
 /** What a day holds in the repeating week and what was recorded on it. */
@@ -85,6 +87,7 @@ export function WeekScreen() {
       </header>
       <DateBar path="/" />
       <WeekBoard monday={monday} />
+      <ReorganiseWeek monday={monday} />
       <DayPanel day={date} />
       <WeekTotals monday={monday} records={sync.records} />
     </section>
@@ -407,9 +410,9 @@ function WeekTotals({
         </div>
       </dl>
       <p className="rotation-note">
-        Strength days take turns through{" "}
+        Repeating strength days take turns through{" "}
         {settings.routines.map((routine) => routine.name).join(", ")} in
-        calendar order.{" "}
+        calendar order. Reorganised sessions keep their chosen routine.{" "}
         <Link to="/schedule" search={{}}>
           Edit repeating week
         </Link>
