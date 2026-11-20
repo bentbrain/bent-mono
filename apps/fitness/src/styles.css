@@ -15,7 +15,7 @@
   --surface-2: #f1f3f7;
   --line: #e3e6ed;
   --line-strong: #cfd4de;
-  --field-line: #8a93a3;
+  --field-line: #7d8696;
   --chart: #6b8aff;
   --done: #15803d;
   --done-ink: #13753a;
@@ -999,10 +999,8 @@ small,
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .pips i.is-pad {
-  box-shadow: none;
-}
-.pips i.is-pad {
   background: transparent;
+  box-shadow: none;
 }
 .rotation-note {
   font-size: 0.875rem;
@@ -1348,6 +1346,9 @@ small,
   padding: 6px 14px;
   background: rgb(255 255 255 / 0.14);
   color: #fff;
+}
+.workout-timing :focus-visible {
+  outline-color: #fff;
 }
 .timing-row .bent-button:hover {
   background: rgb(255 255 255 / 0.24);
@@ -1879,11 +1880,19 @@ small,
   position: absolute;
   left: -3px;
   right: -3px;
-  border-top: 1.5px dashed var(--ink-2);
-  opacity: 0.5;
+  border-top: 2px dashed var(--ink-2);
+  box-shadow: 0 0 0 1px var(--surface);
 }
 .day-strip a[aria-current] {
   color: var(--accent);
+  font-weight: 750;
+  text-decoration: underline 2px;
+  text-underline-offset: 3px;
+}
+.day-strip a[aria-current] .bar {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 .day-strip a[aria-current] .fill {
   background: var(--accent);
@@ -2188,6 +2197,7 @@ small,
 }
 .history-entry[open] > summary {
   border-bottom: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 .history-entry > :not(summary):not(h2) {
   margin-left: 16px;
@@ -2461,8 +2471,15 @@ legend {
 .settings-links li + li {
   border-top: 1px solid var(--line);
 }
+.settings-links li:first-child a {
+  border-top-left-radius: calc(var(--radius) - 1px);
+  border-top-right-radius: calc(var(--radius) - 1px);
+}
+.settings-links li:last-child a {
+  border-bottom-left-radius: calc(var(--radius) - 1px);
+  border-bottom-right-radius: calc(var(--radius) - 1px);
+}
 .settings-links a {
-  border-radius: calc(var(--radius) - 1px);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2635,6 +2652,27 @@ legend {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+@media (max-width: 479px) {
+  .consistency th,
+  .consistency td {
+    padding: 8px;
+  }
+  .consistency th[scope="row"] {
+    white-space: normal;
+  }
+  .consistency .pips {
+    gap: 3px;
+  }
+  .consistency .pips i {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  .consistency td > span:last-child {
+    display: block;
+    margin: 4px 0 0;
   }
 }
 @media (max-width: 359px) {

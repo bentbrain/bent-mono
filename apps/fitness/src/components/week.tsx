@@ -128,6 +128,7 @@ function WeekBoard({ monday }: { monday: string }) {
           className="icon-button"
           to="/"
           search={dateSearch(addDays(date, -7), today)}
+          activeOptions={{ exact: true }}
         >
           <Icon name="back" />
           <span className="visually-hidden">Previous week</span>
@@ -139,6 +140,7 @@ function WeekBoard({ monday }: { monday: string }) {
           className="icon-button"
           to="/"
           search={dateSearch(addDays(date, 7), today)}
+          activeOptions={{ exact: true }}
         >
           <span className="visually-hidden">Next week</span>
           <Icon name="forward" />

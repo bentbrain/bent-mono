@@ -27,6 +27,7 @@ export function DateBar({
             className="icon-button"
             to={path}
             search={dateSearch(previous, today)}
+            activeOptions={{ exact: true }}
             aria-label={`Previous day, ${formatDate(previous)}`}
           >
             <Icon name="back" />
@@ -41,6 +42,7 @@ export function DateBar({
             className="icon-button"
             to={path}
             search={dateSearch(next, today)}
+            activeOptions={{ exact: true }}
             aria-label={`Next day, ${formatDate(next)}`}
           >
             <Icon name="forward" />
@@ -66,7 +68,7 @@ export function DateBar({
           <span>
             Viewing {formatDate(date)}. New entries here use this date.
           </span>{" "}
-          <Link to={path} search={{}}>
+          <Link to={path} search={{}} activeOptions={{ exact: true }}>
             Return to today
           </Link>
         </p>
