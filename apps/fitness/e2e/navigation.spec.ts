@@ -1068,7 +1068,7 @@ test("food entries can be edited and removed, and the body chart labels recorded
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await openBodyweight(page);
   for (const [date, kg] of [
-    ["2026-01-05", "70"],
+    ["2026-01-05", "70.25"],
     ["2026-01-06", "71.2"],
   ]) {
     await page.locator("#weight-date").fill(date);
@@ -1076,13 +1076,16 @@ test("food entries can be edited and removed, and the body chart labels recorded
     await page.getByRole("button", { name: "Save weigh-in" }).click();
     await expect(page.locator(".sync-state")).toHaveText("Saved");
   }
-  await expect(page.locator(".big-number")).toHaveText("70.6 kg");
+  await expect(page.locator(".big-number")).toHaveText("70.7 kg");
   const chart = page.locator(".weight-chart");
   await expect(chart).toContainText("High 71.2 kg");
-  await expect(chart).toContainText("Low 70.0 kg");
+  await expect(chart).toContainText("Low 70.3 kg");
   await expect(chart).toContainText("Mon 5 Jan");
   await expect(chart).toContainText("Tue 6 Jan");
   await page.getByText("All weigh-ins", { exact: true }).click();
+  await expect(
+    page.locator(".list-row").getByText("70.25 kg", { exact: true }),
+  ).toBeVisible();
   page.once("dialog", (dialog) => void dialog.accept());
   await page
     .getByRole("button", { name: "Remove weigh-in Tue 6 Jan 2026" })
