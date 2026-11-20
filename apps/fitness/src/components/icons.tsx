@@ -44,7 +44,6 @@ const paths = {
   ),
   close: <path d="M6 6l12 12M18 6L6 18" />,
   minus: <path d="M7 12h10" />,
-  chevron: <path d="M9 6l6 6-6 6" />,
   run: (
     <>
       <circle cx="15" cy="4.5" r="2" />

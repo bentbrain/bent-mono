@@ -141,13 +141,15 @@ function Account({ owner }: { owner: string }) {
           <span
             className={`sync-state ${sync.error ? "has-error" : ""}`}
             data-state={
-              sync.error
-                ? "error"
-                : !sync.online || sync.saving || inputPending || sync.pending
+              !sync.online
+                ? "offline"
+                : sync.saving
                   ? "busy"
-                  : sync.ready
-                    ? "saved"
-                    : "busy"
+                  : sync.error
+                    ? "error"
+                    : inputPending || sync.pending || !sync.ready
+                      ? "busy"
+                      : "saved"
             }
             role="status"
           >

@@ -156,12 +156,21 @@ function WeekBoard({ monday }: { monday: string }) {
                 className={`board-day type-${info.plan.type} state-${info.state}${day === today ? " is-today" : ""}`}
                 to="/"
                 search={dateSearch(day, today)}
+                activeOptions={{ exact: true }}
                 aria-label={`${formatDate(day)}${day === today ? ", today" : ""}: ${info.name}, ${info.status}`}
               >
                 <span className="day-name">{weekday}</span>
                 <span className="day-number">{Number(day.slice(8))}</span>
-                <span className="day-kind">
-                  {kind}
+                <span
+                  className={`day-kind${info.plan.type === "run" || detail ? " has-icon" : ""}`}
+                >
+                  {info.plan.type !== "rest" && (
+                    <Icon
+                      name={info.plan.type === "run" ? "run" : "exercises"}
+                      size={16}
+                    />
+                  )}
+                  <span className="kind-word">{kind}</span>
                   {detail && <b>{detail}</b>}
                 </span>
                 <i className={`mark state-${info.state}`}>
