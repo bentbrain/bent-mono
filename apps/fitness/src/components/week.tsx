@@ -159,6 +159,7 @@ function WeekBoard({ monday }: { monday: string }) {
                 to="/"
                 search={dateSearch(day, today)}
                 activeOptions={{ exact: true }}
+                aria-current={day === date ? "page" : undefined}
                 aria-label={`${formatDate(day)}${day === today ? ", today" : ""}: ${info.name}, ${info.status}`}
               >
                 <span className="day-name">{weekday}</span>

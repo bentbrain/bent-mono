@@ -1878,8 +1878,8 @@ small,
 }
 .day-strip .bar .target {
   position: absolute;
-  left: -3px;
-  right: -3px;
+  left: 0;
+  right: 0;
   border-top: 2px dashed var(--ink-2);
   box-shadow: 0 0 0 1px var(--surface);
 }
@@ -2654,7 +2654,7 @@ legend {
     white-space: nowrap;
   }
 }
-@media (max-width: 479px) {
+@media (max-width: 599px) {
   .consistency th,
   .consistency td {
     padding: 8px;

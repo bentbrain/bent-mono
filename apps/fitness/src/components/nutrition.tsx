@@ -333,6 +333,7 @@ export function Nutrition({
                   to="/food"
                   search={dateSearch(day, today)}
                   activeOptions={{ exact: true }}
+                  aria-current={day === date ? "page" : undefined}
                   aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
                 >
                   <span className="bar">
