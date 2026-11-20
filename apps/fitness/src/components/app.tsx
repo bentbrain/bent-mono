@@ -130,7 +130,12 @@ function Account({ owner }: { owner: string }) {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <Link className="wordmark" to="/" search={{}}>
+        <Link
+          className="wordmark"
+          to="/"
+          search={{}}
+          activeOptions={{ exact: true, includeSearch: false }}
+        >
           bent<span>/</span>fitness
         </Link>
         <div
@@ -139,7 +144,18 @@ function Account({ owner }: { owner: string }) {
           data-feedback-redact
         >
           <span
-            className={`sync-state ${sync.error ? "has-error" : ""}`}
+            className="sync-state"
+            data-state={
+              !sync.online
+                ? "offline"
+                : sync.saving
+                  ? "busy"
+                  : sync.error
+                    ? "error"
+                    : inputPending || sync.pending || !sync.ready
+                      ? "busy"
+                      : "saved"
+            }
             role="status"
           >
             {!sync.online

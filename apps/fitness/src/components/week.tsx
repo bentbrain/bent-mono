@@ -86,9 +86,33 @@ export function WeekScreen() {
         <p className="subtitle">{settings.goal}</p>
       </header>
       <DateBar path="/" />
-      <WeekBoard monday={monday} />
-      <ReorganiseWeek monday={monday} />
-      <DayPanel day={date} />
+      <div className="week-card">
+        <WeekBoard monday={monday} />
+        <div className="week-card-foot">
+          <p className="board-legend" aria-hidden="true">
+            <span>
+              <i className="mark state-done" />
+              Done
+            </span>
+            <span>
+              <i className="mark state-planned" />
+              Planned
+            </span>
+            <span>
+              <i className="mark state-missed" />
+              Not recorded
+            </span>
+            <span>
+              <i className="mark state-rest" />
+              Rest
+            </span>
+          </p>
+          <ReorganiseWeek monday={monday} />
+        </div>
+      </div>
+      <div className="week-main">
+        <DayPanel day={date} />
+      </div>
       <WeekTotals monday={monday} records={sync.records} />
     </section>
   );
@@ -104,6 +128,7 @@ function WeekBoard({ monday }: { monday: string }) {
           className="icon-button"
           to="/"
           search={dateSearch(addDays(date, -7), today)}
+          activeOptions={{ exact: true }}
         >
           <Icon name="back" />
           <span className="visually-hidden">Previous week</span>
@@ -115,6 +140,7 @@ function WeekBoard({ monday }: { monday: string }) {
           className="icon-button"
           to="/"
           search={dateSearch(addDays(date, 7), today)}
+          activeOptions={{ exact: true }}
         >
           <span className="visually-hidden">Next week</span>
           <Icon name="forward" />
@@ -132,30 +158,36 @@ function WeekBoard({ monday }: { monday: string }) {
                 className={`board-day type-${info.plan.type} state-${info.state}${day === today ? " is-today" : ""}`}
                 to="/"
                 search={dateSearch(day, today)}
+                activeOptions={{ exact: true }}
+                aria-current={day === date ? "page" : undefined}
                 aria-label={`${formatDate(day)}${day === today ? ", today" : ""}: ${info.name}, ${info.status}`}
               >
                 <span className="day-name">{weekday}</span>
                 <span className="day-number">{Number(day.slice(8))}</span>
-                <span className="day-kind">
-                  {kind}
+                <span
+                  className={`day-kind${info.plan.type === "run" || detail ? " has-icon" : ""}`}
+                >
+                  {info.plan.type !== "rest" && (
+                    <Icon
+                      name={info.plan.type === "run" ? "run" : "exercises"}
+                      size={16}
+                    />
+                  )}
+                  <span className="kind-word">{kind}</span>
                   {detail && <b>{detail}</b>}
                 </span>
-                <span className="day-mark">
+                <i className={`mark state-${info.state}`}>
                   {info.state === "done" ? (
-                    <Icon name="check" size={14} />
+                    <Icon name="check" size={12} />
+                  ) : info.state === "missed" ? (
+                    <Icon name="minus" size={12} />
                   ) : null}
-                </span>
+                </i>
               </Link>
             </li>
           );
         })}
       </ol>
-      <p className="board-legend" aria-hidden="true">
-        <span className="legend-done">Done</span>
-        <span className="legend-planned">Planned</span>
-        <span className="legend-missed">Not recorded</span>
-        <span className="legend-rest">Rest</span>
-      </p>
     </nav>
   );
 }
@@ -172,7 +204,8 @@ function ResumePanel({ record }: { record: RecordEntry }) {
   return (
     <aside className="now-panel is-active active-workout">
       <p className="now-label">
-        Workout in progress · {formatDate(record.data.date)}
+        <span className="status-pill">Workout in progress</span>{" "}
+        {formatDate(record.data.date)}
       </p>
       <h2>{record.data.name}</h2>
       <p className="now-meta">
@@ -186,14 +219,18 @@ function ResumePanel({ record }: { record: RecordEntry }) {
       <div className="meter" aria-hidden="true">
         <span style={{ width: `${(handled / sets.length) * 100}%` }} />
       </div>
-      <p>Your timers and results are saved. Pick up where you left off.</p>
-      <Link
-        className="bent-button bent-button--primary"
-        to="/workout"
-        search={{ workoutId: record.id }}
-      >
-        Resume workout
-      </Link>
+      <p className="now-note">
+        Your timers and results are saved. Pick up where you left off.
+      </p>
+      <div className="now-actions">
+        <Link
+          className="bent-button bent-button--primary"
+          to="/workout"
+          search={{ workoutId: record.id }}
+        >
+          Resume workout
+        </Link>
+      </div>
     </aside>
   );
 }
@@ -245,7 +282,7 @@ function DayPanel({ day }: { day: string }) {
       ) : (
         <article className={`now-panel state-${info.state}`}>
           <p className="now-label">
-            {label} · {info.status}
+            {label} <span className="status-pill">{info.status}</span>
           </p>
           <h2>{info.name}</h2>
           {recorded ? (

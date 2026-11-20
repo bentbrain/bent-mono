@@ -28,7 +28,7 @@ const paths = {
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" />
+      <path d="M18.94 10.08L21.47 10.45L21.47 13.55L18.94 13.92L18.26 15.55L19.79 17.6L17.6 19.79L15.55 18.26L13.92 18.94L13.55 21.47L10.45 21.47L10.08 18.94L8.45 18.26L6.4 19.79L4.21 17.6L5.74 15.55L5.06 13.92L2.53 13.55L2.53 10.45L5.06 10.08L5.74 8.45L4.21 6.4L6.4 4.21L8.45 5.74L10.08 5.06L10.45 2.53L13.55 2.53L13.92 5.06L15.55 5.74L17.6 4.21L19.79 6.4L18.26 8.45Z" />
     </>
   ),
   back: <path d="M15 5l-7 7 7 7" />,
@@ -42,7 +42,8 @@ const paths = {
       <path d="M12 11v6M12 7.5v.5" />
     </>
   ),
-  close: <path d="M5 5l14 14M19 5L5 19" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  minus: <path d="M7 12h10" />,
   run: (
     <>
       <circle cx="15" cy="4.5" r="2" />
@@ -64,7 +65,8 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.8"
-      strokeLinecap="square"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
     >
