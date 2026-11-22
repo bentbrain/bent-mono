@@ -35,6 +35,32 @@ Food shows the day's calories and protein against your targets, with what is lef
 
 Progress counts completed sessions against the plan for recent weeks. Strength cards compare the first and latest best completed set for each exercise, kept separate by reps or seconds and by sides. Bodyweight shows the average of the latest seven weigh-ins and the change from the seven before. Sessions lists completed workouts and runs: correct, remove and restore workouts, and edit or remove runs. A correction editor that finds a newer saved version keeps your typed results and asks whether to load the saved version or save your changes over it. Bodyweight keeps one current value per date; the chart shows the latest 60 recorded dates, a rolling average of up to seven weigh-ins and your highest and lowest values in view. Compare trends over several weeks when adjusting food targets.
 
+## Assistants and agents
+
+Fitness runs an MCP server at `/api/mcp` on the app's origin. ChatGPT, Claude and other MCP clients can use it to read and edit food, bodyweight and runs, and to read planned and completed training. Tell an assistant what you ate and it logs each item with estimated calories and protein, then reports the day's totals.
+
+| Tool                       | What it does                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `fitness_get_day`          | One day's meals with IDs, totals and what is left of the targets, weigh-in, plan, workouts, runs |
+| `fitness_get_history`      | Daily calories, protein, weigh-ins, workouts and runs for up to 62 days                          |
+| `fitness_list_saved_meals` | Saved meals with their calories and protein                                                      |
+| `fitness_add_meals`        | Logs one or more meals to a day                                                                  |
+| `fitness_update_meal`      | Changes a meal's name, calories, protein or date                                                 |
+| `fitness_delete_entries`   | Removes meals, runs or weigh-ins by ID                                                           |
+| `fitness_log_weight`       | Records the day's bodyweight in kg or lb, replacing an earlier value for that date               |
+| `fitness_log_run`          | Records a run on today or an earlier date                                                        |
+
+Dates use the account timezone, and a tool without a date uses today. Each tool call saves its changes in one transaction. If an entry changed in the meantime, the call saves nothing and asks the assistant to read the day again. Strength workouts are read-only here; record and correct them in the app.
+
+To connect an assistant, add `https://<app origin>/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. Browser session cookies do not authorize MCP requests.
+
+The Clerk instance needs these settings:
+
+- OAuth applications with dynamic client registration turned on, so assistants can register and request access.
+- API keys turned on, if you want keys for scripts.
+
+`/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.
+
 ## Equipment photos and exports
 
 Settings accepts up to 20 private JPEG, PNG or WebP equipment photos, each up to 2 MB. The server checks file signatures and ownership, and serves photos with private, no-store headers. Account export includes settings, entries, workout history, corrections and photo bytes. The download starts only after the complete export has loaded. Store exports privately.

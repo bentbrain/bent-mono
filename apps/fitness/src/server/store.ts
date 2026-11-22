@@ -11,6 +11,7 @@ import {
 } from "../domain";
 import type { Mutation, RecordEntry, SaveResult, Workout } from "../domain";
 import { z } from "zod";
+import type { TransactionSql } from "postgres";
 const rowSchema = z.object({
   id: z.string(),
   revision: z.number(),
@@ -31,100 +32,139 @@ export async function saveRecord(
   input: Mutation,
 ): Promise<SaveResult> {
   const request = mutationSchema.parse(input);
+  return database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    return saveWithin(sql, owner, request);
+  });
+}
+export class BatchConflict extends Error {
+  constructor(
+    readonly index: number,
+    readonly current: RecordEntry | null,
+  ) {
+    super("A record changed before this change could be saved.");
+  }
+}
+/**
+ * Saves several changes in one transaction. A conflict or invalid change
+ * rolls back the whole batch, so a retry never repeats part of it.
+ */
+export async function saveRecords(
+  owner: string,
+  inputs: Mutation[],
+): Promise<RecordEntry[]> {
+  const requests = inputs.map((input) => mutationSchema.parse(input));
+  return database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    const saved: RecordEntry[] = [];
+    for (const [index, request] of requests.entries()) {
+      const result = await saveWithin(sql, owner, request);
+      if (result.status === "conflict")
+        throw new BatchConflict(index, result.current);
+      if (result.record) saved.push(result.record);
+    }
+    return saved;
+  });
+}
+async function lockAccount(sql: TransactionSql, owner: string) {
+  await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+  // All account writes share this lock. Receipts and record updates commit together.
+  await sql`SELECT owner_id FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+}
+async function saveWithin(
+  sql: TransactionSql,
+  owner: string,
+  request: Mutation,
+): Promise<SaveResult> {
   const fingerprint = createHash("sha256")
     .update(JSON.stringify(request))
     .digest("hex");
-  return database().begin(async (sql) => {
-    await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-    // All account writes share this lock. Receipts and record updates commit together.
-    await sql`SELECT owner_id FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
-    const [receipt] =
-      await sql`SELECT fingerprint, result FROM fitness_operations WHERE owner_id=${owner} AND id=${request.operationId}`;
-    if (receipt) {
-      if (receipt.fingerprint !== fingerprint)
-        throw new Error(
-          "This save request ID was already used. Reload before retrying.",
-        );
-      return resultSchema.parse(receipt.result);
-    }
-    const [row] =
-      await sql`SELECT id,revision,data,updated_at,deleted FROM fitness_records WHERE owner_id=${owner} AND id=${request.id}`;
-    const current = row && !row.deleted ? entry(row) : null;
-    const revision = row ? z.number().int().parse(row.revision) : 0;
-    if (revision !== request.revision) return { status: "conflict", current };
-    if (request.data?.kind === "weight") {
-      const [sameDay] =
-        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='weight' AND data->>'date'=${request.data.date} AND id<>${request.id}`;
-      if (sameDay) return { status: "conflict", current: entry(sameDay) };
-    }
-    if (request.data?.kind === "workout" && !request.data.finishedAt) {
-      const [active] =
-        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL AND id<>${request.id}`;
-      if (active) return { status: "conflict", current: entry(active) };
-    }
-    if (request.data?.kind === "settings" && request.id !== settingsId)
-      throw new Error("Invalid settings record.");
-    if (request.id === settingsId && request.data?.kind !== "settings")
-      throw new Error("Settings must remain available.");
-    if (current && request.data && current.data.kind !== request.data.kind)
-      throw new Error("Record type cannot change.");
-    if (current?.data.kind === "workout" && current.data.finishedAt)
-      throw new Error("Completed workouts keep their original results.");
-    let original: Workout | null = null;
-    if (request.data?.kind === "workoutCorrection") {
-      const correction = request.data;
-      if (
-        current?.data.kind === "workoutCorrection" &&
-        current.data.workoutId !== correction.workoutId
-      )
-        throw new Error("A correction stays linked to its original workout.");
-      const [originalRow] =
-        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${correction.workoutId} AND deleted=false`;
-      const target = originalRow ? entry(originalRow).data : null;
-      if (target?.kind !== "workout" || !target.finishedAt)
-        throw new Error("Choose one of your completed workouts to correct.");
-      original = target;
-      const problem = correction.replacement
-        ? correctionProblem(target, correction.replacement)
+  const [receipt] =
+    await sql`SELECT fingerprint, result FROM fitness_operations WHERE owner_id=${owner} AND id=${request.operationId}`;
+  if (receipt) {
+    if (receipt.fingerprint !== fingerprint)
+      throw new Error(
+        "This save request ID was already used. Reload before retrying.",
+      );
+    return resultSchema.parse(receipt.result);
+  }
+  const [row] =
+    await sql`SELECT id,revision,data,updated_at,deleted FROM fitness_records WHERE owner_id=${owner} AND id=${request.id}`;
+  const current = row && !row.deleted ? entry(row) : null;
+  const revision = row ? z.number().int().parse(row.revision) : 0;
+  if (revision !== request.revision) return { status: "conflict", current };
+  if (request.data?.kind === "weight") {
+    const [sameDay] =
+      await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='weight' AND data->>'date'=${request.data.date} AND id<>${request.id}`;
+    if (sameDay) return { status: "conflict", current: entry(sameDay) };
+  }
+  if (request.data?.kind === "workout" && !request.data.finishedAt) {
+    const [active] =
+      await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL AND id<>${request.id}`;
+    if (active) return { status: "conflict", current: entry(active) };
+  }
+  if (request.data?.kind === "settings" && request.id !== settingsId)
+    throw new Error("Invalid settings record.");
+  if (request.id === settingsId && request.data?.kind !== "settings")
+    throw new Error("Settings must remain available.");
+  if (current && request.data && current.data.kind !== request.data.kind)
+    throw new Error("Record type cannot change.");
+  if (current?.data.kind === "workout" && current.data.finishedAt)
+    throw new Error("Completed workouts keep their original results.");
+  let original: Workout | null = null;
+  if (request.data?.kind === "workoutCorrection") {
+    const correction = request.data;
+    if (
+      current?.data.kind === "workoutCorrection" &&
+      current.data.workoutId !== correction.workoutId
+    )
+      throw new Error("A correction stays linked to its original workout.");
+    const [originalRow] =
+      await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${correction.workoutId} AND deleted=false`;
+    const target = originalRow ? entry(originalRow).data : null;
+    if (target?.kind !== "workout" || !target.finishedAt)
+      throw new Error("Choose one of your completed workouts to correct.");
+    original = target;
+    const problem = correction.replacement
+      ? correctionProblem(target, correction.replacement)
+      : null;
+    if (problem) throw new Error(problem);
+    const [other] =
+      await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workoutCorrection' AND data->>'workoutId'=${correction.workoutId} AND id<>${request.id}`;
+    if (other) return { status: "conflict", current: entry(other) };
+  }
+  // Completed activity cannot be dated after the owner's current day.
+  // Records keep a date they already had, so existing drafts stay editable.
+  const activity =
+    request.data?.kind === "workoutCorrection"
+      ? request.data.replacement
+      : request.data?.kind === "workout" || request.data?.kind === "run"
+        ? request.data
         : null;
-      if (problem) throw new Error(problem);
-      const [other] =
-        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workoutCorrection' AND data->>'workoutId'=${correction.workoutId} AND id<>${request.id}`;
-      if (other) return { status: "conflict", current: entry(other) };
-    }
-    // Completed activity cannot be dated after the owner's current day.
-    // Records keep a date they already had, so existing drafts stay editable.
-    const activity =
-      request.data?.kind === "workoutCorrection"
-        ? request.data.replacement
-        : request.data?.kind === "workout" || request.data?.kind === "run"
-          ? request.data
-          : null;
-    const previousDate =
-      original?.date ??
-      (current?.data.kind === "workout" || current?.data.kind === "run"
-        ? current.data.date
-        : null);
-    if (activity && activity.date !== previousDate) {
-      const [configuration] =
-        await sql`SELECT data FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
-      const timezone = configuration
-        ? settingsSchema.parse(configuration.data).timezone
-        : "UTC";
-      if (activity.date > localDate(timezone))
-        throw new Error(
-          "Record training on today or an earlier date. Future plans are for previewing.",
-        );
-    }
-    const nextRevision = revision + 1;
-    const data = request.data;
-    const [saved] =
-      await sql`INSERT INTO fitness_records(owner_id,id,revision,data,deleted) VALUES(${owner},${request.id},${nextRevision},${sql.json(data)},${data === null}) ON CONFLICT(owner_id,id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data,deleted=EXCLUDED.deleted,updated_at=now() RETURNING id,revision,data,updated_at`;
-    const result: SaveResult = {
-      status: "saved",
-      record: data ? entry(saved) : null,
-    };
-    await sql`INSERT INTO fitness_operations(owner_id,id,fingerprint,result) VALUES(${owner},${request.operationId},${fingerprint},${sql.json(result)})`;
-    return result;
-  });
+  const previousDate =
+    original?.date ??
+    (current?.data.kind === "workout" || current?.data.kind === "run"
+      ? current.data.date
+      : null);
+  if (activity && activity.date !== previousDate) {
+    const [configuration] =
+      await sql`SELECT data FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
+    const timezone = configuration
+      ? settingsSchema.parse(configuration.data).timezone
+      : "UTC";
+    if (activity.date > localDate(timezone))
+      throw new Error(
+        "Record training on today or an earlier date. Future plans are for previewing.",
+      );
+  }
+  const nextRevision = revision + 1;
+  const data = request.data;
+  const [saved] =
+    await sql`INSERT INTO fitness_records(owner_id,id,revision,data,deleted) VALUES(${owner},${request.id},${nextRevision},${sql.json(data)},${data === null}) ON CONFLICT(owner_id,id) DO UPDATE SET revision=EXCLUDED.revision,data=EXCLUDED.data,deleted=EXCLUDED.deleted,updated_at=now() RETURNING id,revision,data,updated_at`;
+  const result: SaveResult = {
+    status: "saved",
+    record: data ? entry(saved) : null,
+  };
+  await sql`INSERT INTO fitness_operations(owner_id,id,fingerprint,result) VALUES(${owner},${request.operationId},${fingerprint},${sql.json(result)})`;
+  return result;
 }
