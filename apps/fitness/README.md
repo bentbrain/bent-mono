@@ -54,13 +54,14 @@ Dates use the account timezone, and a tool without a date uses today. Read resul
 
 To connect an assistant, add `https://fitness.bent.build/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. OAuth tokens must name the MCP endpoint as their audience. Browser session cookies do not authorize MCP requests.
 
-Access follows the token's scopes. `fitness:read` lists the read tools and `fitness:write` lists the tools that add, change and remove entries. A token with neither gets `403 insufficient_scope`. An API key with scopes follows the same rules. An API key without scopes, such as one created under Manage account, has read and write access.
+Access follows the token's scopes. `fitness:read` lists the read tools and `fitness:write` lists the tools that add, change and remove entries. Write results include the day's totals and replaced values only when the token also has `fitness:read`; otherwise they confirm what the call saved. A token with neither scope gets `403 insufficient_scope`. An API key with scopes follows the same rules. An API key without scopes, such as one created under Manage account, has read and write access.
 
 `FITNESS_MCP_URL` sets the MCP endpoint and defaults to `https://fitness.bent.build/api/mcp`. Set it to the local address in development, for example `http://127.0.0.1:3025/api/mcp`. Configure each Clerk instance with these settings:
 
 - Add the MCP endpoint under Agents → MCP servers. Clerk then issues tokens with that audience.
-- Create the `fitness:read` and `fitness:write` custom scopes under OAuth applications → Scopes, with consent descriptions that say they read, and add, change or remove, food, bodyweight and run entries.
+- Create the `fitness:read` and `fitness:write` custom scopes under OAuth applications → Scopes. Describe `fitness:read` on the consent screen as reading meals, saved meals, bodyweight, runs, planned training, workouts with their sets and notes, and your goal and calorie and protein targets. Describe `fitness:write` as adding, changing and removing meals, bodyweight and runs.
 - Turn on dynamic client registration for OAuth applications and allow both scopes for dynamically registered clients, so assistants can register and request access.
+- Add both scopes to the OAuth default scopes. Clerk uses the default scopes when a client requests none.
 - Turn on API keys to create keys for scripts.
 
 `/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.

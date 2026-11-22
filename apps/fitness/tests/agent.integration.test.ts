@@ -474,3 +474,78 @@ test.skipIf(!configured)(
     ).toContain("up to 62 days");
   },
 );
+
+test.skipIf(!configured)(
+  "write-only connections receive receipts without other entries",
+  async () => {
+    const owner = await connect(ownerB);
+    const date = addDays(today, -5);
+    await owner.call(
+      "fitness_add_meals",
+      {
+        requestId: key(),
+        date,
+        meals: [{ name: "Private dinner", calories: 800, protein: 40 }],
+      },
+      added,
+    );
+    await owner.call(
+      "fitness_log_weight",
+      { requestId: key(), date, weight: 70, unit: "kg" },
+      logged,
+    );
+    const writer = await connect(ownerB, { read: false, write: true });
+    const request = {
+      requestId: key(),
+      date,
+      meals: [{ name: "Snack", calories: 150, protein: 5 }],
+    };
+    const receipts = [
+      await writer.call("fitness_add_meals", request, z.unknown()),
+      await writer.call("fitness_add_meals", request, z.unknown()),
+    ];
+    for (const receipt of receipts) {
+      expect(JSON.stringify(receipt)).not.toContain("Private dinner");
+      expect(receipt).toEqual({
+        date,
+        added: [expect.objectContaining({ name: "Snack", calories: 150 })],
+      });
+    }
+    const snack = z.object({ added: z.array(entry) }).parse(receipts[0])
+      .added[0];
+    if (!snack) throw new Error("The snack was not added.");
+    const edit = await writer.call(
+      "fitness_update_meal",
+      { requestId: key(), ...snack, protein: 6 },
+      z.unknown(),
+    );
+    expect(edit).toEqual({ updated: { id: snack.id, revision: 2 } });
+    const weigh = await writer.call(
+      "fitness_log_weight",
+      { requestId: key(), date, weight: 71, unit: "kg" },
+      z.unknown(),
+    );
+    expect(weigh).toEqual({
+      date,
+      weight: expect.objectContaining({ kg: 71 }),
+    });
+    const removal = await writer.call(
+      "fitness_delete_entries",
+      { requestId: key(), entries: [{ id: snack.id, revision: 2 }] },
+      z.unknown(),
+    );
+    expect(removal).toEqual({ deleted: [{ id: snack.id }] });
+
+    // A full result stored for a reader stays hidden from a writer's retry.
+    const shared = {
+      requestId: key(),
+      date,
+      meals: [{ name: "Tea", calories: 5, protein: 0 }],
+    };
+    const full = await owner.call("fitness_add_meals", shared, added);
+    expect(full.food.meals.map((m) => m.name)).toContain("Private dinner");
+    const replay = await writer.call("fitness_add_meals", shared, z.unknown());
+    expect(JSON.stringify(replay)).not.toContain("Private dinner");
+    expect(replay).toEqual({ date, added: full.added });
+  },
+);

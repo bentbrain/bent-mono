@@ -4,7 +4,7 @@
  * runs once per request ID, in one transaction with its result.
  */
 import { createHash } from "node:crypto";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   addDays,
   displayLoad,
@@ -22,6 +22,7 @@ import {
 import type { Entity, Mutation, RecordEntry, Settings } from "../domain";
 import { BatchConflict, changeOnce, loadRecords } from "./store";
 import type { AccountChange } from "./store";
+import type { AgentAccess } from "./auth";
 
 export class AgentError extends Error {}
 
@@ -264,25 +265,31 @@ function receiptId(requestId: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+const outcome = z.object({
+  full: z.record(z.string(), z.json()),
+  receipt: z.record(z.string(), z.json()),
+});
 /**
  * Runs a write tool once per request ID. A retry with the same input
- * returns the first result instead of saving again.
+ * returns the first result instead of saving again. The full result includes
+ * the day's other entries and previous values, so only connections with read
+ * access see it. Others get a receipt of what they submitted.
  */
 async function once(
   owner: string,
+  access: AgentAccess,
   tool: string,
   { requestId, ...input }: { requestId: string },
-  work: (change: AccountChange) => Promise<object>,
+  work: (change: AccountChange) => Promise<{ full: object; receipt: object }>,
 ) {
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ tool, input }))
     .digest("hex");
   try {
-    return await changeOnce(
-      owner,
-      { id: receiptId(requestId), fingerprint },
-      work,
+    const result = outcome.parse(
+      await changeOnce(owner, { id: receiptId(requestId), fingerprint }, work),
     );
+    return access.read ? result.full : result.receipt;
   } catch (error) {
     if (error instanceof BatchConflict)
       throw new AgentError(
@@ -311,13 +318,14 @@ function find(
 
 export function addMeals(
   owner: string,
+  access: AgentAccess,
   input: {
     requestId: string;
     date?: string;
     meals: { name: string; calories: number; protein: number }[];
   },
 ) {
-  return once(owner, "add_meals", input, async (change) => {
+  return once(owner, access, "add_meals", input, async (change) => {
     const date = input.date ?? account(await change.records()).today;
     const added = [];
     for (const meal of input.meals) {
@@ -334,12 +342,16 @@ export function addMeals(
       );
       if (saved) added.push(mealView(saved));
     }
-    return { date, added, food: food(account(await change.records()), date) };
+    return {
+      full: { date, added, food: food(account(await change.records()), date) },
+      receipt: { date, added },
+    };
   });
 }
 
 export function updateMeal(
   owner: string,
+  access: AgentAccess,
   input: {
     requestId: string;
     id: string;
@@ -350,7 +362,7 @@ export function updateMeal(
     date?: string;
   },
 ) {
-  return once(owner, "update_meal", input, async (change) => {
+  return once(owner, access, "update_meal", input, async (change) => {
     const record = find(account(await change.records()), input, ["meal"]);
     if (record.data.kind !== "meal") throw new Error("Expected a meal.");
     const data = parsed(mealSchema, {
@@ -362,17 +374,23 @@ export function updateMeal(
     });
     const saved = await change.save(changed(record, input.revision, data));
     return {
-      updated: saved ? mealView(saved) : null,
-      food: food(account(await change.records()), data.date),
+      full: {
+        updated: saved ? mealView(saved) : null,
+        food: food(account(await change.records()), data.date),
+      },
+      receipt: {
+        updated: saved ? { id: saved.id, revision: saved.revision } : null,
+      },
     };
   });
 }
 
 export function deleteEntries(
   owner: string,
+  access: AgentAccess,
   input: { requestId: string; entries: { id: string; revision: number }[] },
 ) {
-  return once(owner, "delete_entries", input, async (change) => {
+  return once(owner, access, "delete_entries", input, async (change) => {
     const a = account(await change.records());
     if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
       throw new AgentError("List each entry once.");
@@ -382,17 +400,21 @@ export function deleteEntries(
     for (const record of records)
       await change.save(changed(record, record.revision, null));
     return {
-      deleted: records.map((r) => ({
-        id: r.id,
-        kind: r.data.kind,
-        date: "date" in r.data ? r.data.date : null,
-      })),
+      full: {
+        deleted: records.map((r) => ({
+          id: r.id,
+          kind: r.data.kind,
+          date: "date" in r.data ? r.data.date : null,
+        })),
+      },
+      receipt: { deleted: records.map((r) => ({ id: r.id })) },
     };
   });
 }
 
 export function logWeight(
   owner: string,
+  access: AgentAccess,
   input: {
     requestId: string;
     date?: string;
@@ -400,7 +422,7 @@ export function logWeight(
     unit?: "kg" | "lb";
   },
 ) {
-  return once(owner, "log_weight", input, async (change) => {
+  return once(owner, access, "log_weight", input, async (change) => {
     const a = account(await change.records());
     const date = input.date ?? a.today;
     const unit = input.unit ?? a.settings?.units ?? "kg";
@@ -412,20 +434,29 @@ export function logWeight(
     const existing = a.records.find(
       (r) => r.data.kind === "weight" && r.data.date === date,
     );
-    await change.save(
+    const saved = await change.save(
       existing ? changed(existing, existing.revision, data) : created(data),
     );
     return {
-      date,
-      replacedKg:
-        existing?.data.kind === "weight" ? round(existing.data.kg) : null,
-      weight: weightOn(account(await change.records()), date),
+      full: {
+        date,
+        replacedKg:
+          existing?.data.kind === "weight" ? round(existing.data.kg) : null,
+        weight: weightOn(account(await change.records()), date),
+      },
+      receipt: {
+        date,
+        weight: saved
+          ? { id: saved.id, revision: saved.revision, kg: round(data.kg) }
+          : null,
+      },
     };
   });
 }
 
 export function logRun(
   owner: string,
+  access: AgentAccess,
   input: {
     requestId: string;
     date?: string;
@@ -434,7 +465,7 @@ export function logRun(
     notes?: string;
   },
 ) {
-  return once(owner, "log_run", input, async (change) => {
+  return once(owner, access, "log_run", input, async (change) => {
     const date = input.date ?? account(await change.records()).today;
     const data = parsed(runSchema, {
       kind: "run",
@@ -444,9 +475,10 @@ export function logRun(
       notes: input.notes ?? "",
     });
     const saved = await change.save(created(data));
-    return {
+    const result = {
       date,
       run: saved ? { id: saved.id, revision: saved.revision, ...data } : null,
     };
+    return { full: result, receipt: result };
   });
 }

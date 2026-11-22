@@ -149,7 +149,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Add meals",
         description:
-          "Logs one or more food entries to a day in a single change. Returns the new entries and the day's updated totals.",
+          "Logs one or more food entries to a day in a single change. Returns the new entries, and with read access the day's updated totals.",
         inputSchema: {
           requestId,
           date: date.optional(),
@@ -157,7 +157,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         },
         annotations: add,
       },
-      (input) => run(() => addMeals(owner, input)),
+      (input) => run(() => addMeals(owner, access, input)),
     );
 
     server.registerTool(
@@ -177,7 +177,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         },
         annotations: { ...replace, idempotentHint: true },
       },
-      (input) => run(() => updateMeal(owner, input)),
+      (input) => run(() => updateMeal(owner, access, input)),
     );
 
     server.registerTool(
@@ -196,7 +196,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         },
         annotations: { ...replace, idempotentHint: true },
       },
-      (input) => run(() => deleteEntries(owner, input)),
+      (input) => run(() => deleteEntries(owner, access, input)),
     );
 
     server.registerTool(
@@ -216,7 +216,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         },
         annotations: { ...replace, idempotentHint: true },
       },
-      (input) => run(() => logWeight(owner, input)),
+      (input) => run(() => logWeight(owner, access, input)),
     );
 
     server.registerTool(
@@ -233,7 +233,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         },
         annotations: add,
       },
-      (input) => run(() => logRun(owner, input)),
+      (input) => run(() => logRun(owner, access, input)),
     );
   }
 
