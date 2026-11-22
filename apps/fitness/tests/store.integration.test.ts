@@ -34,7 +34,6 @@ afterAll(async () => {
     await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
     await sql`DELETE FROM fitness_accounts WHERE owner_id=${owner}`;
   }
-  await sql.end();
 });
 test.skipIf(!configured)(
   "real Postgres isolates owners, deduplicates retries, rejects stale writes and preserves deletion revisions",

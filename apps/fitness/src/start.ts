@@ -10,12 +10,23 @@ const privateHeaders = createMiddleware().server(async ({ next }) => {
   setResponseHeader("X-Content-Type-Options", "nosniff");
   return next();
 });
+const clerk = clerkMiddleware();
+/**
+ * Signs in browser sessions. The MCP endpoint authenticates its own bearer
+ * tokens against its audience, so it skips the session check.
+ */
+const sessions = createMiddleware().server((context) => {
+  const server = clerk.options.server;
+  return new URL(context.request.url).pathname === "/api/mcp" || !server
+    ? context.next()
+    : server(context);
+});
 export const startInstance = createStart(() => ({
   requestMiddleware: [
     privateHeaders,
     createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === "serverFn" }),
     ...(process.env.CLERK_SECRET_KEY && process.env.VITE_CLERK_PUBLISHABLE_KEY
-      ? [clerkMiddleware()]
+      ? [sessions]
       : []),
   ],
 }));
