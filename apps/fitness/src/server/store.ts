@@ -11,7 +11,7 @@ import {
 } from "../domain";
 import type { Mutation, RecordEntry, SaveResult, Workout } from "../domain";
 import { z } from "zod";
-import type { TransactionSql } from "postgres";
+import type { Sql, TransactionSql } from "postgres";
 const rowSchema = z.object({
   id: z.string(),
   revision: z.number(),
@@ -22,9 +22,12 @@ function entry(row: unknown) {
   const r = rowSchema.parse(row);
   return recordSchema.parse({ ...r, updatedAt: r.updated_at.toISOString() });
 }
-export async function loadRecords(owner: string): Promise<RecordEntry[]> {
+export async function loadRecords(
+  owner: string,
+  sql: Sql | TransactionSql = database(),
+): Promise<RecordEntry[]> {
   const rows =
-    await database()`SELECT id, revision, data, updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false ORDER BY updated_at DESC`;
+    await sql`SELECT id, revision, data, updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false ORDER BY updated_at DESC`;
   return rows.map(entry);
 }
 export async function saveRecord(
@@ -37,35 +40,64 @@ export async function saveRecord(
     return saveWithin(sql, owner, request);
   });
 }
+/** A record rule rejected the change. The message is safe to show. */
+export class StoreRuleError extends Error {}
 export class BatchConflict extends Error {
-  constructor(
-    readonly index: number,
-    readonly current: RecordEntry | null,
-  ) {
+  constructor(readonly current: RecordEntry | null) {
     super("A record changed before this change could be saved.");
   }
 }
+export type AccountChange = {
+  records(): Promise<RecordEntry[]>;
+  /** Saves a change, or throws BatchConflict to roll back the request. */
+  save(input: Mutation): Promise<RecordEntry | null>;
+};
 /**
- * Saves several changes in one transaction. A conflict or invalid change
- * rolls back the whole batch, so a retry never repeats part of it.
+ * Runs one request under the account lock and stores its result with its
+ * changes. Repeating the request ID with the same fingerprint returns the
+ * first result; a different fingerprint fails. An error rolls back every
+ * change and the receipt together.
  */
-export async function saveRecords(
+export async function changeOnce(
   owner: string,
-  inputs: Mutation[],
-): Promise<RecordEntry[]> {
-  const requests = inputs.map((input) => mutationSchema.parse(input));
+  receipt: { id: string; fingerprint: string },
+  work: (change: AccountChange) => Promise<object>,
+): Promise<z.infer<typeof storedResult>> {
   return database().begin(async (sql) => {
     await lockAccount(sql, owner);
-    const saved: RecordEntry[] = [];
-    for (const [index, request] of requests.entries()) {
-      const result = await saveWithin(sql, owner, request);
-      if (result.status === "conflict")
-        throw new BatchConflict(index, result.current);
-      if (result.record) saved.push(result.record);
+    const [previous] =
+      await sql`SELECT fingerprint, result FROM fitness_operations WHERE owner_id=${owner} AND id=${receipt.id}`;
+    if (previous) {
+      if (previous.fingerprint !== receipt.fingerprint)
+        throw new StoreRuleError(
+          "This request ID was already used for a different change. Use a new request ID.",
+        );
+      return storedResult.parse(previous.result);
     }
-    return saved;
+    const result = storedResult.parse(
+      JSON.parse(
+        JSON.stringify(
+          await work({
+            records: () => loadRecords(owner, sql),
+            async save(input) {
+              const outcome = await saveWithin(
+                sql,
+                owner,
+                mutationSchema.parse(input),
+              );
+              if (outcome.status === "conflict")
+                throw new BatchConflict(outcome.current);
+              return outcome.record;
+            },
+          }),
+        ),
+      ),
+    );
+    await sql`INSERT INTO fitness_operations(owner_id,id,fingerprint,result) VALUES(${owner},${receipt.id},${receipt.fingerprint},${sql.json(result)})`;
+    return result;
   });
 }
+const storedResult = z.record(z.string(), z.json());
 async function lockAccount(sql: TransactionSql, owner: string) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
   // All account writes share this lock. Receipts and record updates commit together.
@@ -83,7 +115,7 @@ async function saveWithin(
     await sql`SELECT fingerprint, result FROM fitness_operations WHERE owner_id=${owner} AND id=${request.operationId}`;
   if (receipt) {
     if (receipt.fingerprint !== fingerprint)
-      throw new Error(
+      throw new StoreRuleError(
         "This save request ID was already used. Reload before retrying.",
       );
     return resultSchema.parse(receipt.result);
@@ -104,13 +136,13 @@ async function saveWithin(
     if (active) return { status: "conflict", current: entry(active) };
   }
   if (request.data?.kind === "settings" && request.id !== settingsId)
-    throw new Error("Invalid settings record.");
+    throw new StoreRuleError("Invalid settings record.");
   if (request.id === settingsId && request.data?.kind !== "settings")
-    throw new Error("Settings must remain available.");
+    throw new StoreRuleError("Settings must remain available.");
   if (current && request.data && current.data.kind !== request.data.kind)
-    throw new Error("Record type cannot change.");
+    throw new StoreRuleError("Record type cannot change.");
   if (current?.data.kind === "workout" && current.data.finishedAt)
-    throw new Error("Completed workouts keep their original results.");
+    throw new StoreRuleError("Completed workouts keep their original results.");
   let original: Workout | null = null;
   if (request.data?.kind === "workoutCorrection") {
     const correction = request.data;
@@ -118,17 +150,21 @@ async function saveWithin(
       current?.data.kind === "workoutCorrection" &&
       current.data.workoutId !== correction.workoutId
     )
-      throw new Error("A correction stays linked to its original workout.");
+      throw new StoreRuleError(
+        "A correction stays linked to its original workout.",
+      );
     const [originalRow] =
       await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${correction.workoutId} AND deleted=false`;
     const target = originalRow ? entry(originalRow).data : null;
     if (target?.kind !== "workout" || !target.finishedAt)
-      throw new Error("Choose one of your completed workouts to correct.");
+      throw new StoreRuleError(
+        "Choose one of your completed workouts to correct.",
+      );
     original = target;
     const problem = correction.replacement
       ? correctionProblem(target, correction.replacement)
       : null;
-    if (problem) throw new Error(problem);
+    if (problem) throw new StoreRuleError(problem);
     const [other] =
       await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND deleted=false AND data->>'kind'='workoutCorrection' AND data->>'workoutId'=${correction.workoutId} AND id<>${request.id}`;
     if (other) return { status: "conflict", current: entry(other) };
@@ -153,7 +189,7 @@ async function saveWithin(
       ? settingsSchema.parse(configuration.data).timezone
       : "UTC";
     if (activity.date > localDate(timezone))
-      throw new Error(
+      throw new StoreRuleError(
         "Record training on today or an earlier date. Future plans are for previewing.",
       );
   }

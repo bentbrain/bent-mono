@@ -1,7 +1,10 @@
 /**
  * Account operations for connected agents. Every change goes through the
- * same validation, revision checks and request receipts as the app.
+ * same validation, revision checks and record rules as the app. Each write
+ * runs once per request ID, in one transaction with its result.
  */
+import { createHash } from "node:crypto";
+import type { z } from "zod";
 import {
   addDays,
   displayLoad,
@@ -17,12 +20,11 @@ import {
   weightSchema,
 } from "../domain";
 import type { Entity, Mutation, RecordEntry, Settings } from "../domain";
-import type { z } from "zod";
-import { BatchConflict, loadRecords, saveRecords } from "./store";
+import { BatchConflict, changeOnce, loadRecords } from "./store";
+import type { AccountChange } from "./store";
 
 export class AgentError extends Error {}
 
-type Meal = Extract<Entity, { kind: "meal" }>;
 type Account = {
   records: RecordEntry[];
   settings: Settings | undefined;
@@ -30,8 +32,7 @@ type Account = {
   today: string;
 };
 
-async function account(owner: string): Promise<Account> {
-  const records = await loadRecords(owner);
+function account(records: RecordEntry[]): Account {
   const stored = records.find((r) => r.id === settingsId)?.data;
   const settings =
     stored?.kind === "settings" ? settingsSchema.parse(stored) : undefined;
@@ -44,12 +45,13 @@ function round(value: number) {
 }
 
 function mealView(record: RecordEntry) {
-  const data = record.data as Meal;
+  if (record.data.kind !== "meal") throw new Error("Expected a meal.");
   return {
     id: record.id,
-    name: data.name,
-    calories: data.calories,
-    protein: data.protein,
+    revision: record.revision,
+    name: record.data.name,
+    calories: record.data.calories,
+    protein: record.data.protein,
   };
 }
 
@@ -80,6 +82,7 @@ function weightOn(account: Account, date: string) {
   const units = account.settings?.units ?? "kg";
   return {
     id: record.id,
+    revision: record.revision,
     kg: round(record.data.kg),
     display: `${displayLoad(record.data.kg, units)} ${units}`,
   };
@@ -118,6 +121,7 @@ function training(account: Account, date: string) {
       ? [
           {
             id: r.id,
+            revision: r.revision,
             minutes: r.data.minutes,
             distanceKm: r.data.distanceKm,
             notes: r.data.notes,
@@ -143,10 +147,6 @@ function plan(account: Account, date: string) {
   };
 }
 
-function dateOrToday(account: Account, date: string | undefined) {
-  return date ?? account.today;
-}
-
 function summary(account: Account) {
   return {
     today: account.today,
@@ -163,8 +163,8 @@ function summary(account: Account) {
 }
 
 export async function getDay(owner: string, input: { date?: string }) {
-  const a = await account(owner);
-  const date = dateOrToday(a, input.date);
+  const a = account(await loadRecords(owner));
+  const date = input.date ?? a.today;
   return {
     ...summary(a),
     date,
@@ -180,8 +180,8 @@ export async function getHistory(
   owner: string,
   input: { from: string; to?: string },
 ) {
-  const a = await account(owner);
-  const to = dateOrToday(a, input.to);
+  const a = account(await loadRecords(owner));
+  const to = input.to ?? a.today;
   if (input.from > to)
     throw new AgentError("Choose a start date on or before the end date.");
   if (addDays(input.from, historyLimit - 1) < to)
@@ -231,13 +231,12 @@ function created(data: Entity): Mutation {
   };
 }
 
-function changed(record: RecordEntry, data: Entity | null): Mutation {
-  return {
-    operationId: crypto.randomUUID(),
-    id: record.id,
-    revision: record.revision,
-    data,
-  };
+function changed(
+  record: RecordEntry,
+  revision: number,
+  data: Entity | null,
+): Mutation {
+  return { operationId: crypto.randomUUID(), id: record.id, revision, data };
 }
 
 function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -251,142 +250,197 @@ function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
   );
 }
 
-async function commit(owner: string, changes: Mutation[]) {
+/** Derives the stored receipt ID from the caller's request ID. */
+function receiptId(requestId: string) {
+  const hex = createHash("sha256")
+    .update("fitness-agent:" + requestId)
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Runs a write tool once per request ID. A retry with the same input
+ * returns the first result instead of saving again.
+ */
+async function once(
+  owner: string,
+  tool: string,
+  { requestId, ...input }: { requestId: string },
+  work: (change: AccountChange) => Promise<object>,
+) {
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({ tool, input }))
+    .digest("hex");
   try {
-    return await saveRecords(owner, changes);
+    return await changeOnce(
+      owner,
+      { id: receiptId(requestId), fingerprint },
+      work,
+    );
   } catch (error) {
     if (error instanceof BatchConflict)
       throw new AgentError(
-        "An entry changed while saving. Read the day again and retry.",
+        "An entry changed while saving. Read the day again and retry with a new request ID.",
       );
     throw error;
   }
 }
 
-export async function addMeals(
-  owner: string,
-  input: {
-    date?: string;
-    meals: { name: string; calories: number; protein: number }[];
-  },
+function find(
+  account: Account,
+  entry: { id: string; revision: number },
+  kinds: Entity["kind"][],
 ) {
-  const a = await account(owner);
-  const date = dateOrToday(a, input.date);
-  const changes = input.meals.map((meal) =>
-    created(
-      parsed(mealSchema, {
-        kind: "meal",
-        date,
-        name: meal.name,
-        calories: meal.calories,
-        protein: meal.protein,
-      }),
-    ),
-  );
-  const saved = await commit(owner, changes);
-  const after = await account(owner);
-  return {
-    date,
-    added: saved.map(mealView),
-    food: food(after, date),
-  };
-}
-
-function find(account: Account, id: string, kinds: Entity["kind"][]) {
-  const record = account.records.find((r) => r.id === id);
+  const record = account.records.find((r) => r.id === entry.id);
   if (!record || !kinds.includes(record.data.kind))
     throw new AgentError(
-      `No ${kinds.join(", ")} entry has that ID. Read the day to find current IDs.`,
+      `No ${kinds.join(", ")} entry has the ID ${entry.id}. Read the day to find current IDs.`,
+    );
+  if (record.revision !== entry.revision)
+    throw new AgentError(
+      `Entry ${entry.id} changed after you read it. Read the day again before changing it.`,
     );
   return record;
 }
 
-export async function updateMeal(
+export function addMeals(
   owner: string,
   input: {
+    requestId: string;
+    date?: string;
+    meals: { name: string; calories: number; protein: number }[];
+  },
+) {
+  return once(owner, "add_meals", input, async (change) => {
+    const date = input.date ?? account(await change.records()).today;
+    const added = [];
+    for (const meal of input.meals) {
+      const saved = await change.save(
+        created(
+          parsed(mealSchema, {
+            kind: "meal",
+            date,
+            name: meal.name,
+            calories: meal.calories,
+            protein: meal.protein,
+          }),
+        ),
+      );
+      if (saved) added.push(mealView(saved));
+    }
+    return { date, added, food: food(account(await change.records()), date) };
+  });
+}
+
+export function updateMeal(
+  owner: string,
+  input: {
+    requestId: string;
     id: string;
+    revision: number;
     name?: string;
     calories?: number;
     protein?: number;
     date?: string;
   },
 ) {
-  const a = await account(owner);
-  const record = find(a, input.id, ["meal"]);
-  const before = record.data as Meal;
-  const data = parsed(mealSchema, {
-    ...before,
-    ...(input.name === undefined ? {} : { name: input.name }),
-    ...(input.calories === undefined ? {} : { calories: input.calories }),
-    ...(input.protein === undefined ? {} : { protein: input.protein }),
-    ...(input.date === undefined ? {} : { date: input.date }),
+  return once(owner, "update_meal", input, async (change) => {
+    const record = find(account(await change.records()), input, ["meal"]);
+    if (record.data.kind !== "meal") throw new Error("Expected a meal.");
+    const data = parsed(mealSchema, {
+      ...record.data,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.calories === undefined ? {} : { calories: input.calories }),
+      ...(input.protein === undefined ? {} : { protein: input.protein }),
+      ...(input.date === undefined ? {} : { date: input.date }),
+    });
+    const saved = await change.save(changed(record, input.revision, data));
+    return {
+      updated: saved ? mealView(saved) : null,
+      food: food(account(await change.records()), data.date),
+    };
   });
-  const [saved] = await commit(owner, [changed(record, data)]);
-  const after = await account(owner);
-  return {
-    updated: saved ? mealView(saved) : null,
-    food: food(after, data.date),
-  };
 }
 
-export async function deleteEntries(owner: string, input: { ids: string[] }) {
-  const a = await account(owner);
-  const ids = [...new Set(input.ids)];
-  const records = ids.map((id) => find(a, id, ["meal", "run", "weight"]));
-  await commit(
-    owner,
-    records.map((record) => changed(record, null)),
-  );
-  return {
-    deleted: records.map((r) => ({
-      id: r.id,
-      kind: r.data.kind,
-      date: "date" in r.data ? r.data.date : null,
-    })),
-  };
-}
-
-export async function logWeight(
+export function deleteEntries(
   owner: string,
-  input: { date?: string; weight: number; unit?: "kg" | "lb" },
+  input: { requestId: string; entries: { id: string; revision: number }[] },
 ) {
-  const a = await account(owner);
-  const date = dateOrToday(a, input.date);
-  const unit = input.unit ?? a.settings?.units ?? "kg";
-  const data = parsed(weightSchema, {
-    kind: "weight",
-    date,
-    kg: toKg(input.weight, unit),
+  return once(owner, "delete_entries", input, async (change) => {
+    const a = account(await change.records());
+    if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
+      throw new AgentError("List each entry once.");
+    const records = input.entries.map((entry) =>
+      find(a, entry, ["meal", "run", "weight"]),
+    );
+    for (const record of records)
+      await change.save(changed(record, record.revision, null));
+    return {
+      deleted: records.map((r) => ({
+        id: r.id,
+        kind: r.data.kind,
+        date: "date" in r.data ? r.data.date : null,
+      })),
+    };
   });
-  const existing = a.records.find(
-    (r) => r.data.kind === "weight" && r.data.date === date,
-  );
-  await commit(owner, [existing ? changed(existing, data) : created(data)]);
-  return {
-    date,
-    replaced: Boolean(existing),
-    weight: weightOn(await account(owner), date),
-  };
 }
 
-export async function logRun(
+export function logWeight(
   owner: string,
   input: {
+    requestId: string;
+    date?: string;
+    weight: number;
+    unit?: "kg" | "lb";
+  },
+) {
+  return once(owner, "log_weight", input, async (change) => {
+    const a = account(await change.records());
+    const date = input.date ?? a.today;
+    const unit = input.unit ?? a.settings?.units ?? "kg";
+    const data = parsed(weightSchema, {
+      kind: "weight",
+      date,
+      kg: toKg(input.weight, unit),
+    });
+    const existing = a.records.find(
+      (r) => r.data.kind === "weight" && r.data.date === date,
+    );
+    await change.save(
+      existing ? changed(existing, existing.revision, data) : created(data),
+    );
+    return {
+      date,
+      replacedKg:
+        existing?.data.kind === "weight" ? round(existing.data.kg) : null,
+      weight: weightOn(account(await change.records()), date),
+    };
+  });
+}
+
+export function logRun(
+  owner: string,
+  input: {
+    requestId: string;
     date?: string;
     minutes: number;
     distanceKm: number;
     notes?: string;
   },
 ) {
-  const a = await account(owner);
-  const date = dateOrToday(a, input.date);
-  const data = parsed(runSchema, {
-    kind: "run",
-    date,
-    minutes: input.minutes,
-    distanceKm: input.distanceKm,
-    notes: input.notes ?? "",
+  return once(owner, "log_run", input, async (change) => {
+    const date = input.date ?? account(await change.records()).today;
+    const data = parsed(runSchema, {
+      kind: "run",
+      date,
+      minutes: input.minutes,
+      distanceKm: input.distanceKm,
+      notes: input.notes ?? "",
+    });
+    const saved = await change.save(created(data));
+    return {
+      date,
+      run: saved ? { id: saved.id, revision: saved.revision, ...data } : null,
+    };
   });
-  const [saved] = await commit(owner, [created(data)]);
-  return { date, run: { id: saved?.id, ...data } };
 }

@@ -1,10 +1,8 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { AgentAuthError, requireAgentOwner } from "./auth";
-import { authorizationServer } from "./config";
+import { authorizationServer, mcpResource } from "./config";
 import { createFitnessMcpServer } from "./mcp";
 
-const mcpPath = "/api/mcp";
-const metadataPath = "/.well-known/oauth-protected-resource";
 /** Browser origins allowed to call the endpoint. Server-side clients send no Origin. */
 const clientOrigins = new Set([
   "https://chatgpt.com",
@@ -22,14 +20,14 @@ function json(value: unknown, status = 200, headers: HeadersInit = {}) {
 }
 
 /** OAuth protected resource metadata (RFC 9728) for the MCP endpoint. */
-export function resourceMetadata(request: Request) {
+export function resourceMetadata() {
   const issuer = authorizationServer();
-  if (!issuer)
+  const resource = mcpResource();
+  if (!issuer || !resource)
     return json({ error: "Account services need configuration." }, 503);
-  const origin = new URL(request.url).origin;
   return json(
     {
-      resource: origin + mcpPath,
+      resource,
       resource_name: "Fitness",
       authorization_servers: [issuer],
       bearer_methods_supported: ["header"],
@@ -56,10 +54,13 @@ export async function authorizationMetadata() {
   });
 }
 
-function unauthorized(request: Request, description: string) {
-  const metadata = new URL(request.url).origin + metadataPath + mcpPath;
+function unauthorized(description: string) {
+  const resource = mcpResource();
+  const metadata = resource
+    ? `, resource_metadata="${new URL(resource).origin}/.well-known/oauth-protected-resource/api/mcp"`
+    : "";
   return json({ error: "invalid_token", error_description: description }, 401, {
-    "WWW-Authenticate": `Bearer resource_metadata="${metadata}", error="invalid_token", error_description="${description}"`,
+    "WWW-Authenticate": `Bearer error="invalid_token", error_description="${description}"${metadata}`,
   });
 }
 
@@ -83,9 +84,10 @@ function cors(response: Response, origin: string | null) {
 
 function allowedOrigin(request: Request) {
   const origin = request.headers.get("origin");
+  const resource = mcpResource();
   return (
     !origin ||
-    origin === new URL(request.url).origin ||
+    (resource !== null && origin === new URL(resource).origin) ||
     clientOrigins.has(origin)
   );
 }
@@ -106,10 +108,10 @@ export async function handleMcp(request: Request) {
     return json({ error: "This origin is not allowed." }, 403);
   let owner: string;
   try {
-    owner = await requireAgentOwner();
+    owner = await requireAgentOwner(request);
   } catch (error) {
     if (error instanceof AgentAuthError)
-      return cors(unauthorized(request, error.message), origin);
+      return cors(unauthorized(error.message), origin);
     throw error;
   }
   if (request.method !== "POST")

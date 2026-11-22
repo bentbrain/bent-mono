@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
-import { allowedEmails, configurationReady } from "./config";
+import { allowedEmails, configurationReady, mcpResource } from "./config";
 
 export class AgentAuthError extends Error {}
 
@@ -31,17 +31,28 @@ export async function requireOwner() {
 
 /**
  * Authenticates an agent request from its bearer token: a Clerk OAuth access
- * token issued to a connected app, or a Clerk API key owned by the user.
+ * token issued for this MCP endpoint, or a Clerk API key owned by the user.
  * Session cookies are not accepted, so a browser cannot call the agent API
  * on the user's behalf.
  */
-export async function requireAgentOwner() {
-  if (!configurationReady())
+export async function requireAgentOwner(request: Request) {
+  const resource = mcpResource();
+  if (!configurationReady() || !resource)
     throw new AgentAuthError(
       "Account services need configuration. Contact the app owner.",
     );
-  const result = await auth({ acceptsToken: ["oauth_token", "api_key"] });
-  if (!result.isAuthenticated)
+  const state = await clerkClient().authenticateRequest(request, {
+    acceptsToken: ["oauth_token", "api_key"],
+    // Clerk checks OAuth tokens against this audience. API keys have none.
+    audience: resource,
+    publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY,
+    secretKey: process.env.CLERK_SECRET_KEY,
+  });
+  const result = state.toAuth();
+  if (
+    !result?.isAuthenticated ||
+    (result.tokenType !== "oauth_token" && result.tokenType !== "api_key")
+  )
     throw new AgentAuthError("Connect with an invited Fitness account.");
   const userId = result.userId;
   if (!userId?.startsWith("user_"))

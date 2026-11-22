@@ -12,11 +12,25 @@ import {
   logWeight,
   updateMeal,
 } from "./agent";
+import { StoreRuleError } from "./store";
 
 const date = z.iso
   .date()
   .describe("Date as YYYY-MM-DD. Defaults to today in the account timezone.");
 const id = z.string().uuid();
+const revision = z
+  .number()
+  .int()
+  .positive()
+  .describe("The entry's revision from fitness_get_day");
+const requestId = z
+  .string()
+  .trim()
+  .min(8)
+  .max(128)
+  .describe(
+    "A new unique ID for this change, such as a UUID. Send the same ID only when retrying the same call.",
+  );
 const mealInput = {
   name: z
     .string()
@@ -33,27 +47,27 @@ const read = {
   destructiveHint: false,
   openWorldHint: false,
 };
-const write = {
+const add = {
   readOnlyHint: false,
   destructiveHint: false,
   openWorldHint: false,
 };
+const replace = { ...add, destructiveHint: true };
 
-function reply(value: object): CallToolResult {
+function reply(value: Record<string, unknown>): CallToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(value) }],
-    structuredContent: value as Record<string, unknown>,
+    structuredContent: value,
   };
 }
 
-/** Messages from validation and store rules are safe to show; others are not. */
+/** Validation and record rule messages are safe to show; other errors are not. */
 function failure(error: unknown): CallToolResult {
-  const safe =
-    error instanceof AgentError ||
-    (error instanceof Error &&
-      error.constructor === Error &&
-      !("code" in error));
-  if (!safe) console.error("fitness.mcp.tool_failed", error);
+  const safe = error instanceof AgentError || error instanceof StoreRuleError;
+  if (!safe)
+    console.error("fitness.mcp.tool_failed", {
+      name: error instanceof Error ? error.name : typeof error,
+    });
   return {
     isError: true,
     content: [
@@ -67,7 +81,7 @@ function failure(error: unknown): CallToolResult {
   };
 }
 
-function run<T extends object>(task: () => Promise<T>) {
+function run(task: () => Promise<Record<string, unknown>>) {
   return task().then(reply, failure);
 }
 
@@ -79,7 +93,8 @@ export function createFitnessMcpServer(owner: string) {
         "Fitness holds one person's food log, bodyweight, runs and strength training.",
         "Dates are YYYY-MM-DD in the account timezone; omit the date for today.",
         "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals.",
-        "Before editing or removing entries, call fitness_get_day to find their IDs. Do not add a meal that is already logged for that day unless the user ate it again.",
+        "Before editing or removing entries, call fitness_get_day to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again.",
+        "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
         "Weights are stored in kilograms; pass the unit the user gave.",
       ].join(" "),
     },
@@ -131,10 +146,11 @@ export function createFitnessMcpServer(owner: string) {
       description:
         "Logs one or more food entries to a day in a single change. Returns the new entries and the day's updated totals.",
       inputSchema: {
+        requestId,
         date: date.optional(),
         meals: z.array(z.object(mealInput)).min(1).max(30),
       },
-      annotations: write,
+      annotations: add,
     },
     (input) => run(() => addMeals(owner, input)),
   );
@@ -144,15 +160,17 @@ export function createFitnessMcpServer(owner: string) {
     {
       title: "Update a meal",
       description:
-        "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values.",
+        "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values. Fails if the entry changed after it was read.",
       inputSchema: {
+        requestId,
         id: id.describe("Meal ID from fitness_get_day"),
+        revision,
         name: mealInput.name.optional(),
         calories: mealInput.calories.optional(),
         protein: mealInput.protein.optional(),
         date: z.iso.date().optional().describe("Move the entry to this date"),
       },
-      annotations: { ...write, idempotentHint: true },
+      annotations: { ...replace, idempotentHint: true },
     },
     (input) => run(() => updateMeal(owner, input)),
   );
@@ -162,15 +180,16 @@ export function createFitnessMcpServer(owner: string) {
     {
       title: "Delete entries",
       description:
-        "Removes meals, runs or weigh-ins by ID in a single change. Strength workouts are managed in the app.",
+        "Removes meals, runs or weigh-ins in a single change. Fails without removing anything if an entry changed after it was read. Strength workouts are managed in the app.",
       inputSchema: {
-        ids: z
-          .array(id)
+        requestId,
+        entries: z
+          .array(z.object({ id, revision }))
           .min(1)
           .max(30)
-          .describe("Entry IDs from fitness_get_day"),
+          .describe("Entry IDs and revisions from fitness_get_day"),
       },
-      annotations: { ...write, destructiveHint: true, idempotentHint: true },
+      annotations: { ...replace, idempotentHint: true },
     },
     (input) => run(() => deleteEntries(owner, input)),
   );
@@ -182,14 +201,15 @@ export function createFitnessMcpServer(owner: string) {
       description:
         "Records bodyweight for a day. A day keeps one weigh-in, so this replaces any existing value for that date.",
       inputSchema: {
+        requestId,
         date: date.optional(),
-        weight: z.number().positive().max(1100),
+        weight: z.number().positive(),
         unit: z
           .enum(["kg", "lb"])
           .optional()
           .describe("Defaults to the account's units"),
       },
-      annotations: { ...write, idempotentHint: true },
+      annotations: { ...replace, idempotentHint: true },
     },
     (input) => run(() => logWeight(owner, input)),
   );
@@ -200,12 +220,13 @@ export function createFitnessMcpServer(owner: string) {
       title: "Log a run",
       description: "Records a completed run on today or an earlier date.",
       inputSchema: {
+        requestId,
         date: date.optional(),
         minutes: z.number().positive().max(1440),
         distanceKm: z.number().nonnegative().max(500),
         notes: z.string().max(2000).optional(),
       },
-      annotations: write,
+      annotations: add,
     },
     (input) => run(() => logRun(owner, input)),
   );

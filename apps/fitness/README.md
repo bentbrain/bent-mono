@@ -50,14 +50,15 @@ Fitness runs an MCP server at `/api/mcp` on the app's origin. ChatGPT, Claude an
 | `fitness_log_weight`       | Records the day's bodyweight in kg or lb, replacing an earlier value for that date               |
 | `fitness_log_run`          | Records a run on today or an earlier date                                                        |
 
-Dates use the account timezone, and a tool without a date uses today. Each tool call saves its changes in one transaction. If an entry changed in the meantime, the call saves nothing and asks the assistant to read the day again. Strength workouts are read-only here; record and correct them in the app.
+Dates use the account timezone, and a tool without a date uses today. Read results include each meal, run and weigh-in's ID and revision. Updates and deletions send the revision they read, and fail if the entry has changed since. Every change carries a `requestId` chosen by the assistant. Retrying the same call with the same ID returns the first result without saving again, and reusing an ID for different input fails. Each tool call saves its changes and its result in one transaction, so a failed call saves nothing. Strength workouts are read-only here; record and correct them in the app.
 
-To connect an assistant, add `https://<app origin>/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. Browser session cookies do not authorize MCP requests.
+To connect an assistant, add `https://fitness.bent.build/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. OAuth tokens must name the MCP endpoint as their audience. Browser session cookies do not authorize MCP requests.
 
-The Clerk instance needs these settings:
+`FITNESS_MCP_URL` sets the MCP endpoint and defaults to `https://fitness.bent.build/api/mcp`. Set it to the local address in development, for example `http://127.0.0.1:3025/api/mcp`. Configure each Clerk instance with these settings:
 
-- OAuth applications with dynamic client registration turned on, so assistants can register and request access.
-- API keys turned on, if you want keys for scripts.
+- Add the MCP endpoint under Agents → MCP servers. Clerk then issues tokens with that audience.
+- Turn on dynamic client registration for OAuth applications, so assistants can register and request access.
+- Turn on API keys to create keys for scripts.
 
 `/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.
 

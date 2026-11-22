@@ -3,5 +3,5 @@ import { resourceMetadata } from "../server/mcp-http";
 export const Route = createFileRoute(
   "/.well-known/oauth-protected-resource/api/mcp",
 )({
-  server: { handlers: { GET: ({ request }) => resourceMetadata(request) } },
+  server: { handlers: { GET: () => resourceMetadata() } },
 });

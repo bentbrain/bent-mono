@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { z } from "zod";
 import { database } from "../src/server/db";
 import { createFitnessMcpServer } from "../src/server/mcp";
 import {
   BatchConflict,
+  changeOnce,
   loadRecords,
   saveRecord,
-  saveRecords,
 } from "../src/server/store";
 import { addDays, defaultSettings, localDate, settingsId } from "../src/domain";
 const configured = Boolean(process.env.FITNESS_TEST_DATABASE_URL);
@@ -41,6 +42,55 @@ afterAll(async () => {
   }
 });
 
+const meal = z.object({
+  id: z.string(),
+  revision: z.number(),
+  name: z.string(),
+  calories: z.number(),
+  protein: z.number(),
+});
+const amounts = z.object({ calories: z.number(), protein: z.number() });
+const food = z.object({
+  meals: z.array(meal),
+  totals: amounts,
+  remaining: amounts.nullable(),
+});
+const entry = z.object({ id: z.string(), revision: z.number() });
+const weight = entry.extend({ kg: z.number(), display: z.string() });
+const day = z.object({
+  date: z.string(),
+  timezone: z.string(),
+  units: z.string(),
+  targets: amounts.nullable(),
+  plan: z.object({ type: z.string() }).nullable(),
+  food,
+  weight: weight.nullable(),
+  runs: z.array(
+    entry.extend({
+      minutes: z.number(),
+      distanceKm: z.number(),
+      notes: z.string(),
+    }),
+  ),
+});
+const added = z.object({ date: z.string(), added: z.array(meal), food });
+const updated = z.object({ updated: meal, food });
+const deleted = z.object({
+  deleted: z.array(
+    z.object({ id: z.string(), kind: z.string(), date: z.string() }),
+  ),
+});
+const logged = z.object({ replacedKg: z.number().nullable(), weight });
+const run = z.object({ run: entry });
+const history = z.object({
+  days: z.array(z.object({ date: z.string(), calories: z.number() })),
+});
+const toolResult = z.object({
+  isError: z.boolean().optional(),
+  content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
+  structuredContent: z.unknown().optional(),
+});
+
 async function connect(owner: string) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "1.0.0" });
@@ -48,125 +98,210 @@ async function connect(owner: string) {
     createFitnessMcpServer(owner).connect(serverSide),
     client.connect(clientSide),
   ]);
-  return async (name: string, args: Record<string, unknown> = {}) => {
-    const result = await client.callTool({ name, arguments: args });
-    const content = result.content as { type: string; text: string }[];
-    return {
-      error: result.isError ? (content[0]?.text ?? "") : null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool output is checked by assertions
-      data: result.structuredContent as any,
-    };
+  async function invoke(name: string, args: Record<string, unknown>) {
+    return toolResult.parse(await client.callTool({ name, arguments: args }));
+  }
+  return {
+    /** Calls a tool and validates its structured result. */
+    async call<T>(
+      name: string,
+      args: Record<string, unknown>,
+      schema: z.ZodType<T>,
+    ): Promise<T> {
+      const result = await invoke(name, args);
+      if (result.isError)
+        throw new Error(result.content.find((c) => c.type === "text")?.text);
+      return schema.parse(result.structuredContent);
+    },
+    /** Calls a tool that should fail and returns its message. */
+    async failure(name: string, args: Record<string, unknown>) {
+      const result = await invoke(name, args);
+      expect(result.isError).toBeTrue();
+      return result.content.find((c) => c.type === "text")?.text ?? "";
+    },
   };
 }
+const key = () => crypto.randomUUID();
 
 test.skipIf(!configured)(
   "agents log, edit and remove food for their own account",
   async () => {
-    const call = await connect(ownerA);
-    const empty = await call("fitness_get_day");
-    expect(empty.data).toMatchObject({
+    const { call, failure } = await connect(ownerA);
+    const empty = await call("fitness_get_day", {}, day);
+    expect(empty).toMatchObject({
       date: today,
       timezone,
       units: "lb",
       targets: { calories: 2400, protein: 120 },
       food: { meals: [], totals: { calories: 0, protein: 0 } },
     });
-    expect(empty.data.plan.type).toBeDefined();
+    expect(empty.plan?.type).toBeDefined();
 
-    const added = await call("fitness_add_meals", {
-      meals: [
-        { name: "Porridge with berries", calories: 420, protein: 14 },
-        { name: "Chicken wrap", calories: 610, protein: 42.5 },
-      ],
-    });
-    expect(added.error).toBeNull();
-    expect(added.data.added).toHaveLength(2);
-    expect(added.data.food.totals).toEqual({ calories: 1030, protein: 56.5 });
-    expect(added.data.food.remaining).toEqual({
-      calories: 1370,
-      protein: 63.5,
-    });
+    const meals = await call(
+      "fitness_add_meals",
+      {
+        requestId: key(),
+        meals: [
+          { name: "Porridge with berries", calories: 420, protein: 14 },
+          { name: "Chicken wrap", calories: 610, protein: 42.5 },
+        ],
+      },
+      added,
+    );
+    expect(meals.added).toHaveLength(2);
+    expect(meals.food.totals).toEqual({ calories: 1030, protein: 56.5 });
+    expect(meals.food.remaining).toEqual({ calories: 1370, protein: 63.5 });
 
-    const wrap = added.data.added[1].id;
-    const updated = await call("fitness_update_meal", {
-      id: wrap,
-      calories: 650,
-    });
-    expect(updated.data.updated).toEqual({
-      id: wrap,
+    const wrap = meals.added[1];
+    if (!wrap) throw new Error("The wrap was not added.");
+    const edit = await call(
+      "fitness_update_meal",
+      { requestId: key(), id: wrap.id, revision: wrap.revision, calories: 650 },
+      updated,
+    );
+    expect(edit.updated).toEqual({
+      id: wrap.id,
+      revision: 2,
       name: "Chicken wrap",
       calories: 650,
       protein: 42.5,
     });
-    expect(updated.data.food.totals.calories).toBe(1070);
+    expect(edit.food.totals.calories).toBe(1070);
+    expect(
+      await failure("fitness_update_meal", {
+        requestId: key(),
+        id: wrap.id,
+        revision: wrap.revision,
+        calories: 1,
+      }),
+    ).toContain("changed after you read it");
 
     const yesterday = addDays(today, -1);
-    const moved = await call("fitness_update_meal", {
-      id: wrap,
-      date: yesterday,
-    });
-    expect(moved.data.food.meals.map((m: { id: string }) => m.id)).toEqual([
-      wrap,
-    ]);
-    const history = await call("fitness_get_history", { from: yesterday });
-    expect(
-      history.data.days.map((d: { calories: number }) => d.calories),
-    ).toEqual([650, 420]);
+    const moved = await call(
+      "fitness_update_meal",
+      { requestId: key(), id: wrap.id, revision: 2, date: yesterday },
+      updated,
+    );
+    expect(moved.food.meals.map((m) => m.id)).toEqual([wrap.id]);
+    const days = await call(
+      "fitness_get_history",
+      { from: yesterday },
+      history,
+    );
+    expect(days.days.map((d) => d.calories)).toEqual([650, 420]);
 
-    const removed = await call("fitness_delete_entries", { ids: [wrap] });
-    expect(removed.data.deleted).toEqual([
-      { id: wrap, kind: "meal", date: yesterday },
+    const removed = await call(
+      "fitness_delete_entries",
+      { requestId: key(), entries: [{ id: wrap.id, revision: 3 }] },
+      deleted,
+    );
+    expect(removed.deleted).toEqual([
+      { id: wrap.id, kind: "meal", date: yesterday },
     ]);
-    expect(
-      (await call("fitness_get_day", { date: yesterday })).data.food,
-    ).toMatchObject({ meals: [] });
+    const after = await call("fitness_get_day", { date: yesterday }, day);
+    expect(after.food.meals).toEqual([]);
 
-    const invalid = await call("fitness_add_meals", {
-      meals: [{ name: "Too much", calories: 20000, protein: 1 }],
-    });
-    expect(invalid.error).toContain("calories");
+    expect(
+      await failure("fitness_add_meals", {
+        requestId: key(),
+        meals: [{ name: "Too much", calories: 20000, protein: 1 }],
+      }),
+    ).toContain("calories");
+  },
+);
+
+test.skipIf(!configured)(
+  "a retried request saves once and a reused request ID fails",
+  async () => {
+    const { call, failure } = await connect(ownerA);
+    const date = addDays(today, -3);
+    const request = {
+      requestId: key(),
+      date,
+      meals: [{ name: "Banana", calories: 105, protein: 1.3 }],
+    };
+    const first = await call("fitness_add_meals", request, added);
+    const retry = await call("fitness_add_meals", request, added);
+    expect(retry).toEqual(first);
+    const stored = (await loadRecords(ownerA)).filter(
+      (r) => r.data.kind === "meal" && r.data.date === date,
+    );
+    expect(stored).toHaveLength(1);
+    expect(
+      await failure("fitness_add_meals", {
+        ...request,
+        meals: [{ name: "Apple", calories: 95, protein: 0.5 }],
+      }),
+    ).toContain("already used");
+
+    const banana = first.added[0];
+    if (!banana) throw new Error("The banana was not added.");
+    const removal = {
+      requestId: key(),
+      entries: [{ id: banana.id, revision: banana.revision }],
+    };
+    const removed = await call("fitness_delete_entries", removal, deleted);
+    expect(await call("fitness_delete_entries", removal, deleted)).toEqual(
+      removed,
+    );
   },
 );
 
 test.skipIf(!configured)(
   "weigh-ins replace the day's value and runs follow the date rules",
   async () => {
-    const call = await connect(ownerA);
-    const first = await call("fitness_log_weight", { weight: 176.4 });
-    expect(first.data).toMatchObject({
-      replaced: false,
+    const { call, failure } = await connect(ownerA);
+    const first = await call(
+      "fitness_log_weight",
+      { requestId: key(), weight: 176.4 },
+      logged,
+    );
+    expect(first).toMatchObject({
+      replacedKg: null,
       weight: { display: "176.4 lb" },
     });
-    expect(first.data.weight.kg).toBeCloseTo(80.01, 2);
-    const second = await call("fitness_log_weight", {
-      weight: 79.5,
-      unit: "kg",
-    });
-    expect(second.data).toMatchObject({
-      replaced: true,
-      weight: { kg: 79.5 },
-    });
+    expect(first.weight.kg).toBeCloseTo(80.01, 2);
+    const second = await call(
+      "fitness_log_weight",
+      { requestId: key(), weight: 79.5, unit: "kg" },
+      logged,
+    );
+    expect(second).toMatchObject({ replacedKg: 80.01, weight: { kg: 79.5 } });
+    const heavy = await call(
+      "fitness_log_weight",
+      { requestId: key(), date: addDays(today, -1), weight: 1101, unit: "lb" },
+      logged,
+    );
+    expect(heavy.weight.display).toBe("1101 lb");
     const weights = (await loadRecords(ownerA)).filter(
       (r) => r.data.kind === "weight",
     );
-    expect(weights).toHaveLength(1);
+    expect(weights).toHaveLength(2);
 
-    const run = await call("fitness_log_run", {
-      minutes: 31,
-      distanceKm: 5.2,
-    });
-    expect(run.error).toBeNull();
-    const future = await call("fitness_log_run", {
-      date: addDays(today, 2),
-      minutes: 30,
-      distanceKm: 5,
-    });
-    expect(future.error).toContain("today or an earlier date");
-    const day = await call("fitness_get_day");
-    expect(day.data.runs).toEqual([
-      { id: run.data.run.id, minutes: 31, distanceKm: 5.2, notes: "" },
+    const logRun = await call(
+      "fitness_log_run",
+      { requestId: key(), minutes: 31, distanceKm: 5.2 },
+      run,
+    );
+    expect(
+      await failure("fitness_log_run", {
+        requestId: key(),
+        date: addDays(today, 2),
+        minutes: 30,
+        distanceKm: 5,
+      }),
+    ).toContain("today or an earlier date");
+    const current = await call("fitness_get_day", {}, day);
+    expect(current.runs).toEqual([
+      {
+        id: logRun.run.id,
+        revision: 1,
+        minutes: 31,
+        distanceKm: 5.2,
+        notes: "",
+      },
     ]);
-    expect(day.data.weight.kg).toBe(79.5);
+    expect(current.weight?.kg).toBe(79.5);
   },
 );
 
@@ -174,31 +309,45 @@ test.skipIf(!configured)(
   "agents only reach the authenticated account",
   async () => {
     const own = await connect(ownerA);
-    const meal = (
-      await own("fitness_add_meals", {
-        meals: [{ name: "Apple", calories: 95, protein: 0.5 }],
-      })
-    ).data.added[0].id;
+    const apple = (
+      await own.call(
+        "fitness_add_meals",
+        {
+          requestId: key(),
+          meals: [{ name: "Apple", calories: 95, protein: 0.5 }],
+        },
+        added,
+      )
+    ).added[0];
+    if (!apple) throw new Error("The apple was not added.");
     const other = await connect(ownerB);
-    const day = await other("fitness_get_day");
-    expect(day.data.food.meals).toEqual([]);
-    expect(day.data.targets).toBeNull();
-    const update = await other("fitness_update_meal", {
-      id: meal,
-      calories: 1,
-    });
-    expect(update.error).toContain("No meal entry has that ID");
-    const remove = await other("fitness_delete_entries", { ids: [meal] });
-    expect(remove.error).toContain("No meal, run, weight entry");
-    expect((await loadRecords(ownerA)).some((r) => r.id === meal)).toBeTrue();
+    const otherDay = await other.call("fitness_get_day", {}, day);
+    expect(otherDay.food.meals).toEqual([]);
+    expect(otherDay.targets).toBeNull();
+    expect(
+      await other.failure("fitness_update_meal", {
+        requestId: key(),
+        id: apple.id,
+        revision: apple.revision,
+        calories: 1,
+      }),
+    ).toContain("No meal entry has the ID");
+    expect(
+      await other.failure("fitness_delete_entries", {
+        requestId: key(),
+        entries: [{ id: apple.id, revision: apple.revision }],
+      }),
+    ).toContain("No meal, run, weight entry");
+    expect((await loadRecords(ownerA)).some((r) => r.id === apple.id)).toBe(
+      true,
+    );
   },
 );
 
 test.skipIf(!configured)(
-  "a conflicting change rolls back the whole batch",
+  "a conflicting change rolls back the request and its receipt",
   async () => {
-    const before = (await loadRecords(ownerB)).length;
-    const stale = await saveRecord(ownerB, {
+    const toast = await saveRecord(ownerB, {
       operationId: crypto.randomUUID(),
       id: crypto.randomUUID(),
       revision: 0,
@@ -210,9 +359,12 @@ test.skipIf(!configured)(
         protein: 6,
       },
     });
-    if (stale.status !== "saved" || !stale.record) throw new Error("setup");
-    const attempt = saveRecords(ownerB, [
-      {
+    if (toast.status !== "saved" || !toast.record) throw new Error("setup");
+    const toastId = toast.record.id;
+    const before = await loadRecords(ownerB);
+    const receipt = { id: crypto.randomUUID(), fingerprint: "conflict" };
+    const attempt = changeOnce(ownerB, receipt, async (change) => {
+      await change.save({
         operationId: crypto.randomUUID(),
         id: crypto.randomUUID(),
         revision: 0,
@@ -223,20 +375,20 @@ test.skipIf(!configured)(
           calories: 150,
           protein: 12,
         },
-      },
-      {
+      });
+      await change.save({
         operationId: crypto.randomUUID(),
-        id: stale.record.id,
+        id: toastId,
         revision: 0,
         data: null,
-      },
-    ]);
+      });
+      return {};
+    });
     expect(attempt).rejects.toBeInstanceOf(BatchConflict);
     await attempt.catch(() => undefined);
-    const after = await loadRecords(ownerB);
-    expect(after).toHaveLength(before + 1);
-    expect(
-      after.some((r) => r.data.kind === "meal" && r.data.name === "Eggs"),
-    ).toBeFalse();
+    expect(await loadRecords(ownerB)).toEqual(before);
+    const [stored] =
+      await database()`SELECT id FROM fitness_operations WHERE owner_id=${ownerB} AND id=${receipt.id}`;
+    expect(stored).toBeUndefined();
   },
 );
