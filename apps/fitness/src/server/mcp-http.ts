@@ -1,5 +1,10 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { AgentAuthError, requireAgentOwner } from "./auth";
+import {
+  AgentAuthError,
+  AgentScopeError,
+  agentScopes,
+  requireAgentOwner,
+} from "./auth";
 import { authorizationServer, mcpResource } from "./config";
 import { createFitnessMcpServer } from "./mcp";
 
@@ -31,7 +36,7 @@ export function resourceMetadata() {
       resource_name: "Fitness",
       authorization_servers: [issuer],
       bearer_methods_supported: ["header"],
-      scopes_supported: ["profile", "email"],
+      scopes_supported: [agentScopes.read, agentScopes.write],
     },
     200,
     { "Access-Control-Allow-Origin": "*" },
@@ -54,13 +59,19 @@ export async function authorizationMetadata() {
   });
 }
 
-function unauthorized(description: string) {
+/** A Bearer challenge naming the scopes to request and where to sign in. */
+function challenge(
+  error: "invalid_token" | "insufficient_scope",
+  description: string,
+  status: 401 | 403,
+) {
   const resource = mcpResource();
   const metadata = resource
     ? `, resource_metadata="${new URL(resource).origin}/.well-known/oauth-protected-resource/api/mcp"`
     : "";
-  return json({ error: "invalid_token", error_description: description }, 401, {
-    "WWW-Authenticate": `Bearer error="invalid_token", error_description="${description}"${metadata}`,
+  const scope = `${agentScopes.read} ${agentScopes.write}`;
+  return json({ error, error_description: description }, status, {
+    "WWW-Authenticate": `Bearer error="${error}", error_description="${description}", scope="${scope}"${metadata}`,
   });
 }
 
@@ -106,12 +117,14 @@ export async function handleMcp(request: Request) {
   const origin = request.headers.get("origin");
   if (!allowedOrigin(request))
     return json({ error: "This origin is not allowed." }, 403);
-  let owner: string;
+  let agent: Awaited<ReturnType<typeof requireAgentOwner>>;
   try {
-    owner = await requireAgentOwner(request);
+    agent = await requireAgentOwner(request);
   } catch (error) {
     if (error instanceof AgentAuthError)
-      return cors(unauthorized(error.message), origin);
+      return cors(challenge("invalid_token", error.message, 401), origin);
+    if (error instanceof AgentScopeError)
+      return cors(challenge("insufficient_scope", error.message, 403), origin);
     throw error;
   }
   if (request.method !== "POST")
@@ -121,7 +134,7 @@ export async function handleMcp(request: Request) {
       }),
       origin,
     );
-  const server = createFitnessMcpServer(owner);
+  const server = createFitnessMcpServer(agent.owner, agent.access);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

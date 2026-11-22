@@ -2,6 +2,13 @@ import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { allowedEmails, configurationReady, mcpResource } from "./config";
 
 export class AgentAuthError extends Error {}
+/** The token is valid but grants no Fitness access. */
+export class AgentScopeError extends Error {}
+export const agentScopes = {
+  read: "fitness:read",
+  write: "fitness:write",
+} as const;
+export type AgentAccess = { read: boolean; write: boolean };
 
 /** Returns the user ID when its verified primary email is invited. */
 async function invited(userId: string) {
@@ -29,11 +36,27 @@ export async function requireOwner() {
   return owner;
 }
 
+/** The Fitness access a verified token's scopes grant. */
+export function agentAccess(
+  tokenType: "oauth_token" | "api_key",
+  scopes: string[],
+): AgentAccess {
+  const ownerKey = tokenType === "api_key" && scopes.length === 0;
+  return {
+    read: ownerKey || scopes.includes(agentScopes.read),
+    write: ownerKey || scopes.includes(agentScopes.write),
+  };
+}
+
 /**
  * Authenticates an agent request from its bearer token: a Clerk OAuth access
  * token issued for this MCP endpoint, or a Clerk API key owned by the user.
  * Session cookies are not accepted, so a browser cannot call the agent API
  * on the user's behalf.
+ *
+ * OAuth tokens and scoped API keys grant what their scopes name:
+ * fitness:read for reading and fitness:write for changes. An API key without
+ * scopes is one the owner created for their own scripts and grants both.
  */
 export async function requireAgentOwner(request: Request) {
   const resource = mcpResource();
@@ -57,10 +80,15 @@ export async function requireAgentOwner(request: Request) {
   const userId = result.userId;
   if (!userId?.startsWith("user_"))
     throw new AgentAuthError("Use a token that belongs to a Fitness account.");
+  const access = agentAccess(result.tokenType, result.scopes);
+  if (!access.read && !access.write)
+    throw new AgentScopeError(
+      "Approve Fitness read or write access for this connection.",
+    );
   const owner = await invited(userId);
   if (!owner)
     throw new AgentAuthError(
       "This account needs an invitation. Contact the app owner.",
     );
-  return owner;
+  return { owner, access };
 }

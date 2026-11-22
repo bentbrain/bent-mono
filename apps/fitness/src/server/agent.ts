@@ -182,12 +182,18 @@ export async function getHistory(
 ) {
   const a = account(await loadRecords(owner));
   const to = input.to ?? a.today;
-  if (input.from > to)
+  const span =
+    Math.round(
+      (Date.parse(to + "T00:00:00Z") - Date.parse(input.from + "T00:00:00Z")) /
+        86400000,
+    ) + 1;
+  if (span < 1)
     throw new AgentError("Choose a start date on or before the end date.");
-  if (addDays(input.from, historyLimit - 1) < to)
+  if (span > historyLimit)
     throw new AgentError(`Choose a range of up to ${historyLimit} days.`);
   const days = [];
-  for (let date = input.from; date <= to; date = addDays(date, 1)) {
+  for (let offset = 0; offset < span; offset++) {
+    const date = addDays(input.from, offset);
     const { workouts, runs } = training(a, date);
     const eaten = food(a, date);
     days.push({

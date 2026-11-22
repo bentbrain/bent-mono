@@ -3,6 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { database } from "../src/server/db";
+import { agentAccess } from "../src/server/auth";
+import type { AgentAccess } from "../src/server/auth";
 import { createFitnessMcpServer } from "../src/server/mcp";
 import {
   BatchConflict,
@@ -91,17 +93,21 @@ const toolResult = z.object({
   structuredContent: z.unknown().optional(),
 });
 
-async function connect(owner: string) {
+const full: AgentAccess = { read: true, write: true };
+async function connect(owner: string, access = full) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "1.0.0" });
   await Promise.all([
-    createFitnessMcpServer(owner).connect(serverSide),
+    createFitnessMcpServer(owner, access).connect(serverSide),
     client.connect(clientSide),
   ]);
   async function invoke(name: string, args: Record<string, unknown>) {
     return toolResult.parse(await client.callTool({ name, arguments: args }));
   }
   return {
+    async tools() {
+      return (await client.listTools()).tools.map((tool) => tool.name).sort();
+    },
     /** Calls a tool and validates its structured result. */
     async call<T>(
       name: string,
@@ -390,5 +396,81 @@ test.skipIf(!configured)(
     const [stored] =
       await database()`SELECT id FROM fitness_operations WHERE owner_id=${ownerB} AND id=${receipt.id}`;
     expect(stored).toBeUndefined();
+  },
+);
+
+test("token scopes grant read and write access separately", () => {
+  expect(agentAccess("oauth_token", ["profile", "email"])).toEqual({
+    read: false,
+    write: false,
+  });
+  expect(agentAccess("oauth_token", ["fitness:read"])).toEqual({
+    read: true,
+    write: false,
+  });
+  expect(agentAccess("oauth_token", ["fitness:read", "fitness:write"])).toEqual(
+    full,
+  );
+  expect(agentAccess("oauth_token", [])).toEqual({ read: false, write: false });
+  expect(agentAccess("api_key", [])).toEqual(full);
+  expect(agentAccess("api_key", ["fitness:read"])).toEqual({
+    read: true,
+    write: false,
+  });
+  expect(agentAccess("api_key", ["other"])).toEqual({
+    read: false,
+    write: false,
+  });
+});
+
+test.skipIf(!configured)(
+  "a connection lists only the tools its grant allows",
+  async () => {
+    const reader = await connect(ownerB, { read: true, write: false });
+    expect(await reader.tools()).toEqual([
+      "fitness_get_day",
+      "fitness_get_history",
+      "fitness_list_saved_meals",
+    ]);
+    expect(
+      await reader.failure("fitness_add_meals", {
+        requestId: key(),
+        meals: [{ name: "Apple", calories: 95, protein: 0.5 }],
+      }),
+    ).toContain("not found");
+    const writer = await connect(ownerB, { read: false, write: true });
+    expect(await writer.tools()).toEqual([
+      "fitness_add_meals",
+      "fitness_delete_entries",
+      "fitness_log_run",
+      "fitness_log_weight",
+      "fitness_update_meal",
+    ]);
+  },
+);
+
+test.skipIf(!configured)(
+  "history accepts ranges at the end of the calendar",
+  async () => {
+    const { call, failure } = await connect(ownerB);
+    const last = await call(
+      "fitness_get_history",
+      { from: "9999-12-31", to: "9999-12-31" },
+      history,
+    );
+    expect(last.days.map((d) => d.date)).toEqual(["9999-12-31"]);
+    const span = await call(
+      "fitness_get_history",
+      { from: "9999-10-31", to: "9999-12-31" },
+      history,
+    );
+    expect(span.days).toHaveLength(62);
+    expect(span.days.at(-1)?.date).toBe("9999-12-31");
+    expect(
+      await failure("fitness_get_history", {
+        from: "9999-10-30",
+        to: "9999-12-31",
+      }),
+    ).toContain("up to 62 days");
   },
 );

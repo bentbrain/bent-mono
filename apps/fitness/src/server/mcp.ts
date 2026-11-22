@@ -13,6 +13,7 @@ import {
   updateMeal,
 } from "./agent";
 import { StoreRuleError } from "./store";
+import type { AgentAccess } from "./auth";
 
 const date = z.iso
   .date()
@@ -85,7 +86,8 @@ function run(task: () => Promise<Record<string, unknown>>) {
   return task().then(reply, failure);
 }
 
-export function createFitnessMcpServer(owner: string) {
+/** Registers the read tools and write tools the connection's grant allows. */
+export function createFitnessMcpServer(owner: string, access: AgentAccess) {
   const server = new McpServer(
     { name: "bent-fitness", version: "1.0.0" },
     {
@@ -100,136 +102,140 @@ export function createFitnessMcpServer(owner: string) {
     },
   );
 
-  server.registerTool(
-    "fitness_get_day",
-    {
-      title: "Get a day",
-      description:
-        "Returns one day's meals with IDs, calorie and protein totals against targets, bodyweight, planned training, workouts and runs.",
-      inputSchema: { date: date.optional() },
-      annotations: read,
-    },
-    (input) => run(() => getDay(owner, input)),
-  );
-
-  server.registerTool(
-    "fitness_get_history",
-    {
-      title: "Get history",
-      description:
-        "Summarises each day in a date range of up to 62 days: calories, protein, meal count, bodyweight, workouts and runs.",
-      inputSchema: {
-        from: z.iso.date().describe("First date, YYYY-MM-DD"),
-        to: date.optional(),
+  if (access.read) {
+    server.registerTool(
+      "fitness_get_day",
+      {
+        title: "Get a day",
+        description:
+          "Returns one day's meals with IDs, calorie and protein totals against targets, bodyweight, planned training, workouts and runs.",
+        inputSchema: { date: date.optional() },
+        annotations: read,
       },
-      annotations: read,
-    },
-    (input) => run(() => getHistory(owner, input)),
-  );
+      (input) => run(() => getDay(owner, input)),
+    );
 
-  server.registerTool(
-    "fitness_list_saved_meals",
-    {
-      title: "List saved meals",
-      description:
-        "Lists the user's saved meals with their calories and protein. Use these values when the user mentions one of them.",
-      inputSchema: {},
-      annotations: read,
-    },
-    () => run(() => listSavedMeals(owner)),
-  );
-
-  server.registerTool(
-    "fitness_add_meals",
-    {
-      title: "Add meals",
-      description:
-        "Logs one or more food entries to a day in a single change. Returns the new entries and the day's updated totals.",
-      inputSchema: {
-        requestId,
-        date: date.optional(),
-        meals: z.array(z.object(mealInput)).min(1).max(30),
+    server.registerTool(
+      "fitness_get_history",
+      {
+        title: "Get history",
+        description:
+          "Summarises each day in a date range of up to 62 days: calories, protein, meal count, bodyweight, workouts and runs.",
+        inputSchema: {
+          from: z.iso.date().describe("First date, YYYY-MM-DD"),
+          to: date.optional(),
+        },
+        annotations: read,
       },
-      annotations: add,
-    },
-    (input) => run(() => addMeals(owner, input)),
-  );
+      (input) => run(() => getHistory(owner, input)),
+    );
 
-  server.registerTool(
-    "fitness_update_meal",
-    {
-      title: "Update a meal",
-      description:
-        "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values. Fails if the entry changed after it was read.",
-      inputSchema: {
-        requestId,
-        id: id.describe("Meal ID from fitness_get_day"),
-        revision,
-        name: mealInput.name.optional(),
-        calories: mealInput.calories.optional(),
-        protein: mealInput.protein.optional(),
-        date: z.iso.date().optional().describe("Move the entry to this date"),
+    server.registerTool(
+      "fitness_list_saved_meals",
+      {
+        title: "List saved meals",
+        description:
+          "Lists the user's saved meals with their calories and protein. Use these values when the user mentions one of them.",
+        inputSchema: {},
+        annotations: read,
       },
-      annotations: { ...replace, idempotentHint: true },
-    },
-    (input) => run(() => updateMeal(owner, input)),
-  );
+      () => run(() => listSavedMeals(owner)),
+    );
+  }
 
-  server.registerTool(
-    "fitness_delete_entries",
-    {
-      title: "Delete entries",
-      description:
-        "Removes meals, runs or weigh-ins in a single change. Fails without removing anything if an entry changed after it was read. Strength workouts are managed in the app.",
-      inputSchema: {
-        requestId,
-        entries: z
-          .array(z.object({ id, revision }))
-          .min(1)
-          .max(30)
-          .describe("Entry IDs and revisions from fitness_get_day"),
+  if (access.write) {
+    server.registerTool(
+      "fitness_add_meals",
+      {
+        title: "Add meals",
+        description:
+          "Logs one or more food entries to a day in a single change. Returns the new entries and the day's updated totals.",
+        inputSchema: {
+          requestId,
+          date: date.optional(),
+          meals: z.array(z.object(mealInput)).min(1).max(30),
+        },
+        annotations: add,
       },
-      annotations: { ...replace, idempotentHint: true },
-    },
-    (input) => run(() => deleteEntries(owner, input)),
-  );
+      (input) => run(() => addMeals(owner, input)),
+    );
 
-  server.registerTool(
-    "fitness_log_weight",
-    {
-      title: "Log bodyweight",
-      description:
-        "Records bodyweight for a day. A day keeps one weigh-in, so this replaces any existing value for that date.",
-      inputSchema: {
-        requestId,
-        date: date.optional(),
-        weight: z.number().positive(),
-        unit: z
-          .enum(["kg", "lb"])
-          .optional()
-          .describe("Defaults to the account's units"),
+    server.registerTool(
+      "fitness_update_meal",
+      {
+        title: "Update a meal",
+        description:
+          "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values. Fails if the entry changed after it was read.",
+        inputSchema: {
+          requestId,
+          id: id.describe("Meal ID from fitness_get_day"),
+          revision,
+          name: mealInput.name.optional(),
+          calories: mealInput.calories.optional(),
+          protein: mealInput.protein.optional(),
+          date: z.iso.date().optional().describe("Move the entry to this date"),
+        },
+        annotations: { ...replace, idempotentHint: true },
       },
-      annotations: { ...replace, idempotentHint: true },
-    },
-    (input) => run(() => logWeight(owner, input)),
-  );
+      (input) => run(() => updateMeal(owner, input)),
+    );
 
-  server.registerTool(
-    "fitness_log_run",
-    {
-      title: "Log a run",
-      description: "Records a completed run on today or an earlier date.",
-      inputSchema: {
-        requestId,
-        date: date.optional(),
-        minutes: z.number().positive().max(1440),
-        distanceKm: z.number().nonnegative().max(500),
-        notes: z.string().max(2000).optional(),
+    server.registerTool(
+      "fitness_delete_entries",
+      {
+        title: "Delete entries",
+        description:
+          "Removes meals, runs or weigh-ins in a single change. Fails without removing anything if an entry changed after it was read. Strength workouts are managed in the app.",
+        inputSchema: {
+          requestId,
+          entries: z
+            .array(z.object({ id, revision }))
+            .min(1)
+            .max(30)
+            .describe("Entry IDs and revisions from fitness_get_day"),
+        },
+        annotations: { ...replace, idempotentHint: true },
       },
-      annotations: add,
-    },
-    (input) => run(() => logRun(owner, input)),
-  );
+      (input) => run(() => deleteEntries(owner, input)),
+    );
+
+    server.registerTool(
+      "fitness_log_weight",
+      {
+        title: "Log bodyweight",
+        description:
+          "Records bodyweight for a day. A day keeps one weigh-in, so this replaces any existing value for that date.",
+        inputSchema: {
+          requestId,
+          date: date.optional(),
+          weight: z.number().positive(),
+          unit: z
+            .enum(["kg", "lb"])
+            .optional()
+            .describe("Defaults to the account's units"),
+        },
+        annotations: { ...replace, idempotentHint: true },
+      },
+      (input) => run(() => logWeight(owner, input)),
+    );
+
+    server.registerTool(
+      "fitness_log_run",
+      {
+        title: "Log a run",
+        description: "Records a completed run on today or an earlier date.",
+        inputSchema: {
+          requestId,
+          date: date.optional(),
+          minutes: z.number().positive().max(1440),
+          distanceKm: z.number().nonnegative().max(500),
+          notes: z.string().max(2000).optional(),
+        },
+        annotations: add,
+      },
+      (input) => run(() => logRun(owner, input)),
+    );
+  }
 
   return server;
 }
