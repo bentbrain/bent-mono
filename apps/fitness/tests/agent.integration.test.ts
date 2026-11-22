@@ -5,7 +5,7 @@ import { z } from "zod";
 import { database } from "../src/server/db";
 import { agentAccess } from "../src/server/auth";
 import type { AgentAccess } from "../src/server/auth";
-import { createFitnessMcpServer } from "../src/server/mcp";
+import { createFitnessMcpServer, instructions } from "../src/server/mcp";
 import {
   BatchConflict,
   changeOnce,
@@ -105,6 +105,7 @@ async function connect(owner: string, access = full) {
     return toolResult.parse(await client.callTool({ name, arguments: args }));
   }
   return {
+    instructions: () => client.getInstructions() ?? "",
     async tools() {
       return (await client.listTools()).tools.map((tool) => tool.name).sort();
     },
@@ -423,6 +424,20 @@ test("token scopes grant read and write access separately", () => {
   });
 });
 
+test("instructions mention only the tools and results a grant includes", () => {
+  const tools = /fitness_[a-z_]+/g;
+  const reader = instructions({ read: true, write: false });
+  expect(reader.match(tools) ?? []).toEqual([]);
+  expect(reader).toContain("need write access");
+  const writer = instructions({ read: false, write: true });
+  expect(writer.match(tools)).toEqual(["fitness_add_meals"]);
+  expect(writer).not.toContain("totals");
+  expect(writer).toContain("receipts");
+  const both = instructions(full);
+  expect(both).toContain("fitness_get_day");
+  expect(both).toContain("totals");
+});
+
 test.skipIf(!configured)(
   "a connection lists only the tools its grant allows",
   async () => {
@@ -438,7 +453,13 @@ test.skipIf(!configured)(
         meals: [{ name: "Apple", calories: 95, protein: 0.5 }],
       }),
     ).toContain("not found");
+    expect(reader.instructions()).toBe(
+      instructions({ read: true, write: false }),
+    );
     const writer = await connect(ownerB, { read: false, write: true });
+    expect(writer.instructions()).toBe(
+      instructions({ read: false, write: true }),
+    );
     expect(await writer.tools()).toEqual([
       "fitness_add_meals",
       "fitness_delete_entries",

@@ -86,19 +86,36 @@ function run(task: () => Promise<Record<string, unknown>>) {
   return task().then(reply, failure);
 }
 
+/** Guidance for the tools and results this connection's grant includes. */
+export function instructions(access: AgentAccess) {
+  const lines = [
+    "Fitness holds one person's food log, bodyweight, runs and strength training.",
+    "Dates are YYYY-MM-DD in the account timezone; omit the date for today.",
+  ];
+  if (access.read && !access.write)
+    lines.push(
+      "This connection can read entries. Logging, editing and removing entries need write access.",
+    );
+  if (access.write)
+    lines.push(
+      access.read
+        ? "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals."
+        : "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged.",
+      access.read
+        ? "Before editing or removing entries, call fitness_get_day to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
+        : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
+      "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
+      "Weights are stored in kilograms; pass the unit the user gave.",
+    );
+  return lines.join(" ");
+}
+
 /** Registers the read tools and write tools the connection's grant allows. */
 export function createFitnessMcpServer(owner: string, access: AgentAccess) {
   const server = new McpServer(
     { name: "bent-fitness", version: "1.0.0" },
     {
-      instructions: [
-        "Fitness holds one person's food log, bodyweight, runs and strength training.",
-        "Dates are YYYY-MM-DD in the account timezone; omit the date for today.",
-        "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals.",
-        "Before editing or removing entries, call fitness_get_day to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again.",
-        "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
-        "Weights are stored in kilograms; pass the unit the user gave.",
-      ].join(" "),
+      instructions: instructions(access),
     },
   );
 
