@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Bent Drive Copilot",
-  description: "Read-only access to your Tesla vehicle status through an authorized AI connection.",
+  description: "Read-only Tesla vehicle status in ChatGPT for invited users.",
 };
 
 export default function RootLayout({

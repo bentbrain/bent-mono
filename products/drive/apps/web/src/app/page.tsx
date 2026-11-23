@@ -14,9 +14,9 @@ import { Separator } from "@/components/ui/separator";
 const steps = [
   {
     number: "01",
-    title: "Connect your MCP client",
+    title: "Add the server in ChatGPT",
     description:
-      "Add https://drive.bent.build/mcp as a custom MCP server in ChatGPT or another MCP client that supports OAuth. In ChatGPT, this depends on your plan and workspace settings.",
+      "Add https://drive.bent.build/mcp as a custom MCP server in ChatGPT. This depends on your ChatGPT plan and workspace settings.",
   },
   {
     number: "02",
@@ -68,12 +68,12 @@ export default function Home() {
             </Badge>
             <h1 className="max-w-3xl text-5xl leading-[0.96] font-semibold tracking-[-0.065em] sm:text-7xl">
               Read-only Tesla status
-              <span className="block text-muted-foreground">for MCP clients</span>
+              <span className="block text-muted-foreground">in ChatGPT</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg leading-8 text-muted-foreground">
-              Connect ChatGPT or another MCP client to read your Tesla vehicle
-              status. You need an invited GitHub account and a Tesla account.
-              Enter your Tesla password only on Tesla&apos;s site.
+              Connect ChatGPT to read your Tesla vehicle status. You need an
+              invited GitHub account and a Tesla account. Enter your Tesla
+              password only on Tesla&apos;s site.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               {securityFeatures.map((label) => (
