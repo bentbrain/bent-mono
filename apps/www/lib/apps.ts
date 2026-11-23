@@ -191,12 +191,12 @@ export const apps: readonly ShowcaseApp[] = [
   {
     id: "drive",
     name: "Drive",
-    tagline: "Read-only Tesla status for ChatGPT and Codex.",
+    tagline: "Read-only Tesla status for MCP clients.",
     category: "Utilities",
     domain: "drive.bent.build",
     access: "Invited GitHub accounts, plus a Tesla account",
     description:
-      "An MCP server that lets ChatGPT or Codex read a Tesla's battery, range, charging, locks, climate and Sentry state. Sign in with an invited GitHub account, then approve read-only access with Tesla. The website has setup instructions.",
+      "An MCP server that lets ChatGPT or another MCP client read a Tesla's battery, range, charging, locks, climate and Sentry state. Sign in with an invited GitHub account, then approve read-only access with Tesla. The website has setup instructions.",
     highlights: [
       "Lists vehicles and reads their status",
       "Requests Tesla's read-only vehicle scope",

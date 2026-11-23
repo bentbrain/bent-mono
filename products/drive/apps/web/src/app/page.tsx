@@ -16,7 +16,7 @@ const steps = [
     number: "01",
     title: "Connect your MCP client",
     description:
-      "Add https://drive.bent.build/mcp as a custom MCP endpoint in ChatGPT, or install Tesla Bridge in Codex.",
+      "Add https://drive.bent.build/mcp as a custom MCP server in ChatGPT or another MCP client that supports OAuth. In ChatGPT, this depends on your plan and workspace settings.",
   },
   {
     number: "02",
@@ -71,9 +71,9 @@ export default function Home() {
               <span className="block text-muted-foreground">for MCP clients</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg leading-8 text-muted-foreground">
-              Connect ChatGPT or Codex to read your Tesla vehicle status. You need
-              an invited GitHub account and a Tesla account. Enter your Tesla
-              password only on Tesla&apos;s site.
+              Connect ChatGPT or another MCP client to read your Tesla vehicle
+              status. You need an invited GitHub account and a Tesla account.
+              Enter your Tesla password only on Tesla&apos;s site.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               {securityFeatures.map((label) => (

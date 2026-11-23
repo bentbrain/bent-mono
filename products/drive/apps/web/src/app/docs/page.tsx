@@ -16,8 +16,10 @@ export default function DocsPage() {
       </Badge>
       <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">Connection guide</h1>
       <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
-        Connect an MCP client to read your Tesla vehicle status. You need an
-        invited GitHub account and a Tesla account.
+        Connect an MCP client that supports OAuth to read your Tesla vehicle
+        status. You need an invited GitHub account and a Tesla account. In
+        ChatGPT, adding a custom MCP server depends on your plan and workspace
+        settings; a workspace admin may need to allow it.
       </p>
       <Separator className="my-10" />
 

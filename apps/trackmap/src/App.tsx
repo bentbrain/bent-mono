@@ -263,7 +263,7 @@ export default function App() {
         download(blob, `trackmap-${snapshot.format}.${kind}`);
         setNotice(
           kind === "mp4"
-            ? "MP4 ready. Save the video to Photos, then select it when creating your Instagram Story."
+            ? "MP4 ready. Check your downloads to save it."
             : `${kind.toUpperCase()} ready. Check your downloads to save it. GIF and PNG overlays can be layered in an editor.`,
         );
       }
