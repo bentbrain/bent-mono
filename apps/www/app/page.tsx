@@ -3,20 +3,42 @@ import { AppIcon } from "@/components/showcase/app-icon";
 import { AppSection } from "@/components/showcase/app-section";
 import { PhoneFrame } from "@/components/showcase/device-frames";
 import { apps } from "@/lib/apps";
+import { getImageProps } from "next/image";
 
 const heroApps = ["home", "fitness", "shop"].flatMap((id) =>
   apps.filter((app) => app.id === id),
 );
+const heroImageSizes = "12rem";
 
 function HeroPhones() {
   return (
     <div aria-hidden="true" className="relative hidden h-[28rem] lg:block">
+      {heroApps.map((app) => {
+        // The hero is hidden below the lg breakpoint, so preload its images
+        // for wide screens only instead of marking them as priority images.
+        const { props } = getImageProps({
+          src: app.mobile.image,
+          alt: "",
+          sizes: heroImageSizes,
+        });
+        return (
+          <link
+            key={`preload-${app.id}`}
+            rel="preload"
+            as="image"
+            imageSrcSet={props.srcSet}
+            imageSizes={props.sizes}
+            media="(min-width: 1024px)"
+            fetchPriority="high"
+          />
+        );
+      })}
       {heroApps.map((app, index) => (
         <PhoneFrame
           key={app.id}
           image={app.mobile.image}
           alt=""
-          sizes="12rem"
+          sizes={heroImageSizes}
           className={
             [
               "absolute left-0 top-10 w-44 -rotate-6",
