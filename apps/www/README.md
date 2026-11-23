@@ -9,7 +9,13 @@ bun install --frozen-lockfile
 bun run --cwd apps/www dev
 ```
 
-The development site opens at `http://localhost:3000`. Edit `app/page.tsx` to change its content. Fonts are bundled locally with `next/font/local`; shared design tokens come from `@bent/design-tokens`.
+The development site opens at `http://localhost:3000`. The homepage lists every app on the bent.build subdomains. `lib/apps.ts` holds each app's name, domain, description and screenshots, and `components/showcase` renders the app sections. Fonts are bundled locally with `next/font/local`; shared design tokens come from `@bent/design-tokens`.
+
+## Screenshots
+
+Each app has a desktop and a mobile screenshot in `assets/screenshots`, named `<app>-desktop.webp` and `<app>-mobile.webp`. Capture desktop at 1440 × 900 and mobile at 390 × 844, both at 2× scale (light theme where the app has one), then save them as WebP at 1600 × 1000 and 780 × 1688.
+
+This repository is public. Capture public pages or local runs with synthetic data. Screenshots must not show real people, account details, locations, vehicle data or private guide content.
 
 Run the application checks from the repository root:
 
