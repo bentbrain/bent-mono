@@ -16,7 +16,6 @@ function HeroPhones() {
           key={app.id}
           image={app.mobile.image}
           alt=""
-          priority
           sizes="12rem"
           className={
             [
@@ -89,8 +88,8 @@ export default function Home() {
           </nav>
         </section>
 
-        {apps.map((app, index) => (
-          <AppSection key={app.id} app={app} priority={index === 0} />
+        {apps.map((app) => (
+          <AppSection key={app.id} app={app} />
         ))}
       </main>
 

@@ -149,9 +149,9 @@ export const apps: readonly ShowcaseApp[] = [
     domain: "jp.bent.build",
     access: "Open to everyone",
     description:
-      "Posts with photos and videos, a gallery you can filter by category and a map of where each photo was taken. Subscribe by email to get new posts.",
+      "Posts with photos and videos, a gallery you can filter by category and a map of geotagged photos and videos in and around Japan. Subscribe by email to get new posts.",
     highlights: [
-      "Map of geotagged photos and videos",
+      "Map of geotagged photos and videos in and around Japan",
       "Gallery filtered by category",
       "Email updates for new posts",
     ],
@@ -224,7 +224,7 @@ export const apps: readonly ShowcaseApp[] = [
     highlights: [
       "Works with any web framework",
       "Runs in an iframe, separate from the site's styles",
-      "Only loads on registered website addresses",
+      "Project members can use it on registered website origins",
       "Open source under the MIT license",
     ],
     desktop: {

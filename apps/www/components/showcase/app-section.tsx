@@ -3,10 +3,7 @@ import type { ShowcaseApp } from "@/lib/apps";
 import { AppIcon } from "./app-icon";
 import { BrowserFrame, PhoneFrame } from "./device-frames";
 
-export function AppSection({
-  app,
-  priority = false,
-}: Readonly<{ app: ShowcaseApp; priority?: boolean }>) {
+export function AppSection({ app }: Readonly<{ app: ShowcaseApp }>) {
   const headingId = `${app.id}-title`;
   return (
     <section
@@ -51,13 +48,11 @@ export function AppSection({
           image={app.desktop.image}
           alt={app.desktop.alt}
           domain={app.domain}
-          priority={priority}
         />
         <PhoneFrame
           className="order-first md:order-none"
           image={app.mobile.image}
           alt={app.mobile.alt}
-          priority={priority}
         />
       </div>
 

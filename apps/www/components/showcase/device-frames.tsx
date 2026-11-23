@@ -4,14 +4,12 @@ import { cn } from "@/lib/utils";
 type FrameProps = Readonly<{
   image: StaticImageData;
   alt: string;
-  priority?: boolean;
 }>;
 
 export function BrowserFrame({
   image,
   alt,
   domain,
-  priority,
 }: FrameProps & Readonly<{ domain: string }>) {
   return (
     <figure className="w-[min(82vw,46rem)] shrink-0 snap-start border border-border bg-background shadow-[0_24px_60px_-32px_rgb(0_0_0/0.35)] dark:shadow-none">
@@ -30,7 +28,6 @@ export function BrowserFrame({
         src={image}
         alt={alt}
         placeholder="blur"
-        priority={priority}
         sizes="(min-width: 768px) 46rem, 82vw"
         className="block h-auto w-full"
       />
@@ -41,7 +38,6 @@ export function BrowserFrame({
 export function PhoneFrame({
   image,
   alt,
-  priority,
   className,
   sizes = "(min-width: 768px) 15rem, 52vw",
 }: FrameProps & Readonly<{ className?: string; sizes?: string }>) {
@@ -63,7 +59,6 @@ export function PhoneFrame({
           src={image}
           alt={alt}
           placeholder="blur"
-          priority={priority}
           sizes={sizes}
           className="block h-auto w-full"
         />
