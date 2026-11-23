@@ -86,12 +86,17 @@ function DesktopQrHandoff() {
 
   return (
     <main className="relative z-10 hidden flex-1 place-items-center bg-background p-8 text-primary lg:grid">
-      <canvas
-        ref={qrCanvasRef}
-        className="block h-auto w-[min(68vw,256px)] border border-primary"
-        role="img"
-        aria-label="QR code to continue creating this design on a phone"
-      />
+      <figure className="grid justify-items-center gap-4 text-center">
+        <canvas
+          ref={qrCanvasRef}
+          className="block h-auto w-[min(68vw,256px)] border border-primary"
+          role="img"
+          aria-label="QR code to continue creating this design on a phone"
+        />
+        <figcaption className="max-w-[29rem] text-sm leading-[1.6]">
+          Scan the QR code with your phone to continue creating your design.
+        </figcaption>
+      </figure>
     </main>
   );
 }

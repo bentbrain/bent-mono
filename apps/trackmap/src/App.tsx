@@ -263,7 +263,7 @@ export default function App() {
         download(blob, `trackmap-${snapshot.format}.${kind}`);
         setNotice(
           kind === "mp4"
-            ? "MP4 ready. Save the video to Photos, then select it when creating your Instagram Story."
+            ? "MP4 ready. Check your downloads to save it."
             : `${kind.toUpperCase()} ready. Check your downloads to save it. GIF and PNG overlays can be layered in an editor.`,
         );
       }
@@ -290,6 +290,10 @@ export default function App() {
       </header>
       <main>
         <h1>Trackmap</h1>
+        <p>
+          Turn a GPX, TCX, FIT or GeoJSON file into a rotating 3D route card.
+          Trackmap processes files in your browser.
+        </p>
         <div className="workspace">
           <section className="preview-panel" aria-label="Activity card preview">
             <div className="panel-heading">
@@ -694,7 +698,7 @@ export default function App() {
                   disabled={!exportable || loading || mediaLoading}
                   onClick={() => void save("mp4")}
                 >
-                  Export Story video · MP4
+                  Export MP4 video
                 </Button>
                 <div className="two-columns">
                   <Button

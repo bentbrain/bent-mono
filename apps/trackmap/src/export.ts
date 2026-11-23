@@ -134,7 +134,7 @@ export async function exportVideo(
     !(await canEncodeVideo("avc", { width, height, quality, frameRate: 30 }))
   ) {
     throw new Error(
-      "H.264 video export is unavailable in this browser. Update your browser to enable Story video export.",
+      "H.264 video export is unavailable in this browser. Update your browser to enable MP4 export.",
     );
   }
   const canvas = document.createElement("canvas");

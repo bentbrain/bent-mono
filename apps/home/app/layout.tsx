@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Home",
   description:
-    "A pixel apartment with Pearl and Maree.",
+    "Interactive isometric 3D apartment viewer with two animated cats and simulated lighting.",
 };
 
 export default function RootLayout({

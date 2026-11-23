@@ -42,7 +42,7 @@ Every CI run includes full CodeQL analysis. Code outside Shop requires zero raw 
 
 `bun run dev --filter=@bent/trackmap` starts the activity card editor. Import GPX, TCX, FIT or GeoJSON files from Strava or another GPS recorder. Activity files and background media are processed in the browser. A synthetic sample route is included.
 
-The editor turns recorded coordinates and elevation into a rotating 3D route. Adjust the camera, colour, title, units and route endpoints. Export an H.264 Story MP4 at 1080 px wide over a local photo or video, a transparent or styled PNG at 1080 px wide, or a looping GIF at 540 px wide. MP4 combines the animation and background for Instagram uploads. PNG and GIF exports can be used as layers in an editor.
+The editor turns recorded coordinates and elevation into a rotating 3D route. Adjust the camera, colour, title, units and route endpoints. Export a 9:16 Story or 1:1 square H.264 MP4 at 1080 px wide with a plain background or a local photo or video. Export a transparent or styled PNG at 1080 px wide, or a looping GIF at 540 px wide. PNG and GIF exports can be used as layers in an editor.
 
 Trackmap uses the shared Vercel release route from `apps/trackmap`, with Node 24, the pinned Bun bootstrap and workspace access. Assigning `trackmap.bent.build` requires the exact-head `Release qualification` production Deployment Check.
 

@@ -21,6 +21,7 @@ export interface SocialCardSettings {
 export const SOCIAL_CARD_WIDTH = 1_200;
 export const SOCIAL_CARD_HEIGHT = 630;
 const SOCIAL_CARD_VERSION = "v4";
+const SOCIAL_CARD_TITLE = "bent.shop | Custom T-shirts and totes";
 export const SOCIAL_CARD_DESCRIPTION =
   "Make your own shirt or tote from a photo.";
 export const SOCIAL_CARD_SETTINGS: SocialCardSettings = {
@@ -136,7 +137,7 @@ export function createSocialCardMetadata({
       images: [image],
       locale: "en_AU",
       siteName: "bent.shop",
-      title: "make your own",
+      title: SOCIAL_CARD_TITLE,
       type: "website",
       url: sharePath,
     },
@@ -145,7 +146,7 @@ export function createSocialCardMetadata({
       card: "summary_large_image",
       description: SOCIAL_CARD_DESCRIPTION,
       images: [{ alt, url: imagePath }],
-      title: "make your own",
+      title: SOCIAL_CARD_TITLE,
     },
   };
 }

@@ -14,14 +14,15 @@ import { Separator } from "@/components/ui/separator";
 const steps = [
   {
     number: "01",
-    title: "Add the plugin",
+    title: "Add the server in ChatGPT",
     description:
-      "Add the plugin in Codex or ChatGPT to connect your Tesla account.",
+      "Add https://drive.bent.build/mcp as a custom MCP server in ChatGPT. This depends on your ChatGPT plan and workspace settings.",
   },
   {
     number: "02",
-    title: "Approve with Tesla",
-    description: "You sign in directly with Tesla and choose the read-only vehicle permission.",
+    title: "Sign in with GitHub and Tesla",
+    description:
+      "Sign in with an invited GitHub account, then authorize read-only vehicle access on Tesla's site.",
   },
   {
     number: "03",
@@ -66,12 +67,13 @@ export default function Home() {
               Read-only pilot
             </Badge>
             <h1 className="max-w-3xl text-5xl leading-[0.96] font-semibold tracking-[-0.065em] sm:text-7xl">
-              Your Tesla,
-              <span className="block text-muted-foreground">in the conversation.</span>
+              Read-only Tesla status
+              <span className="block text-muted-foreground">in ChatGPT</span>
             </h1>
             <p className="mt-8 max-w-xl text-lg leading-8 text-muted-foreground">
-              Connect your Tesla account to approved AI tools for read-only vehicle status.
-              Sign in directly with Tesla. Your password stays with Tesla.
+              Connect ChatGPT to read your Tesla vehicle status. You need an
+              invited GitHub account and a Tesla account. Enter your Tesla
+              password only on Tesla&apos;s site.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               {securityFeatures.map((label) => (

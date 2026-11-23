@@ -98,7 +98,7 @@ async function storefrontFixture() {
         }
         // The grid no longer emits variant metadata for legacy homepage queries.
         if (url.pathname === "/") {
-            return new Response(`bent.shop products make your own /api/social-card/v4/featured/staple-tee/black.png <a href="/featured/${featuredId}">Current featured product</a>`, {
+            return new Response(`bent.shop products bent.shop | Custom T-shirts and totes /api/social-card/v4/featured/staple-tee/black.png <a href="/featured/${featuredId}">Current featured product</a>`, {
                 status: 200, headers: { "content-type": "text/html" },
             });
         }
@@ -109,7 +109,7 @@ async function storefrontFixture() {
         const productId = url.searchParams.get("product") === "tote" ? toteId : featuredId;
         const color = url.pathname.startsWith("/product/") ? "white" : "black";
         const image = `https://shop.bent.build/api/social-card/v4/product/${productId}/${color}.png`;
-        return new Response(`make your own <meta property="og:image" content="${image}"/><meta name="twitter:image" content="${image}"/>`, {
+        return new Response(`bent.shop | Custom T-shirts and totes <meta property="og:image" content="${image}"/><meta name="twitter:image" content="${image}"/>`, {
             status: 200, headers: { "content-type": "text/html" },
         });
     };
@@ -138,7 +138,7 @@ test("storefront smoke checks current featured metadata, removed tuners, favicon
 });
 test("storefront smoke rejects a missing selection, broken featured route and incorrect variant metadata", async () => {
     const cases = [
-        { path: "/", change: () => new Response("bent.shop products make your own /api/social-card/v4/featured/staple-tee/black.png", { headers: { "content-type": "text/html" } }), error: /current featured selection/ },
+        { path: "/", change: () => new Response("bent.shop products bent.shop | Custom T-shirts and totes /api/social-card/v4/featured/staple-tee/black.png", { headers: { "content-type": "text/html" } }), error: /current featured selection/ },
         { path: "/featured/", change: () => new Response("Not found", { status: 404 }), error: /HTTP 404/ },
         { path: "/featured/", change: async (response) => new Response((await response.text()).replaceAll("/black.png", "/white.png"), { headers: response.headers }), error: /variant-aware social metadata/ },
         { path: "/featured/", change: async (response) => new Response((await response.text()).replace('name="twitter:image"', 'name="wrong"'), { headers: response.headers }), error: /matching social image metadata/ },
