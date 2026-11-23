@@ -429,9 +429,25 @@ export function deleteEntries(
     const a = account(await change.records());
     if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
       throw new AgentError("List each entry once.");
-    const records = input.entries.map((entry) =>
-      find(a, access, entry, ["meal", "regular", "run", "weight"]),
-    );
+    const kinds: Entity["kind"][] = ["meal", "regular", "run", "weight"];
+    // Without read access, a failed batch names no entry, so it does not show
+    // which of the other entries still exist.
+    if (
+      !access.read &&
+      input.entries.some(
+        (entry) =>
+          !a.records.some(
+            (r) =>
+              r.id === entry.id &&
+              r.revision === entry.revision &&
+              kinds.includes(r.data.kind),
+          ),
+      )
+    )
+      throw new AgentError(
+        "Nothing was removed because an entry is not at the ID and revision given. Use IDs and revisions from this connection's latest receipts.",
+      );
+    const records = input.entries.map((entry) => find(a, access, entry, kinds));
     for (const record of records)
       await change.save(changed(record, record.revision, null));
     return {

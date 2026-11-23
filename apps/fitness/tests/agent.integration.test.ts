@@ -751,9 +751,39 @@ test.skipIf(!configured)(
       expect(errors[0]).toBe(errors[1]);
       expect(errors[2]).toBe(errors[3]);
       expect(errors[0]).toContain("this connection's latest receipt");
+      // A failed batch does not show which of its other entries matched.
+      const batches = [
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [
+            { id: snack.id, revision: 2 },
+            { id: missing, revision: 1 },
+          ],
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [
+            { id: snack.id, revision: 1 },
+            { id: missing, revision: 1 },
+          ],
+        }),
+      ];
+      expect(batches[0]).toBe(batches[1]);
+      expect(batches[0]).not.toContain(snack.id);
+      expect(batches[0]).toContain("Nothing was removed");
+      const kept = await call("fitness_list_saved_meals", {}, savedList);
+      expect(kept.savedMeals.find((m) => m.id === snack.id)?.revision).toBe(2);
       expect(
         await writer.failure("fitness_add_saved_meals", request),
       ).toContain("already used for a different change");
+      const writerRequest = {
+        requestId: key(),
+        savedMeals: [{ name: "Oats", calories: 300, protein: 10 }],
+      };
+      await writer.call("fitness_add_saved_meals", writerRequest, z.unknown());
+      expect(await failure("fitness_add_saved_meals", writerRequest)).toContain(
+        "already used for a different change",
+      );
       const reused = {
         requestId: key(),
         savedMeals: [{ name: "Tea", calories: 5, protein: 0 }],
