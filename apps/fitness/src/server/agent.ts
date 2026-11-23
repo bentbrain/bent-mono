@@ -308,21 +308,33 @@ const kindNames: Partial<Record<Entity["kind"], string>> = {
   weight: "weigh-in",
 };
 
+/**
+ * Finds an entry to change at the revision the caller read. Without read
+ * access, one error covers missing, other-kind and changed entries, so
+ * failures do not show what the account holds.
+ */
 function find(
   account: Account,
+  access: AgentAccess,
   entry: { id: string; revision: number },
   kinds: Entity["kind"][],
 ) {
   const record = account.records.find((r) => r.id === entry.id);
-  if (!record || !kinds.includes(record.data.kind))
+  const current =
+    record && kinds.includes(record.data.kind) ? record : undefined;
+  if (!access.read && current?.revision !== entry.revision)
+    throw new AgentError(
+      `No ${kinds.map((k) => kindNames[k] ?? k).join(", ")} entry has the ID ${entry.id} at revision ${entry.revision}. Use an ID and revision from this connection's latest receipt.`,
+    );
+  if (!current)
     throw new AgentError(
       `No ${kinds.map((k) => kindNames[k] ?? k).join(", ")} entry has the ID ${entry.id}. Read the entries again to find current IDs.`,
     );
-  if (record.revision !== entry.revision)
+  if (current.revision !== entry.revision)
     throw new AgentError(
       `Entry ${entry.id} changed after you read it. Read it again before changing it.`,
     );
-  return record;
+  return current;
 }
 
 /** Matches the app: a saved meal with the same name, calories and protein is a duplicate. */
@@ -384,7 +396,9 @@ export function updateMeal(
   },
 ) {
   return once(owner, access, "update_meal", input, async (change) => {
-    const record = find(account(await change.records()), input, ["meal"]);
+    const record = find(account(await change.records()), access, input, [
+      "meal",
+    ]);
     if (record.data.kind !== "meal") throw new Error("Expected a meal.");
     const data = parsed(mealSchema, {
       ...record.data,
@@ -416,7 +430,7 @@ export function deleteEntries(
     if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
       throw new AgentError("List each entry once.");
     const records = input.entries.map((entry) =>
-      find(a, entry, ["meal", "regular", "run", "weight"]),
+      find(a, access, entry, ["meal", "regular", "run", "weight"]),
     );
     for (const record of records)
       await change.save(changed(record, record.revision, null));
@@ -531,11 +545,13 @@ export function addSavedMeals(
       if (saved) added.push(savedMealView(saved));
     }
     return {
-      full: {
-        added,
-        alreadySaved,
-        savedMeals: savedMeals(await change.records()),
-      },
+      full: access.read
+        ? {
+            added,
+            alreadySaved,
+            savedMeals: savedMeals(await change.records()),
+          }
+        : { added },
       receipt: { added },
     };
   });
@@ -554,7 +570,9 @@ export function updateSavedMeal(
   },
 ) {
   return once(owner, access, "update_saved_meal", input, async (change) => {
-    const record = find(account(await change.records()), input, ["regular"]);
+    const record = find(account(await change.records()), access, input, [
+      "regular",
+    ]);
     if (record.data.kind !== "regular")
       throw new Error("Expected a saved meal.");
     const data = parsed(regularSchema, {

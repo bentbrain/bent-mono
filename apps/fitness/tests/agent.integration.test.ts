@@ -724,6 +724,33 @@ test.skipIf(!configured)(
           z.unknown(),
         ),
       ).toEqual({ updated: { id: snack.id, revision: 2 } });
+      // Without read access, a missing entry and a changed one fail alike.
+      const missing = crypto.randomUUID();
+      const errors = [
+        await writer.failure("fitness_update_saved_meal", {
+          requestId: key(),
+          id: snack.id,
+          revision: 1,
+          calories: 1,
+        }),
+        await writer.failure("fitness_update_saved_meal", {
+          requestId: key(),
+          id: missing,
+          revision: 1,
+          calories: 1,
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [{ id: snack.id, revision: 1 }],
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [{ id: missing, revision: 1 }],
+        }),
+      ].map((message) => message.replace(missing, snack.id));
+      expect(errors[0]).toBe(errors[1]);
+      expect(errors[2]).toBe(errors[3]);
+      expect(errors[0]).toContain("this connection's latest receipt");
       expect(
         await writer.failure("fitness_add_saved_meals", request),
       ).toContain("already used for a different change");
