@@ -10,6 +10,7 @@ import {
   displayLoad,
   localDate,
   mealSchema,
+  regularSchema,
   runSchema,
   scheduled,
   settingsId,
@@ -211,22 +212,23 @@ export async function getHistory(
   return { ...summary(a), days };
 }
 
-export async function listSavedMeals(owner: string) {
-  const records = await loadRecords(owner);
+function savedMealView(record: RecordEntry) {
+  if (record.data.kind !== "regular") throw new Error("Expected a saved meal.");
   return {
-    savedMeals: records.flatMap((r) =>
-      r.data.kind === "regular"
-        ? [
-            {
-              id: r.id,
-              name: r.data.name,
-              calories: r.data.calories,
-              protein: r.data.protein,
-            },
-          ]
-        : [],
-    ),
+    id: record.id,
+    revision: record.revision,
+    name: record.data.name,
+    calories: record.data.calories,
+    protein: record.data.protein,
   };
+}
+
+function savedMeals(records: RecordEntry[]) {
+  return records.filter((r) => r.data.kind === "regular").map(savedMealView);
+}
+
+export async function listSavedMeals(owner: string) {
+  return { savedMeals: savedMeals(await loadRecords(owner)) };
 }
 
 function created(data: Entity): Mutation {
@@ -299,6 +301,13 @@ async function once(
   }
 }
 
+const kindNames: Partial<Record<Entity["kind"], string>> = {
+  meal: "meal",
+  regular: "saved meal",
+  run: "run",
+  weight: "weigh-in",
+};
+
 function find(
   account: Account,
   entry: { id: string; revision: number },
@@ -307,13 +316,25 @@ function find(
   const record = account.records.find((r) => r.id === entry.id);
   if (!record || !kinds.includes(record.data.kind))
     throw new AgentError(
-      `No ${kinds.join(", ")} entry has the ID ${entry.id}. Read the day to find current IDs.`,
+      `No ${kinds.map((k) => kindNames[k] ?? k).join(", ")} entry has the ID ${entry.id}. Read the entries again to find current IDs.`,
     );
   if (record.revision !== entry.revision)
     throw new AgentError(
-      `Entry ${entry.id} changed after you read it. Read the day again before changing it.`,
+      `Entry ${entry.id} changed after you read it. Read it again before changing it.`,
     );
   return record;
+}
+
+/** Matches the app: a saved meal with the same name, calories and protein is a duplicate. */
+function sameMeal(
+  a: { name: string; calories: number; protein: number },
+  b: { name: string; calories: number; protein: number },
+) {
+  return (
+    a.name.toLowerCase() === b.name.toLowerCase() &&
+    a.calories === b.calories &&
+    a.protein === b.protein
+  );
 }
 
 export function addMeals(
@@ -395,7 +416,7 @@ export function deleteEntries(
     if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
       throw new AgentError("List each entry once.");
     const records = input.entries.map((entry) =>
-      find(a, entry, ["meal", "run", "weight"]),
+      find(a, entry, ["meal", "regular", "run", "weight"]),
     );
     for (const record of records)
       await change.save(changed(record, record.revision, null));
@@ -403,7 +424,7 @@ export function deleteEntries(
       full: {
         deleted: records.map((r) => ({
           id: r.id,
-          kind: r.data.kind,
+          kind: r.data.kind === "regular" ? "savedMeal" : r.data.kind,
           date: "date" in r.data ? r.data.date : null,
         })),
       },
@@ -480,5 +501,70 @@ export function logRun(
       run: saved ? { id: saved.id, revision: saved.revision, ...data } : null,
     };
     return { full: result, receipt: result };
+  });
+}
+
+export function addSavedMeals(
+  owner: string,
+  access: AgentAccess,
+  input: {
+    requestId: string;
+    savedMeals: { name: string; calories: number; protein: number }[];
+  },
+) {
+  return once(owner, access, "add_saved_meals", input, async (change) => {
+    const existing = savedMeals(await change.records());
+    const added = [];
+    const alreadySaved = [];
+    for (const meal of input.savedMeals) {
+      const data = parsed(regularSchema, { kind: "regular", ...meal });
+      const match = [...existing, ...added].find((m) => sameMeal(m, data));
+      if (match) {
+        alreadySaved.push(match);
+        continue;
+      }
+      const saved = await change.save(created(data));
+      if (saved) added.push(savedMealView(saved));
+    }
+    return {
+      full: {
+        added,
+        alreadySaved,
+        savedMeals: savedMeals(await change.records()),
+      },
+      receipt: { added },
+    };
+  });
+}
+
+export function updateSavedMeal(
+  owner: string,
+  access: AgentAccess,
+  input: {
+    requestId: string;
+    id: string;
+    revision: number;
+    name?: string;
+    calories?: number;
+    protein?: number;
+  },
+) {
+  return once(owner, access, "update_saved_meal", input, async (change) => {
+    const record = find(account(await change.records()), input, ["regular"]);
+    if (record.data.kind !== "regular")
+      throw new Error("Expected a saved meal.");
+    const data = parsed(regularSchema, {
+      ...record.data,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.calories === undefined ? {} : { calories: input.calories }),
+      ...(input.protein === undefined ? {} : { protein: input.protein }),
+    });
+    const saved = await change.save(changed(record, input.revision, data));
+    return {
+      full: { updated: saved ? savedMealView(saved) : null },
+      receipt: {
+        updated: saved ? { id: saved.id, revision: saved.revision } : null,
+      },
+    };
   });
 }

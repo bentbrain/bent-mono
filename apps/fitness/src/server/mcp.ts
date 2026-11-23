@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   AgentError,
   addMeals,
+  addSavedMeals,
   deleteEntries,
   getDay,
   getHistory,
@@ -11,6 +12,7 @@ import {
   logRun,
   logWeight,
   updateMeal,
+  updateSavedMeal,
 } from "./agent";
 import { StoreRuleError } from "./store";
 import type { AgentAccess } from "./auth";
@@ -23,7 +25,7 @@ const revision = z
   .number()
   .int()
   .positive()
-  .describe("The entry's revision from fitness_get_day");
+  .describe("The entry's current revision");
 const requestId = z
   .string()
   .trim()
@@ -41,6 +43,10 @@ const mealInput = {
     .describe("What was eaten, e.g. 'Chicken burrito bowl'"),
   calories: z.number().nonnegative().max(10000).describe("Calories (kcal)"),
   protein: z.number().nonnegative().max(500).describe("Protein in grams"),
+};
+const savedMealInput = {
+  ...mealInput,
+  name: mealInput.name.describe("Saved meal name, e.g. 'Usual breakfast'"),
 };
 
 const read = {
@@ -101,8 +107,9 @@ export function instructions(access: AgentAccess) {
       access.read
         ? "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals."
         : "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged.",
+      "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. A meal already saved with the same name, calories and protein is not saved again.",
       access.read
-        ? "Before editing or removing entries, call fitness_get_day to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
+        ? "Before editing or removing entries, call fitness_get_day, or fitness_list_saved_meals for saved meals, to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
         : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
       "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
       "Weights are stored in kilograms; pass the unit the user gave.",
@@ -152,7 +159,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "List saved meals",
         description:
-          "Lists the user's saved meals with their calories and protein. Use these values when the user mentions one of them.",
+          "Lists the user's saved meals with their IDs, revisions, calories and protein. Use these values when the user mentions one of them.",
         inputSchema: {},
         annotations: read,
       },
@@ -185,7 +192,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
           "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values. Fails if the entry changed after it was read.",
         inputSchema: {
           requestId,
-          id: id.describe("Meal ID from fitness_get_day"),
+          id: id.describe("Meal ID"),
           revision,
           name: mealInput.name.optional(),
           calories: mealInput.calories.optional(),
@@ -202,18 +209,52 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Delete entries",
         description:
-          "Removes meals, runs or weigh-ins in a single change. Fails without removing anything if an entry changed after it was read. Strength workouts are managed in the app.",
+          "Removes meals, saved meals, runs or weigh-ins in a single change. Fails without removing anything if an entry changed after it was read. Strength workouts are managed in the app.",
         inputSchema: {
           requestId,
           entries: z
             .array(z.object({ id, revision }))
             .min(1)
             .max(30)
-            .describe("Entry IDs and revisions from fitness_get_day"),
+            .describe("Entry IDs and their current revisions"),
         },
         annotations: { ...replace, idempotentHint: true },
       },
       (input) => run(() => deleteEntries(owner, access, input)),
+    );
+
+    server.registerTool(
+      "fitness_add_saved_meals",
+      {
+        title: "Add saved meals",
+        description:
+          "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Skips a meal already saved with the same name, calories and protein. To record food eaten on a day, use fitness_add_meals.",
+        inputSchema: {
+          requestId,
+          savedMeals: z.array(z.object(savedMealInput)).min(1).max(30),
+        },
+        annotations: add,
+      },
+      (input) => run(() => addSavedMeals(owner, access, input)),
+    );
+
+    server.registerTool(
+      "fitness_update_saved_meal",
+      {
+        title: "Update a saved meal",
+        description:
+          "Changes a saved meal's name, calories or protein. Omitted fields keep their current values. Meals already logged keep their values. Fails if the saved meal changed after it was read.",
+        inputSchema: {
+          requestId,
+          id: id.describe("Saved meal ID"),
+          revision,
+          name: savedMealInput.name.optional(),
+          calories: mealInput.calories.optional(),
+          protein: mealInput.protein.optional(),
+        },
+        annotations: { ...replace, idempotentHint: true },
+      },
+      (input) => run(() => updateSavedMeal(owner, access, input)),
     );
 
     server.registerTool(
