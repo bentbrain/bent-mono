@@ -27,7 +27,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csp-nonce" content={nonce} />
-        <title>Feedback</title>
+        <title>Feedback toolbar · bent.build</title>
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <Meta />
         <Links />

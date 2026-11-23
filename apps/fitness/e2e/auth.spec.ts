@@ -73,7 +73,9 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Plan the week. Log every set." }),
+    page.getByRole("heading", {
+      name: "Track strength sessions, runs, food and bodyweight.",
+    }),
   ).toBeVisible();
   await clerk.signIn({
     page,

@@ -110,7 +110,10 @@ describe("MobileOnlyGate", () => {
       );
     });
 
-    expect(container.textContent).toBe("");
+    expect(container.querySelector("figcaption")?.textContent).toBe(
+      "Scan the QR code with your phone to continue creating your design.",
+    );
+    expect(container.textContent).not.toContain("Camera landing");
     expect(container.querySelector("canvas")).not.toBeNull();
     act(() => {
       root.unmount();
@@ -163,7 +166,9 @@ describe("MobileOnlyGate", () => {
 
     expect(mounted).toHaveBeenCalledOnce();
     expect(unmounted).toHaveBeenCalledOnce();
-    expect(container.textContent).toBe("");
+    expect(container.querySelector("figcaption")?.textContent).toBe(
+      "Scan the QR code with your phone to continue creating your design.",
+    );
     expect(container.textContent).not.toContain("Mobile editor");
     act(() => {
       root.unmount();
@@ -240,7 +245,9 @@ describe("MobileOnlyGate", () => {
         },
       );
       expect(container.textContent).not.toContain("Useful no-JS landing");
-      expect(container.textContent).toBe("");
+      expect(container.querySelector("figcaption")?.textContent).toBe(
+        "Scan the QR code with your phone to continue creating your design.",
+      );
     } finally {
       act(() => {
         root?.unmount();

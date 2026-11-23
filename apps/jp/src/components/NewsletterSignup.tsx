@@ -6,6 +6,7 @@ import { Field, FieldLabel } from './ui/field';
 
 export function NewsletterSignup({ instance }: { instance: 'top' | 'footer' }) {
   const emailId = `newsletter-${instance}-email`;
+  const descriptionId = `newsletter-${instance}-description`;
   const websiteId = `newsletter-${instance}-website`;
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,9 @@ export function NewsletterSignup({ instance }: { instance: 'top' | 'footer' }) {
       className="w-full"
     >
       <div>
+        <p id={descriptionId} className="mb-2 text-xs">
+          email updates for new posts
+        </p>
         <form
           data-feedback-redact
           data-feedback-private
@@ -55,6 +59,7 @@ export function NewsletterSignup({ instance }: { instance: 'top' | 'footer' }) {
               name="email"
               type="email"
               autoComplete="email"
+              aria-describedby={descriptionId}
               maxLength={254}
               required
               disabled={!ready || busy}

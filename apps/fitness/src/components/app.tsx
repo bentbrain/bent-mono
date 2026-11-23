@@ -35,11 +35,7 @@ function Welcome() {
       <div className="wordmark">
         bent<span>/</span>fitness
       </div>
-      <h1>Plan the week. Log every set.</h1>
-      <p>
-        Your strength sessions, runs, food and bodyweight in one private
-        account.
-      </p>
+      <h1>Track strength sessions, runs, food and bodyweight.</h1>
       <ul className="landing-jobs">
         <li>
           <strong>Week</strong>
@@ -47,7 +43,8 @@ function Welcome() {
         </li>
         <li>
           <strong>Exercises</strong>
-          Setup, form cues, pictures and a tutorial for every movement.
+          Setup, form cues, illustrations and a YouTube tutorial for each
+          included dumbbell exercise.
         </li>
         <li>
           <strong>Food</strong>
@@ -59,9 +56,7 @@ function Welcome() {
         </li>
       </ul>
       <SignInButton mode="modal">
-        <Button appearance="primary">
-          Sign in to your plan <span aria-hidden>→</span>
-        </Button>
+        <Button appearance="primary">Sign in</Button>
       </SignInButton>
       <p className="muted">
         Invited accounts only. Your training and nutrition stay private.

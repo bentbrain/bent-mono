@@ -348,11 +348,11 @@ for (const path of ['/', '/gallery', '/newsletter/privacy']) {
         await expect(subscribe).toBeEnabled();
         await expect(signup.getByRole('heading')).toHaveCount(0);
         await expect(
-          signup.getByText(
-            'get new journal entries by email. unsubscribe anytime.',
-            { exact: true },
-          ),
-        ).toHaveCount(0);
+          signup.getByText('email updates for new posts', { exact: true }),
+        ).toBeVisible();
+        await expect(email).toHaveAccessibleDescription(
+          'email updates for new posts',
+        );
         await expect(signup.getByRole('status')).toBeEmpty();
         const label = signup.locator('label.sr-only');
         await expect(label).toHaveText('email');

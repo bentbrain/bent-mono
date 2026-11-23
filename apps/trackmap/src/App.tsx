@@ -290,6 +290,10 @@ export default function App() {
       </header>
       <main>
         <h1>Trackmap</h1>
+        <p>
+          Turn a GPX, TCX, FIT or GeoJSON file into a rotating 3D route card.
+          Trackmap processes files in your browser.
+        </p>
         <div className="workspace">
           <section className="preview-panel" aria-label="Activity card preview">
             <div className="panel-heading">
@@ -694,7 +698,7 @@ export default function App() {
                   disabled={!exportable || loading || mediaLoading}
                   onClick={() => void save("mp4")}
                 >
-                  Export Story video · MP4
+                  Export MP4 video
                 </Button>
                 <div className="two-columns">
                   <Button

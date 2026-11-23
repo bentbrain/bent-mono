@@ -397,7 +397,7 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   test.slow();
   await page.goto("/");
   const first = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export Story video" }).click();
+  await page.getByRole("button", { name: "Export MP4 video", exact: true }).click();
   const firstDownload = await first;
   await firstDownload.saveAs(info.outputPath("story.mp4"));
   const path = await firstDownload.path();
@@ -484,7 +484,7 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
     ]);
   }
   const second = downloadOrError();
-  await page.getByRole("button", { name: "Export Story video" }).click();
+  await page.getByRole("button", { name: "Export MP4 video", exact: true }).click();
   const secondDownload = await second;
   await secondDownload.saveAs(info.outputPath("composite.mp4"));
   const secondPath = await secondDownload.path();
@@ -532,7 +532,7 @@ test("exports an H.264 Story MP4 and can use that video as a local background", 
   const frames = gifFrames(await readFile(gifPath));
   expect(frames).toHaveLength(72);
   expect(frames.every((frame) => !frame.transparent)).toBe(true);
-  await page.getByRole("button", { name: "Export Story video" }).click();
+  await page.getByRole("button", { name: "Export MP4 video", exact: true }).click();
   await page.getByRole("button", { name: "Cancel export" }).click();
   await expect(page.getByRole("button", { name: "Save PNG" })).toBeEnabled();
 });

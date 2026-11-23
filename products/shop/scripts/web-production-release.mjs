@@ -70,7 +70,7 @@ export async function smokeStorefront(origin, { bypass, includeImages, fetcher =
         const response = await request(path);
         check(response.headers.get("content-type")?.includes("text/html"), `${path} HTML content type.`);
         const html = await response.text();
-        check(html.includes("make your own"), `${path} storefront content.`);
+        check(html.includes("bent.shop | Custom T-shirts and totes"), `${path} storefront content.`);
         return html;
     };
     const home = await readHtml("/");

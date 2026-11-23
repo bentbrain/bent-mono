@@ -21,7 +21,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Your strength training, food and progress in one private account.",
+          "Private tracker for strength sessions, runs, food and bodyweight. Access is by invitation.",
       },
       { name: "theme-color", content: "#0647ff" },
       { name: "apple-mobile-web-app-capable", content: "yes" },

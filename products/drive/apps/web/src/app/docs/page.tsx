@@ -16,8 +16,8 @@ export default function DocsPage() {
       </Badge>
       <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">Connection guide</h1>
       <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
-        Connect an approved MCP client to read your Tesla vehicle information.
-        Sign in directly with Tesla. Your password stays with Tesla.
+        Connect an MCP client to read your Tesla vehicle status. You need an
+        invited GitHub account and a Tesla account.
       </p>
       <Separator className="my-10" />
 
@@ -43,8 +43,9 @@ export default function DocsPage() {
           </CardHeader>
           <CardContent className="leading-7 text-muted-foreground">
             <p>
-              The service uses OAuth 2.1 authorization-code flow with PKCE and dynamic client
-              registration. Sign in with Tesla to authorize vehicle access. Bent Drive Copilot issues
+              Sign in with an invited GitHub account, then authorize read-only vehicle
+              access on Tesla&apos;s site. The service uses OAuth 2.1 authorization-code
+              flow with PKCE and dynamic client registration. Bent Drive Copilot issues
               separate, short-lived tokens to the MCP client.
             </p>
           </CardContent>
