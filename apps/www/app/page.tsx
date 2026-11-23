@@ -24,7 +24,7 @@ function HeroPhones() {
       as: "image",
       imageSrcSet: props.srcSet,
       imageSizes: props.sizes,
-      media: "(min-width: 1024px)",
+      media: "(min-width: 64rem)",
       fetchPriority: "high",
     });
   }
