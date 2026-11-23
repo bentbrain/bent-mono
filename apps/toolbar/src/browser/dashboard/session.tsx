@@ -79,9 +79,9 @@ function Auth({
             <h2 className="text-[28px] font-medium tracking-[-.8px]">
               {signup ? 'Create account' : 'Sign in'}
             </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Manage website feedback projects, install the toolbar on your site and connect a local
-              coding agent through MCP.
+            <p className="mt-2 text-sm text-muted-foreground [@media(max-height:699px)]:hidden">
+              Manage feedback projects, install the toolbar and connect a local coding agent through
+              MCP.
             </p>
           </div>
           {github ? (
