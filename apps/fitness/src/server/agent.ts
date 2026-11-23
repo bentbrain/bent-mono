@@ -10,6 +10,7 @@ import {
   displayLoad,
   localDate,
   mealSchema,
+  regularSchema,
   runSchema,
   scheduled,
   settingsId,
@@ -211,22 +212,23 @@ export async function getHistory(
   return { ...summary(a), days };
 }
 
-export async function listSavedMeals(owner: string) {
-  const records = await loadRecords(owner);
+function savedMealView(record: RecordEntry) {
+  if (record.data.kind !== "regular") throw new Error("Expected a saved meal.");
   return {
-    savedMeals: records.flatMap((r) =>
-      r.data.kind === "regular"
-        ? [
-            {
-              id: r.id,
-              name: r.data.name,
-              calories: r.data.calories,
-              protein: r.data.protein,
-            },
-          ]
-        : [],
-    ),
+    id: record.id,
+    revision: record.revision,
+    name: record.data.name,
+    calories: record.data.calories,
+    protein: record.data.protein,
   };
+}
+
+function savedMeals(records: RecordEntry[]) {
+  return records.filter((r) => r.data.kind === "regular").map(savedMealView);
+}
+
+export async function listSavedMeals(owner: string) {
+  return { savedMeals: savedMeals(await loadRecords(owner)) };
 }
 
 function created(data: Entity): Mutation {
@@ -299,21 +301,52 @@ async function once(
   }
 }
 
+const kindNames: Partial<Record<Entity["kind"], string>> = {
+  meal: "meal",
+  regular: "saved meal",
+  run: "run",
+  weight: "weigh-in",
+};
+
+/**
+ * Finds an entry to change at the revision the caller read. Without read
+ * access, one error covers missing, other-kind and changed entries, so
+ * failures do not show what the account holds.
+ */
 function find(
   account: Account,
+  access: AgentAccess,
   entry: { id: string; revision: number },
   kinds: Entity["kind"][],
 ) {
   const record = account.records.find((r) => r.id === entry.id);
-  if (!record || !kinds.includes(record.data.kind))
+  const current =
+    record && kinds.includes(record.data.kind) ? record : undefined;
+  if (!access.read && current?.revision !== entry.revision)
     throw new AgentError(
-      `No ${kinds.join(", ")} entry has the ID ${entry.id}. Read the day to find current IDs.`,
+      `No ${kinds.map((k) => kindNames[k] ?? k).join(", ")} entry has the ID ${entry.id} at revision ${entry.revision}. Use an ID and revision from this connection's latest receipt.`,
     );
-  if (record.revision !== entry.revision)
+  if (!current)
     throw new AgentError(
-      `Entry ${entry.id} changed after you read it. Read the day again before changing it.`,
+      `No ${kinds.map((k) => kindNames[k] ?? k).join(", ")} entry has the ID ${entry.id}. Read the entries again to find current IDs.`,
     );
-  return record;
+  if (current.revision !== entry.revision)
+    throw new AgentError(
+      `Entry ${entry.id} changed after you read it. Read it again before changing it.`,
+    );
+  return current;
+}
+
+/** Matches the app: a saved meal with the same name, calories and protein is a duplicate. */
+function sameMeal(
+  a: { name: string; calories: number; protein: number },
+  b: { name: string; calories: number; protein: number },
+) {
+  return (
+    a.name.toLowerCase() === b.name.toLowerCase() &&
+    a.calories === b.calories &&
+    a.protein === b.protein
+  );
 }
 
 export function addMeals(
@@ -363,7 +396,9 @@ export function updateMeal(
   },
 ) {
   return once(owner, access, "update_meal", input, async (change) => {
-    const record = find(account(await change.records()), input, ["meal"]);
+    const record = find(account(await change.records()), access, input, [
+      "meal",
+    ]);
     if (record.data.kind !== "meal") throw new Error("Expected a meal.");
     const data = parsed(mealSchema, {
       ...record.data,
@@ -394,16 +429,32 @@ export function deleteEntries(
     const a = account(await change.records());
     if (new Set(input.entries.map((e) => e.id)).size !== input.entries.length)
       throw new AgentError("List each entry once.");
-    const records = input.entries.map((entry) =>
-      find(a, entry, ["meal", "run", "weight"]),
-    );
+    const kinds: Entity["kind"][] = ["meal", "regular", "run", "weight"];
+    // Without read access, a failed batch names no entry, so it does not show
+    // which of the other entries still exist.
+    if (
+      !access.read &&
+      input.entries.some(
+        (entry) =>
+          !a.records.some(
+            (r) =>
+              r.id === entry.id &&
+              r.revision === entry.revision &&
+              kinds.includes(r.data.kind),
+          ),
+      )
+    )
+      throw new AgentError(
+        "Nothing was removed because an entry is not at the ID and revision given. Use IDs and revisions from this connection's latest receipts.",
+      );
+    const records = input.entries.map((entry) => find(a, access, entry, kinds));
     for (const record of records)
       await change.save(changed(record, record.revision, null));
     return {
       full: {
         deleted: records.map((r) => ({
           id: r.id,
-          kind: r.data.kind,
+          kind: r.data.kind === "regular" ? "savedMeal" : r.data.kind,
           date: "date" in r.data ? r.data.date : null,
         })),
       },
@@ -480,5 +531,78 @@ export function logRun(
       run: saved ? { id: saved.id, revision: saved.revision, ...data } : null,
     };
     return { full: result, receipt: result };
+  });
+}
+
+export function addSavedMeals(
+  owner: string,
+  access: AgentAccess,
+  input: {
+    requestId: string;
+    savedMeals: { name: string; calories: number; protein: number }[];
+  },
+) {
+  // Skipping meals already saved would show a write-only connection which
+  // ones exist, so it checks only the meals in its own request. The grant is
+  // part of the request, so a retry under the other grant is rejected.
+  const tool = access.read ? "add_saved_meals" : "add_saved_meals_write_only";
+  return once(owner, access, tool, input, async (change) => {
+    const existing = access.read ? savedMeals(await change.records()) : [];
+    const added = [];
+    const alreadySaved = [];
+    for (const meal of input.savedMeals) {
+      const data = parsed(regularSchema, { kind: "regular", ...meal });
+      const match = [...existing, ...added].find((m) => sameMeal(m, data));
+      if (match) {
+        alreadySaved.push(match);
+        continue;
+      }
+      const saved = await change.save(created(data));
+      if (saved) added.push(savedMealView(saved));
+    }
+    return {
+      full: access.read
+        ? {
+            added,
+            alreadySaved,
+            savedMeals: savedMeals(await change.records()),
+          }
+        : { added },
+      receipt: { added },
+    };
+  });
+}
+
+export function updateSavedMeal(
+  owner: string,
+  access: AgentAccess,
+  input: {
+    requestId: string;
+    id: string;
+    revision: number;
+    name?: string;
+    calories?: number;
+    protein?: number;
+  },
+) {
+  return once(owner, access, "update_saved_meal", input, async (change) => {
+    const record = find(account(await change.records()), access, input, [
+      "regular",
+    ]);
+    if (record.data.kind !== "regular")
+      throw new Error("Expected a saved meal.");
+    const data = parsed(regularSchema, {
+      ...record.data,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.calories === undefined ? {} : { calories: input.calories }),
+      ...(input.protein === undefined ? {} : { protein: input.protein }),
+    });
+    const saved = await change.save(changed(record, input.revision, data));
+    return {
+      full: { updated: saved ? savedMealView(saved) : null },
+      receipt: {
+        updated: saved ? { id: saved.id, revision: saved.revision } : null,
+      },
+    };
   });
 }

@@ -82,6 +82,11 @@ const deleted = z.object({
     z.object({ id: z.string(), kind: z.string(), date: z.string() }),
   ),
 });
+const savedList = z.object({ savedMeals: z.array(meal) });
+const savedAdded = savedList.extend({
+  added: z.array(meal),
+  alreadySaved: z.array(meal),
+});
 const logged = z.object({ replacedKg: z.number().nullable(), weight });
 const run = z.object({ run: entry });
 const history = z.object({
@@ -344,7 +349,7 @@ test.skipIf(!configured)(
         requestId: key(),
         entries: [{ id: apple.id, revision: apple.revision }],
       }),
-    ).toContain("No meal, run, weight entry");
+    ).toContain("No meal, saved meal, run, weigh-in entry");
     expect((await loadRecords(ownerA)).some((r) => r.id === apple.id)).toBe(
       true,
     );
@@ -430,11 +435,15 @@ test("instructions mention only the tools and results a grant includes", () => {
   expect(reader.match(tools) ?? []).toEqual([]);
   expect(reader).toContain("need write access");
   const writer = instructions({ read: false, write: true });
-  expect(writer.match(tools)).toEqual(["fitness_add_meals"]);
+  expect(writer.match(tools)).toEqual([
+    "fitness_add_meals",
+    "fitness_add_saved_meals",
+  ]);
   expect(writer).not.toContain("totals");
   expect(writer).toContain("receipts");
   const both = instructions(full);
   expect(both).toContain("fitness_get_day");
+  expect(both).toContain("fitness_list_saved_meals");
   expect(both).toContain("totals");
 });
 
@@ -462,10 +471,12 @@ test.skipIf(!configured)(
     );
     expect(await writer.tools()).toEqual([
       "fitness_add_meals",
+      "fitness_add_saved_meals",
       "fitness_delete_entries",
       "fitness_log_run",
       "fitness_log_weight",
       "fitness_update_meal",
+      "fitness_update_saved_meal",
     ]);
   },
 );
@@ -568,5 +579,227 @@ test.skipIf(!configured)(
     const replay = await writer.call("fitness_add_meals", shared, z.unknown());
     expect(JSON.stringify(replay)).not.toContain("Private dinner");
     expect(replay).toEqual({ date, added: full.added });
+  },
+);
+
+test.skipIf(!configured)(
+  "agents save, edit and remove saved meals",
+  async () => {
+    const owner = "integration:" + crypto.randomUUID();
+    try {
+      const { call, failure } = await connect(owner);
+      const request = {
+        requestId: key(),
+        savedMeals: [
+          { name: "Usual breakfast", calories: 420, protein: 32 },
+          { name: "usual breakfast", calories: 420, protein: 32 },
+          { name: "Protein shake", calories: 180, protein: 30 },
+        ],
+      };
+      const first = await call("fitness_add_saved_meals", request, savedAdded);
+      expect(first.added.map((m) => [m.name, m.revision])).toEqual([
+        ["Usual breakfast", 1],
+        ["Protein shake", 1],
+      ]);
+      expect(first.alreadySaved.map((m) => m.id)).toEqual([first.added[0]?.id]);
+      expect(first.savedMeals).toHaveLength(2);
+      expect(
+        await call("fitness_add_saved_meals", request, savedAdded),
+      ).toEqual(first);
+      const again = await call(
+        "fitness_add_saved_meals",
+        {
+          requestId: key(),
+          savedMeals: [
+            { name: "USUAL BREAKFAST", calories: 420, protein: 32 },
+            { name: "Usual breakfast", calories: 450, protein: 32 },
+          ],
+        },
+        savedAdded,
+      );
+      expect(again.alreadySaved.map((m) => m.name)).toEqual([
+        "Usual breakfast",
+      ]);
+      expect(again.added.map((m) => m.calories)).toEqual([450]);
+      const listed = await call("fitness_list_saved_meals", {}, savedList);
+      expect(listed.savedMeals).toHaveLength(3);
+      const shake = listed.savedMeals.find((m) => m.name === "Protein shake");
+      if (!shake) throw new Error("The shake was not saved.");
+      expect(
+        await failure("fitness_add_saved_meals", {
+          requestId: key(),
+          savedMeals: [{ name: "Too much", calories: 20000, protein: 1 }],
+        }),
+      ).toContain("savedMeals");
+      expect(
+        await failure("fitness_update_saved_meal", {
+          requestId: key(),
+          id: shake.id,
+          revision: shake.revision + 1,
+          protein: 35,
+        }),
+      ).toContain("changed after you read it");
+      const edit = await call(
+        "fitness_update_saved_meal",
+        {
+          requestId: key(),
+          id: shake.id,
+          revision: shake.revision,
+          protein: 35,
+        },
+        z.object({ updated: meal }),
+      );
+      expect(edit.updated).toEqual({ ...shake, revision: 2, protein: 35 });
+      const logged = await call(
+        "fitness_add_meals",
+        {
+          requestId: key(),
+          meals: [{ name: "Protein shake", calories: 180, protein: 35 }],
+        },
+        added,
+      );
+      const loggedMeal = logged.added[0];
+      if (!loggedMeal) throw new Error("The meal was not logged.");
+      expect(
+        await failure("fitness_update_saved_meal", {
+          requestId: key(),
+          ...loggedMeal,
+          name: "Not saved",
+        }),
+      ).toContain("No saved meal entry");
+      expect(
+        await failure("fitness_update_meal", {
+          requestId: key(),
+          id: shake.id,
+          revision: 2,
+          name: "Not logged",
+        }),
+      ).toContain("No meal entry");
+      const removal = await call(
+        "fitness_delete_entries",
+        { requestId: key(), entries: [{ id: shake.id, revision: 2 }] },
+        z.object({
+          deleted: z.array(
+            z.object({ id: z.string(), kind: z.string(), date: z.null() }),
+          ),
+        }),
+      );
+      expect(removal.deleted).toEqual([
+        { id: shake.id, kind: "savedMeal", date: null },
+      ]);
+      const remaining = await call("fitness_list_saved_meals", {}, savedList);
+      expect(remaining.savedMeals.map((m) => m.name)).toEqual([
+        "Usual breakfast",
+        "Usual breakfast",
+      ]);
+      const day = await call("fitness_get_day", {}, z.object({ food }));
+      expect(day.food.meals.map((m) => m.name)).toEqual(["Protein shake"]);
+
+      // A write-only connection cannot tell which meals are already saved.
+      const writer = await connect(owner, { read: false, write: true });
+      const receipt = await writer.call(
+        "fitness_add_saved_meals",
+        {
+          requestId: key(),
+          savedMeals: [
+            { name: "Usual breakfast", calories: 420, protein: 32 },
+            { name: "Late snack", calories: 200, protein: 10 },
+            { name: "late snack", calories: 200, protein: 10 },
+          ],
+        },
+        z.unknown(),
+      );
+      expect(receipt).toEqual({
+        added: [
+          expect.objectContaining({ name: "Usual breakfast", revision: 1 }),
+          expect.objectContaining({ name: "Late snack", revision: 1 }),
+        ],
+      });
+      const snack = z.object({ added: z.array(entry) }).parse(receipt).added[1];
+      if (!snack) throw new Error("The snack was not saved.");
+      expect(
+        await writer.call(
+          "fitness_update_saved_meal",
+          { requestId: key(), ...snack, calories: 210 },
+          z.unknown(),
+        ),
+      ).toEqual({ updated: { id: snack.id, revision: 2 } });
+      // Without read access, a missing entry and a changed one fail alike.
+      const missing = crypto.randomUUID();
+      const errors = [
+        await writer.failure("fitness_update_saved_meal", {
+          requestId: key(),
+          id: snack.id,
+          revision: 1,
+          calories: 1,
+        }),
+        await writer.failure("fitness_update_saved_meal", {
+          requestId: key(),
+          id: missing,
+          revision: 1,
+          calories: 1,
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [{ id: snack.id, revision: 1 }],
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [{ id: missing, revision: 1 }],
+        }),
+      ].map((message) => message.replace(missing, snack.id));
+      expect(errors[0]).toBe(errors[1]);
+      expect(errors[2]).toBe(errors[3]);
+      expect(errors[0]).toContain("this connection's latest receipt");
+      // A failed batch does not show which of its other entries matched.
+      const batches = [
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [
+            { id: snack.id, revision: 2 },
+            { id: missing, revision: 1 },
+          ],
+        }),
+        await writer.failure("fitness_delete_entries", {
+          requestId: key(),
+          entries: [
+            { id: snack.id, revision: 1 },
+            { id: missing, revision: 1 },
+          ],
+        }),
+      ];
+      expect(batches[0]).toBe(batches[1]);
+      expect(batches[0]).not.toContain(snack.id);
+      expect(batches[0]).toContain("Nothing was removed");
+      const kept = await call("fitness_list_saved_meals", {}, savedList);
+      expect(kept.savedMeals.find((m) => m.id === snack.id)?.revision).toBe(2);
+      expect(
+        await writer.failure("fitness_add_saved_meals", request),
+      ).toContain("already used for a different change");
+      const writerRequest = {
+        requestId: key(),
+        savedMeals: [{ name: "Oats", calories: 300, protein: 10 }],
+      };
+      await writer.call("fitness_add_saved_meals", writerRequest, z.unknown());
+      expect(await failure("fitness_add_saved_meals", writerRequest)).toContain(
+        "already used for a different change",
+      );
+      const reused = {
+        requestId: key(),
+        savedMeals: [{ name: "Tea", calories: 5, protein: 0 }],
+      };
+      await call("fitness_add_saved_meals", reused, savedAdded);
+      expect(
+        await failure("fitness_add_saved_meals", {
+          ...reused,
+          savedMeals: [{ name: "Coffee", calories: 5, protein: 0 }],
+        }),
+      ).toContain("already used for a different change");
+    } finally {
+      const sql = database();
+      await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
+      await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
+      await sql`DELETE FROM fitness_accounts WHERE owner_id=${owner}`;
+    }
   },
 );
