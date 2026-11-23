@@ -120,7 +120,7 @@ function ExerciseDetail({
           <span className="video-link-label">
             <span className="video-link-title">
               Watch tutorial<span className="visually-hidden"> · </span>
-              <span aria-hidden> ↗</span>
+              <span aria-hidden>{"\u00a0↗"}</span>
             </span>
             <span className="video-link-credit">{guide.credit}</span>
           </span>

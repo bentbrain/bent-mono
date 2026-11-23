@@ -1183,7 +1183,7 @@ small,
   font-weight: 650;
   font-size: 0.9375rem;
   line-height: 1.3;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .video-link-credit {
   font-size: 0.8125rem;
