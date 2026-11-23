@@ -107,7 +107,9 @@ export function instructions(access: AgentAccess) {
       access.read
         ? "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals."
         : "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged.",
-      "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. A meal already saved with the same name, calories and protein is not saved again.",
+      access.read
+        ? "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. A meal already saved with the same name, calories and protein is not saved again."
+        : "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. This connection cannot see saved meals, so each call saves every distinct meal it lists. Save each meal once.",
       access.read
         ? "Before editing or removing entries, call fitness_get_day, or fitness_list_saved_meals for saved meals, to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
         : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
@@ -227,8 +229,9 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       "fitness_add_saved_meals",
       {
         title: "Add saved meals",
-        description:
-          "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Skips a meal already saved with the same name, calories and protein. To record food eaten on a day, use fitness_add_meals.",
+        description: access.read
+          ? "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Skips a meal already saved with the same name, calories and protein. To record food eaten on a day, use fitness_add_meals."
+          : "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Saves each distinct meal in the request once. To record food eaten on a day, use fitness_add_meals.",
         inputSchema: {
           requestId,
           savedMeals: z.array(z.object(savedMealInput)).min(1).max(30),

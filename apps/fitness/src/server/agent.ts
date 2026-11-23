@@ -512,8 +512,12 @@ export function addSavedMeals(
     savedMeals: { name: string; calories: number; protein: number }[];
   },
 ) {
-  return once(owner, access, "add_saved_meals", input, async (change) => {
-    const existing = savedMeals(await change.records());
+  // Skipping meals already saved would show a write-only connection which
+  // ones exist, so it checks only the meals in its own request. The grant is
+  // part of the request, so a retry under the other grant is rejected.
+  const tool = access.read ? "add_saved_meals" : "add_saved_meals_write_only";
+  return once(owner, access, tool, input, async (change) => {
+    const existing = access.read ? savedMeals(await change.records()) : [];
     const added = [];
     const alreadySaved = [];
     for (const meal of input.savedMeals) {

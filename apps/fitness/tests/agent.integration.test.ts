@@ -695,6 +695,7 @@ test.skipIf(!configured)(
       const day = await call("fitness_get_day", {}, z.object({ food }));
       expect(day.food.meals.map((m) => m.name)).toEqual(["Protein shake"]);
 
+      // A write-only connection cannot tell which meals are already saved.
       const writer = await connect(owner, { read: false, write: true });
       const receipt = await writer.call(
         "fitness_add_saved_meals",
@@ -703,14 +704,18 @@ test.skipIf(!configured)(
           savedMeals: [
             { name: "Usual breakfast", calories: 420, protein: 32 },
             { name: "Late snack", calories: 200, protein: 10 },
+            { name: "late snack", calories: 200, protein: 10 },
           ],
         },
         z.unknown(),
       );
       expect(receipt).toEqual({
-        added: [expect.objectContaining({ name: "Late snack", revision: 1 })],
+        added: [
+          expect.objectContaining({ name: "Usual breakfast", revision: 1 }),
+          expect.objectContaining({ name: "Late snack", revision: 1 }),
+        ],
       });
-      const snack = z.object({ added: z.array(entry) }).parse(receipt).added[0];
+      const snack = z.object({ added: z.array(entry) }).parse(receipt).added[1];
       if (!snack) throw new Error("The snack was not saved.");
       expect(
         await writer.call(
@@ -719,6 +724,20 @@ test.skipIf(!configured)(
           z.unknown(),
         ),
       ).toEqual({ updated: { id: snack.id, revision: 2 } });
+      expect(
+        await writer.failure("fitness_add_saved_meals", request),
+      ).toContain("already used for a different change");
+      const reused = {
+        requestId: key(),
+        savedMeals: [{ name: "Tea", calories: 5, protein: 0 }],
+      };
+      await call("fitness_add_saved_meals", reused, savedAdded);
+      expect(
+        await failure("fitness_add_saved_meals", {
+          ...reused,
+          savedMeals: [{ name: "Coffee", calories: 5, protein: 0 }],
+        }),
+      ).toContain("already used for a different change");
     } finally {
       const sql = database();
       await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
