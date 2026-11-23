@@ -1298,7 +1298,8 @@ small,
   border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
-.plan-exercise > div > h2 {
+.plan-exercise > div > h2,
+.plan-exercise .sheet-head h2 {
   display: flex;
   align-items: baseline;
   gap: 8px;
