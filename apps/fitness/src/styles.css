@@ -1298,18 +1298,18 @@ small,
   border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
-.plan-exercise h2 {
+.plan-exercise > div > h2 {
   display: flex;
   align-items: baseline;
   gap: 8px;
   font-size: 1.0625rem;
   margin: 0;
 }
-.plan-exercise p {
+.plan-exercise > div > p {
   margin: 0;
   font-size: 0.875rem;
 }
-.plan-exercise > div:last-child p + p {
+.plan-exercise > div:last-child > p + p {
   margin-top: 4px;
 }
 .prescription {
@@ -1497,7 +1497,7 @@ small,
   align-items: start;
   margin-bottom: 10px;
 }
-.exercise-title h3 {
+.exercise-title > div > h3 {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1505,7 +1505,7 @@ small,
   font-size: 1.0625rem;
   margin-bottom: 2px;
 }
-.exercise-title p {
+.exercise-title > div > p {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--muted);
