@@ -117,8 +117,12 @@ function ExerciseDetail({
           rel="noreferrer"
         >
           <Icon name="play" size={16} />
-          <span>
-            Watch tutorial · {guide.credit} <span aria-hidden>↗</span>
+          <span className="video-link-label">
+            <span className="video-link-title">
+              Watch tutorial<span className="visually-hidden"> · </span>
+              <span aria-hidden>{"\u00a0↗"}</span>
+            </span>
+            <span className="video-link-credit">{guide.credit}</span>
           </span>
         </a>
         <p className="muted">
