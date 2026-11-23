@@ -46,7 +46,7 @@ Fitness runs an MCP server at `/api/mcp` on the app's origin. ChatGPT, Claude an
 | `fitness_list_saved_meals`  | Saved meals with IDs, calories and protein                                                       |
 | `fitness_add_meals`         | Logs one or more meals to a day                                                                  |
 | `fitness_update_meal`       | Changes a meal's name, calories, protein or date                                                 |
-| `fitness_add_saved_meals`   | Saves one or more meals for one-tap logging, skipping meals already saved                        |
+| `fitness_add_saved_meals`   | Saves one or more meals for one-tap logging; with `fitness:read`, skips meals already saved      |
 | `fitness_update_saved_meal` | Changes a saved meal's name, calories or protein                                                 |
 | `fitness_delete_entries`    | Removes meals, saved meals, runs or weigh-ins by ID                                              |
 | `fitness_log_weight`        | Records the day's bodyweight in kg or lb, replacing an earlier value for that date               |
