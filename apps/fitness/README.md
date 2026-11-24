@@ -68,6 +68,54 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 `/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.
 
+## Apple Health
+
+Fitness imports weigh-ins and runs from Apple Health. Your iPhone sends them to `https://fitness.bent.build/api/health/import`, either through the Health Auto Export app or an Apple Shortcut. Create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only.
+
+Each request is one JSON export in the Health Auto Export format:
+
+```json
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "weight_body_mass",
+        "units": "kg",
+        "data": [{ "date": "2026-11-20 06:10:00 +1000", "qty": 80.4 }]
+      }
+    ],
+    "workouts": [
+      {
+        "name": "Running",
+        "start": "2026-11-21 06:00:00 +1000",
+        "end": "2026-11-21 06:32:00 +1000",
+        "duration": 1815,
+        "distance": { "qty": 5.2, "units": "km" }
+      }
+    ]
+  }
+}
+```
+
+- Weigh-ins come from the `weight_body_mass` metric in kg, lb or st. For a date without a weigh-in, Fitness saves the earliest new weigh-in a request sends for it.
+- Runs come from workouts whose name contains Run or Running. The duration is in seconds; without one, Fitness uses the time between start and end. Distance can be in km, m, mi or yd. A run without a distance is saved as 0 km.
+- Fitness reads timestamps as `yyyy-MM-dd HH:mm:ss +hhmm` or as ISO 8601 with an offset, and dates each entry in the account timezone. Other metrics and workout types are counted and left out.
+
+Fitness decides each Health sample once and remembers the result, so a sync can safely resend days it has already sent. A sample becomes a new entry, or matches one already in Fitness: a weigh-in on the same date, or a run you entered in Fitness on the same date within 5% or 100 m of its distance. Each run you entered matches one Health run at most. Fitness pairs each day's runs to match as many as it can, then with the closest distances. A later sync can revisit an earlier pairing with a run you haven't changed since: the earlier Health run moves to another of your runs, or, if a closer Health run takes its place, Fitness saves it as its own run. Imported runs have the note "Apple Health". Changes and removals you make in Fitness stay in place on later syncs, including after a timezone change. A removed weigh-in keeps its date empty for the samples Fitness had already linked to it.
+
+With `fitness:read` access, the reply has one outcome for each weigh-in date and each distinct run start it can record: `added`, or `kept` with the reason. The `added` counts include an earlier Health run saved because a closer match took its place. Workouts sent twice with the same start count once. Entries dated after today and values outside the app's limits are listed under `skipped` with the reason. A write-only key's reply is `{"received": {"weights": 3, "runs": 1}}`: the weigh-ins and running workouts in its payload, including ones Fitness skips or already has. Send up to 4 MB and 2000 weigh-ins and runs per request. A request with a malformed entry fails with a `400` naming it and saves nothing.
+
+**Health Auto Export.** Add a REST API automation with the import URL, JSON export format and version 2. Add the `Authorization` header with your key. Select the weight metric under Health Metrics and turn Summarize Data off, so each weigh-in arrives on its own rather than as a daily average. Add a second automation for Workouts. Leave route data and workout metrics off to keep requests small, and turn on Batch Requests for long date ranges.
+
+**Apple Shortcut for weigh-ins.** Shortcuts can read weigh-ins from Health. Use Health Auto Export for runs. Allow the shortcut to read Weight when Health asks. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
+
+1. Find Health Samples where Type is Weight and Start Date is in the last 7 days.
+2. Repeat with each sample. Inside the loop, add a Text action containing `{"date":"<Start Date>","qty":<Value>}`. Format Start Date as ISO 8601 with the time included. Value must be a plain number with a decimal point, such as `80.4`, in the unit from step 4.
+3. After the loop, Combine Text with the Repeat Results, using a comma as the separator.
+4. Add a Text action containing `{"data":{"metrics":[{"name":"weight_body_mass","units":"kg","data":[<Combined Text>]}]}}`. Use the weight unit your Health app shows: kg, lb or st.
+5. Get Contents of URL: the import URL, method POST, headers `Authorization: Bearer <key>` and `Content-Type: application/json`, request body File with the Text from step 4.
+6. Run it daily from a Time of Day personal automation.
+
 ## Equipment photos and exports
 
 Settings accepts up to 20 private JPEG, PNG or WebP equipment photos, each up to 2 MB. The server checks file signatures and ownership, and serves photos with private, no-store headers. Account export includes settings, entries, workout history, corrections and photo bytes. The download starts only after the complete export has loaded. Store exports privately.

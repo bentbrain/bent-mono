@@ -53,6 +53,117 @@ export type AccountChange = {
   save(input: Mutation): Promise<RecordEntry | null>;
 };
 /**
+ * An Apple Health sample and the record it became, or matched when one
+ * already existed. `date` and `revision` are the record's when they were
+ * linked. Run links keep the Health run's distance and duration.
+ */
+export type HealthLink = {
+  sample: string;
+  recordId: string;
+  date: string;
+  matched: boolean;
+  revision: number | null;
+  distanceKm: number | null;
+  minutes: number | null;
+};
+export type HealthChange = AccountChange & {
+  /** The links stored for these samples, by sample. */
+  links(samples: string[]): Promise<Map<string, HealthLink>>;
+  /** The links that point to any of these records. */
+  linksTo(ids: string[]): Promise<HealthLink[]>;
+  link(links: HealthLink[]): Promise<void>;
+  /** Points existing sample links at other records. */
+  relink(links: HealthLink[]): Promise<void>;
+};
+function accountChange(sql: TransactionSql, owner: string): AccountChange {
+  return {
+    records: () => loadRecords(owner, sql),
+    async save(input) {
+      const outcome = await saveWithin(sql, owner, mutationSchema.parse(input));
+      if (outcome.status === "conflict")
+        throw new BatchConflict(outcome.current);
+      return outcome.record;
+    },
+  };
+}
+const linkRow = z.object({
+  sample: z.string(),
+  record_id: z.string(),
+  record_date: z.string(),
+  matched: z.boolean(),
+  record_revision: z.number().int().nullable(),
+  distance_km: z.number().nullable(),
+  minutes: z.number().nullable(),
+});
+function linkOf(row: unknown): HealthLink {
+  const r = linkRow.parse(row);
+  return {
+    sample: r.sample,
+    recordId: r.record_id,
+    date: r.record_date,
+    matched: r.matched,
+    revision: r.record_revision,
+    distanceKm: r.distance_km,
+    minutes: r.minutes,
+  };
+}
+/** Health import operations within an open transaction. Use `changeHealth` to run an import. */
+export function healthChange(sql: TransactionSql, owner: string): HealthChange {
+  const columns = sql`sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched, record_revision, distance_km, minutes`;
+  return {
+    ...accountChange(sql, owner),
+    async links(samples) {
+      if (!samples.length) return new Map();
+      const rows =
+        await sql`SELECT ${columns} FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
+      return new Map(
+        rows.map((row) => {
+          const link = linkOf(row);
+          return [link.sample, link];
+        }),
+      );
+    },
+    async linksTo(ids) {
+      if (!ids.length) return [];
+      const rows =
+        await sql`SELECT ${columns} FROM fitness_health_samples WHERE owner_id=${owner} AND record_id IN ${sql(ids)}`;
+      return rows.map(linkOf);
+    },
+    async link(links) {
+      if (!links.length) return;
+      const rows = links.map((l) => ({
+        owner_id: owner,
+        sample: l.sample,
+        record_id: l.recordId,
+        record_date: l.date,
+        matched: l.matched,
+        record_revision: l.revision,
+        distance_km: l.distanceKm,
+        minutes: l.minutes,
+      }));
+      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched", "record_revision", "distance_km", "minutes")} ON CONFLICT DO NOTHING`;
+    },
+    async relink(links) {
+      for (const l of links)
+        await sql`UPDATE fitness_health_samples SET record_id=${l.recordId}, record_date=${l.date}, matched=${l.matched}, record_revision=${l.revision} WHERE owner_id=${owner} AND sample=${l.sample}`;
+    },
+  };
+}
+/**
+ * Runs an Apple Health import under the account lock in one transaction. An
+ * error rolls back every change and link. The links make retries safe.
+ */
+export async function changeHealth<T>(
+  owner: string,
+  work: (change: HealthChange) => Promise<T>,
+): Promise<T> {
+  const result = await database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    return { value: await work(healthChange(sql, owner)) };
+  });
+  return result.value;
+}
+/**
  * Runs one request under the account lock and stores its result with its
  * changes. Repeating the request ID with the same fingerprint returns the
  * first result; a different fingerprint fails. An error rolls back every
@@ -75,23 +186,7 @@ export async function changeOnce(
       return storedResult.parse(previous.result);
     }
     const result = storedResult.parse(
-      JSON.parse(
-        JSON.stringify(
-          await work({
-            records: () => loadRecords(owner, sql),
-            async save(input) {
-              const outcome = await saveWithin(
-                sql,
-                owner,
-                mutationSchema.parse(input),
-              );
-              if (outcome.status === "conflict")
-                throw new BatchConflict(outcome.current);
-              return outcome.record;
-            },
-          }),
-        ),
-      ),
+      JSON.parse(JSON.stringify(await work(accountChange(sql, owner)))),
     );
     await sql`INSERT INTO fitness_operations(owner_id,id,fingerprint,result) VALUES(${owner},${receipt.id},${receipt.fingerprint},${sql.json(result)})`;
     return result;
