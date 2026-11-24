@@ -355,14 +355,32 @@ describe("Run assignment", () => {
       assignRuns([{ distanceKm: 5.2 }, { distanceKm: 5 }], [{ distanceKm: 5 }]),
     ).toEqual([null, 0]);
   });
-  test("keeps an earlier pair when a new run fits a free entry", () => {
+  test("moves an earlier pair when that brings both runs closer", () => {
     expect(
       assignRuns(
         [{ distanceKm: 5 }, { distanceKm: 5.1 }],
         [{ distanceKm: 5.1 }, { distanceKm: 5 }],
         [0],
       ),
-    ).toEqual([0, 1]);
+    ).toEqual([1, 0]);
+  });
+  test("keeps an earlier pair on a tie", () => {
+    expect(
+      assignRuns(
+        [{ distanceKm: 5 }, { distanceKm: 5 }],
+        [{ distanceKm: 5 }, { distanceKm: 5 }],
+        [1],
+      ),
+    ).toEqual([1, 0]);
+  });
+  test("lets a closer new run take an earlier pair's entry", () => {
+    expect(
+      assignRuns(
+        [{ distanceKm: 5.2 }, { distanceKm: 5 }],
+        [{ distanceKm: 5 }],
+        [0],
+      ),
+    ).toEqual([null, 0]);
   });
   test("finds every match when many other runs are sent", () => {
     const others = Array.from({ length: 11 }, (_, i) => ({

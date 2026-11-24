@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS fitness_photos (
   PRIMARY KEY (owner_id,id)
 );
 -- Each Apple Health sample Fitness has synced, the record it became or matched,
--- that record's date and revision, and a run sample's distance.
+-- that record's date and revision, and a run sample's distance and duration.
 CREATE TABLE IF NOT EXISTS fitness_health_samples (
   owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
   sample text NOT NULL,
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS fitness_health_samples (
   matched boolean NOT NULL,
   record_revision integer,
   distance_km double precision,
+  minutes double precision,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (owner_id,sample)
 );

@@ -154,14 +154,16 @@ export async function importHealth(
           date: weight.date,
           revision: null,
           distanceKm: null,
+          minutes: null,
           ...link,
         });
     }
 
     const runs: (Outcome & { start: string })[] = [];
     // Runs in Fitness, and the Health links that point to them. A match to an
-    // entered run that is unchanged since can move to another entered run
-    // when a new Health run needs it. Other links stay as they are.
+    // entered run that is unchanged since can move to another entered run, or
+    // give way to a closer new match, in which case its Health run is saved
+    // as a new run. Other links stay as they are.
     const entered = records.filter((r) => r.data.kind === "run");
     const toEntered = await change.linksTo(entered.map((r) => r.id));
     const linkedIds = new Set(toEntered.map((l) => l.recordId));
@@ -170,6 +172,7 @@ export async function importHealth(
       return (
         l.matched &&
         l.distanceKm !== null &&
+        l.minutes !== null &&
         record?.revision === l.revision &&
         record.data.kind === "run" &&
         record.data.date === l.date
@@ -177,6 +180,8 @@ export async function importHealth(
     });
     const pairs = new Map<string, RecordEntry>();
     const moved: HealthLink[] = [];
+    const displaced = new Set<string>();
+    let savedRuns = 0;
     const fresh = samples.runs.filter((r) => !links.has(runKey(r.start)));
     for (const date of new Set(fresh.map((r) => r.date))) {
       const held = movable.filter((l) => l.date === date);
@@ -197,13 +202,41 @@ export async function importHealth(
           return index >= 0 ? index : null;
         }),
       );
-      held.forEach((l, i) => {
+      for (const [i, l] of held.entries()) {
         const j = result[i];
         const record =
           j === null || j === undefined ? undefined : candidates[j];
-        if (record && record.id !== l.recordId)
-          moved.push({ ...l, recordId: record.id, revision: record.revision });
-      });
+        if (record) {
+          if (record.id !== l.recordId)
+            moved.push({
+              ...l,
+              recordId: record.id,
+              revision: record.revision,
+            });
+          continue;
+        }
+        // A closer match took this run's entry: save the Health run itself.
+        const saved = await change.save(
+          created(
+            runSchema.parse({
+              kind: "run",
+              date: l.date,
+              minutes: l.minutes,
+              distanceKm: Math.round((l.distanceKm ?? 0) * 1000) / 1000,
+              notes: "Apple Health",
+            }),
+          ),
+        );
+        if (!saved) throw new Error("Expected the saved run.");
+        savedRuns++;
+        displaced.add(l.sample);
+        moved.push({
+          ...l,
+          recordId: saved.id,
+          matched: false,
+          revision: saved.revision,
+        });
+      }
       today.forEach((run, k) => {
         const j = result[held.length + k];
         const record =
@@ -214,6 +247,10 @@ export async function importHealth(
     for (const run of samples.runs) {
       const sample = runKey(run.start);
       const link = links.get(sample);
+      if (link && displaced.has(sample)) {
+        runs.push({ date: run.date, start: run.start, status: "added" });
+        continue;
+      }
       if (link) {
         runs.push({
           date: run.date,
@@ -238,6 +275,7 @@ export async function importHealth(
           matched: true,
           revision: existing.revision,
           distanceKm: run.distanceKm,
+          minutes: run.minutes,
         });
         continue;
       }
@@ -253,6 +291,7 @@ export async function importHealth(
         ),
       );
       if (!saved) throw new Error("Expected the saved run.");
+      savedRuns++;
       runs.push({ date: run.date, start: run.start, status: "added" });
       added.push({
         sample,
@@ -261,6 +300,7 @@ export async function importHealth(
         matched: false,
         revision: saved.revision,
         distanceKm: run.distanceKm,
+        minutes: run.minutes,
       });
     }
     await change.relink(moved);
@@ -272,7 +312,8 @@ export async function importHealth(
     return {
       added: {
         weights: weights.filter((w) => w.status === "added").length,
-        runs: runs.filter((r) => r.status === "added").length,
+        // Includes earlier runs saved after a closer match took their entry.
+        runs: savedRuns,
       },
       weights,
       runs,

@@ -623,6 +623,7 @@ test.skipIf(!configured)(
           matched: false,
           revision: null,
           distanceKm: null,
+          minutes: null,
         },
       ]);
       return change.links([sample]);
@@ -940,3 +941,43 @@ test.skipIf(!configured)(
     ).toEqual([5, 5.2]);
   },
 );
+
+for (const later of ["both runs", "the exact run alone"] as const)
+  test.skipIf(!configured)(
+    `saves an earlier weaker match when ${later} arrives later`,
+    async () => {
+      const date = later === "both runs" ? day(-100) : day(-101);
+      await save({ kind: "run", date, minutes: 30, distanceKm: 5, notes: "" });
+      const morning = running(date, 5.2, "06:00:00");
+      const evening = running(date, 5, "17:00:00");
+      expect(
+        await importHealth(owner, both, exportOf([], [morning])),
+      ).toMatchObject({ added: { runs: 0 } });
+      const body = exportOf(
+        [],
+        later === "both runs" ? [morning, evening] : [evening],
+      );
+      expect(await importHealth(owner, both, body)).toMatchObject({
+        added: { runs: 1 },
+      });
+      expect(
+        await importHealth(owner, both, exportOf([], [morning, evening])),
+      ).toMatchObject({ added: { runs: 0 } });
+      const runs = (await loadRecords(owner)).filter(
+        (r) => r.data.kind === "run" && r.data.date === date,
+      );
+      expect(runs.map((r) => (r.data.kind === "run" ? r.data : null))).toEqual(
+        expect.arrayContaining([
+          { kind: "run", date, minutes: 30, distanceKm: 5, notes: "" },
+          {
+            kind: "run",
+            date,
+            minutes: 30,
+            distanceKm: 5.2,
+            notes: "Apple Health",
+          },
+        ]),
+      );
+      expect(runs).toHaveLength(2);
+    },
+  );

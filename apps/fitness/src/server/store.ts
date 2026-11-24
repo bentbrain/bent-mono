@@ -55,7 +55,7 @@ export type AccountChange = {
 /**
  * An Apple Health sample and the record it became, or matched when one
  * already existed. `date` and `revision` are the record's when they were
- * linked. Run links keep the Health run's distance.
+ * linked. Run links keep the Health run's distance and duration.
  */
 export type HealthLink = {
   sample: string;
@@ -64,6 +64,7 @@ export type HealthLink = {
   matched: boolean;
   revision: number | null;
   distanceKm: number | null;
+  minutes: number | null;
 };
 export type HealthChange = AccountChange & {
   /** The links stored for these samples, by sample. */
@@ -92,6 +93,7 @@ const linkRow = z.object({
   matched: z.boolean(),
   record_revision: z.number().int().nullable(),
   distance_km: z.number().nullable(),
+  minutes: z.number().nullable(),
 });
 function linkOf(row: unknown): HealthLink {
   const r = linkRow.parse(row);
@@ -102,11 +104,12 @@ function linkOf(row: unknown): HealthLink {
     matched: r.matched,
     revision: r.record_revision,
     distanceKm: r.distance_km,
+    minutes: r.minutes,
   };
 }
 /** Health import operations within an open transaction. Use `changeHealth` to run an import. */
 export function healthChange(sql: TransactionSql, owner: string): HealthChange {
-  const columns = sql`sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched, record_revision, distance_km`;
+  const columns = sql`sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched, record_revision, distance_km, minutes`;
   return {
     ...accountChange(sql, owner),
     async links(samples) {
@@ -136,8 +139,9 @@ export function healthChange(sql: TransactionSql, owner: string): HealthChange {
         matched: l.matched,
         record_revision: l.revision,
         distance_km: l.distanceKm,
+        minutes: l.minutes,
       }));
-      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched", "record_revision", "distance_km")} ON CONFLICT DO NOTHING`;
+      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched", "record_revision", "distance_km", "minutes")} ON CONFLICT DO NOTHING`;
     },
     async relink(links) {
       for (const l of links)

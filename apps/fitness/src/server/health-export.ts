@@ -296,9 +296,9 @@ type Distance = { distanceKm: number };
 /**
  * Pairs one day's Health runs with runs entered in Fitness, each entered run
  * used at most once. The pairing matches as many runs as possible, then has
- * the smallest total distance difference. `initial` gives pairs from earlier
- * syncs: those Health runs always stay paired, and move to another entered
- * run only when that lets more runs match. Returns the entered index for
+ * the smallest total distance difference, then keeps the most pairs from
+ * earlier syncs, which `initial` gives. An earlier pair can move to another
+ * entered run or give way to a closer match. Returns the entered index for
  * each Health run, or null.
  *
  * This is a minimum-cost maximum flow, found with successive shortest paths.
@@ -312,11 +312,9 @@ export function assignRuns(
   const n = health.length;
   const m = entered.length;
   if (!n || !m) return pick;
-  // Costs rank, from most to least important: keeping every earlier pair,
-  // matching more runs (the flow is maximal), moving fewer earlier pairs,
-  // then the total distance difference, which is at most 500 km per pair.
-  const keep = 1e9;
-  const move = 1e6;
+  // Any pair other than an earlier one costs a millionth of a kilometre more,
+  // so earlier pairs win ties.
+  const change = 1e-6;
   type Edge = { to: number; cap: number; cost: number; rev: number };
   const source = 0;
   const sink = n + m + 1;
@@ -330,11 +328,11 @@ export function assignRuns(
   };
   health.forEach((run, i) => {
     const held = initial[i] ?? null;
-    add(source, 1 + i, held === null ? 0 : -keep);
+    add(source, 1 + i, 0);
     entered.forEach((other, j) => {
       if (held !== j && !sameRun(run, other)) return;
       const gap = Math.abs(run.distanceKm - other.distanceKm);
-      add(1 + i, 1 + n + j, gap + (held !== null && held !== j ? move : 0));
+      add(1 + i, 1 + n + j, gap + (held === j ? 0 : change));
     });
   });
   entered.forEach((_, j) => add(1 + n + j, sink, 0));
