@@ -48,24 +48,20 @@ export function agentAccess(
   };
 }
 
+type BearerToken = "oauth_token" | "api_key";
+
 /**
- * Authenticates an agent request from its bearer token: a Clerk OAuth access
- * token issued for this MCP endpoint, or a Clerk API key owned by the user.
- * Session cookies are not accepted, so a browser cannot call the agent API
- * on the user's behalf.
- *
- * OAuth tokens and scoped API keys grant what their scopes name:
- * fitness:read for reading and fitness:write for changes. An API key without
- * scopes is one the owner created for their own scripts and grants both.
+ * Verifies a bearer token of an accepted type and returns its invited owner
+ * and the access its scopes grant.
  */
-export async function requireAgentOwner(request: Request) {
+async function requireTokenOwner(request: Request, accepts: BearerToken[]) {
   const resource = mcpResource();
   if (!configurationReady() || !resource)
     throw new AgentAuthError(
       "Account services need configuration. Contact the app owner.",
     );
   const state = await clerkClient().authenticateRequest(request, {
-    acceptsToken: ["oauth_token", "api_key"],
+    acceptsToken: accepts,
     // Clerk checks OAuth tokens against this audience. API keys have none.
     audience: resource,
     publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY,
@@ -74,9 +70,14 @@ export async function requireAgentOwner(request: Request) {
   const result = state.toAuth();
   if (
     !result?.isAuthenticated ||
-    (result.tokenType !== "oauth_token" && result.tokenType !== "api_key")
+    (result.tokenType !== "oauth_token" && result.tokenType !== "api_key") ||
+    !accepts.includes(result.tokenType)
   )
-    throw new AgentAuthError("Connect with an invited Fitness account.");
+    throw new AgentAuthError(
+      accepts.includes("oauth_token")
+        ? "Connect with an invited Fitness account."
+        : "Send a Fitness API key as the bearer token.",
+    );
   const userId = result.userId;
   if (!userId?.startsWith("user_"))
     throw new AgentAuthError("Use a token that belongs to a Fitness account.");
@@ -91,4 +92,26 @@ export async function requireAgentOwner(request: Request) {
       "This account needs an invitation. Contact the app owner.",
     );
   return { owner, access };
+}
+
+/**
+ * Authenticates an agent request from its bearer token: a Clerk OAuth access
+ * token issued for this MCP endpoint, or a Clerk API key owned by the user.
+ * Session cookies are not accepted, so a browser cannot call the agent API
+ * on the user's behalf.
+ *
+ * OAuth tokens and scoped API keys grant what their scopes name:
+ * fitness:read for reading and fitness:write for changes. An API key without
+ * scopes is one the owner created for their own scripts and grants both.
+ */
+export function requireAgentOwner(request: Request) {
+  return requireTokenOwner(request, ["oauth_token", "api_key"]);
+}
+
+/**
+ * Authenticates an import from the owner's own scripts and apps. Only Clerk
+ * API keys are accepted; OAuth tokens are issued for the MCP endpoint.
+ */
+export function requireApiKeyOwner(request: Request) {
+  return requireTokenOwner(request, ["api_key"]);
 }

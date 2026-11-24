@@ -68,6 +68,54 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 `/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.
 
+## Apple Health
+
+Fitness imports weigh-ins and runs from Apple Health. Your iPhone sends them to `https://fitness.bent.build/api/health/import`, either through the Health Auto Export app or an Apple Shortcut. Create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only.
+
+Each request is one JSON export in the Health Auto Export format:
+
+```json
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "weight_body_mass",
+        "units": "kg",
+        "data": [{ "date": "2026-11-20 06:10:00 +1000", "qty": 80.4 }]
+      }
+    ],
+    "workouts": [
+      {
+        "name": "Running",
+        "start": "2026-11-21 06:00:00 +1000",
+        "end": "2026-11-21 06:32:00 +1000",
+        "duration": 1815,
+        "distance": { "qty": 5.2, "units": "km" }
+      }
+    ]
+  }
+}
+```
+
+- Weigh-ins come from the `weight_body_mass` metric in kg, lb or st. Fitness keeps the earliest weigh-in of each day.
+- Runs come from workouts whose name contains Run or Running. The duration is in seconds; without one, Fitness uses the time between start and end. Distance can be in km, m, mi or yd. A run without a distance is saved as 0 km.
+- Fitness reads timestamps as `yyyy-MM-dd HH:mm:ss +hhmm` or as ISO 8601 with an offset, and dates each entry in the account timezone. Other metrics and workout types are counted and left out.
+
+Each Health sample is imported once, so a sync can safely resend days it has already sent. A date that already has a weigh-in keeps it. A run on the same date within 5% or 100 m of a recorded run counts as that run. Imported runs have the note "Apple Health". Changes and removals you make in Fitness stay in place on later syncs. Entries dated after today, and values outside the app's limits, are listed under `skipped` with the reason.
+
+With `fitness:read` access, the reply lists each weigh-in and run as `added` or `kept` with the reason. A write-only key's reply gives the counts it sent. Send up to 4 MB and 2000 weigh-ins and runs per request. A request with a malformed entry fails with a `400` naming it and saves nothing.
+
+**Health Auto Export.** Add a REST API automation with the import URL, JSON export format and version 2. Add the `Authorization` header with your key. Select the weight metric under Health Metrics, or add a second automation for Workouts. Leave route data and workout metrics off to keep requests small, and turn on Batch Requests for long date ranges.
+
+**Apple Shortcut for weigh-ins.** Shortcuts can read weigh-ins from Health. Use Health Auto Export for runs.
+
+1. Find Health Samples where Type is Weight and Start Date is in the last 7 days.
+2. Repeat with each sample. Inside the loop, add a Text action containing `{"date":"<Start Date>","qty":<Value>}`. Format Start Date as ISO 8601 with the time included.
+3. After the loop, Combine Text with the Repeat Results, using a comma as the separator.
+4. Add a Text action containing `{"data":{"metrics":[{"name":"weight_body_mass","units":"kg","data":[<Combined Text>]}]}}`. Use the weight unit your Health app shows: kg, lb or st.
+5. Get Contents of URL: the import URL, method POST, headers `Authorization: Bearer <key>` and `Content-Type: application/json`, request body File with the Text from step 4.
+6. Run it daily from a Time of Day personal automation.
+
 ## Equipment photos and exports
 
 Settings accepts up to 20 private JPEG, PNG or WebP equipment photos, each up to 2 MB. The server checks file signatures and ownership, and serves photos with private, no-store headers. Account export includes settings, entries, workout history, corrections and photo bytes. The download starts only after the complete export has loaded. Store exports privately.

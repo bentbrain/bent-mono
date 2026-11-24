@@ -49,9 +49,42 @@ export class BatchConflict extends Error {
 }
 export type AccountChange = {
   records(): Promise<RecordEntry[]>;
+  /** The IDs in `ids` the account has used, including removed records. */
+  used(ids: string[]): Promise<Set<string>>;
   /** Saves a change, or throws BatchConflict to roll back the request. */
   save(input: Mutation): Promise<RecordEntry | null>;
 };
+function accountChange(sql: TransactionSql, owner: string): AccountChange {
+  return {
+    records: () => loadRecords(owner, sql),
+    async used(ids) {
+      if (!ids.length) return new Set();
+      const rows =
+        await sql`SELECT id FROM fitness_records WHERE owner_id=${owner} AND id IN ${sql(ids)}`;
+      return new Set(rows.map((row) => z.string().parse(row.id)));
+    },
+    async save(input) {
+      const outcome = await saveWithin(sql, owner, mutationSchema.parse(input));
+      if (outcome.status === "conflict")
+        throw new BatchConflict(outcome.current);
+      return outcome.record;
+    },
+  };
+}
+/**
+ * Runs changes under the account lock in one transaction. An error rolls
+ * back every change. Use it when the changes themselves make retries safe.
+ */
+export async function changeAccount<T>(
+  owner: string,
+  work: (change: AccountChange) => Promise<T>,
+): Promise<T> {
+  const result = await database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    return { value: await work(accountChange(sql, owner)) };
+  });
+  return result.value;
+}
 /**
  * Runs one request under the account lock and stores its result with its
  * changes. Repeating the request ID with the same fingerprint returns the
@@ -75,23 +108,7 @@ export async function changeOnce(
       return storedResult.parse(previous.result);
     }
     const result = storedResult.parse(
-      JSON.parse(
-        JSON.stringify(
-          await work({
-            records: () => loadRecords(owner, sql),
-            async save(input) {
-              const outcome = await saveWithin(
-                sql,
-                owner,
-                mutationSchema.parse(input),
-              );
-              if (outcome.status === "conflict")
-                throw new BatchConflict(outcome.current);
-              return outcome.record;
-            },
-          }),
-        ),
-      ),
+      JSON.parse(JSON.stringify(await work(accountChange(sql, owner)))),
     );
     await sql`INSERT INTO fitness_operations(owner_id,id,fingerprint,result) VALUES(${owner},${receipt.id},${receipt.fingerprint},${sql.json(result)})`;
     return result;

@@ -12,6 +12,11 @@ test("fails closed without provider configuration and serves installation assets
       await request.get("/api/photos/00000000-0000-4000-8000-000000000001")
     ).status(),
   ).toBe(403);
+  const healthImport = await request.post("/api/health/import", {
+    data: { data: { metrics: [] } },
+  });
+  expect(healthImport.status()).toBe(401);
+  expect(healthImport.headers()["cache-control"]).toContain("no-store");
   const manifest = await request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBe(true);
   expect((await manifest.json()).display).toBe("standalone");
