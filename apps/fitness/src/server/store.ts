@@ -86,13 +86,14 @@ const linkRow = z.object({
   record_date: z.string(),
   matched: z.boolean(),
 });
-function healthChange(sql: TransactionSql, owner: string): HealthChange {
+/** Health import operations within an open transaction. Use `changeHealth` to run an import. */
+export function healthChange(sql: TransactionSql, owner: string): HealthChange {
   return {
     ...accountChange(sql, owner),
     async links(samples) {
       if (!samples.length) return new Map();
       const rows =
-        await sql`SELECT sample, record_id, record_date::text, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
+        await sql`SELECT sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
       return new Map(
         rows.map((row) => {
           const r = linkRow.parse(row);

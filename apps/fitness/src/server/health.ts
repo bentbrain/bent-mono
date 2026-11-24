@@ -94,12 +94,16 @@ export async function importHealth(
         (s) => !links.has(weightKey(s.at)),
       );
       const [first] = undecided;
-      const earlier = linked[0];
       if (!first) {
+        // Report the decision for this date: a live weigh-in on it first,
+        // then a removed one, then a link made under another timezone.
+        const onDate = linked.filter((l) => l.date === weight.date);
+        const shown =
+          onDate.find((l) => live.has(l.recordId)) ?? onDate[0] ?? linked[0];
         weights.push({
           date: weight.date,
           status: "kept",
-          reason: earlier ? decided(earlier, reasons.weighIn) : "",
+          reason: shown ? decided(shown, reasons.weighIn) : "",
         });
         continue;
       }

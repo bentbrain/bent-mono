@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { database } from "../src/server/db";
 import { importHealth, readImportBody } from "../src/server/health";
-import { loadRecords, saveRecord } from "../src/server/store";
+import { healthChange, loadRecords, saveRecord } from "../src/server/store";
 import { addDays, defaultSettings, localDate, settingsId } from "../src/domain";
 import type { Entity } from "../src/domain";
 
@@ -555,5 +555,77 @@ test.skipIf(!configured)(
       revision: utc.record.revision,
       data: settings.data,
     });
+  },
+);
+
+async function withTimezone(zone: string) {
+  const settings = (await loadRecords(owner)).find((r) => r.id === settingsId);
+  if (settings?.data.kind !== "settings") throw new Error("No settings.");
+  await saveRecord(owner, {
+    operationId: crypto.randomUUID(),
+    id: settingsId,
+    revision: settings.revision,
+    data: { ...settings.data, timezone: zone },
+  });
+}
+
+test.skipIf(!configured)(
+  "reports a live weigh-in on its date when an old link was removed",
+  async () => {
+    // 23:30 UTC on day -50 is day -49 in Brisbane.
+    const late = { date: `${day(-50)}T23:30:00Z`, qty: 83 };
+    const next = { date: at(day(-49), "06:00:00"), qty: 82 };
+    await withTimezone("UTC");
+    await importHealth(owner, both, exportOf([late]));
+    const imported = (await loadRecords(owner)).find(
+      (r) => r.data.kind === "weight" && r.data.date === day(-50),
+    );
+    if (!imported) throw new Error("Expected the imported weigh-in.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: imported.id,
+      revision: imported.revision,
+      data: null,
+    });
+    await withTimezone(timezone);
+    const body = exportOf([late, next]);
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      weights: [{ date: day(-49), status: "added" }],
+    });
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      weights: [
+        {
+          date: day(-49),
+          status: "kept",
+          reason: "Imported in an earlier sync.",
+        },
+      ],
+    });
+    expect(await importHealth(owner, both, exportOf([late]))).toMatchObject({
+      weights: [
+        { status: "kept", reason: "Removed in Fitness after an earlier sync." },
+      ],
+    });
+  },
+);
+
+test.skipIf(!configured)(
+  "reads link dates as ISO dates under any DateStyle",
+  async () => {
+    const sample = "weight:datestyle-" + crypto.randomUUID();
+    const links = await database().begin(async (sql) => {
+      await sql`SET LOCAL DateStyle = 'SQL, MDY'`;
+      const change = healthChange(sql, owner);
+      await change.link([
+        {
+          sample,
+          recordId: crypto.randomUUID(),
+          date: "2026-10-18",
+          matched: false,
+        },
+      ]);
+      return change.links([sample]);
+    });
+    expect(links.get(sample)?.date).toBe("2026-10-18");
   },
 );
