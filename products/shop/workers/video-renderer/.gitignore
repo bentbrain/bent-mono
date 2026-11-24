@@ -1,7 +1,0 @@
-.vercel
-.env*
-.turbo
-.wrangler
-dist
-dist-check
-node_modules

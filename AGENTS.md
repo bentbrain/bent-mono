@@ -14,4 +14,4 @@ Run affected application checks and the public-source audit before publishing. S
 
 Use pull requests, conventional commits and independent Sol review of the final head against the current base. Never bypass protections or fabricate review statuses. Preserve original source attribution through SOURCE_PROVENANCE.json.
 
-Keep the blog's existing CodeQL rule of zero raw findings, including flows involving the blog or shared packages. The new Shop analysis may record individually investigated, intentional network/file flows and fixed-origin requests in .github/codeql/reviewed-flows.json. Unknown findings, vulnerabilities, changed source or guard/test/configuration inputs, changed traces, and stale or ambiguous records must fail. Keep every query and the original SARIF report. A disposition record is evidence for review, never approval: independent Sol review must cover the exact final head, current base, gate and records before native false-positive dismissal or merge. Do not automate privileged alert dismissal from PR-supplied records.
+Require zero raw CodeQL findings across the repository. Keep every query and the original SARIF report.
