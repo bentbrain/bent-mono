@@ -97,20 +97,20 @@ Each request is one JSON export in the Health Auto Export format:
 }
 ```
 
-- Weigh-ins come from the `weight_body_mass` metric in kg, lb or st. Fitness keeps the earliest weigh-in of each day.
+- Weigh-ins come from the `weight_body_mass` metric in kg, lb or st. Each date gets the earliest weigh-in a request sends for it.
 - Runs come from workouts whose name contains Run or Running. The duration is in seconds; without one, Fitness uses the time between start and end. Distance can be in km, m, mi or yd. A run without a distance is saved as 0 km.
 - Fitness reads timestamps as `yyyy-MM-dd HH:mm:ss +hhmm` or as ISO 8601 with an offset, and dates each entry in the account timezone. Other metrics and workout types are counted and left out.
 
-Each Health sample is imported once, so a sync can safely resend days it has already sent. A date that already has a weigh-in keeps it. A run on the same date within 5% or 100 m of a recorded run counts as that run. Imported runs have the note "Apple Health". Changes and removals you make in Fitness stay in place on later syncs. Entries dated after today, and values outside the app's limits, are listed under `skipped` with the reason.
+Fitness decides each Health sample once and remembers the result, so a sync can safely resend days it has already sent. A sample becomes a new entry, or matches one already in Fitness: a weigh-in on the same date, or a run you entered in Fitness on the same date within 5% or 100 m of its distance. Each run you entered matches one Health run at most. Imported runs have the note "Apple Health". Changes and removals you make in Fitness stay in place on later syncs, including after a timezone change. Entries dated after today, and values outside the app's limits, are listed under `skipped` with the reason.
 
-With `fitness:read` access, the reply lists each weigh-in and run as `added` or `kept` with the reason. A write-only key's reply gives the counts it sent. Send up to 4 MB and 2000 weigh-ins and runs per request. A request with a malformed entry fails with a `400` naming it and saves nothing.
+With `fitness:read` access, the reply lists each weigh-in and run as `added` or `kept` with the reason. A write-only key's reply gives the number of weigh-in dates and runs it sent that Fitness can record, and the `skipped` list for its own samples. Send up to 4 MB and 2000 weigh-ins and runs per request. A request with a malformed entry fails with a `400` naming it and saves nothing.
 
-**Health Auto Export.** Add a REST API automation with the import URL, JSON export format and version 2. Add the `Authorization` header with your key. Select the weight metric under Health Metrics, or add a second automation for Workouts. Leave route data and workout metrics off to keep requests small, and turn on Batch Requests for long date ranges.
+**Health Auto Export.** Add a REST API automation with the import URL, JSON export format and version 2. Add the `Authorization` header with your key. Select the weight metric under Health Metrics and turn Summarize Data off, so each weigh-in arrives on its own rather than as a daily average. Add a second automation for Workouts. Leave route data and workout metrics off to keep requests small, and turn on Batch Requests for long date ranges.
 
-**Apple Shortcut for weigh-ins.** Shortcuts can read weigh-ins from Health. Use Health Auto Export for runs.
+**Apple Shortcut for weigh-ins.** Shortcuts can read weigh-ins from Health. Use Health Auto Export for runs. Allow the shortcut to read Weight when Health asks. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
 
 1. Find Health Samples where Type is Weight and Start Date is in the last 7 days.
-2. Repeat with each sample. Inside the loop, add a Text action containing `{"date":"<Start Date>","qty":<Value>}`. Format Start Date as ISO 8601 with the time included.
+2. Repeat with each sample. Inside the loop, add a Text action containing `{"date":"<Start Date>","qty":<Value>}`. Format Start Date as ISO 8601 with the time included. Value must be a plain number with a decimal point, such as `80.4`, in the unit from step 4.
 3. After the loop, Combine Text with the Repeat Results, using a comma as the separator.
 4. Add a Text action containing `{"data":{"metrics":[{"name":"weight_body_mass","units":"kg","data":[<Combined Text>]}]}}`. Use the weight unit your Health app shows: kg, lb or st.
 5. Get Contents of URL: the import URL, method POST, headers `Authorization: Bearer <key>` and `Content-Type: application/json`, request body File with the Text from step 4.

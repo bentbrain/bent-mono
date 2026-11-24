@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { database } from "../src/server/db";
-import { importHealth } from "../src/server/health";
-import { healthRecordId } from "../src/server/health-export";
+import { importHealth, readImportBody } from "../src/server/health";
 import { loadRecords, saveRecord } from "../src/server/store";
 import { addDays, defaultSettings, localDate, settingsId } from "../src/domain";
 import type { Entity } from "../src/domain";
@@ -33,6 +32,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!configured) return;
   const sql = database();
+  await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_accounts WHERE owner_id=${owner}`;
@@ -94,7 +94,11 @@ test.skipIf(!configured)(
     const weigh = records.find(
       (r) => r.data.kind === "weight" && r.data.date === day(-2),
     );
-    expect(weigh?.id).toBe(healthRecordId("weight:" + day(-2)));
+    // Record IDs are random; the sample links live in their own table.
+    expect(weigh?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4/);
+    const [link] =
+      await database()`SELECT record_id, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample=${"weight:" + new Date(`${day(-2)}T06:00:00+10:00`).toISOString()}`;
+    expect(link).toEqual({ record_id: weigh?.id, matched: false });
     expect(weigh?.data).toEqual({ kind: "weight", date: day(-2), kg: 80.4 });
     const run = records.find((r) => r.data.kind === "run");
     expect(run?.data).toEqual({
@@ -287,3 +291,115 @@ test.skipIf(!configured)(
     });
   },
 );
+
+test.skipIf(!configured)(
+  "keeps a run match across separate uploads and after removal",
+  async () => {
+    const manual = await save({
+      kind: "run",
+      date: day(-20),
+      minutes: 30,
+      distanceKm: 5,
+      notes: "",
+    });
+    const morning = exportOf([], [running(day(-20), 5, "06:00:00")]);
+    const evening = exportOf([], [running(day(-20), 5.05, "17:00:00")]);
+    const matched =
+      "A run with about the same distance is already recorded for this date.";
+    expect(await importHealth(owner, both, morning)).toMatchObject({
+      runs: [{ status: "kept", reason: matched }],
+    });
+    expect(await importHealth(owner, both, evening)).toMatchObject({
+      runs: [{ status: "added" }],
+    });
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: manual.id,
+      revision: manual.revision,
+      data: null,
+    });
+    expect(await importHealth(owner, both, morning)).toMatchObject({
+      added: { runs: 0 },
+      runs: [{ status: "kept", reason: matched }],
+    });
+    const runs = (await loadRecords(owner)).filter(
+      (r) => r.data.kind === "run" && r.data.date === day(-20),
+    );
+    expect(runs).toHaveLength(1);
+  },
+);
+
+test.skipIf(!configured)(
+  "keeps a weigh-in's link when the account timezone changes",
+  async () => {
+    // 23:30 UTC falls on the next day in Brisbane.
+    const sample = `${day(-25)}T23:30:00Z`;
+    const body = exportOf([{ date: sample, qty: 82 }]);
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      weights: [{ date: day(-24), status: "added" }],
+    });
+    const records = await loadRecords(owner);
+    const settings = records.find((r) => r.id === settingsId);
+    if (settings?.data.kind !== "settings") throw new Error("No settings.");
+    const utc = await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: settings.revision,
+      data: { ...settings.data, timezone: "UTC" },
+    });
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { weights: 0 },
+      weights: [
+        {
+          date: day(-25),
+          status: "kept",
+          reason: "Imported in an earlier sync.",
+        },
+      ],
+    });
+    expect(
+      (await loadRecords(owner)).filter(
+        (r) =>
+          r.data.kind === "weight" &&
+          (r.data.date === day(-25) || r.data.date === day(-24)),
+      ),
+    ).toHaveLength(1);
+    if (utc.status !== "saved" || !utc.record) throw new Error("Not saved.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: utc.record.revision,
+      data: settings.data,
+    });
+  },
+);
+
+test("stops reading a body at the size limit", async () => {
+  const chunk = new Uint8Array(1_000_000).fill(32);
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      sent++;
+      if (sent > 10) controller.close();
+      else controller.enqueue(chunk);
+    },
+  });
+  const request = new Request(
+    "https://fitness.example.invalid/api/health/import",
+    {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+    } as RequestInit,
+  );
+  expect(await readImportBody(request)).toBeNull();
+  expect(sent).toBeLessThan(10);
+  const small = new Request(
+    "https://fitness.example.invalid/api/health/import",
+    {
+      method: "POST",
+      body: '{"data":{}}',
+    },
+  );
+  expect(await readImportBody(small)).toBe('{"data":{}}');
+});

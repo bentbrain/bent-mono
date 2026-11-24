@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   HealthImportError,
   healthInstant,
-  healthRecordId,
-  isHealthRecordId,
   readHealthExport,
   sameRun,
 } from "../src/server/health-export";
@@ -232,15 +230,7 @@ describe("Health export payloads", () => {
   });
 });
 
-describe("Health record identity", () => {
-  test("maps each sample key to one valid record ID", () => {
-    const id = healthRecordId("run:2026-11-21T20:00:00.000Z");
-    expect(id).toBe(healthRecordId("run:2026-11-21T20:00:00.000Z"));
-    expect(id).not.toBe(healthRecordId("run:2026-11-21T20:00:01.000Z"));
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
-  });
+describe("Run matching", () => {
   test("treats runs within 5% or 100 m as the same distance", () => {
     expect(sameRun({ distanceKm: 5 }, { distanceKm: 5.2 })).toBe(true);
     expect(sameRun({ distanceKm: 5 }, { distanceKm: 5.4 })).toBe(false);
@@ -248,7 +238,79 @@ describe("Health record identity", () => {
   });
 });
 
-test("recognises imported record IDs", () => {
-  expect(isHealthRecordId(healthRecordId("weight:2026-11-20"))).toBe(true);
-  expect(isHealthRecordId(crypto.randomUUID())).toBe(false);
+describe("Health export edge values", () => {
+  test("rejects calendar dates that do not exist and bad offsets", () => {
+    expect(healthInstant("2026-02-30 06:00:00 +1000")).toBeNull();
+    expect(healthInstant("2026-11-20 24:00:00 +1000")).toBeNull();
+    expect(healthInstant("0001-01-01T00:00:00Z")).toBeNull();
+    expect(healthInstant("2026-11-20T06:00:00+15:00")).toBeNull();
+    expect(healthInstant("2026-11-20T06:00:00+10:60")).toBeNull();
+    expect(healthInstant("2026-11-20T06:00Z")?.toISOString()).toBe(
+      "2026-11-20T06:00:00.000Z",
+    );
+  });
+  test("treats inherited property names as unknown units", () => {
+    expect(() =>
+      readHealthExport(weights("constructor", []), timezone, today),
+    ).toThrow("Send weight in kg, lb or st.");
+    const result = readHealthExport(
+      {
+        data: {
+          workouts: [
+            {
+              name: "Running",
+              start: "2026-11-22 06:00:00 +1000",
+              duration: 1800,
+              distance: { qty: 5, units: "toString" },
+            },
+          ],
+        },
+      },
+      timezone,
+      today,
+    );
+    expect(result.runs).toEqual([]);
+    expect(result.skipped[0]?.reason).toBe("Send distance in km, m, mi or yd.");
+  });
+  test("checks duration bounds before rounding", () => {
+    const runOf = (duration: number) =>
+      readHealthExport(
+        {
+          data: {
+            workouts: [
+              {
+                name: "Running",
+                start: "2026-11-22 06:00:00 +1000",
+                duration,
+                distance: { qty: 0, units: "km" },
+              },
+            ],
+          },
+        },
+        timezone,
+        today,
+      );
+    expect(runOf(0.25).runs[0]?.minutes).toBe(0.01);
+    expect(runOf(86400).runs[0]?.minutes).toBe(1440);
+    expect(runOf(86400.1).skipped[0]?.reason).toBe(
+      "Duration is outside 0–1440 minutes.",
+    );
+  });
+  test("lists every weigh-in sent for a date", () => {
+    const [weight] = readHealthExport(
+      weights("kg", [
+        { date: "2026-11-20 19:00:00 +1000", qty: 81.2 },
+        { date: "2026-11-20 06:10:00 +1000", qty: 80.4 },
+        { date: "2026-11-20 06:10:00 +1000", qty: 80.4 },
+      ]),
+      timezone,
+      today,
+    ).weights;
+    expect(weight).toEqual({
+      date: "2026-11-20",
+      at: "2026-11-19T20:10:00.000Z",
+      kg: 80.4,
+      samples: ["2026-11-20T09:00:00.000Z", "2026-11-19T20:10:00.000Z"],
+    });
+  });
 });

@@ -1,7 +1,7 @@
 /**
  * Imports Apple Health weigh-ins and runs sent by Health Auto Export or an
- * Apple Shortcut. Each Health sample maps to a fixed record ID, so repeated
- * syncs of the same days save each sample once.
+ * Apple Shortcut. Fitness links each Health sample to the record it became,
+ * or to the entry it matched, so repeated syncs decide each sample once.
  */
 import { runSchema, settingsId, settingsSchema, weightSchema } from "../domain";
 import type { Entity, RecordEntry } from "../domain";
@@ -15,12 +15,11 @@ import type { AgentAccess } from "./auth";
 import {
   HealthImportError,
   healthImportLimits,
-  healthRecordId,
-  isHealthRecordId,
   readHealthExport,
   sameRun,
 } from "./health-export";
-import { BatchConflict, StoreRuleError, changeAccount } from "./store";
+import { BatchConflict, StoreRuleError, changeHealth } from "./store";
+import type { HealthLink } from "./store";
 
 type Outcome = { date: string; status: "added" | "kept"; reason?: string };
 
@@ -38,13 +37,24 @@ function timezoneOf(records: RecordEntry[]) {
     : "UTC";
 }
 
-function created(id: string, data: Entity) {
-  return { operationId: crypto.randomUUID(), id, revision: 0, data };
+function created(data: Entity) {
+  return {
+    operationId: crypto.randomUUID(),
+    id: crypto.randomUUID(),
+    revision: 0,
+    data,
+  };
 }
 
 /**
- * Saves new weigh-ins and runs from one Health export. A weigh-in or run
- * already in Fitness, imported earlier or removed after import stays as it is.
+ * Saves new weigh-ins and runs from one Health export.
+ *
+ * Each sample is decided once. A sample becomes a new entry, or matches an
+ * entry already in Fitness: a weigh-in on the same date, or a run entered in
+ * Fitness on the same date with about the same distance. Each entered run
+ * matches at most one Health run. Later syncs keep that decision, so entries
+ * changed or removed in Fitness stay as they are.
+ *
  * Connections with read access get each sample's outcome; write-only
  * connections get the counts they sent, so the reply does not show what the
  * account holds.
@@ -54,74 +64,103 @@ export async function importHealth(
   access: AgentAccess,
   body: unknown,
 ) {
-  return changeAccount(owner, async (change) => {
+  return changeHealth(owner, async (change) => {
     const records = await change.records();
+    const live = new Map(records.map((r) => [r.id, r]));
     const samples = readHealthExport(body, timezoneOf(records));
-    const weightIds = samples.weights.map((w) =>
-      healthRecordId("weight:" + w.date),
-    );
-    const runIds = samples.runs.map((r) => healthRecordId("run:" + r.start));
-    const used = await change.used([...weightIds, ...runIds]);
-    const live = new Set(records.map((r) => r.id));
-    const previously = (id: string) =>
-      live.has(id) ? reasons.imported : reasons.removed;
+    const weightKey = (at: string) => "weight:" + at;
+    const runKey = (start: string) => "run:" + start;
+    const links = await change.links([
+      ...samples.weights.flatMap((w) => w.samples.map(weightKey)),
+      ...samples.runs.map((r) => runKey(r.start)),
+    ]);
+    const decided = (link: HealthLink, matchedReason: string) =>
+      link.matched
+        ? matchedReason
+        : live.has(link.recordId)
+          ? reasons.imported
+          : reasons.removed;
+    const added: HealthLink[] = [];
 
     const weights: Outcome[] = [];
-    for (const [i, weight] of samples.weights.entries()) {
-      const id = weightIds[i] ?? "";
-      const recorded = records.some(
+    for (const weight of samples.weights) {
+      const keys = weight.samples.map(weightKey);
+      const link = keys.map((k) => links.get(k)).find(Boolean);
+      const recorded = records.find(
         (r) => r.data.kind === "weight" && r.data.date === weight.date,
       );
-      const reason = used.has(id)
-        ? previously(id)
-        : recorded
-          ? reasons.weighIn
-          : null;
-      if (reason) {
-        weights.push({ date: weight.date, status: "kept", reason });
-        continue;
+      let recordId: string;
+      let matched: boolean;
+      if (link) {
+        weights.push({
+          date: weight.date,
+          status: "kept",
+          reason: decided(link, reasons.weighIn),
+        });
+        ({ recordId, matched } = link);
+      } else if (recorded) {
+        weights.push({
+          date: weight.date,
+          status: "kept",
+          reason: reasons.weighIn,
+        });
+        recordId = recorded.id;
+        matched = true;
+      } else {
+        const saved = await change.save(
+          created(
+            weightSchema.parse({
+              kind: "weight",
+              date: weight.date,
+              kg: weight.kg,
+            }),
+          ),
+        );
+        if (!saved) throw new Error("Expected the saved weigh-in.");
+        weights.push({ date: weight.date, status: "added" });
+        recordId = saved.id;
+        matched = false;
       }
-      await change.save(
-        created(
-          id,
-          weightSchema.parse({
-            kind: "weight",
-            date: weight.date,
-            kg: weight.kg,
-          }),
-        ),
-      );
-      weights.push({ date: weight.date, status: "added" });
+      for (const sample of keys)
+        if (!links.has(sample)) added.push({ sample, recordId, matched });
     }
 
     const runs: (Outcome & { start: string })[] = [];
-    // Runs entered in Fitness. Each one stands in for at most one Health run.
-    const entered = records.filter(
-      (r) => r.data.kind === "run" && !isHealthRecordId(r.id),
-    );
-    for (const [i, run] of samples.runs.entries()) {
-      const id = runIds[i] ?? "";
-      const match = used.has(id)
-        ? -1
-        : entered.findIndex(
-            (r) =>
-              r.data.kind === "run" &&
-              r.data.date === run.date &&
-              sameRun(r.data, run),
-          );
-      const reason = used.has(id)
-        ? previously(id)
-        : match >= 0
-          ? reasons.run
-          : null;
-      if (reason) {
-        if (match >= 0) entered.splice(match, 1);
-        runs.push({ date: run.date, start: run.start, status: "kept", reason });
+    // Runs entered in Fitness that no Health run has matched yet.
+    const entered = records.filter((r) => r.data.kind === "run");
+    const taken = await change.linked(entered.map((r) => r.id));
+    const open = entered.filter((r) => !taken.has(r.id));
+    for (const run of samples.runs) {
+      const sample = runKey(run.start);
+      const link = links.get(sample);
+      if (link) {
+        runs.push({
+          date: run.date,
+          start: run.start,
+          status: "kept",
+          reason: decided(link, reasons.run),
+        });
         continue;
       }
-      await change.save(
+      const match = open.findIndex(
+        (r) =>
+          r.data.kind === "run" &&
+          r.data.date === run.date &&
+          sameRun(r.data, run),
+      );
+      const existing = match >= 0 ? open.splice(match, 1)[0] : undefined;
+      if (existing) {
+        runs.push({
+          date: run.date,
+          start: run.start,
+          status: "kept",
+          reason: reasons.run,
+        });
+        added.push({ sample, recordId: existing.id, matched: true });
+        continue;
+      }
+      const saved = await change.save(
         created(
-          id,
           runSchema.parse({
             kind: "run",
             date: run.date,
@@ -131,13 +170,12 @@ export async function importHealth(
           }),
         ),
       );
+      if (!saved) throw new Error("Expected the saved run.");
       runs.push({ date: run.date, start: run.start, status: "added" });
+      added.push({ sample, recordId: saved.id, matched: false });
     }
+    await change.link(added);
 
-    const added = {
-      weights: weights.filter((w) => w.status === "added").length,
-      runs: runs.filter((r) => r.status === "added").length,
-    };
     if (!access.read)
       return {
         received: {
@@ -147,7 +185,10 @@ export async function importHealth(
         skipped: samples.skipped,
       };
     return {
-      added,
+      added: {
+        weights: weights.filter((w) => w.status === "added").length,
+        runs: runs.filter((r) => r.status === "added").length,
+      },
       weights,
       runs,
       skipped: samples.skipped,
@@ -161,11 +202,30 @@ function json(value: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(value, { status, headers: { ...noStore, ...headers } });
 }
 
-async function readBody(request: Request) {
+/** Reads the body up to the size limit, stopping as soon as it is exceeded. */
+export async function readImportBody(request: Request) {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > healthImportLimits.bytes) return null;
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > healthImportLimits.bytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > healthImportLimits.bytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return new TextDecoder().decode(bytes);
 }
 
@@ -188,7 +248,7 @@ export async function handleHealthImport(request: Request) {
       { error: `Use an API key with ${agentScopes.write} access.` },
       403,
     );
-  const text = await readBody(request);
+  const text = await readImportBody(request);
   if (text === null)
     return json(
       {

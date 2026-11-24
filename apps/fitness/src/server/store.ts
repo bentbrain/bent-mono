@@ -49,20 +49,21 @@ export class BatchConflict extends Error {
 }
 export type AccountChange = {
   records(): Promise<RecordEntry[]>;
-  /** The IDs in `ids` the account has used, including removed records. */
-  used(ids: string[]): Promise<Set<string>>;
   /** Saves a change, or throws BatchConflict to roll back the request. */
   save(input: Mutation): Promise<RecordEntry | null>;
+};
+/** An Apple Health sample and the record it became, or matched when one already existed. */
+export type HealthLink = { sample: string; recordId: string; matched: boolean };
+export type HealthChange = AccountChange & {
+  /** The links stored for these samples, by sample. */
+  links(samples: string[]): Promise<Map<string, HealthLink>>;
+  /** The records in `ids` that a Health sample became or matched. */
+  linked(ids: string[]): Promise<Set<string>>;
+  link(links: HealthLink[]): Promise<void>;
 };
 function accountChange(sql: TransactionSql, owner: string): AccountChange {
   return {
     records: () => loadRecords(owner, sql),
-    async used(ids) {
-      if (!ids.length) return new Set();
-      const rows =
-        await sql`SELECT id FROM fitness_records WHERE owner_id=${owner} AND id IN ${sql(ids)}`;
-      return new Set(rows.map((row) => z.string().parse(row.id)));
-    },
     async save(input) {
       const outcome = await saveWithin(sql, owner, mutationSchema.parse(input));
       if (outcome.status === "conflict")
@@ -71,17 +72,57 @@ function accountChange(sql: TransactionSql, owner: string): AccountChange {
     },
   };
 }
+const linkRow = z.object({
+  sample: z.string(),
+  record_id: z.string(),
+  matched: z.boolean(),
+});
+function healthChange(sql: TransactionSql, owner: string): HealthChange {
+  return {
+    ...accountChange(sql, owner),
+    async links(samples) {
+      if (!samples.length) return new Map();
+      const rows =
+        await sql`SELECT sample, record_id, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
+      return new Map(
+        rows.map((row) => {
+          const r = linkRow.parse(row);
+          return [
+            r.sample,
+            { sample: r.sample, recordId: r.record_id, matched: r.matched },
+          ];
+        }),
+      );
+    },
+    async linked(ids) {
+      if (!ids.length) return new Set();
+      const rows =
+        await sql`SELECT DISTINCT record_id FROM fitness_health_samples WHERE owner_id=${owner} AND record_id IN ${sql(ids)}`;
+      return new Set(rows.map((row) => z.string().parse(row.record_id)));
+    },
+    async link(links) {
+      if (!links.length) return;
+      const rows = links.map((l) => ({
+        owner_id: owner,
+        sample: l.sample,
+        record_id: l.recordId,
+        matched: l.matched,
+      }));
+      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "matched")} ON CONFLICT DO NOTHING`;
+    },
+  };
+}
 /**
- * Runs changes under the account lock in one transaction. An error rolls
- * back every change. Use it when the changes themselves make retries safe.
+ * Runs an Apple Health import under the account lock in one transaction. An
+ * error rolls back every change and link. The links make retries safe.
  */
-export async function changeAccount<T>(
+export async function changeHealth<T>(
   owner: string,
-  work: (change: AccountChange) => Promise<T>,
+  work: (change: HealthChange) => Promise<T>,
 ): Promise<T> {
   const result = await database().begin(async (sql) => {
     await lockAccount(sql, owner);
-    return { value: await work(accountChange(sql, owner)) };
+    return { value: await work(healthChange(sql, owner)) };
   });
   return result.value;
 }
