@@ -11,14 +11,16 @@
     "build": "vite build && tsc --noEmit",
     "typecheck": "bun scripts/routes.ts && tsc --noEmit",
     "lint": "eslint src tests e2e scripts *.ts",
-    "test": "bun test tests/domain.test.ts tests/health.test.ts",
+    "test": "bun test tests/domain.test.ts tests/health.test.ts tests/devices.test.ts",
     "test:integration": "bun test tests/*.integration.test.ts",
+    "fixtures:wire": "FITNESS_WIRE_FIXTURES=update bun test tests/wire.integration.test.ts",
     "knip": "bun scripts/routes.ts && knip",
     "test:browser": "playwright test",
     "db:migrate": "bun scripts/migrate.ts"
   },
   "dependencies": {
     "@bent/design-tokens": "workspace:*",
+    "@bent/fitness-contracts": "workspace:*",
     "@bent/ui": "workspace:*",
     "@clerk/tanstack-react-start": "1.7.13",
     "@modelcontextprotocol/sdk": "1.32.2",
