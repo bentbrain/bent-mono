@@ -16,14 +16,9 @@ import { comparison, includesPath, workspaceScope } from "./ci-scope.mjs";
 const packages = [
   { name: "@bent/trackmap", path: "apps/trackmap" },
   { name: "@bent/design-tokens", path: "packages/design-tokens" },
-  { name: "@bent/shop-product", path: "products/shop" },
-  { name: "@forever-tee/web", path: "products/shop/apps/web" },
-  { name: "@forever-tee/api", path: "products/shop/workers/api" },
-];
-packages.push(
   { name: "@bent/drive-product", path: "products/drive" },
   { name: "@bent/drive-web", path: "products/drive/apps/web" },
-);
+];
 const base = "a".repeat(40),
   head = "b".repeat(40);
 function fixture(run) {
@@ -73,34 +68,34 @@ test("PR, push and merge queue use explicit event bases; missing or zero history
   assert.equal(comparison("push", { before: "0".repeat(40) }, head), null);
   assert.equal(comparison("pull_request", {}, head), null);
 });
-test("an app-only dependency and lockfile update does not select Shop", () =>
+test("an app-only dependency and lockfile update retains its affected scope", () =>
   fixture((env) => {
     const scope = workspaceScope(
       env,
       execute(["apps/trackmap/package.json", "bun.lock"], [packages[0]]),
     );
     assert.deepEqual(scope.packages, [packages[0]]);
-    assert.equal(includesPath(scope, "products/shop"), false);
+    assert.equal(includesPath(scope, "products/drive"), false);
   }));
-test("shared consumers supplied by Turbo and Shop's relative imports are retained", () =>
+test("shared consumers supplied by Turbo are retained", () =>
   fixture((env) => {
     const scope = workspaceScope(
       env,
       execute(["packages/design-tokens/src/index.css"], packages.slice(1, 4)),
     );
-    assert.equal(includesPath(scope, "products/shop/workers/api"), true);
-    assert.equal(includesPath(scope, "products/shop/apps/web"), true);
+    assert.equal(includesPath(scope, "products/drive"), true);
+    assert.equal(includesPath(scope, "products/drive/apps/web"), true);
   }));
-test("Shop tooling, root changes, deleted workspace paths and missing history fail closed", () =>
+test("root changes, deleted workspace paths and missing history select every workspace", () =>
   fixture((env) => {
     for (const files of [
-      ["products/shop/scripts/check-ci.mjs"],
+      ["scripts/ci-scope.mjs"],
       ["package.json"],
       ["scripts/ci-check.mjs"],
       ["apps/removed/package.json"],
     ]) {
       const scope = workspaceScope(env, execute(files, [packages[2]]));
-      assert.equal(includesPath(scope, "products/shop/apps/web"), true);
+      assert.deepEqual(scope.packages, packages);
     }
     assert.deepEqual(
       workspaceScope(env, execute([], [], true)).packages,
@@ -119,68 +114,6 @@ test("Shop tooling, root changes, deleted workspace paths and missing history fa
       true,
     );
   }));
-test("the real runner skips unrelated Shop and preserves Shop static checks without nested suites", () =>
-  fixture((env) => {
-    function commands(task, shop, full = false) {
-      const output = execFileSync(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          `
-      import childProcess from "node:child_process";
-      import {syncBuiltinESMExports} from "node:module";
-      const packages = ${JSON.stringify(packages)};
-      const calls = [];
-      childProcess.execFileSync = (command, args) => command === "git" ? ${JSON.stringify(shop ? "products/shop/apps/web/src/page.tsx\0" : "apps/trackmap/src/main.ts\0")} : JSON.stringify({packages:{items:args.includes("--affected") ? packages.filter(item => ${shop} ? item.path.startsWith("products/shop") : item.path === "apps/trackmap") : packages}});
-      childProcess.spawnSync = (command,args,options) => { calls.push({command,args,cwd:options.cwd}); return {status:0}; };
-      syncBuiltinESMExports();
-      process.argv[2] = ${JSON.stringify(task)};
-      await import("./scripts/ci-check.mjs");
-      console.log(JSON.stringify(calls));
-    `,
-        ],
-        {
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            ...env,
-            ...(full ? { GITHUB_EVENT_NAME: "schedule" } : {}),
-          },
-        },
-      );
-      return JSON.parse(output.trim().split("\n").at(-1));
-    }
-    assert.deepEqual(commands("shop", false), []);
-    assert.equal(
-      commands("browser", false).some((call) => call.cwd.endsWith("apps/jp")),
-      false,
-    );
-    assert.deepEqual(
-      commands("shop", true).map((call) => call.args),
-      [["run", "test:smoke"]],
-    );
-    assert.equal(
-      commands("typecheck", true)[0].args.includes("types:check"),
-      true,
-    );
-    assert.equal(commands("lint", true)[0].args.includes("lint"), true);
-    assert.equal(commands("build", true)[0].args.includes("build"), true);
-    assert.deepEqual(commands("test", true).at(-1).args, ["run", "test:core"]);
-    assert.equal(
-      commands("test", true).some((call) =>
-        call.args.includes("--filter=@forever-tee/web"),
-      ),
-      false,
-    );
-    assert.equal(
-      commands("shop", true, true).some((call) =>
-        call.args.includes("test:e2e:local"),
-      ),
-      true,
-    );
-  }));
-
 test("real Turbo scopes dependency/lockfile updates and shared consumers", (context) => {
   const turbo = resolve("node_modules/.bin/turbo");
   if (!existsSync(turbo)) {
@@ -208,7 +141,7 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
     return git("rev-parse", "HEAD");
   };
   try {
-    for (const path of ["apps/activity", "apps/shop", "packages/tokens"])
+    for (const path of ["apps/activity", "apps/other", "packages/tokens"])
       mkdirSync(join(cwd, path), { recursive: true });
     put("package.json", {
       name: "fixture",
@@ -222,10 +155,10 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
       name: "activity",
       dependencies: { "is-number": "^6.0.0", tokens: "workspace:*" },
     };
-    const shop = { name: "shop", dependencies: { tokens: "workspace:*" } };
+    const other = { name: "other", dependencies: { tokens: "workspace:*" } };
     const tokens = { name: "tokens" };
     put("apps/activity/package.json", activity);
-    put("apps/shop/package.json", shop);
+    put("apps/other/package.json", other);
     put("packages/tokens/package.json", tokens);
     const lock = {
       lockfileVersion: 3,
@@ -233,12 +166,12 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
       workspaces: {
         "": { name: "fixture" },
         "apps/activity": activity,
-        "apps/shop": shop,
+        "apps/other": other,
         "packages/tokens": tokens,
       },
       packages: {
         activity: ["activity@workspace:apps/activity"],
-        shop: ["shop@workspace:apps/shop"],
+        other: ["other@workspace:apps/other"],
         tokens: ["tokens@workspace:packages/tokens"],
         "is-number": ["is-number@6.0.0", "", {}],
       },
@@ -279,7 +212,7 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
       ":root { color: black }",
     );
     head = commit();
-    assert.deepEqual(affected(head), ["activity", "shop", "tokens"]);
+    assert.deepEqual(affected(head), ["activity", "other", "tokens"]);
     base = head;
     put("package.json", {
       name: "fixture",
@@ -289,7 +222,7 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
       overrides: { "is-number": "7.0.0" },
     });
     head = commit();
-    assert.deepEqual(affected(head), ["activity", "shop", "tokens"]);
+    assert.deepEqual(affected(head), ["activity", "other", "tokens"]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -305,5 +238,5 @@ test("product-root tooling validates its nested applications", () =>
       ),
     );
     assert.equal(includesPath(scope, "products/drive/apps/web"), true);
-    assert.equal(includesPath(scope, "products/shop"), false);
+    assert.equal(includesPath(scope, "apps/trackmap"), false);
   }));

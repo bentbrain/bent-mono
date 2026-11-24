@@ -11,7 +11,7 @@ const workflow = { id: 12, path: ".github/workflows/quality.yml", state: "active
 const run = { id: 23, head_sha: sha, head_branch: "main", event: "push", path: workflow.path,
   workflow_id: workflow.id, repository: { full_name: repo }, head_repository: { full_name: repo },
   status: "completed", conclusion: "success", run_attempt: 2 };
-const names = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser", "shop", "public-source",
+const names = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser", "public-source",
   "secret-scan", "dependencies", "CodeQL", "Release qualification"];
 test("the production aggregate depends on every root Quality job and runs after failures", async () => {
   const source = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");

@@ -49,12 +49,6 @@
       ]
     },
     {
-      "repository": "https://github.com/bentbrain/forever-tee",
-      "revision": "e52854299971d2f6a7984ebe934e258343c88aed",
-      "destination": "products/shop",
-      "method": "audited source snapshot; original history remains upstream"
-    },
-    {
       "repository": "https://github.com/bentbrain/maya-collage",
       "revision": "958916ea3b3f1cf5e2cd7d13d4a6a357ff8b4f11",
       "destination": "apps/collage",

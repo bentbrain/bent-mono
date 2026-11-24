@@ -29,15 +29,6 @@
       "project": "apartment-guide"
     },
     {
-      "name": "shop",
-      "domains": [
-        "shop.bent.build"
-      ],
-      "directory": "products/shop/apps/web",
-      "platform": "vercel-cloudflare-aws",
-      "project": "forever-tee-web"
-    },
-    {
       "name": "toolbar",
       "domains": [
         "toolbar.bent.build"
