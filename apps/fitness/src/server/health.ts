@@ -71,58 +71,74 @@ export async function importHealth(
     const weightKey = (at: string) => "weight:" + at;
     const runKey = (start: string) => "run:" + start;
     const links = await change.links([
-      ...samples.weights.flatMap((w) => w.samples.map(weightKey)),
+      ...samples.weights.flatMap((w) => w.samples.map((s) => weightKey(s.at))),
       ...samples.runs.map((r) => runKey(r.start)),
     ]);
     const decided = (link: HealthLink, matchedReason: string) =>
-      link.matched
-        ? matchedReason
-        : live.has(link.recordId)
-          ? reasons.imported
-          : reasons.removed;
+      !live.has(link.recordId)
+        ? reasons.removed
+        : link.matched
+          ? matchedReason
+          : reasons.imported;
     const added: HealthLink[] = [];
 
+    // Each weigh-in sample keeps its own decision. For each date, the earliest
+    // undecided sample becomes the weigh-in or matches the date's weigh-in.
     const weights: Outcome[] = [];
     for (const weight of samples.weights) {
-      const keys = weight.samples.map(weightKey);
-      const link = keys.map((k) => links.get(k)).find(Boolean);
-      const recorded = records.find(
-        (r) => r.data.kind === "weight" && r.data.date === weight.date,
+      const linked = weight.samples.flatMap((s) => {
+        const link = links.get(weightKey(s.at));
+        return link ? [link] : [];
+      });
+      const undecided = weight.samples.filter(
+        (s) => !links.has(weightKey(s.at)),
       );
-      let recordId: string;
-      let matched: boolean;
-      if (link) {
+      const [first] = undecided;
+      const earlier = linked[0];
+      if (!first) {
         weights.push({
           date: weight.date,
           status: "kept",
-          reason: decided(link, reasons.weighIn),
+          reason: earlier ? decided(earlier, reasons.weighIn) : "",
         });
-        ({ recordId, matched } = link);
+        continue;
+      }
+      // A date whose synced weigh-in was removed in Fitness stays without one.
+      const removed = linked.find((l) => !live.has(l.recordId));
+      const recorded = records.find(
+        (r) => r.data.kind === "weight" && r.data.date === weight.date,
+      );
+      let link: Omit<HealthLink, "sample">;
+      if (removed) {
+        weights.push({
+          date: weight.date,
+          status: "kept",
+          reason: reasons.removed,
+        });
+        link = { recordId: removed.recordId, matched: removed.matched };
       } else if (recorded) {
         weights.push({
           date: weight.date,
           status: "kept",
           reason: reasons.weighIn,
         });
-        recordId = recorded.id;
-        matched = true;
+        link = { recordId: recorded.id, matched: true };
       } else {
         const saved = await change.save(
           created(
             weightSchema.parse({
               kind: "weight",
               date: weight.date,
-              kg: weight.kg,
+              kg: first.kg,
             }),
           ),
         );
         if (!saved) throw new Error("Expected the saved weigh-in.");
         weights.push({ date: weight.date, status: "added" });
-        recordId = saved.id;
-        matched = false;
+        link = { recordId: saved.id, matched: false };
       }
-      for (const sample of keys)
-        if (!links.has(sample)) added.push({ sample, recordId, matched });
+      for (const s of undecided)
+        added.push({ sample: weightKey(s.at), ...link });
     }
 
     const runs: (Outcome & { start: string })[] = [];
@@ -176,14 +192,9 @@ export async function importHealth(
     }
     await change.link(added);
 
-    if (!access.read)
-      return {
-        received: {
-          weights: samples.weights.length,
-          runs: samples.runs.length,
-        },
-        skipped: samples.skipped,
-      };
+    // Dates and skips depend on the account timezone, so a write-only
+    // connection gets only counts taken from its own payload.
+    if (!access.read) return { received: samples.sent };
     return {
       added: {
         weights: weights.filter((w) => w.status === "added").length,

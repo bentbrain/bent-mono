@@ -47,8 +47,8 @@ const payload = z.object({
   }),
 });
 
-/** The earliest weigh-in of a date, and every weigh-in sent for that date. */
-type HealthWeight = { date: string; at: string; kg: number; samples: string[] };
+/** Every weigh-in sent for one account date, earliest first. */
+type HealthWeight = { date: string; samples: { at: string; kg: number }[] };
 type HealthRun = {
   date: string;
   start: string;
@@ -65,6 +65,8 @@ type HealthSamples = {
   runs: HealthRun[];
   skipped: HealthSkip[];
   ignored: { metrics: number; workouts: number };
+  /** Weigh-ins and running workouts in the payload, counted before dating. */
+  sent: { weights: number; runs: number };
 };
 
 const timestamp =
@@ -134,7 +136,8 @@ export function readHealthExport(
     );
   const skipped: HealthSkip[] = [];
   const ignored = { metrics: 0, workouts: 0 };
-  const earliest = new Map<string, HealthWeight>();
+  const byDate = new Map<string, HealthWeight>();
+  const sent = { weights: 0, runs: 0 };
   let samples = 0;
   const count = () => {
     if (++samples > healthImportLimits.samples)
@@ -160,6 +163,7 @@ export function readHealthExport(
         throw new HealthImportError(
           issue(sample.error, `data.metrics.${m}.data.${p}`),
         );
+      sent.weights++;
       const at = healthInstant(sample.data.date);
       if (!at) {
         skipped.push({
@@ -192,16 +196,10 @@ export function readHealthExport(
         continue;
       }
       const instant = at.toISOString();
-      const previous = earliest.get(date);
-      if (!previous)
-        earliest.set(date, { date, at: instant, kg, samples: [instant] });
-      else {
-        if (!previous.samples.includes(instant)) previous.samples.push(instant);
-        if (instant < previous.at) {
-          previous.at = instant;
-          previous.kg = kg;
-        }
-      }
+      const group = byDate.get(date) ?? { date, samples: [] };
+      byDate.set(date, group);
+      if (!group.samples.some((s) => s.at === instant))
+        group.samples.push({ at: instant, kg });
     }
   }
 
@@ -219,6 +217,7 @@ export function readHealthExport(
     const entry = workout.safeParse(raw);
     if (!entry.success)
       throw new HealthImportError(issue(entry.error, `data.workouts.${w}`));
+    sent.runs++;
     const start = healthInstant(entry.data.start);
     const end =
       entry.data.end === undefined ? null : healthInstant(entry.data.end);
@@ -271,12 +270,16 @@ export function readHealthExport(
   }
 
   return {
-    weights: [...earliest.values()].sort((a, b) =>
-      a.date.localeCompare(b.date),
-    ),
+    weights: [...byDate.values()]
+      .map((w) => ({
+        ...w,
+        samples: w.samples.sort((a, b) => a.at.localeCompare(b.at)),
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
     runs: runs.sort((a, b) => a.start.localeCompare(b.start)),
     skipped,
     ignored,
+    sent,
   };
 }
 

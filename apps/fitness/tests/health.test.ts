@@ -42,7 +42,7 @@ describe("Health export weigh-ins", () => {
       timezone,
       today,
     );
-    expect(result.weights.map((w) => [w.date, w.kg])).toEqual([
+    expect(result.weights.map((w) => [w.date, w.samples[0]?.kg])).toEqual([
       ["2026-11-20", 80.4],
       ["2026-11-21", 80.1],
     ]);
@@ -62,13 +62,13 @@ describe("Health export weigh-ins", () => {
       timezone,
       today,
     );
-    expect(pounds.weights[0]?.kg).toBeCloseTo(80, 2);
+    expect(pounds.weights[0]?.samples[0]?.kg).toBeCloseTo(80, 2);
     const stone = readHealthExport(
       weights("st", [{ date: "2026-11-20 06:00:00 +1000", qty: 12.6 }]),
       timezone,
       today,
     );
-    expect(stone.weights[0]?.kg).toBeCloseTo(80.014, 2);
+    expect(stone.weights[0]?.samples[0]?.kg).toBeCloseTo(80.014, 2);
   });
   test("skips future, out-of-range and undated samples with reasons", () => {
     const result = readHealthExport(
@@ -308,9 +308,40 @@ describe("Health export edge values", () => {
     ).weights;
     expect(weight).toEqual({
       date: "2026-11-20",
-      at: "2026-11-19T20:10:00.000Z",
-      kg: 80.4,
-      samples: ["2026-11-20T09:00:00.000Z", "2026-11-19T20:10:00.000Z"],
+      samples: [
+        { at: "2026-11-19T20:10:00.000Z", kg: 80.4 },
+        { at: "2026-11-20T09:00:00.000Z", kg: 81.2 },
+      ],
     });
+  });
+  test("counts the payload's weigh-ins and runs before dating them", () => {
+    const result = readHealthExport(
+      {
+        data: {
+          metrics: [
+            {
+              name: "weight_body_mass",
+              units: "kg",
+              data: [
+                { date: "2026-11-20 06:00:00 +1000", qty: 80 },
+                { date: "2026-11-20 07:00:00 +1000", qty: 80 },
+                { date: "2026-11-30 06:00:00 +1000", qty: 80 },
+              ],
+            },
+          ],
+          workouts: [
+            { name: "Walking", start: "2026-11-20 06:00:00 +1000" },
+            {
+              name: "Running",
+              start: "2026-11-30 06:00:00 +1000",
+              duration: 60,
+            },
+          ],
+        },
+      },
+      timezone,
+      today,
+    );
+    expect(result.sent).toEqual({ weights: 3, runs: 1 });
   });
 });

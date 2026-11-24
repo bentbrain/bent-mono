@@ -202,10 +202,7 @@ test.skipIf(!configured)(
         [running(day(-8), 4)],
       ),
     );
-    expect(result).toEqual({
-      received: { weights: 2, runs: 1 },
-      skipped: [],
-    });
+    expect(result).toEqual({ received: { weights: 2, runs: 1 } });
     const records = await loadRecords(owner);
     expect(
       records.some((r) => r.data.kind === "weight" && r.data.date === day(-8)),
@@ -320,7 +317,9 @@ test.skipIf(!configured)(
     });
     expect(await importHealth(owner, both, morning)).toMatchObject({
       added: { runs: 0 },
-      runs: [{ status: "kept", reason: matched }],
+      runs: [
+        { status: "kept", reason: "Removed in Fitness after an earlier sync." },
+      ],
     });
     const runs = (await loadRecords(owner)).filter(
       (r) => r.data.kind === "run" && r.data.date === day(-20),
@@ -403,3 +402,104 @@ test("stops reading a body at the size limit", async () => {
   );
   expect(await readImportBody(small)).toBe('{"data":{}}');
 });
+
+test.skipIf(!configured)(
+  "decides each weigh-in sample on its own after a timezone change",
+  async () => {
+    // 23:30 UTC on day -30 is day -29 in Brisbane.
+    const late = { date: `${day(-30)}T23:30:00Z`, qty: 83 };
+    const morning = { date: `${day(-30)}T06:00:00Z`, qty: 82.5 };
+    expect(await importHealth(owner, both, exportOf([late]))).toMatchObject({
+      weights: [{ date: day(-29), status: "added" }],
+    });
+    const settings = (await loadRecords(owner)).find(
+      (r) => r.id === settingsId,
+    );
+    if (settings?.data.kind !== "settings") throw new Error("No settings.");
+    const utc = await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: settings.revision,
+      data: { ...settings.data, timezone: "UTC" },
+    });
+    expect(
+      await importHealth(owner, both, exportOf([late, morning])),
+    ).toMatchObject({ weights: [{ date: day(-30), status: "added" }] });
+    const weighIns = (await loadRecords(owner)).filter(
+      (r) =>
+        r.data.kind === "weight" &&
+        (r.data.date === day(-30) || r.data.date === day(-29)),
+    );
+    expect(weighIns.map((r) => r.data)).toEqual(
+      expect.arrayContaining([
+        { kind: "weight", date: day(-30), kg: 82.5 },
+        { kind: "weight", date: day(-29), kg: 83 },
+      ]),
+    );
+    expect(await importHealth(owner, both, exportOf([morning]))).toMatchObject({
+      weights: [{ status: "kept", reason: "Imported in an earlier sync." }],
+    });
+    if (utc.status !== "saved" || !utc.record) throw new Error("Not saved.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: utc.record.revision,
+      data: settings.data,
+    });
+  },
+);
+
+test.skipIf(!configured)(
+  "reports a removed match as removed and keeps it removed",
+  async () => {
+    const manual = await save({
+      kind: "run",
+      date: day(-35),
+      minutes: 30,
+      distanceKm: 8,
+      notes: "",
+    });
+    const body = exportOf([], [running(day(-35), 8)]);
+    await importHealth(owner, both, body);
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: manual.id,
+      revision: manual.revision,
+      data: null,
+    });
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { runs: 0 },
+      runs: [
+        { status: "kept", reason: "Removed in Fitness after an earlier sync." },
+      ],
+    });
+  },
+);
+
+test.skipIf(!configured)(
+  "imports a payload once when two uploads run together",
+  async () => {
+    const body = exportOf(
+      [{ date: at(day(-40), "06:00:00"), qty: 81 }],
+      [running(day(-40), 6)],
+    );
+    const results = await Promise.all([
+      importHealth(owner, both, body),
+      importHealth(owner, both, body),
+    ]);
+    expect(
+      results
+        .map((r) => ("added" in r ? r.added : null))
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ).toEqual([
+      { weights: 0, runs: 0 },
+      { weights: 1, runs: 1 },
+    ]);
+    const records = (await loadRecords(owner)).filter(
+      (r) =>
+        (r.data.kind === "weight" || r.data.kind === "run") &&
+        r.data.date === day(-40),
+    );
+    expect(records).toHaveLength(2);
+  },
+);
