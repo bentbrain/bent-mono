@@ -683,3 +683,81 @@ test.skipIf(!configured)(
     expect(result).toMatchObject({ added: { runs: 0 } });
   },
 );
+
+test.skipIf(!configured)(
+  "compares run distances at full precision",
+  async () => {
+    await save({
+      kind: "run",
+      date: day(-65),
+      minutes: 6,
+      distanceKm: 1,
+      notes: "",
+    });
+    await save({
+      kind: "run",
+      date: day(-66),
+      minutes: 25,
+      distanceKm: 4.8,
+      notes: "",
+    });
+    const metres = (date: string, m: number) => ({
+      ...running(date, 0),
+      distance: { qty: m, units: "m" },
+    });
+    expect(
+      await importHealth(owner, both, exportOf([], [metres(day(-65), 1100.1)])),
+    ).toMatchObject({ added: { runs: 1 } });
+    expect(
+      await importHealth(owner, both, exportOf([], [metres(day(-66), 5052.6)])),
+    ).toMatchObject({ added: { runs: 0 } });
+    const saved = (await loadRecords(owner)).find(
+      (r) =>
+        r.data.kind === "run" &&
+        r.data.date === day(-65) &&
+        r.data.notes === "Apple Health",
+    );
+    expect(saved?.data).toMatchObject({ distanceKm: 1.1 });
+  },
+);
+
+test.skipIf(!configured)(
+  "names the entry's date when a match was made under another timezone",
+  async () => {
+    // 23:30 UTC on day -70 is day -69 in Brisbane.
+    const weighIn = { date: `${day(-70)}T23:30:00Z`, qty: 80 };
+    const run = {
+      ...running(day(-69), 7),
+      start: `${day(-70)}T23:30:00Z`,
+    };
+    await save({ kind: "weight", date: day(-69), kg: 79.5 });
+    await save({
+      kind: "run",
+      date: day(-69),
+      minutes: 40,
+      distanceKm: 7,
+      notes: "",
+    });
+    await importHealth(owner, both, exportOf([weighIn], [run]));
+    await withTimezone("UTC");
+    expect(
+      await importHealth(owner, both, exportOf([weighIn], [run])),
+    ).toMatchObject({
+      weights: [
+        {
+          date: day(-70),
+          status: "kept",
+          reason: `Matched to the weigh-in on ${day(-69)} in an earlier sync.`,
+        },
+      ],
+      runs: [
+        {
+          date: day(-70),
+          status: "kept",
+          reason: `Matched to the run on ${day(-69)} in an earlier sync.`,
+        },
+      ],
+    });
+    await withTimezone(timezone);
+  },
+);

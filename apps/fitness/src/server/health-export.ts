@@ -235,8 +235,9 @@ export function readHealthExport(
       (end ? (end.getTime() - start.getTime()) / 1000 : null);
     const distance = entry.data.distance;
     const factor = distance ? kmPer.get(distance.units.toLowerCase()) : 0;
+    // Full precision for matching; the importer rounds when saving.
     const distanceKm =
-      distance && factor !== undefined ? round(distance.qty * factor, 3) : 0;
+      distance && factor !== undefined ? distance.qty * factor : 0;
     const readable = day.safeParse(date).success;
     let reason: string | null = null;
     if (!readable)
