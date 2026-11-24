@@ -294,64 +294,47 @@ export function sameRun(a: { distanceKm: number }, b: { distanceKm: number }) {
 type Distance = { distanceKm: number };
 
 /**
- * Pairs one day's Health runs with runs entered in Fitness, each used at most
- * once. The pairing matches as many runs as possible, then prefers the
- * smallest total distance difference. Returns the entered index for each
- * Health run, or null. Days with more than 12 runs on either side use the
- * closest pairs first.
+ * Pairs one day's Health runs with runs entered in Fitness, each entered run
+ * used at most once. `initial` gives pairs from earlier syncs. Those Health
+ * runs stay paired, possibly with another entered run, so that a new run can
+ * take the match it needs. Augmenting paths find the largest number of pairs,
+ * trying the closest distances first. Returns the entered index for each
+ * Health run, or null.
  */
-export function assignRuns(health: Distance[], entered: Distance[]) {
-  const result: (number | null)[] = health.map(() => null);
-  const gap = (i: number, j: number) =>
-    Math.abs((health[i]?.distanceKm ?? 0) - (entered[j]?.distanceKm ?? 0));
-  const fits = (i: number, j: number) => {
-    const a = health[i];
-    const b = entered[j];
-    return a !== undefined && b !== undefined && sameRun(a, b);
-  };
-  if (health.length > 12 || entered.length > 12) {
-    const pairs = health
-      .flatMap((_, i) => entered.map((_, j) => [i, j] as const))
-      .filter(([i, j]) => fits(i, j))
-      .sort((a, b) => gap(a[0], a[1]) - gap(b[0], b[1]));
-    const used = new Set<number>();
-    for (const [i, j] of pairs)
-      if (result[i] === null && !used.has(j)) {
-        result[i] = j;
-        used.add(j);
+export function assignRuns(
+  health: Distance[],
+  entered: Distance[],
+  initial: (number | null)[] = [],
+) {
+  const pick: (number | null)[] = health.map((_, i) => initial[i] ?? null);
+  const holder: (number | null)[] = entered.map(() => null);
+  pick.forEach((j, i) => {
+    if (j !== null) holder[j] = i;
+  });
+  const options = health.map((run, i) =>
+    entered
+      .map((other, j) => ({
+        j,
+        gap: Math.abs(run.distanceKm - other.distanceKm),
+      }))
+      .filter(({ j }) => pick[i] === j || sameRun(run, entered[j] ?? run))
+      .sort((a, b) => a.gap - b.gap)
+      .map(({ j }) => j),
+  );
+  const augment = (i: number, seen: Set<number>): boolean => {
+    for (const j of options[i] ?? []) {
+      if (seen.has(j)) continue;
+      seen.add(j);
+      const current = holder[j] ?? null;
+      if (current === null || augment(current, seen)) {
+        holder[j] = i;
+        pick[i] = j;
+        return true;
       }
-    return result;
-  }
-  type Best = { count: number; gap: number; pick: number | null };
-  const memo = new Map<number, Best>();
-  const best = (i: number, mask: number): Best => {
-    if (i === health.length) return { count: 0, gap: 0, pick: null };
-    const key = i * 4096 + mask;
-    const known = memo.get(key);
-    if (known) return known;
-    let top: Best = { ...best(i + 1, mask), pick: null };
-    for (let j = 0; j < entered.length; j++) {
-      if (mask & (1 << j) || !fits(i, j)) continue;
-      const rest = best(i + 1, mask | (1 << j));
-      const option = {
-        count: rest.count + 1,
-        gap: rest.gap + gap(i, j),
-        pick: j,
-      };
-      if (
-        option.count > top.count ||
-        (option.count === top.count && option.gap < top.gap - 1e-12)
-      )
-        top = option;
     }
-    memo.set(key, top);
-    return top;
+    return false;
   };
-  let mask = 0;
-  for (let i = 0; i < health.length; i++) {
-    const { pick } = best(i, mask);
-    result[i] = pick;
-    if (pick !== null) mask |= 1 << pick;
-  }
-  return result;
+  for (let i = 0; i < health.length; i++)
+    if (pick[i] === null) augment(i, new Set());
+  return pick;
 }

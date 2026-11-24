@@ -621,6 +621,8 @@ test.skipIf(!configured)(
           recordId: crypto.randomUUID(),
           date: "2026-10-18",
           matched: false,
+          revision: null,
+          distanceKm: null,
         },
       ]);
       return change.links([sample]);
@@ -837,3 +839,77 @@ test.skipIf(!configured)(
     ).toHaveLength(2);
   },
 );
+
+test.skipIf(!configured)(
+  "moves an earlier match when a later upload needs it",
+  async () => {
+    await save({
+      kind: "run",
+      date: day(-85),
+      minutes: 28,
+      distanceKm: 5,
+      notes: "",
+    });
+    await save({
+      kind: "run",
+      date: day(-85),
+      minutes: 30,
+      distanceKm: 5.3,
+      notes: "",
+    });
+    const early = running(day(-85), 5.21, "06:00:00");
+    const late = running(day(-85), 5.48, "17:00:00");
+    expect(
+      await importHealth(owner, both, exportOf([], [early])),
+    ).toMatchObject({ added: { runs: 0 } });
+    expect(
+      await importHealth(owner, both, exportOf([], [early, late])),
+    ).toMatchObject({ added: { runs: 0 } });
+    expect(
+      await importHealth(owner, both, exportOf([], [early, late])),
+    ).toMatchObject({ added: { runs: 0 } });
+    expect(
+      (await loadRecords(owner)).filter(
+        (r) => r.data.kind === "run" && r.data.date === day(-85),
+      ),
+    ).toHaveLength(2);
+  },
+);
+
+test.skipIf(!configured)("keeps a match to a run edited since", async () => {
+  const edited = await save({
+    kind: "run",
+    date: day(-90),
+    minutes: 30,
+    distanceKm: 5.3,
+    notes: "",
+  });
+  await save({
+    kind: "run",
+    date: day(-90),
+    minutes: 28,
+    distanceKm: 5,
+    notes: "",
+  });
+  await importHealth(owner, both, exportOf([], [running(day(-90), 5.21)]));
+  await saveRecord(owner, {
+    operationId: crypto.randomUUID(),
+    id: edited.id,
+    revision: edited.revision,
+    data: {
+      kind: "run",
+      date: day(-90),
+      minutes: 31,
+      distanceKm: 5.3,
+      notes: "Hills",
+    },
+  });
+  // The 5.48 km run can only match the edited run, whose match stays.
+  expect(
+    await importHealth(
+      owner,
+      both,
+      exportOf([], [running(day(-90), 5.48, "17:00:00")]),
+    ),
+  ).toMatchObject({ added: { runs: 1 } });
+});

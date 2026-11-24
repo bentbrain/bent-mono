@@ -119,7 +119,7 @@ export async function importHealth(
       const recorded = records.find(
         (r) => r.data.kind === "weight" && r.data.date === weight.date,
       );
-      let link: Omit<HealthLink, "sample" | "date">;
+      let link: Pick<HealthLink, "recordId" | "matched">;
       if (recorded) {
         weights.push({
           date: weight.date,
@@ -149,28 +149,66 @@ export async function importHealth(
         link = { recordId: saved.id, matched: false };
       }
       for (const s of undecided)
-        added.push({ sample: weightKey(s.at), date: weight.date, ...link });
+        added.push({
+          sample: weightKey(s.at),
+          date: weight.date,
+          revision: null,
+          distanceKm: null,
+          ...link,
+        });
     }
 
     const runs: (Outcome & { start: string })[] = [];
-    // Runs entered in Fitness that no Health run has matched yet.
+    // Runs in Fitness, and the Health links that point to them. A match to an
+    // entered run that is unchanged since can move to another entered run
+    // when a new Health run needs it. Other links stay as they are.
     const entered = records.filter((r) => r.data.kind === "run");
-    const taken = await change.linked(entered.map((r) => r.id));
-    const open = entered.filter((r) => !taken.has(r.id));
-    // Pair each day's new Health runs with that day's open entered runs.
+    const toEntered = await change.linksTo(entered.map((r) => r.id));
+    const linkedIds = new Set(toEntered.map((l) => l.recordId));
+    const movable = toEntered.filter((l) => {
+      const record = live.get(l.recordId);
+      return (
+        l.matched &&
+        l.distanceKm !== null &&
+        record?.revision === l.revision &&
+        record.data.kind === "run" &&
+        record.data.date === l.date
+      );
+    });
     const pairs = new Map<string, RecordEntry>();
+    const moved: HealthLink[] = [];
     const fresh = samples.runs.filter((r) => !links.has(runKey(r.start)));
     for (const date of new Set(fresh.map((r) => r.date))) {
-      const health = fresh.filter((r) => r.date === date);
-      const candidates = open.flatMap((r) =>
-        r.data.kind === "run" && r.data.date === date
-          ? [{ record: r, distanceKm: r.data.distanceKm }]
-          : [],
+      const held = movable.filter((l) => l.date === date);
+      const candidates = entered.filter(
+        (r) =>
+          r.data.kind === "run" &&
+          r.data.date === date &&
+          (!linkedIds.has(r.id) || held.some((l) => l.recordId === r.id)),
       );
-      assignRuns(health, candidates).forEach((j, i) => {
-        const run = health[i];
-        const match = j === null ? undefined : candidates[j];
-        if (run && match) pairs.set(run.start, match.record);
+      const today = fresh.filter((r) => r.date === date);
+      const result = assignRuns(
+        [...held.map((l) => ({ distanceKm: l.distanceKm ?? 0 })), ...today],
+        candidates.map((r) => ({
+          distanceKm: r.data.kind === "run" ? r.data.distanceKm : 0,
+        })),
+        held.map((l) => {
+          const index = candidates.findIndex((r) => r.id === l.recordId);
+          return index >= 0 ? index : null;
+        }),
+      );
+      held.forEach((l, i) => {
+        const j = result[i];
+        const record =
+          j === null || j === undefined ? undefined : candidates[j];
+        if (record && record.id !== l.recordId)
+          moved.push({ ...l, recordId: record.id, revision: record.revision });
+      });
+      today.forEach((run, k) => {
+        const j = result[held.length + k];
+        const record =
+          j === null || j === undefined ? undefined : candidates[j];
+        if (record) pairs.set(run.start, record);
       });
     }
     for (const run of samples.runs) {
@@ -198,6 +236,8 @@ export async function importHealth(
           recordId: existing.id,
           date: run.date,
           matched: true,
+          revision: existing.revision,
+          distanceKm: run.distanceKm,
         });
         continue;
       }
@@ -219,8 +259,11 @@ export async function importHealth(
         recordId: saved.id,
         date: run.date,
         matched: false,
+        revision: saved.revision,
+        distanceKm: run.distanceKm,
       });
     }
+    await change.relink(moved);
     await change.link(added);
 
     // Dates and skips depend on the account timezone, so a write-only

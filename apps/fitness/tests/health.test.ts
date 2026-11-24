@@ -350,6 +350,34 @@ describe("Health export edge values", () => {
 });
 
 describe("Run assignment", () => {
+  test("finds every match when many other runs are sent", () => {
+    const others = Array.from({ length: 11 }, (_, i) => ({
+      distanceKm: 0.1 + i / 1000,
+    }));
+    const result = assignRuns(
+      [{ distanceKm: 5.21 }, { distanceKm: 5.48 }, ...others],
+      [{ distanceKm: 5.3 }, { distanceKm: 5 }],
+    );
+    expect(result.slice(0, 2)).toEqual([1, 0]);
+  });
+  test("keeps earlier pairs while moving them to make room", () => {
+    // 5.21 was paired with 5.30; 5.48 can only use 5.30.
+    expect(
+      assignRuns(
+        [{ distanceKm: 5.21 }, { distanceKm: 5.48 }],
+        [{ distanceKm: 5.3 }, { distanceKm: 5 }],
+        [0],
+      ),
+    ).toEqual([1, 0]);
+    // With nowhere to move, the earlier pair stays.
+    expect(
+      assignRuns(
+        [{ distanceKm: 5.3 }, { distanceKm: 5.3 }],
+        [{ distanceKm: 5.3 }],
+        [0],
+      ),
+    ).toEqual([0, null]);
+  });
   const km = (...values: number[]) =>
     values.map((distanceKm) => ({ distanceKm }));
   test("matches as many runs as possible", () => {
@@ -363,7 +391,7 @@ describe("Run assignment", () => {
     expect(assignRuns(km(5, 10), km(5))).toEqual([0, null]);
     expect(assignRuns(km(5), [])).toEqual([null]);
   });
-  test("pairs the closest runs first on very busy days", () => {
+  test("pairs runs on busy days", () => {
     const health = km(...Array.from({ length: 13 }, (_, i) => i + 1));
     const entered = km(...Array.from({ length: 13 }, (_, i) => 13 - i));
     expect(assignRuns(health, entered)).toEqual(

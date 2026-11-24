@@ -54,20 +54,25 @@ export type AccountChange = {
 };
 /**
  * An Apple Health sample and the record it became, or matched when one
- * already existed, with that record's date when they were linked.
+ * already existed. `date` and `revision` are the record's when they were
+ * linked. Run links keep the Health run's distance.
  */
 export type HealthLink = {
   sample: string;
   recordId: string;
   date: string;
   matched: boolean;
+  revision: number | null;
+  distanceKm: number | null;
 };
 export type HealthChange = AccountChange & {
   /** The links stored for these samples, by sample. */
   links(samples: string[]): Promise<Map<string, HealthLink>>;
-  /** The records in `ids` that a Health sample became or matched. */
-  linked(ids: string[]): Promise<Set<string>>;
+  /** The links that point to any of these records. */
+  linksTo(ids: string[]): Promise<HealthLink[]>;
   link(links: HealthLink[]): Promise<void>;
+  /** Points existing sample links at other records. */
+  relink(links: HealthLink[]): Promise<void>;
 };
 function accountChange(sql: TransactionSql, owner: string): AccountChange {
   return {
@@ -85,35 +90,41 @@ const linkRow = z.object({
   record_id: z.string(),
   record_date: z.string(),
   matched: z.boolean(),
+  record_revision: z.number().int().nullable(),
+  distance_km: z.number().nullable(),
 });
+function linkOf(row: unknown): HealthLink {
+  const r = linkRow.parse(row);
+  return {
+    sample: r.sample,
+    recordId: r.record_id,
+    date: r.record_date,
+    matched: r.matched,
+    revision: r.record_revision,
+    distanceKm: r.distance_km,
+  };
+}
 /** Health import operations within an open transaction. Use `changeHealth` to run an import. */
 export function healthChange(sql: TransactionSql, owner: string): HealthChange {
+  const columns = sql`sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched, record_revision, distance_km`;
   return {
     ...accountChange(sql, owner),
     async links(samples) {
       if (!samples.length) return new Map();
       const rows =
-        await sql`SELECT sample, record_id, to_char(record_date, 'YYYY-MM-DD') AS record_date, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
+        await sql`SELECT ${columns} FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
       return new Map(
         rows.map((row) => {
-          const r = linkRow.parse(row);
-          return [
-            r.sample,
-            {
-              sample: r.sample,
-              recordId: r.record_id,
-              date: r.record_date,
-              matched: r.matched,
-            },
-          ];
+          const link = linkOf(row);
+          return [link.sample, link];
         }),
       );
     },
-    async linked(ids) {
-      if (!ids.length) return new Set();
+    async linksTo(ids) {
+      if (!ids.length) return [];
       const rows =
-        await sql`SELECT DISTINCT record_id FROM fitness_health_samples WHERE owner_id=${owner} AND record_id IN ${sql(ids)}`;
-      return new Set(rows.map((row) => z.string().parse(row.record_id)));
+        await sql`SELECT ${columns} FROM fitness_health_samples WHERE owner_id=${owner} AND record_id IN ${sql(ids)}`;
+      return rows.map(linkOf);
     },
     async link(links) {
       if (!links.length) return;
@@ -123,8 +134,14 @@ export function healthChange(sql: TransactionSql, owner: string): HealthChange {
         record_id: l.recordId,
         record_date: l.date,
         matched: l.matched,
+        record_revision: l.revision,
+        distance_km: l.distanceKm,
       }));
-      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched")} ON CONFLICT DO NOTHING`;
+      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched", "record_revision", "distance_km")} ON CONFLICT DO NOTHING`;
+    },
+    async relink(links) {
+      for (const l of links)
+        await sql`UPDATE fitness_health_samples SET record_id=${l.recordId}, record_date=${l.date}, matched=${l.matched}, record_revision=${l.revision} WHERE owner_id=${owner} AND sample=${l.sample}`;
     },
   };
 }
