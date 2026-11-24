@@ -1,0 +1,87 @@
+{
+  "status": 200,
+  "body": {
+    "kind": "device",
+    "accountTimezone": "Australia/Brisbane",
+    "outcomes": [
+      {
+        "ref": "w:00000001-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "added",
+        "code": "new"
+      },
+      {
+        "ref": "w:00000002-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "kept",
+        "code": "date_has_weighin"
+      },
+      {
+        "ref": "w:00000003-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "kept",
+        "code": "duplicate_in_request"
+      },
+      {
+        "ref": "w:00000004-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "kept",
+        "code": "date_has_weighin"
+      },
+      {
+        "ref": "w:00000005-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "skipped",
+        "code": "future"
+      },
+      {
+        "ref": "w:00000006-1111-4222-8333-444455556666",
+        "type": "weight",
+        "result": "skipped",
+        "code": "out_of_range"
+      },
+      {
+        "ref": "r:00000001-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "kept",
+        "code": "matched_existing"
+      },
+      {
+        "ref": "r:00000002-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "added",
+        "code": "new"
+      },
+      {
+        "ref": "r:00000003-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "kept",
+        "code": "duplicate_in_request"
+      },
+      {
+        "ref": "r:00000004-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "skipped",
+        "code": "out_of_range"
+      },
+      {
+        "ref": "r:00000005-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "skipped",
+        "code": "future"
+      },
+      {
+        "ref": "r:00000006-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "kept",
+        "code": "matched_existing"
+      },
+      {
+        "ref": "r:00000007-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "added",
+        "code": "new"
+      }
+    ]
+  }
+}

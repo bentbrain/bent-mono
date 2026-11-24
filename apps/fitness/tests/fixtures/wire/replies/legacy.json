@@ -1,0 +1,34 @@
+{
+  "status": 200,
+  "body": {
+    "added": {
+      "weights": 1,
+      "runs": 0
+    },
+    "weights": [
+      {
+        "date": "2026-11-09",
+        "status": "added"
+      }
+    ],
+    "runs": [
+      {
+        "date": "2026-11-16",
+        "start": "2026-11-15T20:00:00.000Z",
+        "status": "kept",
+        "reason": "Matched to the run on 2026-11-16 in an earlier sync."
+      }
+    ],
+    "skipped": [
+      {
+        "type": "weight",
+        "date": "2099-01-01",
+        "reason": "Dated after today."
+      }
+    ],
+    "ignored": {
+      "metrics": 0,
+      "workouts": 1
+    }
+  }
+}

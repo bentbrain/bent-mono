@@ -49,3 +49,19 @@ export function mcpResource() {
     return null;
   }
 }
+/**
+ * The OAuth application IDs of the iPhone sync app, one per Clerk instance,
+ * from the comma-separated FITNESS_DEVICE_CLIENT_IDS.
+ */
+export function deviceClientIds() {
+  return new Set(
+    (process.env.FITNESS_DEVICE_CLIENT_IDS ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+/** Device enrollment is on only when FITNESS_DEVICE_ENROLLMENT is `enabled`. */
+export function deviceEnrollmentEnabled() {
+  return process.env.FITNESS_DEVICE_ENROLLMENT?.trim() === "enabled";
+}

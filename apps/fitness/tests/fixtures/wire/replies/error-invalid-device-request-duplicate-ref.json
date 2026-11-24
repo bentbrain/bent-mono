@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "error": "data.metrics.0.data.1.ref: This ref was already sent at data.metrics.0.data.0.ref.",
+    "code": "invalid_device_request"
+  }
+}

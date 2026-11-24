@@ -12,12 +12,20 @@ const privateHeaders = createMiddleware().server(async ({ next }) => {
 });
 const clerk = clerkMiddleware();
 /**
- * Signs in browser sessions. The MCP endpoint authenticates its own bearer
- * tokens against its audience, so it skips the session check.
+ * Routes that authenticate their own bearer tokens and never use a browser
+ * session: the MCP endpoint and the iPhone sync device routes.
  */
+export function bearerOnlyPath(pathname: string) {
+  return (
+    pathname === "/api/mcp" ||
+    pathname === "/api/health/devices" ||
+    pathname.startsWith("/api/health/devices/")
+  );
+}
+/** Signs in browser sessions, except on routes that take bearer tokens only. */
 const sessions = createMiddleware().server((context) => {
   const server = clerk.options.server;
-  return new URL(context.request.url).pathname === "/api/mcp" || !server
+  return bearerOnlyPath(new URL(context.request.url).pathname) || !server
     ? context.next()
     : server(context);
 });

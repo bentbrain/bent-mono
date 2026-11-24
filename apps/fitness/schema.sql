@@ -47,3 +47,13 @@ CREATE INDEX IF NOT EXISTS fitness_health_sample_record ON fitness_health_sample
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_weight_date ON fitness_records(owner_id, (data->>'date')) WHERE deleted=false AND data->>'kind'='weight';
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_active_workout ON fitness_records(owner_id) WHERE deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(owner_id, (data->>'workoutId')) WHERE deleted=false AND data->>'kind'='workoutCorrection';
+-- Each one-time OAuth token used to enroll an iPhone sync device, by SHA-256
+-- digest, so a token issues at most one device key. Enrollment removes rows
+-- older than two days.
+CREATE TABLE IF NOT EXISTS fitness_device_enrollments (
+  owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
+  token_digest text PRIMARY KEY CHECK (token_digest ~ '^[0-9a-f]{64}$'),
+  installation_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS fitness_device_enrollment_created ON fitness_device_enrollments(created_at);

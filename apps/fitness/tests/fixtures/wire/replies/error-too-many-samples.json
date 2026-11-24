@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "error": "Send up to 2000 weigh-ins and runs per request. Split the samples across requests.",
+    "code": "too_many_samples"
+  }
+}

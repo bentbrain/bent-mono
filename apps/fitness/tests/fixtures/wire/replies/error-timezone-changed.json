@@ -1,0 +1,8 @@
+{
+  "status": 409,
+  "body": {
+    "error": "The account timezone changed. Group the samples by day in the account timezone and send them again.",
+    "code": "timezone_changed",
+    "accountTimezone": "Australia/Brisbane"
+  }
+}

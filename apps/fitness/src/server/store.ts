@@ -193,6 +193,55 @@ export async function changeOnce(
   });
 }
 const storedResult = z.record(z.string(), z.json());
+/**
+ * Runs work in one transaction holding the account lock, so changes for an
+ * owner, including ones made through other services, happen one at a time.
+ */
+export async function withAccountLock<T>(
+  owner: string,
+  work: (sql: TransactionSql) => Promise<T>,
+): Promise<T> {
+  const result = await database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    return { value: await work(sql) };
+  });
+  return result.value;
+}
+/** The account timezone, from its settings. */
+export async function accountTimezone(
+  sql: Sql | TransactionSql,
+  owner: string,
+) {
+  const [configuration] =
+    await sql`SELECT data FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
+  return configuration
+    ? settingsSchema.parse(configuration.data).timezone
+    : "UTC";
+}
+/**
+ * Records a device enrollment token as used, in its own committed
+ * transaction under the account lock. Returns false when the token was
+ * already used. Records older than two days, past the token lifetime, are
+ * removed.
+ */
+export async function consumeEnrollmentToken(
+  owner: string,
+  digest: string,
+  installationId: string,
+) {
+  return withAccountLock(owner, async (sql) => {
+    await sql`DELETE FROM fitness_device_enrollments WHERE created_at < now() - interval '2 days'`;
+    const rows =
+      await sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,installation_id) VALUES(${owner},${digest},${installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING token_digest`;
+    return rows.length === 1;
+  });
+}
+/** Whether the device enrollment table exists in the database. */
+export async function enrollmentTableExists() {
+  const [row] =
+    await database()`SELECT to_regclass('fitness_device_enrollments') IS NOT NULL AS present`;
+  return row?.present === true;
+}
 async function lockAccount(sql: TransactionSql, owner: string) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
   // All account writes share this lock. Receipts and record updates commit together.

@@ -1,0 +1,9 @@
+{
+  "status": 201,
+  "body": {
+    "secret": "ak_secret_1",
+    "accountTimezone": "Australia/Brisbane",
+    "userId": "user_syntheticdeviceowner",
+    "email": "fitness-device+clerk_test@example.com"
+  }
+}

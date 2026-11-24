@@ -1,0 +1,7 @@
+{
+  "status": 401,
+  "body": {
+    "error": "Send a Fitness API key as the bearer token.",
+    "code": "key_invalid"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "status": 503,
+  "body": {
+    "error": "iPhone sync enrollment is unavailable. Try again later.",
+    "code": "enrollment_unavailable"
+  }
+}

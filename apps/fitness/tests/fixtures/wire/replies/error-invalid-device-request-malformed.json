@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "error": "data.metrics.0.data.1.qty: Invalid input: expected number, received string",
+    "code": "invalid_device_request"
+  }
+}
