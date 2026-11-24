@@ -802,3 +802,38 @@ test.skipIf(!configured)(
     });
   },
 );
+
+test.skipIf(!configured)(
+  "pairs a day's runs so a later run keeps its only match",
+  async () => {
+    await save({
+      kind: "run",
+      date: day(-80),
+      minutes: 28,
+      distanceKm: 5,
+      notes: "",
+    });
+    await save({
+      kind: "run",
+      date: day(-80),
+      minutes: 30,
+      distanceKm: 5.3,
+      notes: "",
+    });
+    const body = exportOf(
+      [],
+      [running(day(-80), 5.05, "06:00:00"), running(day(-80), 5.3, "17:00:00")],
+    );
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { runs: 0 },
+    });
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { runs: 0 },
+    });
+    expect(
+      (await loadRecords(owner)).filter(
+        (r) => r.data.kind === "run" && r.data.date === day(-80),
+      ),
+    ).toHaveLength(2);
+  },
+);

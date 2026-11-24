@@ -290,3 +290,68 @@ export function sameRun(a: { distanceKm: number }, b: { distanceKm: number }) {
   // Allow for floating-point error, so a gap of exactly the limit matches.
   return Math.abs(a.distanceKm - b.distanceKm) <= limit + 1e-9;
 }
+
+type Distance = { distanceKm: number };
+
+/**
+ * Pairs one day's Health runs with runs entered in Fitness, each used at most
+ * once. The pairing matches as many runs as possible, then prefers the
+ * smallest total distance difference. Returns the entered index for each
+ * Health run, or null. Days with more than 12 runs on either side use the
+ * closest pairs first.
+ */
+export function assignRuns(health: Distance[], entered: Distance[]) {
+  const result: (number | null)[] = health.map(() => null);
+  const gap = (i: number, j: number) =>
+    Math.abs((health[i]?.distanceKm ?? 0) - (entered[j]?.distanceKm ?? 0));
+  const fits = (i: number, j: number) => {
+    const a = health[i];
+    const b = entered[j];
+    return a !== undefined && b !== undefined && sameRun(a, b);
+  };
+  if (health.length > 12 || entered.length > 12) {
+    const pairs = health
+      .flatMap((_, i) => entered.map((_, j) => [i, j] as const))
+      .filter(([i, j]) => fits(i, j))
+      .sort((a, b) => gap(a[0], a[1]) - gap(b[0], b[1]));
+    const used = new Set<number>();
+    for (const [i, j] of pairs)
+      if (result[i] === null && !used.has(j)) {
+        result[i] = j;
+        used.add(j);
+      }
+    return result;
+  }
+  type Best = { count: number; gap: number; pick: number | null };
+  const memo = new Map<number, Best>();
+  const best = (i: number, mask: number): Best => {
+    if (i === health.length) return { count: 0, gap: 0, pick: null };
+    const key = i * 4096 + mask;
+    const known = memo.get(key);
+    if (known) return known;
+    let top: Best = { ...best(i + 1, mask), pick: null };
+    for (let j = 0; j < entered.length; j++) {
+      if (mask & (1 << j) || !fits(i, j)) continue;
+      const rest = best(i + 1, mask | (1 << j));
+      const option = {
+        count: rest.count + 1,
+        gap: rest.gap + gap(i, j),
+        pick: j,
+      };
+      if (
+        option.count > top.count ||
+        (option.count === top.count && option.gap < top.gap - 1e-12)
+      )
+        top = option;
+    }
+    memo.set(key, top);
+    return top;
+  };
+  let mask = 0;
+  for (let i = 0; i < health.length; i++) {
+    const { pick } = best(i, mask);
+    result[i] = pick;
+    if (pick !== null) mask |= 1 << pick;
+  }
+  return result;
+}

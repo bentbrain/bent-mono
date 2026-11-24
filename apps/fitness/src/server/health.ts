@@ -15,8 +15,8 @@ import type { AgentAccess } from "./auth";
 import {
   HealthImportError,
   healthImportLimits,
+  assignRuns,
   readHealthExport,
-  sameRun,
 } from "./health-export";
 import { BatchConflict, StoreRuleError, changeHealth } from "./store";
 import type { HealthLink } from "./store";
@@ -157,6 +157,22 @@ export async function importHealth(
     const entered = records.filter((r) => r.data.kind === "run");
     const taken = await change.linked(entered.map((r) => r.id));
     const open = entered.filter((r) => !taken.has(r.id));
+    // Pair each day's new Health runs with that day's open entered runs.
+    const pairs = new Map<string, RecordEntry>();
+    const fresh = samples.runs.filter((r) => !links.has(runKey(r.start)));
+    for (const date of new Set(fresh.map((r) => r.date))) {
+      const health = fresh.filter((r) => r.date === date);
+      const candidates = open.flatMap((r) =>
+        r.data.kind === "run" && r.data.date === date
+          ? [{ record: r, distanceKm: r.data.distanceKm }]
+          : [],
+      );
+      assignRuns(health, candidates).forEach((j, i) => {
+        const run = health[i];
+        const match = j === null ? undefined : candidates[j];
+        if (run && match) pairs.set(run.start, match.record);
+      });
+    }
     for (const run of samples.runs) {
       const sample = runKey(run.start);
       const link = links.get(sample);
@@ -169,13 +185,7 @@ export async function importHealth(
         });
         continue;
       }
-      const match = open.findIndex(
-        (r) =>
-          r.data.kind === "run" &&
-          r.data.date === run.date &&
-          sameRun(r.data, run),
-      );
-      const existing = match >= 0 ? open.splice(match, 1)[0] : undefined;
+      const existing = pairs.get(run.start);
       if (existing) {
         runs.push({
           date: run.date,

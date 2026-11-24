@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   HealthImportError,
   healthInstant,
+  assignRuns,
   readHealthExport,
   sameRun,
 } from "../src/server/health-export";
@@ -345,5 +346,28 @@ describe("Health export edge values", () => {
       today,
     );
     expect(result.sent).toEqual({ weights: 3, runs: 1 });
+  });
+});
+
+describe("Run assignment", () => {
+  const km = (...values: number[]) =>
+    values.map((distanceKm) => ({ distanceKm }));
+  test("matches as many runs as possible", () => {
+    // 5.05 fits both entered runs; 5.30 fits only 5.30.
+    expect(assignRuns(km(5.05, 5.3), km(5.3, 5))).toEqual([1, 0]);
+  });
+  test("prefers the smallest total distance difference", () => {
+    expect(assignRuns(km(5, 5.2), km(5.2, 5))).toEqual([1, 0]);
+  });
+  test("leaves runs without a match unpaired", () => {
+    expect(assignRuns(km(5, 10), km(5))).toEqual([0, null]);
+    expect(assignRuns(km(5), [])).toEqual([null]);
+  });
+  test("pairs the closest runs first on very busy days", () => {
+    const health = km(...Array.from({ length: 13 }, (_, i) => i + 1));
+    const entered = km(...Array.from({ length: 13 }, (_, i) => 13 - i));
+    expect(assignRuns(health, entered)).toEqual(
+      Array.from({ length: 13 }, (_, i) => 12 - i),
+    );
   });
 });
