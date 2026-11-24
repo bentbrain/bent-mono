@@ -178,7 +178,7 @@ function Account({ owner }: { owner: string }) {
           >
             <Icon name="settings" />
           </Link>
-          <UserButton />
+          <UserButton userProfileMode="navigation" userProfileUrl="/account" />
         </div>
       </header>
       <nav className="navigation" aria-label="Main navigation">

@@ -2618,6 +2618,14 @@ legend {
 .auth-page {
   padding: 40px var(--gutter);
 }
+.account-page {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+}
+.account-page > .cl-rootBox {
+  max-width: 100%;
+}
 
 /* Privacy */
 .privacy {
