@@ -74,21 +74,14 @@ export async function importHealth(
       ...samples.weights.flatMap((w) => w.samples.map((s) => weightKey(s.at))),
       ...samples.runs.map((r) => runKey(r.start)),
     ]);
-    // The reason for a sample decided in an earlier sync. A match made under
-    // another timezone names the entry's own date.
-    const decided = (
-      link: HealthLink,
-      date: string,
-      matchedReason: string,
-      kind: string,
-    ) =>
+    // The reason for a sample decided in an earlier sync. A match describes
+    // that decision, since the entry may have changed since.
+    const decided = (link: HealthLink, kind: string) =>
       !live.has(link.recordId)
         ? reasons.removed
         : !link.matched
           ? reasons.imported
-          : link.date === date
-            ? matchedReason
-            : `Matched to the ${kind} on ${link.date} in an earlier sync.`;
+          : `Matched to the ${kind} on ${link.date} in an earlier sync.`;
     const added: HealthLink[] = [];
 
     // Each weigh-in sample keeps its own decision. For each date, the earliest
@@ -112,9 +105,7 @@ export async function importHealth(
         weights.push({
           date: weight.date,
           status: "kept",
-          reason: shown
-            ? decided(shown, weight.date, reasons.weighIn, "weigh-in")
-            : "",
+          reason: shown ? decided(shown, "weigh-in") : "",
         });
         continue;
       }
@@ -174,7 +165,7 @@ export async function importHealth(
           date: run.date,
           start: run.start,
           status: "kept",
-          reason: decided(link, run.date, reasons.run, "run"),
+          reason: decided(link, "run"),
         });
         continue;
       }

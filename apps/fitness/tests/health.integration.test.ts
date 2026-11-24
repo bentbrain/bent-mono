@@ -280,8 +280,7 @@ test.skipIf(!configured)(
         { status: "kept", reason: "Imported in an earlier sync." },
         {
           status: "kept",
-          reason:
-            "A run with about the same distance is already recorded for this date.",
+          reason: `Matched to the run on ${day(-15)} in an earlier sync.`,
         },
         { status: "kept", reason: "Imported in an earlier sync." },
       ],
@@ -652,7 +651,12 @@ test.skipIf(!configured)(
       await importHealth(owner, both, exportOf([first, later])),
     ).toMatchObject({ weights: [{ status: "kept", reason: weighIn }] });
     expect(await importHealth(owner, both, exportOf([later]))).toMatchObject({
-      weights: [{ status: "kept", reason: weighIn }],
+      weights: [
+        {
+          status: "kept",
+          reason: `Matched to the weigh-in on ${day(-55)} in an earlier sync.`,
+        },
+      ],
     });
     expect(await importHealth(owner, both, exportOf([first]))).toMatchObject({
       weights: [
@@ -759,5 +763,42 @@ test.skipIf(!configured)(
       ],
     });
     await withTimezone(timezone);
+  },
+);
+
+test.skipIf(!configured)(
+  "describes a replayed match as the earlier decision after an edit",
+  async () => {
+    const entered = await save({
+      kind: "run",
+      date: day(-75),
+      minutes: 30,
+      distanceKm: 5,
+      notes: "",
+    });
+    const body = exportOf([], [running(day(-75), 5)]);
+    await importHealth(owner, both, body);
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: entered.id,
+      revision: entered.revision,
+      data: {
+        kind: "run",
+        date: day(-76),
+        minutes: 45,
+        distanceKm: 8,
+        notes: "",
+      },
+    });
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { runs: 0 },
+      runs: [
+        {
+          date: day(-75),
+          status: "kept",
+          reason: `Matched to the run on ${day(-75)} in an earlier sync.`,
+        },
+      ],
+    });
   },
 );
