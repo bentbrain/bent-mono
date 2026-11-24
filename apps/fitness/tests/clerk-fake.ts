@@ -104,6 +104,7 @@ function createFake() {
       fake.pageSize = 100;
       fake.requests = [];
       fake.listCalls = 0;
+      fake.sequence = 0;
       fake.clock = () => Date.now();
     },
     /** Adds a key directly, as one created earlier. */
