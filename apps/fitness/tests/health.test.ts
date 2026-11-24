@@ -350,6 +350,20 @@ describe("Health export edge values", () => {
 });
 
 describe("Run assignment", () => {
+  test("leaves a weaker match free for the run that fits exactly", () => {
+    expect(
+      assignRuns([{ distanceKm: 5.2 }, { distanceKm: 5 }], [{ distanceKm: 5 }]),
+    ).toEqual([null, 0]);
+  });
+  test("keeps an earlier pair when a new run fits a free entry", () => {
+    expect(
+      assignRuns(
+        [{ distanceKm: 5 }, { distanceKm: 5.1 }],
+        [{ distanceKm: 5.1 }, { distanceKm: 5 }],
+        [0],
+      ),
+    ).toEqual([0, 1]);
+  });
   test("finds every match when many other runs are sent", () => {
     const others = Array.from({ length: 11 }, (_, i) => ({
       distanceKm: 0.1 + i / 1000,

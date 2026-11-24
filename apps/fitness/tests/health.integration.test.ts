@@ -913,3 +913,30 @@ test.skipIf(!configured)("keeps a match to a run edited since", async () => {
     ),
   ).toMatchObject({ added: { runs: 1 } });
 });
+
+test.skipIf(!configured)(
+  "saves a run that only nearly matches when another fits exactly",
+  async () => {
+    await save({
+      kind: "run",
+      date: day(-95),
+      minutes: 30,
+      distanceKm: 5,
+      notes: "",
+    });
+    const body = exportOf(
+      [],
+      [running(day(-95), 5.2, "06:00:00"), running(day(-95), 5, "17:00:00")],
+    );
+    expect(await importHealth(owner, both, body)).toMatchObject({
+      added: { runs: 1 },
+      runs: [{ status: "added" }, { status: "kept" }],
+    });
+    const runs = (await loadRecords(owner)).filter(
+      (r) => r.data.kind === "run" && r.data.date === day(-95),
+    );
+    expect(
+      runs.map((r) => r.data.kind === "run" && r.data.distanceKm).sort(),
+    ).toEqual([5, 5.2]);
+  },
+);

@@ -295,46 +295,91 @@ type Distance = { distanceKm: number };
 
 /**
  * Pairs one day's Health runs with runs entered in Fitness, each entered run
- * used at most once. `initial` gives pairs from earlier syncs. Those Health
- * runs stay paired, possibly with another entered run, so that a new run can
- * take the match it needs. Augmenting paths find the largest number of pairs,
- * trying the closest distances first. Returns the entered index for each
- * Health run, or null.
+ * used at most once. The pairing matches as many runs as possible, then has
+ * the smallest total distance difference. `initial` gives pairs from earlier
+ * syncs: those Health runs always stay paired, and move to another entered
+ * run only when that lets more runs match. Returns the entered index for
+ * each Health run, or null.
+ *
+ * This is a minimum-cost maximum flow, found with successive shortest paths.
  */
 export function assignRuns(
   health: Distance[],
   entered: Distance[],
   initial: (number | null)[] = [],
 ) {
-  const pick: (number | null)[] = health.map((_, i) => initial[i] ?? null);
-  const holder: (number | null)[] = entered.map(() => null);
-  pick.forEach((j, i) => {
-    if (j !== null) holder[j] = i;
-  });
-  const options = health.map((run, i) =>
-    entered
-      .map((other, j) => ({
-        j,
-        gap: Math.abs(run.distanceKm - other.distanceKm),
-      }))
-      .filter(({ j }) => pick[i] === j || sameRun(run, entered[j] ?? run))
-      .sort((a, b) => a.gap - b.gap)
-      .map(({ j }) => j),
-  );
-  const augment = (i: number, seen: Set<number>): boolean => {
-    for (const j of options[i] ?? []) {
-      if (seen.has(j)) continue;
-      seen.add(j);
-      const current = holder[j] ?? null;
-      if (current === null || augment(current, seen)) {
-        holder[j] = i;
-        pick[i] = j;
-        return true;
-      }
-    }
-    return false;
+  const pick: (number | null)[] = health.map(() => null);
+  const n = health.length;
+  const m = entered.length;
+  if (!n || !m) return pick;
+  // Costs rank, from most to least important: keeping every earlier pair,
+  // matching more runs (the flow is maximal), moving fewer earlier pairs,
+  // then the total distance difference, which is at most 500 km per pair.
+  const keep = 1e9;
+  const move = 1e6;
+  type Edge = { to: number; cap: number; cost: number; rev: number };
+  const source = 0;
+  const sink = n + m + 1;
+  const graph: Edge[][] = Array.from({ length: sink + 1 }, () => []);
+  const add = (from: number, to: number, cost: number) => {
+    const forward = graph[from];
+    const backward = graph[to];
+    if (!forward || !backward) return;
+    forward.push({ to, cap: 1, cost, rev: backward.length });
+    backward.push({ to: from, cap: 0, cost: -cost, rev: forward.length - 1 });
   };
-  for (let i = 0; i < health.length; i++)
-    if (pick[i] === null) augment(i, new Set());
+  health.forEach((run, i) => {
+    const held = initial[i] ?? null;
+    add(source, 1 + i, held === null ? 0 : -keep);
+    entered.forEach((other, j) => {
+      if (held !== j && !sameRun(run, other)) return;
+      const gap = Math.abs(run.distanceKm - other.distanceKm);
+      add(1 + i, 1 + n + j, gap + (held !== null && held !== j ? move : 0));
+    });
+  });
+  entered.forEach((_, j) => add(1 + n + j, sink, 0));
+
+  for (let round = 0; round < Math.min(n, m); round++) {
+    // Bellman-Ford over the residual graph, which can hold negative costs.
+    const distance = graph.map(() => Infinity);
+    const via: ({ node: number; edge: number } | null)[] = graph.map(
+      () => null,
+    );
+    distance[source] = 0;
+    for (let pass = 0; pass < graph.length; pass++) {
+      let changed = false;
+      graph.forEach((edges, node) => {
+        const base = distance[node] ?? Infinity;
+        if (base === Infinity) return;
+        edges.forEach((edge, index) => {
+          if (
+            edge.cap > 0 &&
+            base + edge.cost < (distance[edge.to] ?? Infinity) - 1e-9
+          ) {
+            distance[edge.to] = base + edge.cost;
+            via[edge.to] = { node, edge: index };
+            changed = true;
+          }
+        });
+      });
+      if (!changed) break;
+    }
+    if (distance[sink] === Infinity) break;
+    for (let node = sink; node !== source;) {
+      const step = via[node];
+      const edge = step ? graph[step.node]?.[step.edge] : undefined;
+      if (!step || !edge) break;
+      edge.cap -= 1;
+      const back = graph[edge.to]?.[edge.rev];
+      if (back) back.cap += 1;
+      node = step.node;
+    }
+  }
+  health.forEach((_, i) => {
+    const used = graph[1 + i]?.find(
+      (edge) => edge.to > n && edge.to <= n + m && edge.cap === 0,
+    );
+    pick[i] = used ? used.to - n - 1 : null;
+  });
   return pick;
 }
