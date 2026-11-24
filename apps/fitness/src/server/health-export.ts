@@ -285,8 +285,7 @@ export function readHealthExport(
 
 /** A run recorded in Fitness on the same date with about the same distance. */
 export function sameRun(a: { distanceKm: number }, b: { distanceKm: number }) {
-  return (
-    Math.abs(a.distanceKm - b.distanceKm) <=
-    Math.max(0.1, 0.05 * Math.max(a.distanceKm, b.distanceKm))
-  );
+  const limit = Math.max(0.1, 0.05 * Math.max(a.distanceKm, b.distanceKm));
+  // Allow for floating-point error, so a gap of exactly the limit matches.
+  return Math.abs(a.distanceKm - b.distanceKm) <= limit + 1e-9;
 }

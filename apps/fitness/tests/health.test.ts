@@ -235,6 +235,8 @@ describe("Run matching", () => {
     expect(sameRun({ distanceKm: 5 }, { distanceKm: 5.2 })).toBe(true);
     expect(sameRun({ distanceKm: 5 }, { distanceKm: 5.4 })).toBe(false);
     expect(sameRun({ distanceKm: 0 }, { distanceKm: 0.1 })).toBe(true);
+    expect(sameRun({ distanceKm: 1 }, { distanceKm: 1.1 })).toBe(true);
+    expect(sameRun({ distanceKm: 1 }, { distanceKm: 1.1001 })).toBe(false);
   });
 });
 

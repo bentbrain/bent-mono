@@ -107,7 +107,8 @@ export async function importHealth(
         });
         continue;
       }
-      // A date whose synced weigh-in was removed in Fitness stays without one.
+      // New samples match the date's live weigh-in. A date whose synced
+      // weigh-in was removed in Fitness, and has none now, stays without one.
       // Only links to a record on this date count, so a timezone change does
       // not carry a removal to another date.
       const removed = linked.find(
@@ -117,20 +118,20 @@ export async function importHealth(
         (r) => r.data.kind === "weight" && r.data.date === weight.date,
       );
       let link: Omit<HealthLink, "sample" | "date">;
-      if (removed) {
-        weights.push({
-          date: weight.date,
-          status: "kept",
-          reason: reasons.removed,
-        });
-        link = { recordId: removed.recordId, matched: removed.matched };
-      } else if (recorded) {
+      if (recorded) {
         weights.push({
           date: weight.date,
           status: "kept",
           reason: reasons.weighIn,
         });
         link = { recordId: recorded.id, matched: true };
+      } else if (removed) {
+        weights.push({
+          date: weight.date,
+          status: "kept",
+          reason: reasons.removed,
+        });
+        link = { recordId: removed.recordId, matched: removed.matched };
       } else {
         const saved = await change.save(
           created(

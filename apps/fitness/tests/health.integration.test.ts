@@ -629,3 +629,57 @@ test.skipIf(!configured)(
     expect(links.get(sample)?.date).toBe("2026-10-18");
   },
 );
+
+test.skipIf(!configured)(
+  "matches new samples to a weigh-in entered after removing an import",
+  async () => {
+    const first = { date: at(day(-55), "06:00:00"), qty: 84 };
+    const later = { date: at(day(-55), "19:00:00"), qty: 84.6 };
+    await importHealth(owner, both, exportOf([first]));
+    const imported = (await loadRecords(owner)).find(
+      (r) => r.data.kind === "weight" && r.data.date === day(-55),
+    );
+    if (!imported) throw new Error("Expected the imported weigh-in.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: imported.id,
+      revision: imported.revision,
+      data: null,
+    });
+    await save({ kind: "weight", date: day(-55), kg: 83.5 });
+    const weighIn = "A weigh-in is already recorded for this date.";
+    expect(
+      await importHealth(owner, both, exportOf([first, later])),
+    ).toMatchObject({ weights: [{ status: "kept", reason: weighIn }] });
+    expect(await importHealth(owner, both, exportOf([later]))).toMatchObject({
+      weights: [{ status: "kept", reason: weighIn }],
+    });
+    expect(await importHealth(owner, both, exportOf([first]))).toMatchObject({
+      weights: [
+        { status: "kept", reason: "Removed in Fitness after an earlier sync." },
+      ],
+    });
+  },
+);
+
+test.skipIf(!configured)(
+  "matches a Health run exactly 100 m from an entered run",
+  async () => {
+    await save({
+      kind: "run",
+      date: day(-60),
+      minutes: 6,
+      distanceKm: 1,
+      notes: "",
+    });
+    const result = await importHealth(
+      owner,
+      both,
+      exportOf(
+        [],
+        [{ ...running(day(-60), 1.1), distance: { qty: 1100, units: "m" } }],
+      ),
+    );
+    expect(result).toMatchObject({ added: { runs: 0 } });
+  },
+);
