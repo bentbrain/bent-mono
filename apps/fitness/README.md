@@ -70,7 +70,7 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 ## Apple Health
 
-Fitness imports weigh-ins and runs from Apple Health at `https://fitness.bent.build/api/health/import`. The Fitness Sync iPhone app sends them with its own device key, described under [iPhone sync](#iphone-sync). An Apple Shortcut or another script can send weigh-ins with an API key you create under Manage account → API keys. Send the key as `Authorization: Bearer <key>`. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only.
+Fitness imports weigh-ins and runs from Apple Health at `https://fitness.bent.build/api/health/import`. A device can send them with its own import-only key, described under [Device keys](#device-keys). An Apple Shortcut or another script can send weigh-ins with an API key you create under Manage account → API keys. Send the key as `Authorization: Bearer <key>`. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only.
 
 Each request is one JSON export in the Health Auto Export format:
 
@@ -107,9 +107,9 @@ With `fitness:read` access, the reply has one outcome for each weigh-in date and
 
 A key that Clerk reports as unknown, revoked or expired fails with `401` and `"code": "key_invalid"`. Other `401` replies have `"code": "unauthorized"`. When Fitness cannot reach Clerk to check the key, the reply is `503` with `"code": "auth_unavailable"`; send the request again later.
 
-### iPhone sync
+### Device keys
 
-The Fitness Sync app holds a device key with only the `fitness:health:import` scope. With it, the app can import weigh-ins and runs, which can move or replace earlier run pairings as described above. Its replies carry the account timezone and one outcome for each sample the request sent. The key cannot read or change anything else, and the MCP endpoint refuses it. It appears under Manage account → API keys as "iPhone sync: " followed by the device name.
+A device key has only the `fitness:health:import` scope. It can import weigh-ins and runs, which can move or replace earlier run pairings as described above. Its replies carry the account timezone and one outcome for each sample the request sent. The key cannot read or change anything else, and the MCP endpoint refuses it. It appears under Manage account → API keys as "iPhone sync: " followed by the device name.
 
 Device requests use the same format with stricter rules:
 
@@ -135,37 +135,35 @@ The whole request fails with `400` and `"code": "invalid_device_request"`, namin
 }
 ```
 
-| `result`  | `code`                 | Meaning                                                                  |
-| --------- | ---------------------- | ------------------------------------------------------------------------ |
-| `added`   | `new`                  | Fitness saved a new entry                                                |
-| `kept`    | `already_imported`     | An earlier sync imported this sample                                     |
-| `kept`    | `matched_existing`     | The sample matches an entry already in Fitness                           |
-| `kept`    | `removed_in_fitness`   | The entry this sample became was removed in Fitness                      |
-| `kept`    | `date_has_weighin`     | The date already has a weigh-in                                          |
-| `kept`    | `duplicate_in_request` | An earlier ref in this request has the same time and type                |
-| `skipped` | `future`               | The sample is dated after today in the account timezone                  |
-| `skipped` | `out_of_range`         | The weight, duration or distance is outside the app's limits             |
+| `result`  | `code`                 | Meaning                                                      |
+| --------- | ---------------------- | ------------------------------------------------------------ |
+| `added`   | `new`                  | Fitness saved a new entry                                    |
+| `kept`    | `already_imported`     | An earlier sync imported this sample                         |
+| `kept`    | `matched_existing`     | The sample matches an entry already in Fitness               |
+| `kept`    | `removed_in_fitness`   | The entry this sample became was removed in Fitness          |
+| `kept`    | `date_has_weighin`     | The date already has a weigh-in                              |
+| `kept`    | `duplicate_in_request` | An earlier ref in this request has the same time and type    |
+| `skipped` | `future`               | The sample is dated after today in the account timezone      |
+| `skipped` | `out_of_range`         | The weight, duration or distance is outside the app's limits |
 
 Each ref gets exactly one outcome, in request order. Device replies leave out record IDs, earlier match dates and runs the request did not send. Too many samples fail with `400` and `"code": "too_many_samples"`, and a body over 4 MB fails with `413` and `"code": "payload_too_large"`; split the samples across requests.
 
-The app connects and disconnects through these routes. They read only the bearer token and ignore browser cookies.
+A device connects and disconnects through these routes. They read only the bearer token and ignore browser cookies.
 
-- `POST /api/health/devices` exchanges a one-time Clerk OAuth access token for a device key. The token must name the MCP endpoint as its audience, carry `fitness:health:enroll`, come from an OAuth application listed in `FITNESS_DEVICE_CLIENT_IDS` and belong to an invited account. The body is `{"installationId": "<uuid>", "deviceName": "<up to 60 characters>"}`. The `201` reply is `{"secret", "accountTimezone", "userId", "email"}`, where `userId` and `email` are the verified account. Each token connects one device once; reusing it fails with `409 enrollment_token_used`. Connecting an installation again revokes its earlier keys. Up to 3 installations can hold keys (`409 device_limit`), and an account can create up to 5 device keys an hour (`429 rate_limited`). If Clerk fails while issuing the key, the reply is `503 issuance_failed` and the app signs in again to retry.
+- `POST /api/health/devices` exchanges a one-time Clerk OAuth access token for a device key. The token must name the MCP endpoint as its audience, carry `fitness:health:enroll`, come from an OAuth application listed in `FITNESS_DEVICE_CLIENT_IDS` and belong to an invited account. The body is `{"installationId": "<uuid>", "deviceName": "<up to 60 characters>"}`. The `201` reply is `{"secret", "accountTimezone", "userId", "email"}`, where `userId` and `email` are the verified account. Each token connects one device once; reusing it fails with `409 enrollment_token_used`. Connecting an installation again revokes its earlier keys. Up to 3 installations can hold keys (`409 device_limit`), and an account can create up to 5 device keys an hour (`429 rate_limited`). If Clerk fails while issuing the key, the reply is `503 issuance_failed`; sign in again for a fresh token to retry.
 - `DELETE /api/health/devices/current` revokes the device key that sends it and replies `204`. A key that is already revoked fails with `401 key_invalid`. Other keys fail with `403 not_device_key`.
-- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when the app can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token.
+- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token.
 
-Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth application IDs in `FITNESS_DEVICE_CLIENT_IDS`, the Clerk and MCP configuration above, and the `fitness_device_enrollments` table from `schema.sql`. Fitness keeps a SHA-256 digest of each enrollment token there for two days. Configure each Clerk instance for the app:
+Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth application IDs in `FITNESS_DEVICE_CLIENT_IDS`, the Clerk and MCP configuration above, and the `fitness_device_enrollments` table from `schema.sql`. Fitness keeps a SHA-256 digest of each enrollment token there for two days. Configure each Clerk instance for device enrollment:
 
-- Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone send Apple Health weigh-ins and runs to Fitness".
+- Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone import Apple Health weigh-ins and runs into Fitness. Imports can match or re-pair runs you've entered, and the app sees your account timezone and the results of each import."
 - Create a public OAuth application named Fitness Sync iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Assign `fitness:health:enroll` and `openid` to this application only, and leave the enroll scope out of the dynamic-client and default scopes.
 - Issue this application's tokens with the MCP endpoint as their audience.
 - Add the application's ID to `FITNESS_DEVICE_CLIENT_IDS`.
 
-The privacy policy for the app is at `/privacy`.
-
 ### Apple Shortcut for weigh-ins
 
-Shortcuts can read weigh-ins from Health. It cannot read workouts, so runs come from the iPhone app. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
+Shortcuts can read weigh-ins from Health. It cannot read workouts. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
 
 1. Add Find Health Samples. Shortcuts first asks about Steps; decline it, choose Weight as the type, then allow read access when Health asks. Set Start Date is in the last 7 days, and choose kg in the Unit picker.
 2. Add Repeat for Each with the Health Samples. Inside the loop, add Format Date for the sample's Start Date, choose ISO 8601 and turn on Include ISO 8601 Time. Then add a Text action containing `{"date":"<Formatted Date>","qty":<Value>}`. Value must be a plain number with a decimal point, such as `80.4`.

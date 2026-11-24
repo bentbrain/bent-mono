@@ -3,7 +3,6 @@ import {
   HeadContent,
   Scripts,
   Outlet,
-  useLocation,
 } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { readiness } from "../server/functions";
@@ -46,22 +45,15 @@ export const Route = createRootRoute({
     </main>
   ),
 });
-/** Pages that open without account services. */
-const publicPages = new Set(["/privacy"]);
 function Root() {
   const { ready } = Route.useLoaderData();
-  const open = useLocation({
-    select: (location) => publicPages.has(location.pathname),
-  });
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        {open ? (
-          <Outlet />
-        ) : ready ? (
+        {ready ? (
           <ClerkProvider>
             <Outlet />
           </ClerkProvider>

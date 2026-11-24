@@ -57,20 +57,6 @@ test("keeps iPhone sync routes closed without provider configuration", async ({
   expect(await healthImport.json()).toMatchObject({ code: "unauthorized" });
 });
 
-test("publishes the iPhone sync privacy page", async ({ page }) => {
-  await page.goto("/privacy");
-  await expect(
-    page.getByRole("heading", { name: "Fitness Sync privacy" }),
-  ).toBeVisible();
-  for (const section of [
-    "What the app reads",
-    "Where it goes",
-    "How it is kept",
-    "Disconnect or delete",
-  ])
-    await expect(page.getByRole("heading", { name: section })).toBeVisible();
-});
-
 test("serves the ten multi-angle exercise illustrations and their thumbnails", async ({
   request,
 }) => {
