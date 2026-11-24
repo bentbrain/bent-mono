@@ -52,8 +52,16 @@ export type AccountChange = {
   /** Saves a change, or throws BatchConflict to roll back the request. */
   save(input: Mutation): Promise<RecordEntry | null>;
 };
-/** An Apple Health sample and the record it became, or matched when one already existed. */
-export type HealthLink = { sample: string; recordId: string; matched: boolean };
+/**
+ * An Apple Health sample and the record it became, or matched when one
+ * already existed, with that record's date when they were linked.
+ */
+export type HealthLink = {
+  sample: string;
+  recordId: string;
+  date: string;
+  matched: boolean;
+};
 export type HealthChange = AccountChange & {
   /** The links stored for these samples, by sample. */
   links(samples: string[]): Promise<Map<string, HealthLink>>;
@@ -75,6 +83,7 @@ function accountChange(sql: TransactionSql, owner: string): AccountChange {
 const linkRow = z.object({
   sample: z.string(),
   record_id: z.string(),
+  record_date: z.string(),
   matched: z.boolean(),
 });
 function healthChange(sql: TransactionSql, owner: string): HealthChange {
@@ -83,13 +92,18 @@ function healthChange(sql: TransactionSql, owner: string): HealthChange {
     async links(samples) {
       if (!samples.length) return new Map();
       const rows =
-        await sql`SELECT sample, record_id, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
+        await sql`SELECT sample, record_id, record_date::text, matched FROM fitness_health_samples WHERE owner_id=${owner} AND sample IN ${sql(samples)}`;
       return new Map(
         rows.map((row) => {
           const r = linkRow.parse(row);
           return [
             r.sample,
-            { sample: r.sample, recordId: r.record_id, matched: r.matched },
+            {
+              sample: r.sample,
+              recordId: r.record_id,
+              date: r.record_date,
+              matched: r.matched,
+            },
           ];
         }),
       );
@@ -106,9 +120,10 @@ function healthChange(sql: TransactionSql, owner: string): HealthChange {
         owner_id: owner,
         sample: l.sample,
         record_id: l.recordId,
+        record_date: l.date,
         matched: l.matched,
       }));
-      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "matched")} ON CONFLICT DO NOTHING`;
+      await sql`INSERT INTO fitness_health_samples ${sql(rows, "owner_id", "sample", "record_id", "record_date", "matched")} ON CONFLICT DO NOTHING`;
     },
   };
 }

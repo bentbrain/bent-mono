@@ -104,11 +104,15 @@ export async function importHealth(
         continue;
       }
       // A date whose synced weigh-in was removed in Fitness stays without one.
-      const removed = linked.find((l) => !live.has(l.recordId));
+      // Only links to a record on this date count, so a timezone change does
+      // not carry a removal to another date.
+      const removed = linked.find(
+        (l) => l.date === weight.date && !live.has(l.recordId),
+      );
       const recorded = records.find(
         (r) => r.data.kind === "weight" && r.data.date === weight.date,
       );
-      let link: Omit<HealthLink, "sample">;
+      let link: Omit<HealthLink, "sample" | "date">;
       if (removed) {
         weights.push({
           date: weight.date,
@@ -138,7 +142,7 @@ export async function importHealth(
         link = { recordId: saved.id, matched: false };
       }
       for (const s of undecided)
-        added.push({ sample: weightKey(s.at), ...link });
+        added.push({ sample: weightKey(s.at), date: weight.date, ...link });
     }
 
     const runs: (Outcome & { start: string })[] = [];
@@ -172,7 +176,12 @@ export async function importHealth(
           status: "kept",
           reason: reasons.run,
         });
-        added.push({ sample, recordId: existing.id, matched: true });
+        added.push({
+          sample,
+          recordId: existing.id,
+          date: run.date,
+          matched: true,
+        });
         continue;
       }
       const saved = await change.save(
@@ -188,7 +197,12 @@ export async function importHealth(
       );
       if (!saved) throw new Error("Expected the saved run.");
       runs.push({ date: run.date, start: run.start, status: "added" });
-      added.push({ sample, recordId: saved.id, matched: false });
+      added.push({
+        sample,
+        recordId: saved.id,
+        date: run.date,
+        matched: false,
+      });
     }
     await change.link(added);
 

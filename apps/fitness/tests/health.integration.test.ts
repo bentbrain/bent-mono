@@ -503,3 +503,57 @@ test.skipIf(!configured)(
     expect(records).toHaveLength(2);
   },
 );
+
+test.skipIf(!configured)(
+  "keeps a removal on its own date after a timezone change",
+  async () => {
+    // 23:30 UTC on day -45 is day -44 in Brisbane.
+    const late = { date: `${day(-45)}T23:30:00Z`, qty: 83 };
+    const morning = { date: `${day(-45)}T06:00:00Z`, qty: 82.5 };
+    await importHealth(owner, both, exportOf([late]));
+    const imported = (await loadRecords(owner)).find(
+      (r) => r.data.kind === "weight" && r.data.date === day(-44),
+    );
+    if (!imported) throw new Error("Expected the imported weigh-in.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: imported.id,
+      revision: imported.revision,
+      data: null,
+    });
+    const settings = (await loadRecords(owner)).find(
+      (r) => r.id === settingsId,
+    );
+    if (settings?.data.kind !== "settings") throw new Error("No settings.");
+    const utc = await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: settings.revision,
+      data: { ...settings.data, timezone: "UTC" },
+    });
+    expect(
+      await importHealth(owner, both, exportOf([late, morning])),
+    ).toMatchObject({ weights: [{ date: day(-45), status: "added" }] });
+    expect(await importHealth(owner, both, exportOf([late]))).toMatchObject({
+      added: { weights: 0 },
+      weights: [
+        { status: "kept", reason: "Removed in Fitness after an earlier sync." },
+      ],
+    });
+    const weighIns = (await loadRecords(owner)).filter(
+      (r) =>
+        r.data.kind === "weight" &&
+        (r.data.date === day(-45) || r.data.date === day(-44)),
+    );
+    expect(weighIns.map((r) => r.data)).toEqual([
+      { kind: "weight", date: day(-45), kg: 82.5 },
+    ]);
+    if (utc.status !== "saved" || !utc.record) throw new Error("Not saved.");
+    await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: utc.record.revision,
+      data: settings.data,
+    });
+  },
+);
