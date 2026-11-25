@@ -22,7 +22,7 @@ cd apps/collage
 
 Configure a local `.env` using the schema in [`src/env.js`](src/env.js). Required variables cover Postgres (`DATABASE_URI`), `PAYLOAD_SECRET`, Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL`) and `UPLOADTHING_TOKEN`, with optional Convex (`NEXT_PUBLIC_CONVEX_URL`), Cloudflare R2 and PostHog settings. Set `SKIP_ENV_VALIDATION=1` when running typecheck, lint or Knip without live credentials.
 
-To run against a loopback-only local Postgres container, set `DATABASE_URI` in `.env` with a URL-safe non-default password:
+To run against a loopback-only local Postgres container (requires Docker Engine 28.0.0 or later for strict loopback port isolation), set `DATABASE_URI` in `.env` with a URL-safe non-default password:
 
 ```env
 DATABASE_URI=postgresql://postgres:<URL-SAFE-PASSWORD>@127.0.0.1:5432/maya-collage
@@ -59,7 +59,7 @@ bun run build
 
 `bun run test` runs the Convex security (`test:security`), Clerk handshake (`test:auth`) and Payload storage schema (`test:storage-schema`) suites.
 
-`test:storage-schema` creates and alters `public.media`, so it requires a fresh disposable local PostgreSQL database named `payload_migration_test` on `localhost` or `127.0.0.1` alongside synthetic Payload and R2 fixture values (matching `.github/workflows/quality.yml` and `scripts/ci-check.mjs`):
+`test:storage-schema` creates and alters `public.media`, so it requires a fresh disposable local PostgreSQL database named `payload_migration_test` on `localhost` or `127.0.0.1` alongside synthetic Payload and R2 fixture values (matching `.github/workflows/quality.yml` and `scripts/ci-check.mjs`). Use Docker Engine 28.0.0 or later so `-p 127.0.0.1:5433:5432` stays loopback-only:
 
 ```sh
 (
@@ -69,7 +69,7 @@ bun run build
     -e POSTGRES_PASSWORD=test \
     -e POSTGRES_DB=payload_migration_test \
     -p 127.0.0.1:5433:5432 postgres:16)
-  trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
+  trap 'docker rm -fv "$CID" >/dev/null 2>&1 || true' EXIT
 
   ready=0
   for _ in $(seq 1 30); do
