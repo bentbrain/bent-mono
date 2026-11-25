@@ -42,7 +42,9 @@
       "cache": false
     },
     "@bent/fitness#test": {
-      "passThroughEnv": ["FITNESS_TEST_DEADLINE_MS"]
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["FITNESS_TEST_DEADLINE_MS"],
+      "cache": false
     },
     "@bent/fitness#test:integration": {
       "passThroughEnv": [
