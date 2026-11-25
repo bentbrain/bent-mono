@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "tests/**/*.test.ts",
+    "scripts/*.mjs"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.ts",
+    "scripts/*.mjs",
+    "modules/fitness-health/*.{ts,js}"
+  ],
+  "ignoreDependencies": [
+    "react-native-safe-area-context",
+    "expo-application",
+    "expo-auth-session",
+    "expo-constants",
+    "expo-crypto",
+    "expo-web-browser",
+    "@bent/design-tokens",
+    "expo-updates"
+  ]
+}

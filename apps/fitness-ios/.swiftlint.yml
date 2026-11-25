@@ -1,0 +1,26 @@
+included:
+  - modules/fitness-health/ios
+  - tools/health-seed
+excluded:
+  - modules/fitness-health/ios/.build
+  - ios
+line_length:
+  warning: 120
+  error: 140
+identifier_name:
+  min_length: 1
+type_body_length:
+  warning: 400
+  error: 600
+file_length:
+  warning: 700
+  error: 1000
+function_body_length:
+  warning: 80
+  error: 120
+nesting:
+  type_level: 3
+disabled_rules:
+  - todo
+  - trailing_comma
+  - opening_brace

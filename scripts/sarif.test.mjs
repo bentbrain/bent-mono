@@ -3,12 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { classifyReports, readReports, validateManifest } from "./check-sarif.mjs";
+import { classifyReports, parseLanguages, readReports, validateManifest } from "./check-sarif.mjs";
 
-function report() {
+function report(language = "javascript") {
+  const rule = language === "swift" ? "swift/cleartext-transmission" : "js/request-forgery";
   return { version: "2.1.0", runs: [{
     tool: { driver: { name: "CodeQL", semanticVersion: "2.27.4" }, extensions: [{
-      name: "codeql/javascript-queries", semanticVersion: "2.1.0", rules: [{ id: "js/request-forgery" }],
+      name: `codeql/${language}-queries`, semanticVersion: "2.1.0", rules: [{ id: rule }],
     }] },
     properties: { codeqlConfigSummary: { queries: [
       { type: "builtinSuite", uses: "security-extended" }, { type: "builtinSuite", uses: "security-and-quality" },
@@ -64,4 +65,24 @@ test("the reader retains all original SARIF inputs and rejects missing or malfor
   assert.equal((await readReports(directory)).length, 2);
   await writeFile(join(directory, "b.sarif"), "malformed");
   await assert.rejects(readReports(directory));
+});
+
+test("each language's query pack is required and accepted only when requested", () => {
+  assert.deepEqual(classifyReports([report("swift")], ["swift"]), { raw: 0 });
+  assert.deepEqual(classifyReports([report(), report("swift")], ["javascript", "swift"]), { raw: 0 });
+  assert.throws(() => classifyReports([report("swift")]), /query-pack metadata/);
+  assert.throws(() => classifyReports([report()], ["swift"]), /query-pack metadata/);
+  assert.throws(() => classifyReports([report()], ["javascript", "swift"]), /missing codeql\/swift-queries/);
+  const both = report();
+  both.runs[0].tool.extensions.push(report("swift").runs[0].tool.extensions[0]);
+  assert.throws(() => classifyReports([both], ["javascript", "swift"]), /query-pack metadata/);
+  const finding = report("swift"); finding.runs[0].results.push({ ruleId: "swift/cleartext-transmission" });
+  assert.throws(() => classifyReports([finding], ["swift"]), /zero raw findings/);
+});
+
+test("languages are a distinct list of known analyses", () => {
+  assert.deepEqual(parseLanguages(), ["javascript"]);
+  assert.deepEqual(parseLanguages("swift"), ["swift"]);
+  assert.deepEqual(parseLanguages("javascript, swift"), ["javascript", "swift"]);
+  for (const value of ["", "python", "swift,swift", "constructor"]) assert.throws(() => parseLanguages(value));
 });
