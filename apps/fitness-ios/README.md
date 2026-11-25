@@ -61,7 +61,7 @@ A Simulator build signed to run locally, with no paid team, carries its HealthKi
 XCUITest drives the Health access sheet, which appears in the requesting app's window. `SimulatorFlows/HealthSheet.swift` allows or denies with it:
 
 - The "Select All" cell has the identifier `UIA.Health.AuthSheet.AllCategoryButton`, and each type has a switch.
-- The confirming button at the end of the list is Allow for a write request, such as the seeder's, and Continue for a read-only request, such as Fitness Sync's.
+- The confirming button at the end of the list is Allow. On iOS 27.2, a read-only request such as Fitness Sync's shows Continue instead.
 - On iOS 27.2, a read request then asks how much history to share: "Past 30 Days and Future Data" or "All Recorded Data and Future Data". Allow stays disabled until one is chosen. The Health step shows the earliest weigh-in and run the app can read, so a 30-day choice shows there.
 - Don't Allow is followed by an alert saying categories can be turned on later in the Health app.
 - The read sheet notes that background access follows Settings → General → Background App Refresh.

@@ -2,10 +2,10 @@ import XCTest
 
 /// Drives the Health access sheet, which HealthKit shows inside the app's
 /// own window. The sheet lists a "Select All" cell and a switch per type,
-/// then a confirming button at the end of the list: Allow when the app asks
-/// to write, Continue when it only asks to read. A read request then asks how
-/// much history to share, the past 30 days or all of it, before Allow. Don't
-/// Allow is followed by an alert that points to the Health app.
+/// then a confirming button at the end of the list: Allow, or on iOS 27 for
+/// a read-only request, Continue. iOS 27 then asks how much history to share,
+/// the past 30 days or all of it, before Allow. Don't Allow is followed by an
+/// alert that points to the Health app.
 @MainActor
 enum HealthSheet {
   static let selectAll = "UIA.Health.AuthSheet.AllCategoryButton"
@@ -29,7 +29,7 @@ enum HealthSheet {
       return
     }
     app.cells[selectAll].tap()
-    // Write requests confirm with Allow; read-only requests with Continue.
+    // iOS 27 labels the button Continue for read-only requests.
     tapLabel(["Allow", "Continue"], in: app)
     // Read requests can then ask how much history to share.
     let window = app.navigationBars[timeBounded]
