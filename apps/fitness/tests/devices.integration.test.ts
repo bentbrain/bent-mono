@@ -652,8 +652,20 @@ describe("device enrollment", () => {
       const token = oauthToken();
       setDatabaseForTests(pool);
       let response: Response;
+      let committed: { key_state: string; active: boolean }[] = [];
       try {
         response = await enroll(token);
+        // The commit is seen through a pool of its own before the proxy
+        // closes, so closing it cannot race the commit.
+        for (let n = 0; n < 300 && committed.length === 0; n++) {
+          committed = (
+            await isolated.pool()`SELECT key_state, active FROM fitness_device_enrollments WHERE owner_id=${owner}`
+          ).map((r) => ({
+            key_state: String(r.key_state),
+            active: r.active === true,
+          }));
+          if (committed.length === 0) await Bun.sleep(10);
+        }
       } finally {
         arming.mockRestore();
         fake.onCreate = null;
@@ -661,18 +673,124 @@ describe("device enrollment", () => {
         await pool.end({ timeout: 1 }).catch(() => undefined);
         await proxy.close();
       }
+      expect(committed).toEqual([{ key_state: "pending", active: false }]);
       expect(proxy.cuts).toBe(1);
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ code: "issuance_failed" });
       // Clerk was never asked for a key, yet Postgres has the commit, so the
       // token is used.
       expect(creates).toBe(0);
-      expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
       const again = await enroll(token);
       expect(again.status).toBe(409);
       expect(await again.json()).toMatchObject({
         code: "enrollment_token_used",
       });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "creates no key for an attempt whose place in the hourly limit has lapsed",
+    async () => {
+      // The first enrollment pauses after cleanup, before its create.
+      const original = store.unneededKeys;
+      let resume = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let reached = () => undefined as void;
+      const paused = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      let calls = 0;
+      const spy = spyOn(store, "unneededKeys").mockImplementation(
+        async (...args) => {
+          const keys = await original(...args);
+          if (++calls === 1) {
+            reached();
+            await gate;
+          }
+          return keys;
+        },
+      );
+      let stalled: Promise<Response> | undefined;
+      try {
+        stalled = enroll(oauthToken());
+        await paused;
+        const [{ attempt_id: lapsed } = { attempt_id: "" }] =
+          await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='pending'`;
+        // Its reservation passes the hourly window, and five other
+        // enrollments fill the hour meanwhile.
+        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '3 hours' WHERE attempt_id=${lapsed}`;
+        for (let n = 0; n < 5; n++) await enrolled();
+        resume();
+        const response = await stalled;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+        // No sixth key was created, and the hour stays full.
+        expect(
+          fake.keys.filter((k) => k.claims?.enrollment === String(lapsed)),
+        ).toEqual([]);
+        expect(
+          fake.keys.filter((k) => k.claims?.kind === "fitness-ios"),
+        ).toHaveLength(5);
+        expect((await enroll(oauthToken())).status).toBe(429);
+      } finally {
+        resume();
+        await stalled;
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps a failed create's place in the hourly limit unless Clerk's own error rejected it",
+    async () => {
+      for (const [mode, state, next] of [
+        ["rejected", "failed", 201],
+        ["gateway", "ambiguous", 429],
+      ] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        for (let n = 0; n < 4; n++) await enrolled();
+        fake.create = mode;
+        const failed = await enroll(oauthToken());
+        fake.create = "ok";
+        expect(failed.status).toBe(503);
+        expect(await failed.json()).toMatchObject({ code: "issuance_failed" });
+        const [newest] =
+          await database()`SELECT key_state FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY created_at DESC LIMIT 1`;
+        expect({ mode, state: newest?.key_state }).toEqual({ mode, state });
+        // A rejection frees the attempt's place; any other failure keeps it.
+        expect({ mode, next: (await enroll(oauthToken())).status }).toEqual({
+          mode,
+          next,
+        });
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "charges a failed attempt whose key turns up in Clerk's list",
+    async () => {
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      const failed = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state) VALUES(${owner},${"b".repeat(64)},${failed},${otherInstallation(1)},'failed')`;
+      const key = fake.addKey({
+        secret: "ak_failed_attempt",
+        scopes: ["fitness:health:import"],
+        claims: {
+          kind: "fitness-ios",
+          installationId: otherInstallation(1),
+          enrollment: failed,
+        },
+      });
+      expect((await enroll(oauthToken())).status).toBe(201);
+      const [row] =
+        await database()`SELECT key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE attempt_id=${failed}`;
+      expect({ ...row }).toEqual({ key_state: "failed", charged: true });
+      expect(key.revoked).toBe(true);
     },
   );
 

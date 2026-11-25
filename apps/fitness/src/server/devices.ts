@@ -27,6 +27,7 @@ import type {
 } from "@bent/fitness-contracts";
 import {
   clerkNotFound,
+  clerkRejected,
   deviceKeyClaims,
   headerToken,
   invitedEmail,
@@ -44,6 +45,7 @@ import {
   CommitOutcomeUnknown,
   accountTimezone,
   activeDevices,
+  attemptUsable,
   chargeAmbiguousEnrollment,
   countEnrollmentAttempt,
   deactivateDeviceKey,
@@ -53,7 +55,7 @@ import {
   settleEnrollment,
   swapEnrollment,
   swapOutcome,
-  unchargedAmbiguous,
+  unchargedUnissued,
   unneededKeys,
 } from "./store";
 
@@ -83,6 +85,12 @@ const timing = {
   cleanupMs: 10_000,
   /** The time Clerk has to revoke the keys a swap replaced. */
   replacedRevokeMs: 5_000,
+  /**
+   * The time from recording an attempt until its key's create must end,
+   * well inside the grace after which cleanup takes a pending attempt for
+   * abandoned.
+   */
+  attemptMs: 5 * 60_000,
 };
 const defaultTiming = { ...timing };
 /** Sets enrollment timing, or restores the defaults, for tests. */
@@ -354,17 +362,6 @@ async function readBody(request: Request) {
     : text;
 }
 
-/** Clerk answered the create with a client error, so it made no key. */
-function createRefused(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    typeof error.status === "number" &&
-    error.status >= 400 &&
-    error.status < 500
-  );
-}
 function logged(event: string, error: unknown) {
   console.error(event, {
     name: error instanceof Error ? error.name : typeof error,
@@ -390,9 +387,9 @@ function logged(event: string, error: unknown) {
  * 1. Clerk is asked about each active key on its own. One it confirms
  *    revoked, expired or deleted stops being active. Any other answer
  *    fails the enrollment with `503 auth_unavailable` and changes nothing.
- * 2. Clerk's key list, within `cleanupMs`, finds keys left by ambiguous
- *    attempts, which then count toward the hourly limit from their
- *    creation, and keys to clean up. A key missing from the list is never
+ * 2. Clerk's key list, within `cleanupMs`, finds keys left by attempts
+ *    that issued none, ambiguous or failed, which then count toward the
+ *    hourly limit from their creation, and keys to clean up. A key missing from the list is never
  *    treated as gone, and a list that fails or runs out of time is
  *    skipped.
  * 3. The attempt is recorded, which uses the token and reserves its place
@@ -410,12 +407,18 @@ function logged(event: string, error: unknown) {
  *    enrollment needs: keys without an active row, except one an attempt
  *    still pending may yet swap in. Active keys, this installation's
  *    included, keep importing.
- * 5. Clerk creates the key with the attempt ID in its claims. From then
+ * 5. Just before the create, the attempt must still be pending within the
+ *    grace, and the create must end within `attemptMs` of recording, so a
+ *    request that paused for long creates nothing and replies `503
+ *    issuance_failed`. Clerk creates the key with the attempt ID in its
+ *    claims. From then
  *    on, every change to the attempt charges it from the key's creation,
  *    so it keeps counting toward the hourly limit whatever becomes of it.
- *    A create that fails marks the attempt failed, or ambiguous when Clerk
- *    may have made the key, and replies `503 issuance_failed`. A key Clerk
- *    made for it cannot import.
+ *    A create that Clerk's Backend API rejects with one of its own error
+ *    codes marks the attempt failed; any other failure, a gateway's 4xx
+ *    included, marks it ambiguous, still counting toward the hourly limit,
+ *    since Clerk may have made the key. The reply is `503
+ *    issuance_failed`, and a key Clerk made for the attempt cannot import.
  * 6. One transaction locks the installation's rows, stops its current key
  *    and makes the new one active, charged from now, if the attempt is
  *    still pending and activating it keeps the installations with active
@@ -520,7 +523,7 @@ export async function handleDeviceEnroll(request: Request) {
     } catch (error) {
       logged("fitness.devices.list_failed", error);
     }
-    const ambiguous = new Set(await unchargedAmbiguous(userId));
+    const ambiguous = new Set(await unchargedUnissued(userId));
     for (const key of keys)
       if (key.enrollment && ambiguous.has(key.enrollment))
         await chargeAmbiguousEnrollment(
@@ -564,6 +567,8 @@ export async function handleDeviceEnroll(request: Request) {
       `Up to ${deviceLimits.installations} iPhones can sync. Revoke one under Manage account → API keys, then connect again.`,
     );
 
+  const createBy = deadlineIn(timing.attemptMs);
+
   // Clean up in Clerk: keys no current enrollment needs, such as one a
   // timed-out creation left. Cleanup never stops the enrollment.
   try {
@@ -577,23 +582,40 @@ export async function handleDeviceEnroll(request: Request) {
     logged("fitness.devices.cleanup_failed", error);
   }
 
+  // A request that paused for long may find its attempt taken for
+  // abandoned, and its place in the hourly limit gone, so it creates
+  // nothing.
+  let usable = false;
+  try {
+    usable =
+      performance.now() < createBy && (await attemptUsable(userId, attemptId));
+  } catch (error) {
+    logged("fitness.devices.issuance_failed", error);
+  }
+  if (!usable) {
+    await settleEnrollment(userId, attemptId, "failed").catch(() => undefined);
+    return issuanceFailed();
+  }
+
   let created: Awaited<
     ReturnType<ReturnType<typeof clerkClient>["apiKeys"]["create"]>
   >;
   try {
-    created = await bounded(() =>
-      clerkClient().apiKeys.create({
-        name: `iPhone sync: ${deviceName}`,
-        subject: userId,
-        description: "Imports Apple Health weigh-ins and runs into Fitness.",
-        scopes: [fitnessScopes.healthImport],
-        claims: {
-          kind: deviceKeyKind,
-          installationId,
-          enrollment: attemptId,
-        },
-        createdBy: userId,
-      }),
+    created = await bounded(
+      () =>
+        clerkClient().apiKeys.create({
+          name: `iPhone sync: ${deviceName}`,
+          subject: userId,
+          description: "Imports Apple Health weigh-ins and runs into Fitness.",
+          scopes: [fitnessScopes.healthImport],
+          claims: {
+            kind: deviceKeyKind,
+            installationId,
+            enrollment: attemptId,
+          },
+          createdBy: userId,
+        }),
+      createBy,
     );
     if (!created.secret) throw new Error("Clerk returned no key secret.");
   } catch (error) {
@@ -602,7 +624,7 @@ export async function handleDeviceEnroll(request: Request) {
     await settleEnrollment(
       userId,
       attemptId,
-      createRefused(error) ? "failed" : "ambiguous",
+      clerkRejected(error) ? "failed" : "ambiguous",
     ).catch(() => undefined);
     return issuanceFailed();
   }

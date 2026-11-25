@@ -291,6 +291,23 @@ export function clerkNotFound(error: unknown) {
 }
 
 /**
+ * Whether Clerk's Backend API refused a request before acting on it: a 4xx
+ * reply that carries one of its own validation or resource error codes,
+ * such as `form_param_value_invalid` or `resource_not_found`. A 4xx without
+ * such a code, as a gateway sends, proves nothing.
+ */
+export function clerkRejected(error: unknown) {
+  return (
+    isClerkAPIResponseError(error) &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.errors.some(
+      (e) => e.code.startsWith("form_") || e.code.startsWith("resource_"),
+    )
+  );
+}
+
+/**
  * Asks Clerk directly, with `apiKeys.verify`, whether an API key is
  * invalid: only Clerk's own not-found answer confirms it. A key Clerk now
  * accepts, any other error, or no answer in time does not.

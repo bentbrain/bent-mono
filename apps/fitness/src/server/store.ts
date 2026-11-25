@@ -389,9 +389,11 @@ export async function recordEnrollment(
   }
 }
 /**
- * Records what became of an attempt whose key was not issued. `createdAt`
- * is when Clerk created its key, if it did; the attempt then keeps
- * counting toward the hourly limit from then, whatever its state.
+ * Records what became of an attempt whose key was not issued. A pending
+ * attempt takes `state`; any other keeps its own, and none is activated.
+ * `createdAt` is when Clerk created its key, if it did; the attempt then
+ * counts toward the hourly limit from then, whatever its state, including
+ * one cleanup already marked ambiguous.
  */
 export async function settleEnrollment(
   owner: string,
@@ -402,12 +404,13 @@ export async function settleEnrollment(
   await underAccount(
     owner,
     (tx) =>
-      tx`UPDATE fitness_device_enrollments SET key_state=${state}, charged_at=coalesce(charged_at, ${createdAt}) WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='pending'`,
+      tx`UPDATE fitness_device_enrollments SET key_state=CASE WHEN key_state='pending' THEN ${state} ELSE key_state END, charged_at=coalesce(charged_at, ${createdAt}) WHERE owner_id=${owner} AND attempt_id=${attemptId} AND NOT active`,
   );
 }
 /**
- * Charges an ambiguous attempt to the hourly limit from when Clerk created
- * its key, once a key with its attempt ID is found.
+ * Charges an attempt that issued no key, ambiguous or failed, to the
+ * hourly limit from when Clerk created its key, once a key with its
+ * attempt ID is found.
  */
 export async function chargeAmbiguousEnrollment(
   owner: string,
@@ -417,7 +420,7 @@ export async function chargeAmbiguousEnrollment(
   await underAccount(
     owner,
     (tx) =>
-      tx`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='ambiguous' AND charged_at IS NULL`,
+      tx`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state IN ('ambiguous','failed') AND charged_at IS NULL`,
   );
 }
 /** Hours an ambiguous attempt without a found key counts toward the hourly limit. */
@@ -451,10 +454,13 @@ export async function activeDevices(owner: string) {
     };
   });
 }
-/** The owner's ambiguous attempts that have no charge from a found key yet. */
-export async function unchargedAmbiguous(owner: string) {
+/**
+ * The owner's attempts that issued no key, ambiguous or failed, and have
+ * no charge from a found key yet.
+ */
+export async function unchargedUnissued(owner: string) {
   const rows =
-    await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='ambiguous' AND charged_at IS NULL`;
+    await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state IN ('ambiguous','failed') AND charged_at IS NULL`;
   return rows.map((row) => z.string().parse(row.attempt_id));
 }
 /**
@@ -501,6 +507,16 @@ export async function unneededKeys(
     })
     .map((key) => key.id);
 }
+/**
+ * Whether the attempt can still have a key created for it: it is pending
+ * and still within `pendingGraceMinutes`, so cleanup has not taken it for
+ * abandoned and its place in the hourly limit is still held.
+ */
+export async function attemptUsable(owner: string, attemptId: string) {
+  const [row] =
+    await database()`SELECT key_state='pending' AND created_at > now() - make_interval(mins => ${pendingGraceMinutes}) AS usable FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attemptId}`;
+  return row?.usable === true;
+}
 /** Stops these keys importing. */
 export async function deactivateKeys(owner: string, keyIds: string[]) {
   if (!keyIds.length) return;
@@ -520,7 +536,9 @@ class NotActivated extends Error {
  * Swaps the created key in as the installation's active key, in one short
  * transaction under the account lock: the installation's rows are locked,
  * its current row stops being active and this attempt's row records the
- * key, becomes active and is charged from the key's creation. The installation therefore
+ * key, becomes active and is charged from the key's creation. The keys it
+ * replaced are recorded on the row, so a read after a lost commit reply
+ * knows them. The installation therefore
  * always has at most one active key and never goes without one before its
  * replacement exists. Nothing changes, and `reason` says why, if this
  * attempt is no longer pending, or if activating it would give more
@@ -546,7 +564,7 @@ export async function swapEnrollment(
       const old =
         await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
       const activated =
-        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}, greatest(created_at, now())) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
+        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}, greatest(created_at, now())), replaced_key_ids=${tx.array(old.map((row) => z.string().parse(row.key_id)))}::text[] WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
       if (!activated.length) throw new NotActivated("not_pending");
       const [others] =
         await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND active AND installation_id<>${attempt.installationId}`;
@@ -575,10 +593,8 @@ export async function swapEnrollment(
  * for up to five seconds.
  *
  * - `committed`: the attempt's row is issued, active and holds this key.
- *   `replaced` lists the keys that same commit deactivated: the
- *   installation's inactive rows whose last change, their `xmin`, is the
- *   attempt row's. A row a later transaction changed again is left out,
- *   for a later cleanup.
+ *   `replaced` lists the keys that swap replaced, as it recorded them on
+ *   the attempt's row.
  * - `undone`: the attempt's row is not active, and the previous key, if
  *   there was one, still is.
  * - `unknown`: anything else. A lock timeout or other error is thrown.
@@ -594,7 +610,7 @@ export async function swapOutcome(attempt: {
     await tx`SELECT set_config('lock_timeout', '5s', true)`;
     await tx`SELECT set_config('statement_timeout', '5s', true)`;
     const [row] =
-      await tx`SELECT key_state, active, key_id FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId} FOR SHARE`;
+      await tx`SELECT key_state, active, key_id, replaced_key_ids FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId} FOR SHARE`;
     const previous = attempt.previousKeyIds.length
       ? await tx`SELECT key_id FROM fitness_device_enrollments WHERE owner_id=${attempt.owner} AND installation_id=${attempt.installationId} AND active AND key_id IN ${tx(attempt.previousKeyIds)} FOR SHARE`
       : [];
@@ -602,14 +618,12 @@ export async function swapOutcome(attempt: {
       row?.key_state === "issued" &&
       row.active === true &&
       row.key_id === attempt.keyId
-    ) {
-      const replaced =
-        await tx`SELECT key_id FROM fitness_device_enrollments WHERE owner_id=${attempt.owner} AND installation_id=${attempt.installationId} AND NOT active AND key_id IS NOT NULL AND attempt_id<>${attempt.attemptId} AND xmin = (SELECT xmin FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId})`;
+    )
       return {
         outcome: "committed" as const,
-        replaced: replaced.map((r) => z.string().parse(r.key_id)),
+        replaced:
+          z.array(z.string()).nullable().parse(row.replaced_key_ids) ?? [],
       };
-    }
     if (
       row &&
       row.active !== true &&
@@ -667,6 +681,7 @@ const enrollmentColumns = [
   "active",
   "charged_at",
   "created_at",
+  "replaced_key_ids",
 ];
 const windowColumns = ["window_start", "attempts"];
 /**

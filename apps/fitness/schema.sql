@@ -78,6 +78,9 @@ ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_state text N
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_id text;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT false;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS charged_at timestamptz;
+-- The keys an attempt's swap replaced, so a read after a lost commit reply
+-- knows which to revoke.
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS replaced_key_ids text[];
 -- Keys issued before charged_at existed count from when they were recorded.
 UPDATE fitness_device_enrollments SET charged_at = created_at WHERE key_state = 'issued' AND charged_at IS NULL;
 -- Earlier versions checked key_state without ambiguous, and the active key
