@@ -11,6 +11,7 @@ const child = Bun.spawn([process.execPath, "test", ...process.argv.slice(2)], {
 });
 
 let expired = false;
+let cancelled: "SIGINT" | "SIGTERM" | undefined;
 let escalation: ReturnType<typeof setTimeout> | undefined;
 function stop(signal: "SIGINT" | "SIGTERM") {
   child.kill(signal);
@@ -25,9 +26,15 @@ const timer = setTimeout(() => {
   stop("SIGTERM");
 }, limit);
 for (const signal of ["SIGINT", "SIGTERM"] as const)
-  process.on(signal, () => stop(signal));
+  process.on(signal, () => {
+    cancelled ??= signal;
+    stop(signal);
+  });
 
 const code = await child.exited;
 clearTimeout(timer);
 if (escalation) clearTimeout(escalation);
-process.exit(expired ? 1 : code);
+// A run that was stopped never counts as a pass, even when the tests exit 0
+// after handling the signal.
+const cancelledCode = cancelled === "SIGINT" ? 130 : 143;
+process.exit(expired ? 1 : cancelled && code === 0 ? cancelledCode : code);
