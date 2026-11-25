@@ -9,7 +9,7 @@ The Next.js landing website for [bent.build](https://bent.build) and `www.bent.b
 
 ## Analytics
 
-PostHog keeps its state in memory, so it sets no cookies and stores nothing in the visitor's browser. Each page load counts as a new anonymous visit, and session replay is off. The PostHog project discards client IP addresses after adding location data to each event.
+PostHog keeps its state in memory, so it sets no cookies and keeps no analytics state in the visitor's browser between page loads. Each page load counts as a new anonymous visit, and session replay is off. The PostHog project discards client IP addresses after adding location data to each event.
 
 The Vercel project sets `NEXT_PUBLIC_POSTHOG_KEY` for production deployments only, so local and preview builds send no events. To test analytics locally, set the variable when starting the development server:
 
