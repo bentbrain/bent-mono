@@ -22,17 +22,25 @@ cd apps/collage
 
 Configure a local `.env` using the schema in [`src/env.js`](src/env.js). Required variables cover Postgres (`DATABASE_URI`), `PAYLOAD_SECRET`, Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL`) and `UPLOADTHING_TOKEN`, with optional Convex (`NEXT_PUBLIC_CONVEX_URL`), Cloudflare R2 and PostHog settings. Set `SKIP_ENV_VALIDATION=1` when running typecheck, lint or Knip without live credentials.
 
-To start a local Postgres container with `./start-database.sh`, set both `DATABASE_URI` (used by Next.js and Drizzle) and `DATABASE_URL` (read by `start-database.sh` to extract the container password and port) in `.env` to the same URL using the `postgres` user, `maya-collage` database, an explicit port and a URL-safe non-default password:
+To run against a loopback-only local Postgres container, set `DATABASE_URI` in `.env` with a URL-safe non-default password:
 
 ```env
-DATABASE_URI=postgresql://postgres:<URL-SAFE-PASSWORD>@localhost:5432/maya-collage
-DATABASE_URL=postgresql://postgres:<URL-SAFE-PASSWORD>@localhost:5432/maya-collage
+DATABASE_URI=postgresql://postgres:<URL-SAFE-PASSWORD>@127.0.0.1:5432/maya-collage
 ```
 
-Then start the database, push the schema and run the dev server:
+Start a local container bound to `127.0.0.1`:
 
 ```sh
-./start-database.sh
+CID=$(docker run -d \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD='<URL-SAFE-PASSWORD>' \
+  -e POSTGRES_DB=maya-collage \
+  -p 127.0.0.1:5432:5432 postgres:16)
+```
+
+Confirm that container is accepting TCP connections (`docker exec "$CID" pg_isready -h 127.0.0.1 -U postgres -d maya-collage`), then push the schema and start the dev server:
+
+```sh
 bun run db:push
 bun run dev
 ```
@@ -56,7 +64,7 @@ bun run build
 ```sh
 (
   set -eu
-  CID=$(docker run --rm -d \
+  CID=$(docker run -d \
     -e POSTGRES_USER=test \
     -e POSTGRES_PASSWORD=test \
     -e POSTGRES_DB=payload_migration_test \
@@ -72,7 +80,7 @@ bun run build
     sleep 1
   done
   if [ "$ready" -ne 1 ]; then
-    docker logs "$CID" >&2
+    docker logs "$CID" >&2 || true
     echo "Timed out waiting for test PostgreSQL container $CID" >&2
     exit 1
   fi
