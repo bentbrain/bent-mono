@@ -192,7 +192,7 @@ function Auth({
           >
             <svg
               aria-hidden="true"
-              className="size-4 text-(--bent-color-foreground-light) dark:text-(--bent-color-foreground-dark)"
+              className="size-4 text-black dark:text-white"
               viewBox="0 0 16 16"
               fill="currentColor"
             >
