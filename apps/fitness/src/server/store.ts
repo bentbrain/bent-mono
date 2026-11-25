@@ -297,11 +297,12 @@ type Target = ((tx: TransactionSql) => PendingQuery<Row[]>) | null;
 /**
  * Runs one write only while the lease is held, in one short transaction,
  * and returns the rows it changed. Throws DeviceLeaseLost when the lease is
- * not held. The locks come in one order: the lease row, then the
- * enrollment rows the write changes, so a write never waits holding a lock
- * an import needs. Only once both are held is the lease's expiry compared
- * with clock_timestamp(), so a write that waited on either lock past the
- * expiry changes nothing. Holding the lease row FOR SHARE until commit keeps
+ * not held. The locks come in one order: the lease row, then the account
+ * row, then the enrollment rows the write changes. An import takes the
+ * account row and then its enrollment row, and never the lease, so the two
+ * cannot deadlock. Only once all three are held is the lease's expiry
+ * compared with clock_timestamp(), so a write that waited on any of them
+ * past the expiry changes nothing. Holding the lease row FOR SHARE until commit keeps
  * another request from taking the lease over in the meantime.
  */
 async function fenced(
@@ -332,6 +333,13 @@ async function fenced(
       const [held] =
         await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
       if (!held) throw new DeviceLeaseLost();
+      // The account row next, as an import takes it before its enrollment
+      // row, so the two never take the same rows in opposite orders. Writes
+      // to enrollment rows then find the account already held.
+      await budget();
+      await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${lease.owner}) ON CONFLICT DO NOTHING`;
+      await budget();
+      await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${lease.owner} FOR UPDATE`;
       if (target) {
         await budget();
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${target(tx)} FOR UPDATE`;
@@ -339,9 +347,13 @@ async function fenced(
       await stillHeld();
       await budget();
       const changed = (await write(tx, budget)).length;
-      // A write can still wait, for example on a foreign key's row, so the
-      // lease and the deadline are checked again last; either one passed
-      // rolls everything back.
+      // A write can still wait, so the lease and the deadline are checked
+      // again last; either one passed rolls everything back. COMMIT itself
+      // can still stall after this check. That is safe: the lease row stays
+      // locked FOR SHARE until the commit ends, so no other request can take
+      // the lease over meanwhile, and a commit that lands late is the
+      // lost-reply case enrollment already handles. The app may never see
+      // the reply, and its next enrollment replaces that key.
       await stillHeld();
       if (lease.deadline !== undefined && performance.now() >= lease.deadline)
         throw new DeviceLeaseLost();
@@ -435,8 +447,6 @@ export async function recordEnrollment(
     lease,
     (tx) => tx`(${stale(tx)}) OR (${current(tx)})`,
     async (tx, budget) => {
-      await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-      await budget();
       await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
       await budget();
       // Either identity already recorded means the token was used.

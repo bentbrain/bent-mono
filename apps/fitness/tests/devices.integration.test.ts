@@ -1063,17 +1063,17 @@ describe("device issuance lease and attempt windows", () => {
         let releaseFirst = () => undefined as void;
         let releaseSecond = () => undefined as void;
         const held = [
-          // An import holds the installation's current row for 600 ms...
+          // One transaction holds the account row for 600 ms...
           first.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
+            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
             await new Promise<void>((resolve) => {
               releaseFirst = resolve;
               setTimeout(resolve, 600);
             });
           }),
-          // ...and another holds the account row for 1300 ms.
+          // ...and another the installation's current row for 1300 ms.
           second.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
             await new Promise<void>((resolve) => {
               releaseSecond = resolve;
               setTimeout(resolve, 1300);
@@ -1321,6 +1321,79 @@ describe("device issuance lease and attempt windows", () => {
       } finally {
         await store.releaseDeviceLease(other, owner, holder);
         await other.end();
+      }
+    },
+  );
+});
+
+describe("device import against a reconnect", () => {
+  /**
+   * Holds an import inside its transaction, after it takes the account lock
+   * and before it reads its device key, until released.
+   */
+  function importInsideItsLock(secret: string) {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = () => undefined as void;
+    const waiting = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const original = store.changeHealth;
+    const paused: typeof original = (owner, work) =>
+      original(owner, async (change) => {
+        reached();
+        await gate;
+        return work(change);
+      });
+    const spy = spyOn(store, "changeHealth").mockImplementation(paused);
+    const response = importWith(secret).finally(() => spy.mockRestore());
+    return { response, waiting, release };
+  }
+
+  test.skipIf(!configured)(
+    "finishes both a reconnect and an import already holding the account",
+    async () => {
+      for (let round = 0; round < 5; round++) {
+        // A fresh account each round, so the hourly limit stays out of it.
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const secret = await enrolled();
+        const paused = importInsideItsLock(secret);
+        await paused.waiting;
+        // The reconnect starts while the import holds the account row.
+        const reconnect = enroll(oauthToken());
+        await Bun.sleep(100 + round * 50);
+        paused.release();
+        const [imported, reconnected] = await Promise.all([
+          paused.response,
+          reconnect,
+        ]);
+        // The import came first and committed, or it found its key replaced.
+        expect([200, 401]).toContain(imported.status);
+        if (imported.status === 401)
+          expect(await imported.json()).toMatchObject({ code: "key_invalid" });
+        expect(reconnected.status).toBe(201);
+        expect(activeFor(installation)).toHaveLength(1);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "finishes both when the import reaches the account after the reconnect",
+    async () => {
+      for (let round = 0; round < 5; round++) {
+        // A fresh account each round, so the hourly limit stays out of it.
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const secret = await enrolled();
+        const reconnect = enroll(oauthToken());
+        await Bun.sleep(round * 5);
+        const imported = await importWith(secret);
+        const reconnected = await reconnect;
+        expect([200, 401]).toContain(imported.status);
+        expect(reconnected.status).toBe(201);
       }
     },
   );
