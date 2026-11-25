@@ -35,6 +35,7 @@ function HeroPhones() {
           key={app.id}
           image={app.mobile.image}
           alt=""
+          statusBar={app.mobile.statusBar}
           sizes={heroImageSizes}
           className={
             [

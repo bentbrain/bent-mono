@@ -31,6 +31,14 @@ export type AppId =
 
 type Screenshot = Readonly<{ image: StaticImageData; alt: string }>;
 
+type PhoneScreenshot = Screenshot &
+  Readonly<{
+    /** CSS background for the phone status bar, matching the screenshot's top edge. Defaults to white. */
+    statusBar?: string;
+  }>;
+
+const sourceRoot = "https://github.com/bentbrain/bent-mono/tree/main";
+
 export type ShowcaseApp = Readonly<{
   id: AppId;
   name: string;
@@ -40,8 +48,10 @@ export type ShowcaseApp = Readonly<{
   access: string;
   description: string;
   highlights: readonly string[];
+  /** Public source code location, for apps published in the bent-mono repository. */
+  source?: string;
   desktop: Screenshot;
-  mobile: Screenshot;
+  mobile: PhoneScreenshot;
 }>;
 
 export const apps: readonly ShowcaseApp[] = [
@@ -52,6 +62,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Health & fitness",
     domain: "fitness.bent.build",
     access: "Invited accounts only",
+    source: `${sourceRoot}/apps/fitness`,
     description:
       "Plan a week of dumbbell strength sessions, runs and rest days. Log each set with a rest timer, and record daily calories, protein and bodyweight.",
     highlights: [
@@ -68,6 +79,7 @@ export const apps: readonly ShowcaseApp[] = [
     mobile: {
       image: fitnessMobile,
       alt: "Fitness week view on a phone with the seven-day schedule and today's Strength B workout.",
+      statusBar: "#f4f6f8",
     },
   },
   {
@@ -77,6 +89,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Sports",
     domain: "trackmap.bent.build",
     access: "Open to everyone",
+    source: `${sourceRoot}/apps/trackmap`,
     description:
       "Open a GPX, TCX, FIT or GeoJSON file and Trackmap draws the route and its elevation in 3D. Export it as a video, image or GIF. Files stay in your browser.",
     highlights: [
@@ -111,11 +124,11 @@ export const apps: readonly ShowcaseApp[] = [
     ],
     desktop: {
       image: shopDesktop,
-      alt: "Shop product page on desktop with a white t-shirt printed with sample artwork, colour and size options.",
+      alt: "Shop product page on desktop with a black t-shirt printed with a photo of a person wearing the same shirt, colour and size options.",
     },
     mobile: {
       image: shopMobile,
-      alt: "Shop design editor on a phone with sample artwork, t-shirt and tote previews, and background and effect options.",
+      alt: "Shop product page on a phone with a black t-shirt printed with a photo of a person wearing the same shirt, colour and size options.",
     },
   },
   {
@@ -125,6 +138,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Lifestyle",
     domain: "home.bent.build",
     access: "Open to everyone",
+    source: `${sourceRoot}/apps/home`,
     description:
       "An isometric 3D apartment with furniture, two cats and sunlight that follows the time of day. Turn the view in 90-degree steps and dim the lounge and bedroom lights. The lights are a simulation in your browser.",
     highlights: [
@@ -148,6 +162,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Travel",
     domain: "jp.bent.build",
     access: "Open to everyone",
+    source: `${sourceRoot}/apps/jp`,
     description:
       "Posts with photos and videos, a gallery you can filter by category and a map of geotagged photos and videos in and around Japan. Subscribe by email to get new posts.",
     highlights: [
@@ -171,6 +186,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Travel",
     domain: "stay.bent.build",
     access: "Invited guests only",
+    source: `${sourceRoot}/apps/stay`,
     description:
       "Guests sign in to search the house guide and ask questions, which an AI assistant answers from the guide and appliance manuals. The guide also has the Wi-Fi details and controls for the lights, TV and robot vacuum that work on the apartment Wi-Fi.",
     highlights: [
@@ -195,6 +211,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Utilities",
     domain: "drive.bent.build",
     access: "Invited GitHub accounts, plus a Tesla account",
+    source: `${sourceRoot}/products/drive`,
     description:
       "An MCP server that lets ChatGPT read a Tesla's battery, range, charging, locks, climate and Sentry state. Sign in with an invited GitHub account, then approve read-only access with Tesla. The website has setup instructions.",
     highlights: [
@@ -210,6 +227,7 @@ export const apps: readonly ShowcaseApp[] = [
     mobile: {
       image: driveMobile,
       alt: "Drive website on a phone with the overview.",
+      statusBar: "linear-gradient(90deg, #1e0c0d, #280c0f 20%, #320d10 50%, #270b0e 80%, #200b0d)",
     },
   },
   {
@@ -219,6 +237,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Developer tools",
     domain: "toolbar.bent.build",
     access: "Sign in with GitHub",
+    source: `${sourceRoot}/apps/toolbar`,
     description:
       "Add a script tag to a website. Project members can then pin comment threads to page elements, reply and react, and send work requests to a coding agent on their own computer. The agent posts its results back to the thread.",
     highlights: [
@@ -234,6 +253,7 @@ export const apps: readonly ShowcaseApp[] = [
     mobile: {
       image: toolbarMobile,
       alt: "Feedback toolbar on a phone over an example website, with a pinned heading and a comment thread.",
+      statusBar: "#f8f7f3",
     },
   },
   {
@@ -243,6 +263,7 @@ export const apps: readonly ShowcaseApp[] = [
     category: "Art",
     domain: "maya-collage.bent.build",
     access: "Public feed. Sign in to make collages.",
+    source: `${sourceRoot}/apps/collage`,
     description:
       "Browse the public feed, or sign in to make square collages in your browser from stickers and colour, gradient or image backgrounds. Keep collages private, publish them to the feed or download them.",
     highlights: [
@@ -257,6 +278,7 @@ export const apps: readonly ShowcaseApp[] = [
     mobile: {
       image: collageMobile,
       alt: "Maya's Collages feed on a phone with sample collages.",
+      statusBar: "#f5f5f5",
     },
   },
 ];

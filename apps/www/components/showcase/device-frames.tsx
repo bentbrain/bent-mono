@@ -39,8 +39,10 @@ export function PhoneFrame({
   image,
   alt,
   className,
+  statusBar = "#ffffff",
   sizes = "(min-width: 768px) 15rem, 52vw",
-}: FrameProps & Readonly<{ className?: string; sizes?: string }>) {
+}: FrameProps &
+  Readonly<{ className?: string; statusBar?: string; sizes?: string }>) {
   return (
     <figure
       className={cn(
@@ -52,6 +54,7 @@ export function PhoneFrame({
         <div
           aria-hidden="true"
           className="flex h-7 items-center justify-center"
+          style={{ background: statusBar }}
         >
           <span className="h-4 w-16 rounded-full bg-neutral-950" />
         </div>
