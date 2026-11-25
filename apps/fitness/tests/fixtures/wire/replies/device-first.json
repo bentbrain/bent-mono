@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "kind": "device",
+    "accountTimezone": "Australia/Brisbane",
+    "outcomes": [
+      {
+        "ref": "r:00000020-1111-4222-8333-444455556666",
+        "type": "run",
+        "result": "kept",
+        "code": "matched_existing"
+      }
+    ]
+  }
+}

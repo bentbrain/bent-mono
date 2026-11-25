@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "body": {
+    "received": {
+      "weights": 2,
+      "runs": 1
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "status": 409,
+  "body": {
+    "error": "Up to 3 iPhones can sync. Revoke one under Manage account → API keys, then connect again.",
+    "code": "device_limit"
+  }
+}

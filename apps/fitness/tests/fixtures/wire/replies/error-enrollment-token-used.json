@@ -1,0 +1,7 @@
+{
+  "status": 409,
+  "body": {
+    "error": "This sign-in was already used to connect a device. Sign in again.",
+    "code": "enrollment_token_used"
+  }
+}

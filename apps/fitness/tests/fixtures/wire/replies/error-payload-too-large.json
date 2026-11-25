@@ -1,0 +1,7 @@
+{
+  "status": 413,
+  "body": {
+    "error": "Send up to 4 MB per request. Split the samples across requests.",
+    "code": "payload_too_large"
+  }
+}

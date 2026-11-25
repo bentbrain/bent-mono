@@ -1,3 +1,4 @@
+import { parsePublishableKey } from "@clerk/shared/keys";
 export function configurationReady() {
   return Boolean(
     process.env.DATABASE_URL &&
@@ -48,4 +49,32 @@ export function mcpResource() {
   } catch {
     return null;
   }
+}
+/**
+ * The OAuth application IDs of the iPhone sync app, one per Clerk instance,
+ * from the comma-separated FITNESS_DEVICE_CLIENT_IDS.
+ */
+export function deviceClientIds() {
+  return new Set(
+    (process.env.FITNESS_DEVICE_CLIENT_IDS ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+/** Device enrollment is on only when FITNESS_DEVICE_ENROLLMENT is `enabled`. */
+export function deviceEnrollmentEnabled() {
+  return process.env.FITNESS_DEVICE_ENROLLMENT?.trim() === "enabled";
+}
+/**
+ * Whether the Clerk keys are usable: Clerk's own parser accepts the
+ * publishable key, and the secret key has the `sk_test_` or `sk_live_` form.
+ */
+export function clerkKeysValid() {
+  const publishable = process.env.VITE_CLERK_PUBLISHABLE_KEY?.trim() ?? "";
+  const secret = process.env.CLERK_SECRET_KEY?.trim() ?? "";
+  return (
+    parsePublishableKey(publishable) !== null &&
+    /^sk_(?:test|live)_\S+$/.test(secret)
+  );
 }

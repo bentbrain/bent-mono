@@ -54,7 +54,7 @@ Fitness runs an MCP server at `/api/mcp` on the app's origin. ChatGPT, Claude an
 
 Dates use the account timezone, and a tool without a date uses today. Read results include each meal, saved meal, run and weigh-in's ID and revision. Updates and deletions send the revision they read, and fail if the entry has changed since. Every change carries a `requestId` chosen by the assistant. Retrying the same call with the same ID returns the first result without saving again, and reusing an ID for different input fails. Retry a saved meal addition with the same access: a retry after the connection gains or loses `fitness:read` fails with the request ID error. Each tool call saves its changes and its result in one transaction, so a failed call saves nothing. Strength workouts are read-only here; record and correct them in the app.
 
-To connect an assistant, add `https://fitness.bent.build/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. OAuth tokens must name the MCP endpoint as their audience. Browser session cookies do not authorize MCP requests.
+To connect an assistant, add `https://fitness.bent.build/api/mcp` as a custom MCP app or connector. The client opens the Fitness sign-in, where you sign in with your invited account and approve access. For scripts and local agents, create an API key under Manage account → API keys, at `/account/api-keys`, and send it as `Authorization: Bearer <key>`. Every request checks the token and the invitation list. OAuth tokens must name the MCP endpoint as their audience. Browser session cookies do not authorize MCP requests.
 
 Access follows the token's scopes. `fitness:read` lists the read tools and `fitness:write` lists the tools that add, change and remove entries. Write results include the day's totals, the other saved meals and replaced values only when the token also has `fitness:read`; otherwise they confirm what the call saved. Adding saved meals skips a meal already saved with the same name, calories and protein when the token has `fitness:read`; without it, the call saves each distinct meal it lists. A token with neither scope gets `403 insufficient_scope`. An API key with scopes follows the same rules. An API key without scopes, such as one created under Manage account, has read and write access.
 
@@ -62,7 +62,7 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 - Add the MCP endpoint under Agents → MCP servers. Clerk then issues tokens with that audience.
 - Create the `fitness:read` and `fitness:write` custom scopes under OAuth applications → Scopes. Describe `fitness:read` on the consent screen as reading meals, saved meals, bodyweight, runs, planned training, workouts with their sets and notes, and your goal and calorie and protein targets. Describe `fitness:write` as adding, changing and removing meals, saved meals, bodyweight and runs.
-- Turn on dynamic client registration for OAuth applications. Allow `openid`, `profile`, `email`, `fitness:read` and `fitness:write` for dynamically registered clients, or leave the allowed scopes unrestricted.
+- Turn on dynamic client registration for OAuth applications. Set the scopes allowed for dynamically registered clients to `openid`, `profile`, `email`, `fitness:read` and `fitness:write`.
 - Set the OAuth default scopes to `openid`, `profile`, `email`, `fitness:read` and `fitness:write`. Clerk assigns the default scopes to a client that registers without requesting any. ChatGPT registers that way, then requests `openid` because Clerk advertises it.
 - Turn on API keys to create keys for scripts.
 
@@ -70,7 +70,7 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 ## Apple Health
 
-Fitness imports weigh-ins and runs from Apple Health. Your iPhone sends them to `https://fitness.bent.build/api/health/import`, either through the Health Auto Export app or an Apple Shortcut. Create an API key under Manage account → API keys and send it as `Authorization: Bearer <key>`. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only.
+Fitness imports weigh-ins and runs from Apple Health at `https://fitness.bent.build/api/health/import`. A device can send them with its own import-only key, described under [Device keys](#device-keys). An Apple Shortcut or another script can send weigh-ins with an API key you create under Manage account → API keys. Send the key as `Authorization: Bearer <key>`; the key on its own, `Authorization: <key>`, also works, here and on the MCP endpoint. The key needs `fitness:write` access, and a key without scopes has it. The endpoint accepts API keys only and ignores browser cookies.
 
 Each request is one JSON export in the Health Auto Export format:
 
@@ -105,16 +105,98 @@ Fitness decides each Health sample once and remembers the result, so a sync can 
 
 With `fitness:read` access, the reply has one outcome for each weigh-in date and each distinct run start it can record: `added`, or `kept` with the reason. The `added` counts include an earlier Health run saved because a closer match took its place. Workouts sent twice with the same start count once. Entries dated after today and values outside the app's limits are listed under `skipped` with the reason. A write-only key's reply is `{"received": {"weights": 3, "runs": 1}}`: the weigh-ins and running workouts in its payload, including ones Fitness skips or already has. Send up to 4 MB and 2000 weigh-ins and runs per request. A request with a malformed entry fails with a `400` naming it and saves nothing.
 
-**Health Auto Export.** Add a REST API automation with the import URL, JSON export format and version 2. Add the `Authorization` header with your key. Select the weight metric under Health Metrics and turn Summarize Data off, so each weigh-in arrives on its own rather than as a daily average. Add a second automation for Workouts. Leave route data and workout metrics off to keep requests small, and turn on Batch Requests for long date ranges.
+A key that Clerk reports as unknown, revoked or expired fails with `401` and `"code": "key_invalid"`. Fitness confirms that with Clerk directly: a `404` carrying Clerk's `resource_not_found` error gives `401 key_invalid`, and any other reply, such as a gateway's `404`, gives a retryable `503 auth_unavailable`. Other `401` replies have `"code": "unauthorized"`. When Fitness cannot reach Clerk to check the key, the reply is `503` with `"code": "auth_unavailable"`; send the request again later.
 
-**Apple Shortcut for weigh-ins.** Shortcuts can read weigh-ins from Health. Use Health Auto Export for runs. Allow the shortcut to read Weight when Health asks. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
+### Device keys
 
-1. Find Health Samples where Type is Weight and Start Date is in the last 7 days.
-2. Repeat with each sample. Inside the loop, add a Text action containing `{"date":"<Start Date>","qty":<Value>}`. Format Start Date as ISO 8601 with the time included. Value must be a plain number with a decimal point, such as `80.4`, in the unit from step 4.
-3. After the loop, Combine Text with the Repeat Results, using a comma as the separator.
-4. Add a Text action containing `{"data":{"metrics":[{"name":"weight_body_mass","units":"kg","data":[<Combined Text>]}]}}`. Use the weight unit your Health app shows: kg, lb or st.
-5. Get Contents of URL: the import URL, method POST, headers `Authorization: Bearer <key>` and `Content-Type: application/json`, request body File with the Text from step 4.
-6. Run it daily from a Time of Day personal automation.
+A device key has only the `fitness:health:import` scope. It can import weigh-ins and runs, which can move or replace earlier run pairings as described above. Its replies carry the account timezone and one outcome for each sample the request sent. The key cannot read or change anything else, and the MCP endpoint refuses it. It appears under Manage account → API keys as "iPhone sync: " followed by the device name.
+
+Fitness records each enrollment in its database, and only the key recorded on an installation's current enrollment can import. Each installation has one such key. Any other device key, such as one replaced by a later connection or one Clerk created after its enrollment gave up, fails with `401 key_invalid`, and Fitness asks Clerk to revoke it. Each import holds the key's enrollment record until it commits. A disconnect or replacement that starts during an import waits for it, and one that finished first makes the import fail with `401 key_invalid` and save nothing.
+
+Device requests use the same format with stricter rules:
+
+- Every weigh-in in `data` and every workout carries a `ref`: `w:<uuid>` for a weigh-in and `r:<uuid>` for a run, where the UUID is the HealthKit sample's. Fitness compares refs in lower case.
+- Only the `weight_body_mass` metric, with its aliases `body_mass` and `weight`, and running workouts are allowed.
+- Fitness reads every entry before it decides any outcome. The first ref at an instant, for each type, gets that sample's outcome, even `skipped`; a later ref at the same instant gets `duplicate_in_request`.
+- Timestamps are ISO 8601 with seconds and an offset, such as `2026-11-20T06:10:00+10:00`. A run needs a duration or an end time.
+- `expectedTimezone`, next to `data`, is the account timezone a backfill grouped its days in. If the account uses another timezone, the request fails with `409`, `"code": "timezone_changed"` and the current `accountTimezone`, and saves nothing.
+
+The whole request fails with `400` and `"code": "invalid_device_request"`, naming the first entry at fault, if any entry has a missing, malformed or repeated ref, a ref prefix for the other type, an unsupported metric or workout, or a value Fitness cannot read, such as a text `qty`, an impossible date or an unknown unit. Nothing is saved. Samples dated after today, or outside the app's limits, get a `skipped` outcome instead.
+
+```json
+{
+  "kind": "device",
+  "accountTimezone": "Australia/Brisbane",
+  "outcomes": [
+    {
+      "ref": "w:6f1c2a7e-3d4b-4c5a-8e9f-0a1b2c3d4e5f",
+      "type": "weight",
+      "result": "added",
+      "code": "new"
+    }
+  ]
+}
+```
+
+| `result`  | `code`                 | Meaning                                                      |
+| --------- | ---------------------- | ------------------------------------------------------------ |
+| `added`   | `new`                  | Fitness saved a new entry                                    |
+| `kept`    | `already_imported`     | An earlier sync imported this sample                         |
+| `kept`    | `matched_existing`     | The sample matches an entry already in Fitness               |
+| `kept`    | `removed_in_fitness`   | The entry this sample became was removed in Fitness          |
+| `kept`    | `date_has_weighin`     | The date already has a weigh-in                              |
+| `kept`    | `duplicate_in_request` | An earlier ref in this request has the same time and type    |
+| `skipped` | `future`               | The sample is dated after today in the account timezone      |
+| `skipped` | `out_of_range`         | The weight, duration or distance is outside the app's limits |
+
+Each ref gets exactly one outcome, in request order. Device replies leave out record IDs, earlier match dates and runs the request did not send. Too many samples fail with `400` and `"code": "too_many_samples"`, and a body over 4 MB fails with `413` and `"code": "payload_too_large"`; split the samples across requests.
+
+A device connects and disconnects through these routes. They read only the bearer token and ignore browser cookies.
+
+- `POST /api/health/devices` exchanges a one-time Clerk OAuth access token for a device key. The token must name the MCP endpoint as its audience, carry `fitness:health:enroll`, come from an OAuth application listed in `FITNESS_DEVICE_CLIENT_IDS` and belong to an invited account. The body is `{"installationId": "<uuid>", "deviceName": "<up to 60 characters>"}`. The `201` reply is `{"secret", "accountTimezone", "userId", "email"}`, where `userId` and `email` are the verified account. Connecting an installation again replaces its key. Up to 3 installations can hold keys, and an account can create up to 5 device keys an hour.
+
+  | Reply                        | Meaning                                                                                                       | What to do                                                             |
+  | ---------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+  | `401 unauthorized`           | No bearer, a token that is not an OAuth access token, or one that is unknown, expired or for another audience | Sign in again for a fresh token                                        |
+  | `403 insufficient_scope`     | The token lacks `fitness:health:enroll`                                                                       | Approve iPhone sync access when signing in                             |
+  | `403 client_not_allowed`     | The token's OAuth application is not in `FITNESS_DEVICE_CLIENT_IDS`                                           | Use a token from an OAuth client listed in `FITNESS_DEVICE_CLIENT_IDS` |
+  | `403 not_invited`            | The account's verified primary email is not on the invitation list                                            | Ask the app owner for an invitation                                    |
+  | `400 invalid_request`        | The body is not a UUID installation ID and a device name                                                      | Fix the request; the same token can retry                              |
+  | `409 enrollment_token_used`  | This token already connected a device                                                                         | Sign in again for a fresh token                                        |
+  | `409 device_limit`           | 3 other installations hold keys                                                                               | Revoke one under Manage account → API keys, then sign in again         |
+  | `429 rate_limited`           | 5 keys were created in the last hour, or too many attempts reached Fitness; see `Retry-After`                 | Wait, then retry with the same token                                   |
+  | `503 issuance_pending`       | Another enrollment is issuing a key; see `Retry-After`                                                        | Wait, then retry with the same token                                   |
+  | `503 auth_unavailable`       | Clerk could not be reached, or could not check the token's signature                                          | Retry later with the same token                                        |
+  | `503 issuance_failed`        | Clerk failed while issuing the key, after the token was used                                                  | Sign in again for a fresh token                                        |
+  | `503 enrollment_unavailable` | Enrollment is not enabled or configured                                                                       | Try again later                                                        |
+
+  Checks run cheapest first, before any Clerk call. Each server accepts about 10 requests a minute to `POST /api/health/devices` and `GET /api/health/devices/ready`, with a burst of 5. Readiness is one database query; each server reuses a ready result for 30 seconds and a not-ready one for 5. All servers together then accept 20 enrollment attempts a minute, counted in Postgres. The count stops at that cap, and a request that arrives once the window is full reads the count without waiting on it, or is refused by its server's memory of the full window. Clerk's SDK fetches its signing keys again for each token whose key ID it does not know, and reports that with the same reason as an outage, so these limits bound those fetches. One enrollment issues keys at a time on each server, and one at a time for each account under a lease row in Postgres. Fitness does not wait for a busy one: it reads whether the lease is live without a lock, and gives up at once on taking over a lease whose row is still locked. Each Clerk call during an enrollment has up to 10 seconds, none starts after 45 seconds on the server's monotonic clock, and the lease lasts 90. Listing and cleaning up keys has its own 10 seconds and never uses the last 15, which are kept for creating the key; a list that runs out of time is skipped. Recording the enrollment, which uses the token, commits in one transaction that must finish before those last 15 seconds begin. If it cannot, for example because an import holds the account, it rolls back and the enrollment stops with `503 issuance_pending`: the token stays unused. The current key keeps importing either way until its replacement is swapped in. Every database change an enrollment makes runs in its own short transaction that locks the lease row, then the account row, then the enrollment rows it changes, and only then checks the lease against the database clock. Imports lock the account row before their enrollment row and never touch the lease, so the two always take locks in the same order. Before each statement that can wait, its timeout is set to what remains of the enrollment's deadline, and the transaction checks the lease and the deadline again as its last step, rolling back if either has passed. A commit that stalls after that check can still land late; the lease stays held until it ends, and if the app never sees the reply, its next enrollment replaces that key; once the lease expires or another request takes it over, the enrollment changes nothing more, and a key it already created is revoked instead of activated. The SDK takes no cancellation signal for these calls, so a call that runs out of time can still finish at Clerk. The limits, the lease and the rules below make such a late result harmless.
+
+  Postgres holds both limits. The hourly limit counts each created key for an hour from when Clerk returned it, and each enrollment whose creation Clerk never confirmed for 2 hours from when it was recorded, or for an hour from its key's creation once Fitness finds that key. Before counting installations, Fitness asks Clerk about each active key. An installation whose key Clerk reports revoked or expired, for example under Manage account → API keys, or deleted, frees its place. Deleted means a `404` carrying Clerk's `resource_not_found` error. Any other answer, including a 404 without that error, fails the enrollment with `503 auth_unavailable` and changes nothing. Clerk's key list is used only to find keys to clean up; a key missing from it is never treated as gone.
+
+  Each enrollment is recorded, which uses its token and holds its place in the hourly limit, before Fitness changes any key in Clerk. A token is identified by the ID Clerk verifies for it, so the same token written another way is refused too, and a token without one is refused with `401 unauthorized`. Clerk then revokes any device key without a current enrollment. The new key's claims carry the enrollment's ID. When Clerk returns the key, one transaction stops the installation's previous key and makes the new one current, and only after that commits does Clerk revoke the previous key. If the create fails, or the swap cannot finish within 5 seconds after the deadline, the previous key keeps importing and the new key is revoked; the reply is `503 issuance_failed`, and the next attempt needs a fresh sign-in. If the swap's commit reply is lost, Fitness reads the enrollment again on another connection, waiting up to 5 seconds for a commit still in progress: a swap that committed returns the new key, one that did not revokes it, and any other answer leaves both keys for the next enrollment to settle, with `503 issuance_failed`. If Clerk does not confirm the creation, the enrollment is kept as ambiguous, and a key Clerk creates for it later cannot import.
+
+- `DELETE /api/health/devices/current` disconnects the device key that sends it and replies `204`. The key stops importing first, then Clerk revokes it. A key that is not its installation's current key, including one already disconnected, fails with `401 key_invalid`; the app can treat that as disconnected. Other keys fail with `403 not_device_key`. This route works whether or not enrollment is enabled, so a device can always disconnect.
+- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token.
+
+Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth application IDs in `FITNESS_DEVICE_CLIENT_IDS`, the Clerk and MCP configuration above with a publishable key Clerk's parser accepts and an `sk_test_` or `sk_live_` secret key, and the `fitness_device_enrollments`, `fitness_device_issuance_leases` and `fitness_device_attempt_windows` tables from `schema.sql` with their columns. The database user needs to read, add, change and remove their rows, and to read, add and lock rows in `fitness_accounts` (`SELECT`, `INSERT` and `UPDATE`, which `SELECT ... FOR UPDATE` needs). Readiness checks the tables and those privileges in one query without writing. Each server reuses a ready result for 30 seconds and a not-ready one for 5, so after a migration readiness can take a few seconds to turn ready, and a change that breaks it can take up to 30 seconds to show. Fitness keeps a SHA-256 digest of each enrollment token there; rows for keys that can no longer import are removed after two days. Configure each Clerk instance for device enrollment:
+
+- Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone import Apple Health weigh-ins and runs into Fitness. Imports can match or re-pair runs you've entered, and the app sees your account timezone and the results of each import."
+- Create a public OAuth application named Fitness Sync iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
+- Issue this application's tokens with the MCP endpoint as their audience.
+- Add the application's ID to `FITNESS_DEVICE_CLIENT_IDS`.
+
+### Apple Shortcut for weigh-ins
+
+Shortcuts can read weigh-ins from Health. It cannot read workouts. Health data is available only while the iPhone is unlocked, so schedule the shortcut for a time you usually use the phone.
+
+1. Add Find Health Samples. Shortcuts first asks about Steps; decline it, choose Weight as the type, then allow read access when Health asks. Set Start Date is in the last 7 days, and choose kg in the Unit picker.
+2. Add Repeat for Each with the Health Samples. Inside the loop, add Format Date for the sample's Start Date, choose ISO 8601 and turn on Include ISO 8601 Time. Then add a Text action containing `{"date":"<Formatted Date>","qty":<Value>}`. Value must be a plain number with a decimal point, such as `80.4`.
+3. After the loop, add Combine Text with the Repeat Results. Choose Custom as the separator and type a comma.
+4. Add a Text action containing `{"data":{"metrics":[{"name":"weight_body_mass","units":"kg","data":[<Combined Text>]}]}}`.
+5. Add Get Contents of URL. Clear the variable in its URL field and type the import URL. Set Method to POST, add the headers `Authorization: Bearer <key>` and `Content-Type: application/json`, then choose Request Body → File and select the Text from step 4.
+6. Run the shortcut once. The first run asks to send Health data to fitness.bent.build; allow it.
+7. In Automation, tap +, choose Time of Day and Repeat Every Day, choose Run Immediately, then select the shortcut.
 
 ## Equipment photos and exports
 
@@ -137,6 +219,6 @@ bun run knip
 bun run test:browser
 ```
 
-`FITNESS_TEST_DATABASE_URL` enables the Postgres integration tests. Use a disposable database or the dedicated development database. The tests create unique synthetic account IDs and remove only their own records. CI supplies its disposable Postgres service. Public browser checks verify the configuration boundary without provider credentials. Authenticated provider checks require a Clerk development application and invited synthetic accounts.
+`FITNESS_TEST_DATABASE_URL` enables the Postgres integration tests. The device and wire suites each create a schema of their own, apply `schema.sql` there, point the app's database pool at it through a test-only hook and drop it when they finish, so their pruning and shared counts never reach other data; the database user needs to create schemas, and the readiness test also creates and drops a role. They include the iPhone sync wire fixtures in `tests/fixtures/wire/replies`: real handler replies to synthetic requests with a fixed clock. The test regenerates them and fails when a reply or the file list changes. Run `bun run fixtures:wire` to rewrite them after an intended change. Use a disposable database or the dedicated development database. The tests create unique synthetic account IDs and remove only their own records. CI supplies its disposable Postgres service. Public browser checks verify the configuration boundary without provider credentials. A second development server with synthetic Clerk keys checks that the import and device routes answer with their own JSON and skip the session middleware. Authenticated provider checks require a Clerk development application and invited synthetic accounts.
 
-Run the root public-source and workspace checks before publishing. Vercel uses the app directory, Node 24, the pinned Bun bootstrap and the root lockfile. Git-triggered builds are disabled; the repository's `release:vercel` command creates and promotes production candidates with independent review, security checks and `Release qualification`. Configure the dedicated production database and invited accounts before runtime qualification. Apply the schema to that database through the reviewed release procedure.
+Run the root public-source and workspace checks before publishing. Vercel uses the app directory, Node 24, the pinned Bun bootstrap and the root lockfile. Git-triggered builds are disabled; the repository's `release:vercel` command creates and promotes production candidates with independent review, security checks and `Release qualification`. Configure the dedicated production database and invited accounts before runtime qualification. Apply the schema to that database through the reviewed release procedure. `schema.sql` is additive and safe to apply again. It upgrades an earlier enrollment table in place, adding its later columns and constraints and keeping the token digests already recorded. Apply it before setting `FITNESS_DEVICE_ENROLLMENT=enabled`, since enrollment stays unavailable until its tables exist.

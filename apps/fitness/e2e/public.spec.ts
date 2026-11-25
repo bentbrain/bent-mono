@@ -22,6 +22,44 @@ test("fails closed without provider configuration and serves installation assets
   expect((await manifest.json()).display).toBe("standalone");
 });
 
+test("keeps iPhone sync routes closed without provider configuration", async ({
+  request,
+}, testInfo) => {
+  // Server-side only, and each server allows a small burst of device-route
+  // requests, so one browser project covers it.
+  test.skip(testInfo.project.name !== "mobile");
+  const ready = await request.get("/api/health/devices/ready");
+  expect(ready.status()).toBe(503);
+  expect(ready.headers()["cache-control"]).toContain("no-store");
+  expect(await ready.json()).toMatchObject({ code: "enrollment_unavailable" });
+  const bearerless: Record<string, string> = {};
+  for (const headers of [
+    bearerless,
+    { Authorization: "Bearer oat_synthetic" },
+  ]) {
+    const enroll = await request.post("/api/health/devices", {
+      headers,
+      data: { installationId: crypto.randomUUID(), deviceName: "iPhone" },
+    });
+    expect(enroll.status()).toBe(503);
+    expect(enroll.headers()["cache-control"]).toContain("no-store");
+    expect(await enroll.json()).toMatchObject({
+      code: "enrollment_unavailable",
+    });
+  }
+  const disconnect = await request.delete("/api/health/devices/current", {
+    headers: { Authorization: "Bearer ak_synthetic" },
+  });
+  expect(disconnect.status()).toBe(503);
+  expect(await disconnect.json()).toMatchObject({ code: "auth_unavailable" });
+  const healthImport = await request.post("/api/health/import", {
+    headers: { Authorization: "Bearer ak_synthetic" },
+    data: { data: { metrics: [] } },
+  });
+  expect(healthImport.status()).toBe(401);
+  expect(await healthImport.json()).toMatchObject({ code: "unauthorized" });
+});
+
 test("serves the ten multi-angle exercise illustrations and their thumbnails", async ({
   request,
 }) => {

@@ -1,0 +1,7 @@
+{
+  "status": 503,
+  "body": {
+    "error": "Account services are unavailable. Try again shortly.",
+    "code": "auth_unavailable"
+  }
+}
