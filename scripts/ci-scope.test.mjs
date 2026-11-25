@@ -11,13 +11,22 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { comparison, includesPath, workspaceScope } from "./ci-scope.mjs";
+import {
+  browserMatrix,
+  comparison,
+  includesPath,
+  workspaceScope,
+} from "./ci-scope.mjs";
 
+const blog = { name: "japan-blog", path: "apps/jp" };
+const toolbar = { name: "feedback-toolbar", path: "apps/toolbar" };
 const packages = [
   { name: "@bent/trackmap", path: "apps/trackmap" },
   { name: "@bent/design-tokens", path: "packages/design-tokens" },
   { name: "@bent/drive-product", path: "products/drive" },
   { name: "@bent/drive-web", path: "products/drive/apps/web" },
+  blog,
+  toolbar,
 ];
 const base = "a".repeat(40),
   head = "b".repeat(40);
@@ -38,11 +47,15 @@ function fixture(run) {
     rmSync(directory, { recursive: true, force: true });
   }
 }
-function execute(files, affected, fail = false) {
+function execute(files, affected, fail = false, mode = "100644") {
   return (command, args, options) => {
     if (command === "git") {
       assert.deepEqual(args.slice(-2), [base, head]);
       if (fail) throw new Error("Missing base history");
+      if (args.includes("--raw"))
+        return files
+          .map((file) => `:100644 ${mode} 0000000 0000000 M\0${file}\0`)
+          .join("");
       return files.join("\0") + "\0";
     }
     if (args.includes("--affected")) {
@@ -54,6 +67,90 @@ function execute(files, affected, fail = false) {
     });
   };
 }
+
+const browserOptions = { browser: true };
+
+test("only browser selection skips PRs limited to allowlisted documentation", () =>
+  fixture((env) => {
+    const diff = execute(
+      [
+        "apps/jp/README.md",
+        "apps/jp/LICENSE",
+        "apps/toolbar/README.md",
+        "apps/toolbar/LICENSE",
+      ],
+      [blog, toolbar],
+    );
+    assert.deepEqual(
+      browserMatrix(workspaceScope(env, diff, browserOptions)),
+      [],
+    );
+    assert.deepEqual(workspaceScope(env, diff).packages, [blog, toolbar]);
+  }));
+
+test("runtime, fixture, served and unknown paths retain browser coverage", () =>
+  fixture((env) => {
+    for (const path of [
+      "apps/jp/src/content/post.md",
+      "apps/jp/public/LICENSE",
+      "apps/jp/tests/fixtures/README.md",
+      "apps/jp/tests/browser-coverage.json",
+      "apps/jp/src/styles/globals.css",
+      "apps/jp/mockups/assets/tool.js",
+      "bun.lock",
+    ]) {
+      const diff = execute(["apps/jp/README.md", path], [blog]);
+      assert.equal(
+        browserMatrix(workspaceScope(env, diff, browserOptions)).length,
+        4,
+        path,
+      );
+    }
+    const link = execute(["apps/jp/README.md"], [blog], false, "120000");
+    assert.equal(
+      browserMatrix(workspaceScope(env, link, browserOptions)).length,
+      4,
+    );
+    const rootChange = execute([".github/workflows/quality.yml"], [blog]);
+    assert.deepEqual(
+      workspaceScope(env, rootChange, browserOptions).packages,
+      packages,
+    );
+    assert.deepEqual(
+      workspaceScope(env, execute([], [], true), browserOptions).packages,
+      packages,
+    );
+  }));
+
+test("main pushes, weekly runs and manual dispatches select full browser coverage", () =>
+  fixture((env) => {
+    for (const event of ["push", "schedule", "workflow_dispatch"]) {
+      const scope = workspaceScope(
+        { ...env, GITHUB_EVENT_NAME: event, GITHUB_REF: "refs/heads/main" },
+        (command, args, options) => {
+          assert.notEqual(command, "git");
+          assert.ok(!args.includes("--affected"));
+          return execute([], [])(command, args, options);
+        },
+        browserOptions,
+      );
+      assert.equal(scope.full, true);
+      assert.deepEqual(scope.packages, packages);
+    }
+  }));
+
+test("the browser matrix lists each selected suite and each shard once", () => {
+  assert.deepEqual(browserMatrix({ packages: [blog, toolbar, packages[0]] }), [
+    { app: "trackmap", part: 1, total: 1, name: "Browser trackmap (1/1)" },
+    { app: "jp", part: 1, total: 4, name: "Browser jp (1/4)" },
+    { app: "jp", part: 2, total: 4, name: "Browser jp (2/4)" },
+    { app: "jp", part: 3, total: 4, name: "Browser jp (3/4)" },
+    { app: "jp", part: 4, total: 4, name: "Browser jp (4/4)" },
+    { app: "toolbar", part: 1, total: 3, name: "Browser toolbar (1/3)" },
+    { app: "toolbar", part: 2, total: 3, name: "Browser toolbar (2/3)" },
+    { app: "toolbar", part: 3, total: 3, name: "Browser toolbar (3/3)" },
+  ]);
+});
 
 test("PR, push and merge queue use explicit event bases; missing or zero history widens", () => {
   assert.deepEqual(

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
 import { hasNoPendingMigrations } from "./require-no-pending-migrations.mjs";
+import { requireBrowserSuites } from "./require-browser-suites.mjs";
 
 const sha = "a".repeat(40);
 const head = "b".repeat(40);
@@ -13,16 +14,71 @@ const run = { id: 23, head_sha: sha, head_branch: "main", event: "push", path: w
   status: "completed", conclusion: "success", run_attempt: 2 };
 const names = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser", "public-source",
   "secret-scan", "dependencies", "CodeQL", "Release qualification"];
-test("the production aggregate depends on every root Quality job and runs after failures", async () => {
-  const source = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
-  const jobs = source.split("\njobs:\n")[1];
-  assert.ok(jobs);
-  const declared = [...jobs.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  const aggregate = source.split("  release-qualification:\n")[1]?.split(/^  [a-z][a-z0-9-]*:$/m)[0];
+const qualitySource = () => readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
+const qualityJob = (source, name) => source.split(`\n  ${name}:\n`)[1]?.split(/^  [a-z][a-z0-9-]*:$/m)[0];
+const jobDependencies = job => job.match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(",").map(value => value.trim());
+
+test("the production aggregate depends on every Quality job and runs after failures", async () => {
+  const source = await qualitySource();
+  const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
+  const aggregate = qualityJob(source, "release-qualification");
   assert.ok(aggregate?.includes("    if: always()"));
-  const dependencies = aggregate.match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(",").map(value => value.trim());
-  assert.deepEqual(dependencies?.sort(), declared.filter(name => name !== "release-qualification").sort());
+  const dependencies = jobDependencies(aggregate);
+  assert.ok(dependencies?.includes("browser"));
+  const browserDependencies = jobDependencies(qualityJob(source, "browser"));
+  assert.deepEqual(browserDependencies, ["browser-scope", "browser-suite"]);
+  assert.deepEqual([...dependencies, ...browserDependencies].sort(), declared.filter(name => name !== "release-qualification").sort());
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
+});
+
+test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {
+  const source = await qualitySource();
+  const job = qualityJob(source, "browser");
+  assert.match(job, /^    name: browser$\n    if: always\(\)$/m);
+  assert.ok(job.includes("BROWSER_MATRIX: ${{ needs.browser-scope.outputs.matrix }}"));
+  assert.ok(job.includes("run: node scripts/require-browser-suites.mjs"));
+  assert.ok(qualityJob(source, "browser-suite").includes("name: ${{ matrix.name }}"));
+
+  const env = {
+    SCOPE_RESULT: "success", HAS_WORK: "false", SUITE_RESULT: "skipped",
+    BROWSER_MATRIX: JSON.stringify({ include: [] }),
+  };
+  let lookups = 0;
+  const readJobs = () => { lookups++; return []; };
+  assert.equal(requireBrowserSuites(env, readJobs), "No browser suites selected.");
+  for (const override of [
+    { SCOPE_RESULT: "failure" },
+    { SCOPE_RESULT: "skipped" },
+    { SUITE_RESULT: "failure" },
+    { SUITE_RESULT: "success" },
+    { HAS_WORK: "" },
+    { HAS_WORK: "true" },
+    { BROWSER_MATRIX: "{}" },
+    { BROWSER_MATRIX: '{"include":[{}]}' },
+  ]) {
+    assert.throws(() => requireBrowserSuites({ ...env, ...override }, readJobs));
+  }
+  assert.equal(lookups, 0, "An empty or invalid plan does not query the Actions API.");
+});
+
+test("a successful matrix summary still requires one completed success for every shard", () => {
+  const include = ["Browser jp (1/2)", "Browser jp (2/2)"].map(name => ({ name }));
+  const env = {
+    SCOPE_RESULT: "success", HAS_WORK: "true", SUITE_RESULT: "success",
+    BROWSER_MATRIX: JSON.stringify({ include }), GITHUB_RUN_ID: "23",
+  };
+  const [first, second] = include.map(({ name }) => ({ name, run_id: 23, status: "completed", conclusion: "success" }));
+  assert.equal(requireBrowserSuites(env, () => [first, second]), "All 2 selected browser jobs passed.");
+  assert.throws(() => requireBrowserSuites(env, () => [first]), /found 0/);
+  assert.throws(() => requireBrowserSuites(env, () => [first, second, second]), /found 2/);
+  for (const override of [
+    { conclusion: "cancelled" }, { conclusion: "failure" }, { conclusion: "skipped" },
+    { status: "in_progress", conclusion: null }, { run_id: 22 },
+  ]) {
+    assert.throws(() => requireBrowserSuites(env, () => [first, { ...second, ...override }]), /Browser jp \(2\/2\) did not pass/);
+  }
+  for (const result of ["failure", "cancelled", "skipped"])
+    assert.throws(() => requireBrowserSuites({ ...env, SUITE_RESULT: result }, () => [first, second]), /validation incomplete/);
 });
 test("only the pinned Wrangler no-pending result permits the migration-free release route", () => {
   assert.equal(hasNoPendingMigrations("Resource location: remote\n\n✅ No migrations to apply!\n"), true);
