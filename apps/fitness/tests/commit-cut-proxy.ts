@@ -54,7 +54,8 @@ export function upstreamTls(target: URL, env = process.env) {
     port,
     secure: Boolean(ssl),
     direct,
-    prefer: ssl === "prefer",
+    /** Whether a database that declines TLS is reached in plaintext. */
+    plaintextFallback: ssl === "prefer" || ssl === "allow",
     tls,
   };
 }
@@ -102,9 +103,12 @@ export async function openUpstream(
           resolve(data);
         });
       });
-      // The driver goes on in plaintext only for `prefer`; otherwise it
-      // starts TLS whatever the answer, and the handshake fails.
-      if (answer[0] !== 0x53 && plan.prefer) return socket;
+      // Like the driver, `prefer` and `allow` go on in plaintext when the
+      // database declines TLS; every other mode fails.
+      if (answer[0] !== 0x53) {
+        if (plan.plaintextFallback) return socket;
+        throw new Error("The database does not support SSL connections.");
+      }
     }
     const secure = connectTls({ ...plan.tls, socket });
     track(secure);

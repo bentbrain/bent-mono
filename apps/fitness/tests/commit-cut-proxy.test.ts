@@ -36,7 +36,9 @@ describe("the proxy's TLS settings", () => {
     for (const mode of modes) {
       const found = plan(`?sslmode=${mode}`);
       expect(found.secure).toBe(true);
-      expect(found.prefer).toBe(mode === "prefer");
+      expect(found.plaintextFallback).toBe(
+        mode === "prefer" || mode === "allow",
+      );
     }
     // The driver reads sslrootcert=system as verify-full.
     expect(plan("?sslrootcert=system").secure).toBe(true);

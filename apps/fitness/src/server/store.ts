@@ -313,6 +313,7 @@ export async function countEnrollmentAttempt(
 /** Why an enrollment attempt was refused before it used the token. */
 export type EnrollmentRefusal =
   | { reason: "token_used" }
+  | { reason: "stale" }
   | { reason: "device_limit" }
   | { reason: "rate_limited"; retryAfter: number }
   | { reason: "busy" };
@@ -333,6 +334,8 @@ class Refused extends Error {
  *
  * - the token was already used, by the ID Clerk verified for it or by the
  *   digest of its raw string, which earlier enrollments recorded alone;
+ * - the installation's active key came from an attempt with the same or a
+ *   higher `enrollmentSequence`, so this one is stale;
  * - the hourly limit is full, counting this attempt: keys created in the
  *   last hour and attempts that may have created one; or
  * - the owner's other installations with an active key or an attempt
@@ -352,6 +355,8 @@ export async function recordEnrollment(
     digest: string;
     attemptId: string;
     installationId: string;
+    /** The app's count of enrollment attempts for this installation. */
+    enrollmentSequence: number;
   },
   limits: { installations: number; perHour: number },
 ): Promise<EnrollmentRefusal | null> {
@@ -361,6 +366,11 @@ export async function recordEnrollment(
       const used =
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE token_id=${attempt.tokenId} OR token_digest=${attempt.digest}`;
       if (used.length) throw new Refused({ reason: "token_used" });
+      // An attempt the app started before the installation's current key
+      // can never replace it.
+      const later =
+        await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND coalesce(enrollment_sequence, 0) >= ${attempt.enrollmentSequence}`;
+      if (later.length) throw new Refused({ reason: "stale" });
       const charges = await hourlyCharges(tx, owner);
       if (charges.length + 1 > limits.perHour) {
         const freed = charges[charges.length - limits.perHour] ?? 1;
@@ -378,7 +388,7 @@ export async function recordEnrollment(
         throw new Refused({ reason: "device_limit" });
       // Either identity recorded meanwhile means the token was used.
       const inserted =
-        await tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
+        await tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id,enrollment_sequence) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId},${attempt.enrollmentSequence}) ON CONFLICT DO NOTHING RETURNING 1`;
       if (!inserted.length) throw new Refused({ reason: "token_used" });
     });
     return null;
@@ -551,9 +561,10 @@ class NotActivated extends Error {
  * installations active keys than the limit. An attempt older than
  * `pendingGraceMinutes` by the database clock, once its rows are locked,
  * was abandoned: it becomes ambiguous, keeping its charge, with reason
- * `expired`. One recorded before a newer attempt for its installation that
- * is already active or issued becomes failed, keeping its charge, with
- * reason `superseded`, and the newer key stays. Returns whether this attempt
+ * `expired`. One whose installation has another attempt with the same or a
+ * higher `enrollmentSequence` that is active, issued, or pending within
+ * the grace becomes failed, keeping its charge, with reason `superseded`,
+ * and that attempt's key stays or can still be swapped in. Returns whether this attempt
  * became active, and the keys it replaced, which the caller revokes after
  * the commit. An error after the COMMIT was sent throws
  * CommitOutcomeUnknown.
@@ -577,7 +588,7 @@ export async function swapEnrollment(
       // abandoned: it becomes ambiguous, keeps its charge, and the current
       // key stays.
       const [own] =
-        await tx`SELECT key_state, attempt_order, created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}) AS fresh FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
+        await tx`SELECT key_state, coalesce(enrollment_sequence, 0) AS sequence, created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}) AS fresh FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
       if (own?.key_state !== "pending") throw new NotActivated("not_pending");
       if (own.fresh !== true) {
         await tx`UPDATE fitness_device_enrollments SET key_state='ambiguous', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
@@ -587,12 +598,13 @@ export async function swapEnrollment(
           reason: "expired" as const,
         };
       }
-      // A newer attempt for this installation that already has its key
-      // wins: this older one never replaces it, so the key a phone saved
-      // from the newer reply keeps working. The newer rows are locked too,
-      // so none changes while this decides.
+      // The app keeps the key from its latest attempt, the one with the
+      // highest sequence. Another attempt for this installation with the
+      // same or a higher sequence that has its key, or is still being
+      // issued within the grace, wins: this one never replaces it. Those
+      // rows are locked too, so none changes while this decides.
       const newer =
-        await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND attempt_order > ${own.attempt_order} AND (active OR key_state='issued') FOR UPDATE`;
+        await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND attempt_id<>${attempt.attemptId} AND coalesce(enrollment_sequence, 0) >= ${own.sequence} AND (active OR key_state='issued' OR (key_state='pending' AND created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}))) FOR UPDATE`;
       if (newer.length) {
         await tx`UPDATE fitness_device_enrollments SET key_state='failed', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
         return {
@@ -722,7 +734,7 @@ const enrollmentColumns = [
   "charged_at",
   "created_at",
   "replaced_key_ids",
-  "attempt_order",
+  "enrollment_sequence",
 ];
 const windowColumns = ["window_start", "attempts"];
 /**

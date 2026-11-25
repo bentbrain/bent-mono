@@ -81,9 +81,10 @@ ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS charged_at times
 -- The keys an attempt's swap replaced, so a read after a lost commit reply
 -- knows which to revoke.
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS replaced_key_ids text[];
--- The order attempts were recorded in, so an older attempt's swap never
--- replaces a newer one's key. Existing rows are numbered when it is added.
-ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS attempt_order bigint GENERATED ALWAYS AS IDENTITY;
+-- The app's own count of enrollment attempts for the installation, so an
+-- earlier attempt never replaces a later one's key. Rows recorded before
+-- it existed have none and count lowest.
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS enrollment_sequence bigint;
 -- Keys issued before charged_at existed count from when they were recorded.
 UPDATE fitness_device_enrollments SET charged_at = created_at WHERE key_state = 'issued' AND charged_at IS NULL;
 -- Earlier versions checked key_state without ambiguous, and the active key

@@ -30,6 +30,7 @@ export const apiErrorCodes = [
   "import_conflict",
   "device_limit",
   "enrollment_token_used",
+  "stale_enrollment",
   "rate_limited",
   "auth_unavailable",
   "enrollment_unavailable",
@@ -63,6 +64,12 @@ export const DeviceEnrollRequest = z.object({
     .min(1)
     .max(60)
     .regex(/^[^\p{Cc}\p{Cf}]+$/u, "Use letters, numbers and punctuation."),
+  /**
+   * The app's own count of enrollment attempts for this installation,
+   * higher for each new attempt. The attempt with the highest count is the
+   * one that keeps its key.
+   */
+  enrollmentSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
 });
 export type DeviceEnrollRequest = z.infer<typeof DeviceEnrollRequest>;
 

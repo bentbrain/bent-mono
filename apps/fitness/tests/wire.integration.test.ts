@@ -173,11 +173,15 @@ test.skipIf(!configured)(
       scopes: ["openid", "fitness:health:enroll"],
       aud: resource,
     });
-    const enrollBody = JSON.stringify({
-      installationId: installation,
-      deviceName: "Synthetic iPhone",
-    });
-    const enroll = (token: string, body = enrollBody) =>
+    // Each attempt counts one higher, as the app counts them.
+    let sequence = 0;
+    const enrollBody = (enrollmentSequence = ++sequence) =>
+      JSON.stringify({
+        installationId: installation,
+        deviceName: "Synthetic iPhone",
+        enrollmentSequence,
+      });
+    const enroll = (token: string, body = enrollBody()) =>
       devices.handleDeviceEnroll(
         bearer(token, { method: "POST", body }, "/api/health/devices"),
       );
@@ -186,6 +190,18 @@ test.skipIf(!configured)(
     await record(
       "error-enrollment-token-used",
       await enroll("oat_wire_enroll"),
+    );
+    // A fresh token from an attempt the app started no later than the
+    // installation's current key.
+    fake.oauth.set("oat_wire_stale", {
+      userId: owner,
+      clientId: iosClient,
+      scopes: ["openid", "fitness:health:enroll"],
+      aud: resource,
+    });
+    await record(
+      "error-stale-enrollment",
+      await enroll("oat_wire_stale", enrollBody(1)),
     );
     const [issued] = fake.keys;
     if (!issued) throw new Error("Expected the device key.");

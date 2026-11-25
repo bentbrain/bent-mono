@@ -395,14 +395,16 @@ function logged(event: string, error: unknown) {
  *    skipped.
  * 3. The attempt is recorded, which uses the token and reserves its place
  *    in the hourly limit. Under the account lock, the same transaction
- *    refuses a used token with `409 enrollment_token_used`, a full hourly
- *    limit with `429 rate_limited`, and an installation over the limit
- *    with `409 device_limit`, counting this attempt each time. Other
- *    installations count while they have an active key or an attempt
- *    still being issued, so overlapping attempts for new installations
- *    cannot pass the limit together. A refusal,
- *    or a transaction that times out waiting, changes nothing and leaves
- *    the token unused; a timeout replies `503 issuance_pending`.
+ *    refuses a used token with `409 enrollment_token_used`; an attempt
+ *    whose `enrollmentSequence` is not above that of the installation's
+ *    active key with `409 stale_enrollment`; a full hourly limit with `429
+ *    rate_limited`; and an installation over the limit with `409
+ *    device_limit`, counting this attempt each time. Other installations
+ *    count while they have an active key or an attempt still being issued,
+ *    so overlapping attempts for new installations cannot pass the limit
+ *    together. A refusal, or a transaction that times out waiting, changes
+ *    nothing and leaves the token unused; a timeout replies `503
+ *    issuance_pending`.
  * 4. Attempts still pending after the grace were abandoned and become
  *    ambiguous, so they can never be activated. Clerk then revokes keys no
  *    enrollment needs: keys without an active row, except one an attempt
@@ -426,9 +428,11 @@ function logged(event: string, error: unknown) {
  *    attempt is still pending from within the grace by the database clock
  *    and activating it keeps the installations with active keys within the
  *    limit. An attempt that aged past the grace is never activated; it
- *    becomes ambiguous and keeps its charge. Nor is one recorded before a
- *    newer attempt for the installation that already has its key: the
- *    newer key stays, and the older attempt fails, keeping its charge. After the swap commits, Clerk
+ *    becomes ambiguous and keeps its charge. Nor is one while another
+ *    attempt for the installation with the same or a higher
+ *    `enrollmentSequence` has its key or is still being issued: that key
+ *    stays or can still be swapped in, and this attempt fails, keeping its
+ *    charge. After the swap commits, Clerk
  *    revokes the replaced key within `replacedRevokeMs`; a revoke that
  *    fails is logged, and a later enrollment's cleanup revokes the key,
  *    which can no longer import. If the swap does not happen, the current
@@ -510,10 +514,11 @@ export async function handleDeviceEnroll(request: Request) {
     return failure(
       400,
       "invalid_request",
-      "Send the installation ID as a UUID and a device name of up to 60 characters.",
+      "Send the installation ID as a UUID, a device name of up to 60 characters and a positive whole enrollment sequence.",
     );
   const installationId = parsed.data.installationId.toLowerCase();
   const deviceName = parsed.data.deviceName;
+  const enrollmentSequence = parsed.data.enrollmentSequence;
 
   const token = headerToken(request) ?? "";
   const digest = createHash("sha256").update(token).digest("hex");
@@ -553,7 +558,7 @@ export async function handleDeviceEnroll(request: Request) {
   try {
     refusal = await recordEnrollment(
       userId,
-      { tokenId, digest, attemptId, installationId },
+      { tokenId, digest, attemptId, installationId, enrollmentSequence },
       deviceLimits,
     );
   } catch (error) {
@@ -564,6 +569,12 @@ export async function handleDeviceEnroll(request: Request) {
       : authUnavailable();
   }
   if (refusal?.reason === "token_used") return tokenUsed();
+  if (refusal?.reason === "stale")
+    return failure(
+      409,
+      "stale_enrollment",
+      "This iPhone has connected again since. Start a new connection.",
+    );
   if (refusal?.reason === "busy") return busy();
   if (refusal?.reason === "rate_limited")
     return failure(

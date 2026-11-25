@@ -106,6 +106,12 @@ function oauthToken(
   });
   return token;
 }
+/** The app's count of enrollment attempts, one higher for each. */
+let sequence = 0;
+/**
+ * Sends an enrollment. A body without an `enrollmentSequence` gets the next
+ * one, as the app counts its attempts.
+ */
 function enroll(
   token: string | null,
   body: unknown = {
@@ -114,9 +120,13 @@ function enroll(
   },
   headers: Record<string, string> = {},
 ) {
+  const counted =
+    typeof body === "object" && body !== null && !("enrollmentSequence" in body)
+      ? { ...body, enrollmentSequence: ++sequence }
+      : body;
   const init = {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(counted),
     headers: { "content-type": "application/json", ...headers },
   };
   return devices.handleDeviceEnroll(
@@ -434,11 +444,11 @@ describe("device enrollment", () => {
         fake.stall = null;
         fake.onCreate = null;
       }
-      // The swaps take turns on the account row, and the newer attempt wins
-      // whichever runs first: an older swap that comes second is refused,
-      // and one that comes first is replaced.
+      // The swaps take turns on the account row, and the attempt with the
+      // higher sequence wins whichever runs first: the other is refused,
+      // as it would be replaced.
       const [newest] =
-        await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY attempt_order DESC LIMIT 1`;
+        await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY enrollment_sequence DESC LIMIT 1`;
       const winner = fake.keys.find(
         (k) => k.claims?.enrollment === String(newest?.attempt_id),
       );
@@ -449,9 +459,7 @@ describe("device enrollment", () => {
         secret: bodies[n]?.secret as string | undefined,
       }));
       expect(answers).toContainEqual({ status: 201, secret: winner.secret });
-      expect(answers.map((a) => a.status).sort()).toEqual(
-        answers.some((a) => a.status === 503) ? [201, 503] : [201, 201],
-      );
+      expect(answers.map((a) => a.status).sort()).toEqual([201, 503]);
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
       expect(activeFor(installation).map((k) => k.secret)).toEqual([
         winner.secret,
@@ -953,7 +961,7 @@ describe("device enrollment", () => {
         });
         expect((await importWith(bSecret)).status).toBe(200);
         const [, older] =
-          await database()`SELECT attempt_id, key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY attempt_order`;
+          await database()`SELECT attempt_id, key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY enrollment_sequence`;
         expect({ state: older?.key_state, charged: older?.charged }).toEqual({
           state: "failed",
           charged: true,
@@ -970,6 +978,231 @@ describe("device enrollment", () => {
         spy.mockRestore();
       }
     },
+  );
+
+  test.skipIf(!configured)(
+    "keeps the key of the app's later attempt whichever attempt is recorded or swapped first",
+    async () => {
+      for (const order of [
+        "later swaps first",
+        "earlier swaps first",
+      ] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const previous = await enrolled();
+        // The app starts A, then B, so B has the higher sequence. A pauses
+        // before it is recorded, so B is recorded first.
+        const aSequence = ++sequence;
+        const bSequence = ++sequence;
+        const originalRecord = store.recordEnrollment;
+        let releaseA = () => undefined as void;
+        const aGate = new Promise<void>((resolve) => {
+          releaseA = resolve;
+        });
+        let aReached = () => undefined as void;
+        const aAtRecord = new Promise<void>((resolve) => {
+          aReached = resolve;
+        });
+        const recording = spyOn(store, "recordEnrollment").mockImplementation(
+          async (...args) => {
+            if (args[1].enrollmentSequence === aSequence) {
+              aReached();
+              await aGate;
+            }
+            return originalRecord(...args);
+          },
+        );
+        // For the second order, B waits before its swap until A is done.
+        const originalSwap = store.swapEnrollment;
+        let releaseB = () => undefined as void;
+        const bGate = new Promise<void>((resolve) => {
+          releaseB = resolve;
+        });
+        let bReached = () => undefined as void;
+        const bAtSwap = new Promise<void>((resolve) => {
+          bReached = resolve;
+        });
+        const swapping = spyOn(store, "swapEnrollment").mockImplementation(
+          async (...args) => {
+            const [row] =
+              await database()`SELECT enrollment_sequence FROM fitness_device_enrollments WHERE attempt_id=${args[1].attemptId}`;
+            if (
+              order === "earlier swaps first" &&
+              Number(row?.enrollment_sequence) === bSequence
+            ) {
+              bReached();
+              await bGate;
+            }
+            return originalSwap(...args);
+          },
+        );
+        const body = (enrollmentSequence: number) => ({
+          installationId: installation,
+          deviceName: "Synthetic iPhone",
+          enrollmentSequence,
+        });
+        let a: Promise<Response> | undefined;
+        let b: Promise<Response> | undefined;
+        try {
+          a = enroll(oauthToken(), body(aSequence));
+          await aAtRecord;
+          b = enroll(oauthToken(), body(bSequence));
+          let aResponse: Response;
+          let bResponse: Response;
+          if (order === "later swaps first") {
+            bResponse = await b;
+            releaseA();
+            aResponse = await a;
+            // A is recorded after B's key is current, so it is refused
+            // before anything changes, and its token stays unused.
+            expect(aResponse.status).toBe(409);
+            expect(await aResponse.json()).toMatchObject({
+              code: "stale_enrollment",
+            });
+          } else {
+            await bAtSwap;
+            releaseA();
+            aResponse = await a;
+            releaseB();
+            bResponse = await b;
+            // A's swap finds B still being issued, so it never replaces
+            // the current key, and its own key is revoked.
+            expect(aResponse.status).toBe(503);
+            expect(await aResponse.json()).toMatchObject({
+              code: "issuance_failed",
+            });
+            const [aRow] =
+              await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${aSequence}`;
+            const aKey = fake.keys.find(
+              (k) => k.claims?.enrollment === String(aRow?.attempt_id),
+            );
+            expect(aKey?.revoked).toBe(true);
+          }
+          expect(bResponse.status).toBe(201);
+          const bSecret = (await bResponse.json()).secret;
+          expect((await importWith(bSecret)).status).toBe(200);
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            bSecret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+          expect((await importWith(previous)).status).toBe(401);
+        } finally {
+          releaseA();
+          releaseB();
+          await Promise.allSettled([a, b]);
+          recording.mockRestore();
+          swapping.mockRestore();
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "refuses a stale attempt and leaves its token unused",
+    async () => {
+      const current = await enrolled();
+      const [active] =
+        await database()`SELECT enrollment_sequence FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`;
+      const token = oauthToken();
+      const stale = await enroll(token, {
+        installationId: installation,
+        deviceName: "Synthetic iPhone",
+        enrollmentSequence: Number(active?.enrollment_sequence),
+      });
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ code: "stale_enrollment" });
+      expect((await importWith(current)).status).toBe(200);
+      // The app re-links with a later count, and the same token works.
+      expect((await enroll(token)).status).toBe(201);
+      expect((await importWith(current)).status).toBe(401);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "the commit-cut proxy refuses a client's SSL request and reaches the database as the driver does",
+    async () => {
+      const proxy = await commitCutProxy(new URL(isolated.url));
+      const client = postgres(proxy.url, {
+        max: 1,
+        prepare: false,
+        ssl: "prefer",
+        onnotice: () => undefined,
+      });
+      const direct = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        const [proxied] =
+          await client`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        expect(proxy.refusedEncryption).toBe(1);
+        const [straight] =
+          await direct`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        expect(proxied?.ssl).toBe(straight?.ssl);
+      } finally {
+        await client.end();
+        await direct.end();
+        await proxy.close();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "the commit-cut proxy reaches a database without TLS in plaintext under allow and prefer, as the driver does",
+    async () => {
+      const direct = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        const [row] =
+          await direct`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        // Only a database that declines TLS shows the fallback.
+        if (row?.ssl !== false) return;
+        for (const mode of ["allow", "prefer", "require"] as const) {
+          const target = new URL(isolated.url);
+          target.searchParams.set("sslmode", mode);
+          const proxy = await commitCutProxy(target, { negotiationMs: 2000 });
+          const client = postgres(proxy.url, {
+            max: 1,
+            prepare: false,
+            onnotice: () => undefined,
+            connect_timeout: 3,
+          });
+          const driver = postgres(target.href, {
+            max: 1,
+            prepare: false,
+            onnotice: () => undefined,
+            connect_timeout: 3,
+          });
+          const outcome = (sql: typeof client) =>
+            sql`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`.then(
+              ([r]) => (r?.ssl === false ? "plaintext" : "tls"),
+              () => "refused",
+            );
+          try {
+            const expected = mode === "require" ? "refused" : "plaintext";
+            expect({ mode, proxy: await outcome(client) }).toEqual({
+              mode,
+              proxy: expected,
+            });
+            expect({ mode, driver: await outcome(driver) }).toEqual({
+              mode,
+              driver: expected,
+            });
+          } finally {
+            await client.end({ timeout: 1 }).catch(() => undefined);
+            await driver.end({ timeout: 1 }).catch(() => undefined);
+            await proxy.close();
+          }
+        }
+      } finally {
+        await direct.end();
+      }
+    },
+    20_000,
   );
 
   test.skipIf(!configured)(
@@ -1669,6 +1902,7 @@ describe("device enrollment", () => {
                 digest: "7".repeat(64),
                 attemptId,
                 installationId: installation,
+                enrollmentSequence: 1,
               },
               { installations: 3, perHour: 5 },
             ),
@@ -1750,9 +1984,9 @@ describe("device attempt windows and contention", () => {
     async () => {
       await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
       const current = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"d".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at,enrollment_sequence) VALUES(${owner},${"d".repeat(64)},${current},${installation},'issued','ak_id_current',true,now(),1)`;
       const next = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"e".repeat(64)},${next},${installation})`;
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,enrollment_sequence) VALUES(${owner},${"e".repeat(64)},${next},${installation},2)`;
       const active = async () =>
         (
           await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
