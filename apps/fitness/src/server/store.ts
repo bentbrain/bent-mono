@@ -310,6 +310,35 @@ export async function countEnrollmentAttempt(
     await sql`DELETE FROM fitness_device_attempt_windows WHERE window_start < now() - interval '1 hour'`;
   return { allowed: true, wait };
 }
+/**
+ * Records that the app sent this enrollment sequence for the installation,
+ * in one short transaction under the account lock, before any limit is
+ * checked or the token is used. The installation's high-water mark only
+ * rises, and it stays even if the rest of the request is refused, so an
+ * attempt the app started earlier can never take over from a later one,
+ * whatever became of the later one. Returns false, changing nothing, when
+ * a sequence this high was already seen: on the mark, or on an attempt
+ * recorded before the mark existed. A lock or statement wait that runs out
+ * throws, and nothing changes.
+ */
+export async function claimSequence(
+  owner: string,
+  installationId: string,
+  sequence: number,
+) {
+  return underAccount(owner, async (tx) => {
+    const [seen] =
+      await tx`SELECT coalesce(max(enrollment_sequence), 0) AS recorded FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${installationId}`;
+    if (Number(seen?.recorded ?? 0) >= sequence) return false;
+    const rows =
+      await tx`INSERT INTO fitness_device_sequences(owner_id, installation_id, max_seen) VALUES(${owner}, ${installationId}, ${sequence}) ON CONFLICT (owner_id, installation_id) DO UPDATE SET max_seen=EXCLUDED.max_seen, updated_at=now() WHERE fitness_device_sequences.max_seen < EXCLUDED.max_seen RETURNING 1`;
+    return rows.length === 1;
+  });
+}
+/** Whether a wait for a lock or statement ran out, so nothing changed. */
+export function enrollmentBusy(error: unknown) {
+  return lockWaitEnded(error);
+}
 /** Why an enrollment attempt was refused before it used the token. */
 export type EnrollmentRefusal =
   | { reason: "token_used" }
@@ -334,8 +363,8 @@ class Refused extends Error {
  *
  * - the token was already used, by the ID Clerk verified for it or by the
  *   digest of its raw string, which earlier enrollments recorded alone;
- * - the installation's active key came from an attempt with the same or a
- *   higher `enrollmentSequence`, so this one is stale;
+ * - the app has sent a higher `enrollmentSequence` for the installation
+ *   since this attempt claimed its own, so this one is stale;
  * - the hourly limit is full, counting this attempt: keys created in the
  *   last hour and attempts that may have created one; or
  * - the owner's other installations with an active key or an attempt
@@ -366,10 +395,10 @@ export async function recordEnrollment(
       const used =
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE token_id=${attempt.tokenId} OR token_digest=${attempt.digest}`;
       if (used.length) throw new Refused({ reason: "token_used" });
-      // An attempt the app started before the installation's current key
-      // can never replace it.
+      // The app has started a later attempt since this one claimed its
+      // sequence, so this one can never keep a key.
       const later =
-        await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND coalesce(enrollment_sequence, 0) >= ${attempt.enrollmentSequence}`;
+        await tx`SELECT 1 FROM fitness_device_sequences WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND max_seen > ${attempt.enrollmentSequence}`;
       if (later.length) throw new Refused({ reason: "stale" });
       const charges = await hourlyCharges(tx, owner);
       if (charges.length + 1 > limits.perHour) {
@@ -563,8 +592,9 @@ class NotActivated extends Error {
  * was abandoned: it becomes ambiguous, keeping its charge, with reason
  * `expired`. One whose installation has another attempt with the same or a
  * higher `enrollmentSequence` that is active, issued, or pending within
- * the grace becomes failed, keeping its charge, with reason `superseded`,
- * and that attempt's key stays or can still be swapped in. Returns whether this attempt
+ * the grace, or whose app has since sent a higher sequence at all, becomes
+ * failed, keeping its charge, with reason `superseded`, and the current key
+ * stays. Returns whether this attempt
  * became active, and the keys it replaced, which the caller revokes after
  * the commit. An error after the COMMIT was sent throws
  * CommitOutcomeUnknown.
@@ -605,7 +635,12 @@ export async function swapEnrollment(
       // rows are locked too, so none changes while this decides.
       const newer =
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND attempt_id<>${attempt.attemptId} AND coalesce(enrollment_sequence, 0) >= ${own.sequence} AND (active OR key_state='issued' OR (key_state='pending' AND created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}))) FOR UPDATE`;
-      if (newer.length) {
+      // Nor does it once the app has sent a higher sequence at all, even
+      // for an attempt that then failed or was refused: the app keeps only
+      // the reply to its latest attempt.
+      const [mark] =
+        await tx`SELECT max_seen FROM fitness_device_sequences WHERE owner_id=${owner} AND installation_id=${attempt.installationId}`;
+      if (newer.length || Number(mark?.max_seen ?? 0) > Number(own.sequence)) {
         await tx`UPDATE fitness_device_enrollments SET key_state='failed', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
         return {
           activated: false,
@@ -737,6 +772,12 @@ const enrollmentColumns = [
   "enrollment_sequence",
 ];
 const windowColumns = ["window_start", "attempts"];
+const sequenceColumns = [
+  "owner_id",
+  "installation_id",
+  "max_seen",
+  "updated_at",
+];
 /**
  * Whether enrollment can use its tables, in one query: each table and its
  * columns are in the connection's schema, and the database user may read,
@@ -753,20 +794,27 @@ export async function enrollmentTableReady(sql: Sql = database()) {
       (SELECT count(*)::int FROM information_schema.columns
         WHERE table_schema = current_schema() AND (
           (table_name = 'fitness_device_enrollments' AND column_name IN ${sql(enrollmentColumns)})
-          OR (table_name = 'fitness_device_attempt_windows' AND column_name IN ${sql(windowColumns)}))) AS columns,
+          OR (table_name = 'fitness_device_attempt_windows' AND column_name IN ${sql(windowColumns)})
+          OR (table_name = 'fitness_device_sequences' AND column_name IN ${sql(sequenceColumns)}))) AS columns,
       CASE
         WHEN to_regclass('fitness_device_enrollments') IS NULL
           OR to_regclass('fitness_device_attempt_windows') IS NULL
+          OR to_regclass('fitness_device_sequences') IS NULL
           OR to_regclass('fitness_accounts') IS NULL THEN false
         ELSE ${grants("fitness_device_enrollments")}
           AND ${grants("fitness_device_attempt_windows")}
+          AND has_table_privilege(current_user, 'fitness_device_sequences', 'SELECT')
+          AND has_table_privilege(current_user, 'fitness_device_sequences', 'INSERT')
+          AND has_table_privilege(current_user, 'fitness_device_sequences', 'UPDATE')
           AND has_table_privilege(current_user, 'fitness_accounts', 'SELECT')
           AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT')
           AND has_table_privilege(current_user, 'fitness_accounts', 'UPDATE')
       END AS granted`;
   return (
-    row?.columns === enrollmentColumns.length + windowColumns.length &&
-    row.granted === true
+    row?.columns ===
+      enrollmentColumns.length +
+        windowColumns.length +
+        sequenceColumns.length && row.granted === true
   );
 }
 async function lockAccount(sql: TransactionSql, owner: string) {

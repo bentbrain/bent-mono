@@ -124,3 +124,13 @@ CREATE TABLE IF NOT EXISTS fitness_device_attempt_windows (
   window_start timestamptz PRIMARY KEY,
   attempts integer NOT NULL
 );
+-- The highest enrollment sequence each installation's app has sent, kept
+-- whatever became of that attempt, so an earlier attempt never takes over
+-- from a later one, even a later one that failed.
+CREATE TABLE IF NOT EXISTS fitness_device_sequences (
+  owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
+  installation_id uuid NOT NULL,
+  max_seen bigint NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (owner_id, installation_id)
+);

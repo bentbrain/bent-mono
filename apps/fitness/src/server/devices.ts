@@ -47,10 +47,12 @@ import {
   activeDevices,
   attemptUsable,
   chargeAmbiguousEnrollment,
+  claimSequence,
   countEnrollmentAttempt,
   deactivateDeviceKey,
   deactivateKeys,
   deviceKeyActive,
+  enrollmentBusy,
   enrollmentTableReady,
   recordEnrollment,
   settleEnrollment,
@@ -211,6 +213,12 @@ const tokenUsed = () =>
     409,
     "enrollment_token_used",
     "This sign-in was already used to connect a device. Sign in again.",
+  );
+const stale = () =>
+  failure(
+    409,
+    "stale_enrollment",
+    "This iPhone has connected again since. Start a new connection.",
   );
 const issuanceFailed = () =>
   failure(
@@ -385,19 +393,24 @@ function logged(event: string, error: unknown) {
  * that locks the account row first, as an import does, and each statement
  * and lock wait in it is limited:
  *
- * 1. Clerk is asked about each active key on its own. One it confirms
+ * 1. The app's `enrollmentSequence` is claimed for the installation in its
+ *    own short transaction. A sequence no higher than one the
+ *    installation already sent is refused with `409 stale_enrollment`.
+ *    The claim stays even if a later check refuses the request, and the
+ *    token is untouched; a busy account replies `503 issuance_pending`.
+ * 2. Clerk is asked about each active key on its own. One it confirms
  *    revoked, expired or deleted stops being active. Any other answer
  *    fails the enrollment with `503 auth_unavailable` and changes nothing.
- * 2. Clerk's key list, within `cleanupMs`, finds keys left by attempts
+ * 3. Clerk's key list, within `cleanupMs`, finds keys left by attempts
  *    that issued none, ambiguous or failed, which then count toward the
  *    hourly limit from their creation, and keys to clean up. A key missing from the list is never
  *    treated as gone, and a list that fails or runs out of time is
  *    skipped.
- * 3. The attempt is recorded, which uses the token and reserves its place
+ * 4. The attempt is recorded, which uses the token and reserves its place
  *    in the hourly limit. Under the account lock, the same transaction
  *    refuses a used token with `409 enrollment_token_used`; an attempt
- *    whose `enrollmentSequence` is not above that of the installation's
- *    active key with `409 stale_enrollment`; a full hourly limit with `429
+ *    whose installation's app has sent a higher sequence since with `409
+ *    stale_enrollment`; a full hourly limit with `429
  *    rate_limited`; and an installation over the limit with `409
  *    device_limit`, counting this attempt each time. Other installations
  *    count while they have an active key or an attempt still being issued,
@@ -405,12 +418,12 @@ function logged(event: string, error: unknown) {
  *    together. A refusal, or a transaction that times out waiting, changes
  *    nothing and leaves the token unused; a timeout replies `503
  *    issuance_pending`.
- * 4. Attempts still pending after the grace were abandoned and become
+ * 5. Attempts still pending after the grace were abandoned and become
  *    ambiguous, so they can never be activated. Clerk then revokes keys no
  *    enrollment needs: keys without an active row, except one an attempt
  *    still pending may yet swap in. Active keys, this installation's
  *    included, keep importing.
- * 5. Just before the create, the attempt must still be pending within the
+ * 6. Just before the create, the attempt must still be pending within the
  *    grace, and the create must end within `attemptMs` of recording, so a
  *    request that paused for long creates nothing and replies `503
  *    issuance_failed`. Clerk creates the key with the attempt ID in its
@@ -423,16 +436,16 @@ function logged(event: string, error: unknown) {
  *    ambiguous, still counting toward the hourly limit for up to 24 hours,
  *    since Clerk may have made the key. The reply is `503
  *    issuance_failed`, and a key Clerk made for the attempt cannot import.
- * 6. One transaction locks the installation's rows, stops its current key
+ * 7. One transaction locks the installation's rows, stops its current key
  *    and makes the new one active, charged from the key's creation, if the
  *    attempt is still pending from within the grace by the database clock
  *    and activating it keeps the installations with active keys within the
  *    limit. An attempt that aged past the grace is never activated; it
  *    becomes ambiguous and keeps its charge. Nor is one while another
  *    attempt for the installation with the same or a higher
- *    `enrollmentSequence` has its key or is still being issued: that key
- *    stays or can still be swapped in, and this attempt fails, keeping its
- *    charge. After the swap commits, Clerk
+ *    `enrollmentSequence` has its key or is still being issued, or once
+ *    the app has sent a higher sequence at all: the current key stays, and
+ *    this attempt fails, keeping its charge. After the swap commits, Clerk
  *    revokes the replaced key within `replacedRevokeMs`; a revoke that
  *    fails is logged, and a later enrollment's cleanup revokes the key,
  *    which can no longer import. If the swap does not happen, the current
@@ -442,7 +455,7 @@ function logged(event: string, error: unknown) {
  *    progress. A committed swap's replaced keys are the ones it recorded on
  *    the attempt's row, and when that read cannot tell, both keys are left
  *    for a later enrollment.
- * 7. Before replying `201`, the attempt must still be the installation's
+ * 8. Before replying `201`, the attempt must still be the installation's
  *    active one. A later enrollment that replaced it meanwhile makes this
  *    request reply `503 issuance_failed`. This check is best effort: when
  *    its read fails, the key is returned, and the app's own check that a
@@ -520,6 +533,21 @@ export async function handleDeviceEnroll(request: Request) {
   const deviceName = parsed.data.deviceName;
   const enrollmentSequence = parsed.data.enrollmentSequence;
 
+  // The app's sequence is claimed first, before any limit or the token: a
+  // sequence the installation has already sent is refused, and the claim
+  // stays even if the rest of the request is refused.
+  try {
+    if (!(await claimSequence(userId, installationId, enrollmentSequence)))
+      return stale();
+  } catch (error) {
+    // The token is unused either way; the app tries again with a new
+    // sequence.
+    if (enrollmentBusy(error) || error instanceof CommitOutcomeUnknown)
+      return busy();
+    logged("fitness.devices.issuance_failed", error);
+    return authUnavailable();
+  }
+
   const token = headerToken(request) ?? "";
   const digest = createHash("sha256").update(token).digest("hex");
   const attemptId = crypto.randomUUID();
@@ -569,12 +597,7 @@ export async function handleDeviceEnroll(request: Request) {
       : authUnavailable();
   }
   if (refusal?.reason === "token_used") return tokenUsed();
-  if (refusal?.reason === "stale")
-    return failure(
-      409,
-      "stale_enrollment",
-      "This iPhone has connected again since. Start a new connection.",
-    );
+  if (refusal?.reason === "stale") return stale();
   if (refusal?.reason === "busy") return busy();
   if (refusal?.reason === "rate_limited")
     return failure(

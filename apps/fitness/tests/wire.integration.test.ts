@@ -58,6 +58,7 @@ const installation = "3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0b";
 async function clean() {
   const sql = database();
   await sql`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+  await sql`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;

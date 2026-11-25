@@ -51,6 +51,7 @@ const otherInstallation = (n: number) =>
 async function clean() {
   const sql = database();
   await sql`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+  await sql`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
@@ -83,6 +84,7 @@ beforeEach(async () => {
   store.setEnrollmentWait();
   if (configured) {
     await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+    await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
   }
 });
 
@@ -415,59 +417,30 @@ describe("device enrollment", () => {
     "keeps one active key when two enrollments for an installation overlap",
     async () => {
       const previous = await enrolled();
-      // Both creates wait until both have started.
-      let release = () => undefined as void;
-      fake.stall = new Promise<void>((resolve) => {
-        release = resolve;
+      // The app starts two attempts at once; the second has the higher
+      // sequence.
+      const lower = ++sequence;
+      const higher = ++sequence;
+      const body = (enrollmentSequence: number) => ({
+        installationId: installation,
+        deviceName: "Synthetic iPhone",
+        enrollmentSequence,
       });
-      let started = 0;
-      let both = () => undefined as void;
-      const creating = new Promise<void>((resolve) => {
-        both = resolve;
-      });
-      fake.onCreate = () => {
-        if (++started === 2) both();
-      };
-      const first = enroll(oauthToken());
-      const second = enroll(oauthToken());
-      let replies: Response[];
-      try {
-        await creating;
-        // Ordinary Fitness queries still get a connection, and the current
-        // key keeps importing until a replacement is swapped in.
-        expect((await loadRecords(owner)).length).toBeGreaterThan(0);
-        expect((await importWith(previous)).status).toBe(200);
-        release();
-        replies = await Promise.all([first, second]);
-      } finally {
-        release();
-        fake.stall = null;
-        fake.onCreate = null;
-      }
-      // The swaps take turns on the account row, and the attempt with the
-      // higher sequence wins whichever runs first: the other is refused,
-      // as it would be replaced.
-      const [newest] =
-        await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY enrollment_sequence DESC LIMIT 1`;
-      const winner = fake.keys.find(
-        (k) => k.claims?.enrollment === String(newest?.attempt_id),
-      );
-      if (!winner) throw new Error("Expected the newer attempt's key.");
-      const bodies = await Promise.all(replies.map((r) => r.json()));
-      const answers = replies.map((r, n) => ({
-        status: r.status,
-        secret: bodies[n]?.secret as string | undefined,
-      }));
-      expect(answers).toContainEqual({ status: 201, secret: winner.secret });
-      expect(answers.map((a) => a.status).sort()).toEqual([201, 503]);
-      expect((await rows()).filter((r) => r.active)).toHaveLength(1);
-      expect(activeFor(installation).map((k) => k.secret)).toEqual([
-        winner.secret,
+      const [first, second] = await Promise.all([
+        enroll(oauthToken(), body(lower)),
+        enroll(oauthToken(), body(higher)),
       ]);
-      expect((await importWith(winner.secret)).status).toBe(200);
-      for (const answer of answers)
-        if (answer.secret && answer.secret !== winner.secret)
-          expect((await importWith(answer.secret)).status).toBe(401);
+      // Whichever order they run in, the higher sequence keeps its key. The
+      // other is refused when it is recorded, or at its swap.
+      expect(second.status).toBe(201);
+      const secret = (await second.json()).secret;
+      expect([409, 503]).toContain(first.status);
+      expect(await first.json()).toMatchObject({
+        code: first.status === 409 ? "stale_enrollment" : "issuance_failed",
+      });
+      expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      expect(activeFor(installation).map((k) => k.secret)).toEqual([secret]);
+      expect((await importWith(secret)).status).toBe(200);
       expect((await importWith(previous)).status).toBe(401);
     },
   );
@@ -1065,19 +1038,17 @@ describe("device enrollment", () => {
             aResponse = await a;
             releaseB();
             bResponse = await b;
-            // A's swap finds B still being issued, so it never replaces
-            // the current key, and its own key is revoked.
-            expect(aResponse.status).toBe(503);
+            // B is still being issued, but its higher sequence was claimed,
+            // so A is refused when it is recorded and never gets a key.
+            expect(aResponse.status).toBe(409);
             expect(await aResponse.json()).toMatchObject({
-              code: "issuance_failed",
+              code: "stale_enrollment",
             });
-            const [aRow] =
-              await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${aSequence}`;
-            const aKey = fake.keys.find(
-              (k) => k.claims?.enrollment === String(aRow?.attempt_id),
-            );
-            expect(aKey?.revoked).toBe(true);
           }
+          // A never got as far as a key.
+          expect(
+            await database()`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${aSequence}`,
+          ).toHaveLength(0);
           expect(bResponse.status).toBe(201);
           const bSecret = (await bResponse.json()).secret;
           expect((await importWith(bSecret)).status).toBe(200);
@@ -1092,6 +1063,116 @@ describe("device enrollment", () => {
           await Promise.allSettled([a, b]);
           recording.mockRestore();
           swapping.mockRestore();
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps the saved key when a later attempt fails and an earlier one resumes",
+    async () => {
+      for (const failure of ["create rejected", "hourly limit"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
+        fake.keys = [];
+        // The phone saved this key.
+        const saved = await enrolled();
+        // The next attempt gets its key, then waits before its swap.
+        const original = store.swapEnrollment;
+        let resume = () => undefined as void;
+        const gate = new Promise<void>((resolve) => {
+          resume = resolve;
+        });
+        let reached = () => undefined as void;
+        const atSwap = new Promise<void>((resolve) => {
+          reached = resolve;
+        });
+        let calls = 0;
+        const spy = spyOn(store, "swapEnrollment").mockImplementation(
+          async (...args) => {
+            if (++calls === 1) {
+              reached();
+              await gate;
+            }
+            return original(...args);
+          },
+        );
+        const earlierSequence = ++sequence;
+        const laterSequence = ++sequence;
+        const body = (enrollmentSequence: number) => ({
+          installationId: installation,
+          deviceName: "Synthetic iPhone",
+          enrollmentSequence,
+        });
+        let earlier: Promise<Response> | undefined;
+        try {
+          earlier = enroll(oauthToken(), body(earlierSequence));
+          await atSwap;
+          // The app starts a later attempt, which fails.
+          if (failure === "create rejected") {
+            fake.create = "rejected";
+            const later = await enroll(oauthToken(), body(laterSequence));
+            fake.create = "ok";
+            expect({ failure, status: later.status }).toEqual({
+              failure,
+              status: 503,
+            });
+          } else {
+            // The hour fills up first, so the later attempt is refused
+            // before it is recorded.
+            await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,charged_at) SELECT ${owner}, md5(random()::text) || md5(random()::text), gen_random_uuid(), ${otherInstallation(9)}, 'issued', now() FROM generate_series(1, 3)`;
+            const later = await enroll(oauthToken(), body(laterSequence));
+            expect({ failure, status: later.status }).toEqual({
+              failure,
+              status: 429,
+            });
+          }
+          resume();
+          const response = await earlier;
+          // The app keeps only its latest attempt's reply, so the earlier
+          // attempt never replaces the saved key.
+          expect({ failure, status: response.status }).toEqual({
+            failure,
+            status: 503,
+          });
+          expect({ failure, saved: (await importWith(saved)).status }).toEqual({
+            failure,
+            saved: 200,
+          });
+          const [row] =
+            await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${earlierSequence}`;
+          const earlierKey = fake.keys.find(
+            (k) => k.claims?.enrollment === String(row?.attempt_id),
+          );
+          expect({ failure, revoked: earlierKey?.revoked }).toEqual({
+            failure,
+            revoked: true,
+          });
+          // The later sequence was claimed even though its attempt failed:
+          // a retry with it is refused without using its fresh token, and
+          // a higher one goes ahead with that token.
+          const token = oauthToken();
+          const retry = await enroll(token, body(laterSequence));
+          expect({ failure, status: retry.status }).toEqual({
+            failure,
+            status: 409,
+          });
+          expect(await retry.json()).toMatchObject({
+            code: "stale_enrollment",
+          });
+          if (failure === "hourly limit")
+            await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${otherInstallation(9)}`;
+          const higher = await enroll(token);
+          expect({ failure, status: higher.status }).toEqual({
+            failure,
+            status: 201,
+          });
+          expect((await importWith(saved)).status).toBe(401);
+        } finally {
+          resume();
+          await earlier;
+          spy.mockRestore();
+          fake.create = "ok";
         }
       }
     },
@@ -1877,7 +1958,7 @@ describe("device enrollment", () => {
         );
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
         await admin.unsafe(
-          `GRANT INSERT, UPDATE, DELETE ON ${schema}.fitness_device_enrollments TO ${role}; GRANT INSERT, UPDATE ON ${schema}.fitness_device_attempt_windows TO ${role}; GRANT INSERT ON ${schema}.fitness_accounts TO ${role}`,
+          `GRANT INSERT, UPDATE, DELETE ON ${schema}.fitness_device_enrollments TO ${role}; GRANT INSERT, UPDATE ON ${schema}.fitness_device_attempt_windows, ${schema}.fitness_device_sequences TO ${role}; GRANT INSERT ON ${schema}.fitness_accounts TO ${role}`,
         );
         // Pruning old attempt windows needs DELETE too.
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
