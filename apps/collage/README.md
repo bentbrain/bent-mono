@@ -49,7 +49,30 @@ bun run knip
 bun run build
 ```
 
-`bun run test` runs the Convex security, Clerk handshake and Payload storage schema suites.
+`bun run test` runs the Convex security (`test:security`), Clerk handshake (`test:auth`) and Payload storage schema (`test:storage-schema`) suites.
+
+`test:storage-schema` creates and alters `public.media`, so it requires a fresh disposable local PostgreSQL database named `payload_migration_test` on `localhost` or `127.0.0.1` alongside synthetic Payload and R2 fixture values (matching `.github/workflows/quality.yml` and `scripts/ci-check.mjs`):
+
+```sh
+docker run --rm -d --name maya-collage-test-db \
+  -e POSTGRES_USER=test \
+  -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=payload_migration_test \
+  -p 5433:5432 postgres:16
+
+SKIP_ENV_VALIDATION=1 \
+PAYLOAD_SECRET=synthetic-build-fixture \
+PAYLOAD_MIGRATION_TEST_DATABASE_URI=postgresql://test:test@127.0.0.1:5433/payload_migration_test \
+PAYLOAD_STORAGE_SOURCE=r2 \
+R2_BUCKET=fixture-bucket \
+R2_ENDPOINT=https://storage.example.invalid \
+R2_PUBLIC_URL=https://media.example.invalid \
+R2_ACCESS_KEY_ID=fixture-access \
+R2_SECRET_ACCESS_KEY=fixture-secret \
+bun run test
+
+docker rm -f maya-collage-test-db
+```
 
 ## Deployment
 
