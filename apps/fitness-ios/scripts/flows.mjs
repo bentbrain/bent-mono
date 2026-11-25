@@ -94,10 +94,18 @@ const appPath = execFileSync("node", ["scripts/native.mjs", "app-path"], { cwd: 
   .split("\n")
   .at(-1);
 
-const harness = spawn("bun", ["test", "tests/ios-simulator.harness.test.ts", "--timeout", "3600000"], {
+// The harness serves every flow, so it runs for up to an hour: its test
+// timeout, and the Fitness test deadline, which is 15 minutes by default.
+const harnessLimitMs = "3600000";
+const harness = spawn("bun", ["test", "tests/ios-simulator.harness.test.ts", "--timeout", harnessLimitMs], {
   cwd: fitness,
   stdio: "inherit",
-  env: { ...process.env, FITNESS_IOS_SIM_PORT: String(port), FITNESS_IOS_SIM_TIMEZONE: timezone },
+  env: {
+    ...process.env,
+    FITNESS_IOS_SIM_PORT: String(port),
+    FITNESS_IOS_SIM_TIMEZONE: timezone,
+    FITNESS_TEST_DEADLINE_MS: harnessLimitMs,
+  },
 });
 let failed = false;
 try {

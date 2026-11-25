@@ -70,7 +70,7 @@ On a newly booted Simulator, the sheet can take more than 20 seconds to appear, 
 
 ### Simulator flows
 
-`scripts/flows.mjs` builds the development variant against a local harness, then runs each flow on a new Simulator, once more on another new Simulator if it fails. Each attempt starts with `POST /__reset`, which gives the harness an empty account and zero request counts. In every flow, the harness counts no imports before consent, after a relaunch at the consent screen, or after a relaunch at the Health step.
+`scripts/flows.mjs` builds the development variant against a local harness, then runs each flow on a new Simulator, once more on another new Simulator if it fails. Each attempt starts with `POST /__reset`, which gives the harness an empty account and zero request counts. The harness serves every flow, so it runs with `FITNESS_TEST_DEADLINE_MS=3600000` in place of the Fitness tests' 15-minute deadline. In every flow, the harness counts no imports before consent, after a relaunch at the consent screen, or after a relaunch at the Health step.
 
 - **Denied:** sign in, confirm consent, deny Health access. The app shows that it can read nothing, the sync sends no import request, and Disconnect revokes the key.
 - **Allowed:** sign in, confirm consent, allow Health access to all history. The sync sends the earliest weigh-in for each seeded day and three runs: 5 and 4.2 km recorded with their workouts, and 3.1 km from the distance sample attached after the workout was saved. The run without a distance waits for distance access, and the weigh-in dated ahead waits until it is due. A second Sync now, waited for by its own completion time, sends no import request. Send 1 run without distance then sends the waiting run, which Fitness records as 0 km.
