@@ -105,13 +105,33 @@ test.skipIf(!configured)(
           () => null,
           (error: unknown) => error,
         );
-      await terminateWhenSleeping(admin as postgres.Sql, await backend);
+      // A transaction that fails before reporting its backend ends the wait
+      // with its own error, so teardown still runs.
+      const pid = await Promise.race([
+        backend,
+        outcome.then((error) => {
+          throw (
+            error ??
+            new Error("The transaction ended before it reported its backend.")
+          );
+        }),
+      ]);
+      await terminateWhenSleeping(admin as postgres.Sql, pid);
 
       const error = await outcome;
       expect(error).toBeInstanceOf(Error);
       expect(["57P01", "CONNECTION_CLOSED"]).toContain(code(error) ?? "");
 
-      const late = await lateWrite;
+      // The callback reports the late write before the transaction settles;
+      // a callback that ended earlier fails here instead of hanging.
+      const late = await Promise.race([
+        lateWrite,
+        outcome.then(() => {
+          throw new Error(
+            "The transaction ended before it attempted the late write.",
+          );
+        }),
+      ]);
       expect(late.ran).toBe(false);
       expect(late.ran ? undefined : late.error).toBeInstanceOf(Error);
 
