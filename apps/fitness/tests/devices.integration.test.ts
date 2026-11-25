@@ -15,12 +15,15 @@ import {
   resource,
   syntheticOwner,
 } from "./clerk-fake";
+import { isolatedSchema } from "./isolated-schema";
 
 const fake = installClerkFake();
 const configured = Boolean(process.env.FITNESS_TEST_DATABASE_URL);
 if (process.env.CI && !configured)
   throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");
-if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
+// This suite runs in a schema of its own, dropped when it ends.
+const isolated = isolatedSchema("fitness_devices");
+if (configured) configure(isolated.url);
 const environment = { ...process.env };
 const { default: postgres } = await import("postgres");
 const { database } = await import("../src/server/db");
@@ -54,6 +57,7 @@ async function clean() {
 }
 beforeAll(async () => {
   if (!configured) return;
+  await isolated.create();
   await database().unsafe(
     await Bun.file(new URL("../schema.sql", import.meta.url)).text(),
   );
@@ -66,7 +70,11 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
-  if (configured) await clean();
+  if (!configured) return;
+  await database().end();
+  await isolated.drop();
+  // Later suites use the shared test database.
+  process.env.DATABASE_URL = process.env.FITNESS_TEST_DATABASE_URL;
 });
 beforeEach(async () => {
   fake.reset();
@@ -462,7 +470,7 @@ describe("device enrollment", () => {
       // Clerk's own list does not count: the late key appears, then the
       // oldest attempt leaves the hour.
       fake.appear();
-      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '2 hours' WHERE owner_id=${owner} AND created_at = (SELECT min(created_at) FROM fitness_device_enrollments WHERE owner_id=${owner})`;
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '2 hours', charged_at = now() - interval '2 hours' WHERE owner_id=${owner} AND created_at = (SELECT min(created_at) FROM fitness_device_enrollments WHERE owner_id=${owner})`;
       expect((await enroll(oauthToken())).status).toBe(201);
     },
   );
@@ -497,6 +505,78 @@ describe("device enrollment", () => {
       expect(active.map((r) => r.installation_id)).toEqual(
         [3, 4, 5].map(otherInstallation),
       );
+    },
+  );
+
+  test.skipIf(!configured)(
+    "charges the hourly limit from when each key was created",
+    async () => {
+      // Recorded 70 minutes ago, but Clerk created the keys 50 minutes ago.
+      const insert = (charged: string | null, state: string, age: string) =>
+        database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,charged_at,created_at) VALUES(${owner},${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")},${crypto.randomUUID()},${otherInstallation(9)},${state},${charged === null ? null : database()`now() - ${charged}::interval`},now() - ${age}::interval)`;
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      for (let n = 0; n < 4; n++)
+        await insert("50 minutes", "issued", "70 minutes");
+      // An attempt whose creation is unconfirmed counts from when it was recorded.
+      await insert(null, "ambiguous", "90 minutes");
+      const limited = await enroll(oauthToken());
+      expect(limited.status).toBe(429);
+      const wait = Number(limited.headers.get("retry-after"));
+      // The soonest to leave is a key charged 50 minutes ago.
+      expect(wait).toBeGreaterThan(9 * 60);
+      expect(wait).toBeLessThanOrEqual(10 * 60 + 1);
+      // Past its two-hour bound, the ambiguous attempt stops counting.
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '121 minutes' WHERE owner_id=${owner} AND key_state='ambiguous'`;
+      expect((await enroll(oauthToken())).status).toBe(201);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps a valid key active when a changing list hides it",
+    async () => {
+      const kept = await enrolled(otherInstallation(1));
+      const [keptKey] = activeFor(otherInstallation(1));
+      if (!keptKey) throw new Error("Expected the key.");
+      // Two unrelated keys sort ahead of it, one older after it.
+      const later = Date.now() + 60_000;
+      const [first] = [
+        fake.addKey({ secret: "ak_newest", createdAt: later + 1000 }),
+        fake.addKey({ secret: "ak_newer", createdAt: later }),
+        fake.addKey({
+          secret: "ak_older",
+          createdAt: keptKey.createdAt - 1000,
+        }),
+      ];
+      fake.pageSize = 2;
+      // Deleting a key on the first page shifts the device key out of view.
+      let calls = 0;
+      fake.afterList = () => {
+        if (++calls === 1) fake.keys = fake.keys.filter((k) => k !== first);
+      };
+      expect((await enrolled(otherInstallation(2))) === kept).toBe(false);
+      expect(keptKey.revoked).toBe(false);
+      expect((await importWith(kept)).status).toBe(200);
+      const active =
+        await database()`SELECT installation_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active ORDER BY installation_id`;
+      expect(active.map((r) => r.installation_id)).toEqual(
+        [1, 2].map(otherInstallation),
+      );
+    },
+  );
+
+  test.skipIf(!configured)(
+    "changes nothing when Clerk cannot say whether a key exists",
+    async () => {
+      const kept = await enrolled(otherInstallation(1));
+      const [keptKey] = activeFor(otherInstallation(1));
+      if (!keptKey) throw new Error("Expected the key.");
+      fake.getFails.add(keptKey.id);
+      const before = await rows();
+      const response = await enroll(oauthToken());
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
+      expect(await rows()).toEqual(before);
+      expect((await importWith(kept)).status).toBe(200);
     },
   );
 
@@ -655,7 +735,7 @@ describe("device enrollment", () => {
 });
 
 describe("device issuance lease and attempt windows", () => {
-  const url = process.env.FITNESS_TEST_DATABASE_URL ?? "";
+  const url = isolated.url;
   const client = () =>
     postgres(url, { max: 2, prepare: false, onnotice: () => undefined });
 
@@ -720,28 +800,111 @@ describe("device issuance lease and attempt windows", () => {
   });
 
   test.skipIf(!configured)(
-    "counts attempts across independent clients in one window",
+    "counts attempts across independent clients and stops at the cap",
     async () => {
+      // This suite's own schema, so clearing the windows touches no one else.
+      await database()`DELETE FROM fitness_device_attempt_windows`;
       const [a, b] = [client(), client()];
       try {
-        const first = await store.countEnrollmentAttempt(a);
-        const second = await store.countEnrollmentAttempt(b);
-        const third = await store.countEnrollmentAttempt(a);
+        const results = [];
+        for (const sql of [a, b, a, b, a])
+          results.push(await store.countEnrollmentAttempt(3, sql));
+        const windows =
+          await database()`SELECT attempts FROM fitness_device_attempt_windows`;
         // Unless the minute turned over between calls.
-        if (third.attempts > 1) {
-          expect(second.attempts).toBe(first.attempts + 1);
-          expect(third.attempts).toBe(first.attempts + 2);
+        if (windows.length === 1) {
+          expect(results.map((r) => r.allowed)).toEqual([
+            true,
+            true,
+            true,
+            false,
+            false,
+          ]);
+          expect(windows[0]?.attempts).toBe(3);
         }
-        expect(third.wait).toBeGreaterThan(0);
-        expect(third.wait).toBeLessThanOrEqual(60);
+        for (const result of results) {
+          expect(result.wait).toBeGreaterThan(0);
+          expect(result.wait).toBeLessThanOrEqual(60);
+        }
         // Over the shared limit, enrollment refuses before calling Clerk.
-        devices.setSharedEnrollmentLimit(third.attempts);
+        devices.setSharedEnrollmentLimit(0);
         const limited = await enroll(oauthToken());
         expect(limited.status).toBe(429);
         expect(await limited.json()).toMatchObject({ code: "rate_limited" });
         expect(fake.requests).toHaveLength(0);
       } finally {
         await Promise.all([a.end(), b.end()]);
+      }
+    },
+  );
+
+  test.skipIf(!configured)("checks readiness in one query", async () => {
+    const queries: string[] = [];
+    const counted = postgres(url, {
+      max: 1,
+      prepare: false,
+      // Type lookups on connect are the driver's own, not readiness checks.
+      fetch_types: false,
+      onnotice: () => undefined,
+      debug: (_connection, query) => {
+        queries.push(query);
+      },
+    });
+    try {
+      expect(await devices.deviceEnrollmentReady(counted)).toBe(true);
+      expect(queries).toHaveLength(1);
+    } finally {
+      await counted.end();
+    }
+  });
+
+  test.skipIf(!configured)(
+    "stops writing once another request takes over the lease",
+    async () => {
+      let release = () => undefined as void;
+      fake.stall = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const creating = new Promise<void>((resolve) => {
+        fake.onCreate = resolve;
+      });
+      const first = enroll(oauthToken());
+      await creating;
+      // The first request's lease expires and a second client takes it.
+      const other = client();
+      const holder = crypto.randomUUID();
+      try {
+        await other`UPDATE fitness_device_issuance_leases SET expires_at = now() - interval '1 second' WHERE owner_id=${owner}`;
+        expect(await store.acquireDeviceLease(other, owner, holder, 90)).toBe(
+          true,
+        );
+        release();
+        const response = await first;
+        expect(response.status).not.toBe(201);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+        // Its key was created, then revoked, and never became active.
+        const [created] = fake.keys.filter(
+          (k) => k.claims?.installationId === installation,
+        );
+        expect(created?.revoked).toBe(true);
+        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
+        // The second holder's lease is intact.
+        const [lease] =
+          await other`SELECT holder FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
+        expect(lease?.holder).toBe(holder);
+        // Without the lease, a fenced write changes nothing.
+        await expect(
+          store.deactivateInstallation(
+            database(),
+            { owner, holder: crypto.randomUUID() },
+            installation,
+          ),
+        ).rejects.toBeInstanceOf(store.DeviceLeaseLost);
+      } finally {
+        await store.releaseDeviceLease(other, owner, holder);
+        await other.end();
       }
     },
   );

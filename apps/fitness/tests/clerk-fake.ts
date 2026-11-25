@@ -4,6 +4,7 @@
  * `authenticateRequest`, and keeps API keys and users in memory.
  */
 import { mock } from "bun:test";
+import { ClerkAPIResponseError } from "@clerk/shared/error";
 
 type Claims = Record<string, unknown>;
 type FakeKey = {
@@ -66,10 +67,12 @@ function signedIn(auth: Record<string, unknown>) {
   };
 }
 
-class ClerkAPIError extends Error {
-  constructor(readonly status: number) {
-    super(`Clerk responded ${status}`);
-  }
+/** A Backend API error reply, as the SDK throws it. */
+function apiError(status: number) {
+  return new ClerkAPIResponseError(`Clerk responded ${status}`, {
+    data: [],
+    status,
+  });
 }
 
 function createFake() {
@@ -106,6 +109,8 @@ function createFake() {
     } | null,
     /** Key IDs whose revocation fails. */
     revokeFails: new Set<string>(),
+    /** Key IDs whose lookup fails without an answer. */
+    getFails: new Set<string>(),
     pageSize: 100,
     clock: () => Date.now(),
     requests: [] as { request: Request; options: Record<string, unknown> }[],
@@ -119,6 +124,7 @@ function createFake() {
       fake.usersDown = false;
       fake.create = "ok";
       fake.revokeFails.clear();
+      fake.getFails.clear();
       fake.pageSize = 100;
       fake.requests = [];
       fake.listCalls = 0;
@@ -216,9 +222,9 @@ function createFake() {
     },
     users: {
       async getUser(id: string) {
-        if (fake.usersDown) throw new ClerkAPIError(502);
+        if (fake.usersDown) throw apiError(502);
         const user = fake.users.get(id);
-        if (!user) throw new ClerkAPIError(404);
+        if (!user) throw apiError(404);
         return {
           id,
           primaryEmailAddressId: "idn_primary",
@@ -262,7 +268,7 @@ function createFake() {
       }) {
         fake.onCreate?.();
         if (fake.stall) await fake.stall;
-        if (fake.create === "fail") throw new ClerkAPIError(500);
+        if (fake.create === "fail") throw apiError(500);
         const key = fake.addKey({
           secret: `ak_secret_${fake.sequence + 1}`,
           subject: params.subject,
@@ -278,10 +284,16 @@ function createFake() {
         }
         return { ...key };
       },
+      async get(apiKeyId: string) {
+        if (fake.getFails.has(apiKeyId)) throw apiError(502);
+        const key = fake.keys.find((k) => k.id === apiKeyId);
+        if (!key) throw apiError(404);
+        return { ...key };
+      },
       async revoke(params: { apiKeyId: string }) {
-        if (fake.revokeFails.has(params.apiKeyId)) throw new ClerkAPIError(500);
+        if (fake.revokeFails.has(params.apiKeyId)) throw apiError(500);
         const key = fake.keys.find((k) => k.id === params.apiKeyId);
-        if (!key) throw new ClerkAPIError(404);
+        if (!key) throw apiError(404);
         key.revoked = true;
         return { ...key };
       },

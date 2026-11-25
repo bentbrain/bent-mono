@@ -22,6 +22,7 @@ beforeEach(() => {
   fake.reset();
   Object.assign(process.env, environment);
   devices.setEnrollmentBudget(1000, 1000);
+  devices.forgetEnrollmentReadiness();
 });
 afterEach(() => {
   for (const key of Object.keys(process.env))
@@ -378,5 +379,14 @@ describe("Device enrollment budget", () => {
     expect(await limited.json()).toMatchObject({ code: "rate_limited" });
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(fake.requests).toHaveLength(0);
+  });
+
+  test("limits readiness checks with the same budget", async () => {
+    devices.setEnrollmentBudget(10, 1);
+    expect((await devices.handleDeviceReady()).status).toBe(503);
+    const limited = await devices.handleDeviceReady();
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ code: "rate_limited" });
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 });

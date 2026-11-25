@@ -217,6 +217,10 @@ export async function accountTimezone(
 }
 /** Another request holds the owner's device issuance lease. */
 export class DeviceLeaseBusy extends Error {}
+/** The request no longer holds its lease; another may have taken it over. */
+export class DeviceLeaseLost extends Error {}
+/** A held device issuance lease. */
+export type DeviceLease = { owner: string; holder: string };
 /**
  * Takes the owner's device issuance lease for `holder`, unless another
  * holder has one that has not expired. A lease row works through a
@@ -242,39 +246,61 @@ export async function releaseDeviceLease(
 /**
  * Runs device key changes for an owner one at a time under its issuance
  * lease. The lease is not waited for: when another request holds it, this
- * throws DeviceLeaseBusy. The lease outlasts the work's own deadline, and
- * is released when the work ends, whether it succeeds or fails. Statements
- * commit as they run, so an enrollment attempt is recorded before Clerk is
- * called and stays recorded if the call fails.
+ * throws DeviceLeaseBusy. Each write the work makes is fenced by the lease,
+ * so once the lease expires or passes to another request, the next write
+ * throws DeviceLeaseLost instead of changing anything. The lease is
+ * released when the work ends, whether it succeeds or fails.
  */
 export async function withDeviceLease<T>(
   owner: string,
   seconds: number,
-  work: (sql: Sql) => Promise<T>,
+  work: (sql: Sql, lease: DeviceLease) => Promise<T>,
 ): Promise<T> {
   const sql = database();
-  const holder = crypto.randomUUID();
-  if (!(await acquireDeviceLease(sql, owner, holder, seconds)))
+  const lease = { owner, holder: crypto.randomUUID() };
+  if (!(await acquireDeviceLease(sql, owner, lease.holder, seconds)))
     throw new DeviceLeaseBusy();
   try {
-    return await work(sql);
+    return await work(sql, lease);
   } finally {
-    await releaseDeviceLease(sql, owner, holder);
+    await releaseDeviceLease(sql, owner, lease.holder);
   }
+}
+/** The lease row, while this request holds it, locked for the statement. */
+function heldLease(sql: Sql, lease: DeviceLease) {
+  return sql`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} AND expires_at > now() FOR SHARE`;
+}
+const fencedRow = z.object({ held: z.number(), changed: z.number() });
+/**
+ * Runs one write only while the lease is held, and returns the rows it
+ * changed. Throws DeviceLeaseLost when the lease is not held.
+ */
+async function fenced(sql: Sql, lease: DeviceLease, write: ReturnType<Sql>) {
+  const [row] =
+    await sql`WITH held AS (${heldLease(sql, lease)}), changed AS (${write}) SELECT (SELECT count(*) FROM held)::int AS held, (SELECT count(*) FROM changed)::int AS changed`;
+  const result = fencedRow.parse(row);
+  if (result.held !== 1) throw new DeviceLeaseLost();
+  return result.changed;
 }
 /**
  * Counts one enrollment attempt in the current one-minute window, across
- * every server, and returns the window's count and the seconds until the
- * next window. The first attempt in a window removes windows older than an
- * hour.
+ * every server, unless the window already holds `cap`. Returns whether the
+ * attempt fits and the seconds until the next window. The first attempt in
+ * a window removes windows older than an hour.
  */
-export async function countEnrollmentAttempt(sql: Sql = database()) {
-  const [row] =
-    await sql`INSERT INTO fitness_device_attempt_windows(window_start, attempts) VALUES(date_trunc('minute', now()), 1) ON CONFLICT (window_start) DO UPDATE SET attempts = fitness_device_attempt_windows.attempts + 1 RETURNING attempts, ceil(extract(epoch FROM date_trunc('minute', now()) + interval '1 minute' - now()))::int AS wait`;
-  const attempts = z.number().int().parse(row?.attempts);
-  if (attempts === 1)
+export async function countEnrollmentAttempt(
+  cap: number,
+  sql: Sql = database(),
+) {
+  const wait = Math.max(1, 60 - Math.floor((Date.now() / 1000) % 60));
+  if (cap < 1) return { allowed: false, wait };
+  const rows =
+    await sql`INSERT INTO fitness_device_attempt_windows(window_start, attempts) VALUES(date_trunc('minute', now()), 1) ON CONFLICT (window_start) DO UPDATE SET attempts = fitness_device_attempt_windows.attempts + 1 WHERE fitness_device_attempt_windows.attempts < ${cap} RETURNING attempts`;
+  const [row] = rows;
+  if (!row) return { allowed: false, wait };
+  if (row.attempts === 1)
     await sql`DELETE FROM fitness_device_attempt_windows WHERE window_start < now() - interval '1 hour'`;
-  return { attempts, wait: Math.max(1, z.number().int().parse(row?.wait)) };
+  return { allowed: true, wait };
 }
 export async function enrollmentTokenUsed(sql: Sql, digest: string) {
   const rows =
@@ -283,49 +309,86 @@ export async function enrollmentTokenUsed(sql: Sql, digest: string) {
 }
 /**
  * Records an enrollment attempt as pending, which also marks its token as
- * used and holds its place in the hourly limit. Returns false when the
+ * used and reserves its place in the hourly limit. Returns false when the
  * token was already used. Inactive records older than two days, past the
  * token lifetime, are removed.
  */
 export async function recordEnrollment(
   sql: Sql,
-  attempt: {
-    owner: string;
-    digest: string;
-    attemptId: string;
-    installationId: string;
-  },
+  lease: DeviceLease,
+  attempt: { digest: string; attemptId: string; installationId: string },
 ) {
-  await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${attempt.owner}) ON CONFLICT DO NOTHING`;
-  await sql`DELETE FROM fitness_device_enrollments WHERE NOT active AND created_at < now() - interval '2 days'`;
-  const rows =
-    await sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${attempt.owner},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING token_digest`;
-  return rows.length === 1;
+  const owner = lease.owner;
+  await fenced(
+    sql,
+    lease,
+    sql`INSERT INTO fitness_accounts(owner_id) SELECT ${owner}::text WHERE EXISTS (SELECT 1 FROM held) ON CONFLICT DO NOTHING RETURNING 1`,
+  );
+  await fenced(
+    sql,
+    lease,
+    sql`DELETE FROM fitness_device_enrollments WHERE NOT active AND created_at < now() - interval '2 days' AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
+  const inserted = await fenced(
+    sql,
+    lease,
+    sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) SELECT ${owner}::text,${attempt.digest}::text,${attempt.attemptId}::uuid,${attempt.installationId}::uuid WHERE EXISTS (SELECT 1 FROM held) ON CONFLICT (token_digest) DO NOTHING RETURNING 1`,
+  );
+  return inserted === 1;
 }
 /**
  * Marks the owner's pending attempts ambiguous. Under the lease no other
  * attempt is running, so a pending one ended without recording whether
  * Clerk created its key. A key it created cannot import.
  */
-export async function settlePendingEnrollments(sql: Sql, owner: string) {
-  await sql`UPDATE fitness_device_enrollments SET key_state='ambiguous' WHERE owner_id=${owner} AND key_state='pending'`;
+export async function settlePendingEnrollments(sql: Sql, lease: DeviceLease) {
+  await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET key_state='ambiguous' WHERE owner_id=${lease.owner} AND key_state='pending' AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
 }
-/** Records what became of an attempt whose key was not issued. */
+/** Records what became of this request's attempt when its key was not issued. */
 export async function settleEnrollment(
   sql: Sql,
+  lease: DeviceLease,
   attemptId: string,
   state: "ambiguous" | "failed",
 ) {
-  await sql`UPDATE fitness_device_enrollments SET key_state=${state} WHERE attempt_id=${attemptId} AND key_state='pending'`;
+  await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET key_state=${state} WHERE attempt_id=${attemptId} AND key_state='pending' AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
 }
 /**
- * The ages in seconds, oldest first, of the owner's attempts in the last
- * hour that created a key or may have.
+ * Charges an ambiguous attempt to the hourly limit from when Clerk created
+ * its key, once a key with its attempt ID is found.
  */
-export async function recentIssuance(sql: Sql, owner: string) {
+export async function chargeAmbiguousEnrollment(
+  sql: Sql,
+  lease: DeviceLease,
+  attemptId: string,
+  createdAt: Date,
+) {
+  await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${lease.owner} AND attempt_id=${attemptId} AND key_state='ambiguous' AND charged_at IS NULL AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
+}
+/** Hours an ambiguous attempt without a found key counts toward the hourly limit. */
+const ambiguousChargeHours = 2;
+/**
+ * Seconds until each of the owner's attempts stops counting toward the
+ * hourly limit, soonest first. A created key counts for an hour from its
+ * creation. An attempt whose creation is unconfirmed counts from when it
+ * was recorded, for `ambiguousChargeHours`.
+ */
+export async function hourlyCharges(sql: Sql, owner: string) {
   const rows =
-    await sql`SELECT extract(epoch FROM now() - created_at)::float8 AS age FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state IN ('issued','ambiguous') AND created_at > now() - interval '1 hour' ORDER BY created_at`;
-  return rows.map((row) => z.number().parse(row.age));
+    await sql`SELECT extract(epoch FROM (CASE WHEN charged_at IS NOT NULL THEN charged_at + interval '1 hour' ELSE created_at + make_interval(hours => ${ambiguousChargeHours}) END) - now())::float8 AS remaining FROM fitness_device_enrollments WHERE owner_id=${owner} AND ((charged_at IS NOT NULL AND charged_at > now() - interval '1 hour') OR (charged_at IS NULL AND key_state IN ('pending','ambiguous') AND created_at > now() - make_interval(hours => ${ambiguousChargeHours}))) ORDER BY remaining`;
+  return rows.map((row) => z.number().parse(row.remaining));
 }
 const activeRow = z.object({
   attempt_id: z.string(),
@@ -345,30 +408,54 @@ export async function activeDevices(sql: Sql, owner: string) {
     };
   });
 }
+/** The owner's ambiguous attempts that have no charge from a found key yet. */
+export async function unchargedAmbiguous(sql: Sql, owner: string) {
+  const rows =
+    await sql`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='ambiguous' AND charged_at IS NULL`;
+  return rows.map((row) => z.string().parse(row.attempt_id));
+}
 /** Stops these keys importing. */
 export async function deactivateKeys(
   sql: Sql,
-  owner: string,
+  lease: DeviceLease,
   keyIds: string[],
 ) {
   if (!keyIds.length) return;
-  await sql`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND active AND key_id IN ${sql(keyIds)}`;
+  await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND active AND key_id IN ${sql(keyIds)} AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
 }
 /** Stops an installation's active key from importing. */
 export async function deactivateInstallation(
   sql: Sql,
-  owner: string,
+  lease: DeviceLease,
   installationId: string,
 ) {
-  await sql`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${installationId} AND active`;
+  await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND installation_id=${installationId} AND active AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
 }
-/** Records the created key, which makes it the installation's active key. */
+/**
+ * Records the created key, which makes it the installation's active key and
+ * charges the hourly limit from now, when Clerk has returned it. Returns
+ * whether exactly this attempt changed.
+ */
 export async function issueEnrollment(
   sql: Sql,
+  lease: DeviceLease,
   attemptId: string,
   keyId: string,
 ) {
-  await sql`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${keyId}, active=true WHERE attempt_id=${attemptId} AND key_state='pending'`;
+  const changed = await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${keyId}, active=true, charged_at=greatest(created_at, now()) WHERE attempt_id=${attemptId} AND key_state='pending' AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
+  return changed === 1;
 }
 /** A device key's claims and the ID Clerk verified. */
 export type DeviceKeyClaims = {
@@ -397,53 +484,63 @@ export async function deviceKeyActive(
  * Deactivates this key's attempt when it is the installation's active key.
  * Returns whether it was.
  */
-export async function deactivateDeviceKey(sql: Sql, key: DeviceKeyClaims) {
-  const rows =
-    await sql`UPDATE fitness_device_enrollments SET active=false WHERE ${activeKeyRow(sql, key)} RETURNING attempt_id`;
-  return rows.length === 1;
+export async function deactivateDeviceKey(
+  sql: Sql,
+  lease: DeviceLease,
+  key: DeviceKeyClaims,
+) {
+  const changed = await fenced(
+    sql,
+    lease,
+    sql`UPDATE fitness_device_enrollments SET active=false WHERE ${activeKeyRow(sql, key)} AND EXISTS (SELECT 1 FROM held) RETURNING 1`,
+  );
+  return changed === 1;
 }
-const tables = {
-  fitness_device_enrollments: [
-    "owner_id",
-    "token_digest",
-    "attempt_id",
-    "installation_id",
-    "key_state",
-    "key_id",
-    "active",
-    "created_at",
-  ],
-  fitness_device_issuance_leases: ["owner_id", "holder", "expires_at"],
-  fitness_device_attempt_windows: ["window_start", "attempts"],
-};
+const enrollmentColumns = [
+  "owner_id",
+  "token_digest",
+  "attempt_id",
+  "installation_id",
+  "key_state",
+  "key_id",
+  "active",
+  "charged_at",
+  "created_at",
+];
+const leaseColumns = ["owner_id", "holder", "expires_at"];
+const windowColumns = ["window_start", "attempts"];
 /**
- * Whether enrollment can use its tables: each table and its columns are in
- * the connection's schema, and the database user may read, add, change and
- * remove their rows and add accounts. Nothing is written.
+ * Whether enrollment can use its tables, in one query: each table and its
+ * columns are in the connection's schema, and the database user may read,
+ * add, change and remove their rows and add accounts. Nothing is written.
+ * has_table_privilege is true when any listed privilege is held, so each
+ * one is checked on its own, and only for tables that exist.
  */
 export async function enrollmentTableReady(sql: Sql = database()) {
-  for (const [table, columns] of Object.entries(tables)) {
-    const [row] = await sql`
-      SELECT
-        (SELECT count(*)::int FROM information_schema.columns
-          WHERE table_schema=current_schema() AND table_name=${table}
-            AND column_name IN ${sql(columns)}) AS columns,
-        to_regclass(${table}) IS NOT NULL AS present`;
-    if (row?.columns !== columns.length || row.present !== true) return false;
-    // has_table_privilege is true when any listed privilege is held, so each
-    // one is checked on its own.
-    const [grants] = await sql`
-      SELECT
-        has_table_privilege(current_user, ${table}, 'SELECT')
-        AND has_table_privilege(current_user, ${table}, 'INSERT')
-        AND has_table_privilege(current_user, ${table}, 'UPDATE')
-        AND has_table_privilege(current_user, ${table}, 'DELETE') AS granted`;
-    if (grants?.granted !== true) return false;
-  }
-  const [accounts] = await sql`
-    SELECT to_regclass('fitness_accounts') IS NOT NULL
-      AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT') AS granted`;
-  return accounts?.granted === true;
+  const grants = (table: string) =>
+    sql`has_table_privilege(current_user, ${table}, 'SELECT') AND has_table_privilege(current_user, ${table}, 'INSERT') AND has_table_privilege(current_user, ${table}, 'UPDATE') AND has_table_privilege(current_user, ${table}, 'DELETE')`;
+  const [row] = await sql`
+    SELECT
+      (SELECT count(*)::int FROM information_schema.columns
+        WHERE table_schema = current_schema() AND (
+          (table_name = 'fitness_device_enrollments' AND column_name IN ${sql(enrollmentColumns)})
+          OR (table_name = 'fitness_device_issuance_leases' AND column_name IN ${sql(leaseColumns)})
+          OR (table_name = 'fitness_device_attempt_windows' AND column_name IN ${sql(windowColumns)}))) AS columns,
+      CASE
+        WHEN to_regclass('fitness_device_enrollments') IS NULL
+          OR to_regclass('fitness_device_issuance_leases') IS NULL
+          OR to_regclass('fitness_device_attempt_windows') IS NULL
+          OR to_regclass('fitness_accounts') IS NULL THEN false
+        ELSE ${grants("fitness_device_enrollments")}
+          AND ${grants("fitness_device_issuance_leases")}
+          AND ${grants("fitness_device_attempt_windows")}
+          AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT')
+      END AS granted`;
+  return (
+    row?.columns ===
+      enrollmentColumns.length + leaseColumns.length + windowColumns.length &&
+    row.granted === true
+  );
 }
 async function lockAccount(sql: TransactionSql, owner: string) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;

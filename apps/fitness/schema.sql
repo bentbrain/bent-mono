@@ -52,7 +52,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(
 -- key. The attempt ID is also a claim on the key it creates. key_state is
 -- pending while its request runs, then issued (Clerk returned the key,
 -- recorded in key_id), ambiguous (the creation had no confirmed result) or
--- failed (no creation was attempted). A device key can import only while
+-- failed (no creation was attempted). charged_at is when the key Clerk
+-- created for the attempt counts toward the hourly limit from. A device key
+-- can import only while
 -- its attempt is issued and active with the same key_id; each installation
 -- has at most one active attempt. Enrollment removes inactive rows older
 -- than two days.
@@ -72,6 +74,7 @@ ALTER TABLE fitness_device_enrollments ALTER COLUMN attempt_id SET NOT NULL;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_state text NOT NULL DEFAULT 'pending';
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_id text;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT false;
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS charged_at timestamptz;
 -- Earlier versions checked key_state without ambiguous, and the active key
 -- under a generated name.
 ALTER TABLE fitness_device_enrollments DROP CONSTRAINT IF EXISTS fitness_device_enrollments_key_state_check;

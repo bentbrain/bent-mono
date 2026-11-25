@@ -24,7 +24,10 @@ test("fails closed without provider configuration and serves installation assets
 
 test("keeps iPhone sync routes closed without provider configuration", async ({
   request,
-}) => {
+}, testInfo) => {
+  // Server-side only, and each server allows a small burst of device-route
+  // requests, so one browser project covers it.
+  test.skip(testInfo.project.name !== "mobile");
   const ready = await request.get("/api/health/devices/ready");
   expect(ready.status()).toBe(503);
   expect(ready.headers()["cache-control"]).toContain("no-store");

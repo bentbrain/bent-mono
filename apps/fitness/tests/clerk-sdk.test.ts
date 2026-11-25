@@ -104,6 +104,7 @@ afterAll(() => {
 
 beforeEach(() => {
   devices.setEnrollmentBudget(1000, 1000);
+  devices.forgetEnrollmentReadiness();
   fake.reset();
   Object.assign(process.env, environment);
   fake.backend = createClerkClient({
@@ -126,7 +127,7 @@ afterEach(() => {
 function enroll(token: string) {
   tableCheck ??= spyOn(store, "enrollmentTableReady").mockResolvedValue(true);
   attemptCount ??= spyOn(store, "countEnrollmentAttempt").mockResolvedValue({
-    attempts: 1,
+    allowed: true,
     wait: 60,
   });
   return devices.handleDeviceEnroll(
