@@ -3,6 +3,7 @@
   "entry": [
     "src/routes/**/*.{ts,tsx}",
     "tests/**/*.test.ts",
+    "tests/preload.ts",
     "e2e/**/*.spec.ts",
     "scripts/*.ts"
   ],
