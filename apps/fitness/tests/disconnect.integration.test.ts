@@ -94,15 +94,12 @@ test.skipIf(!configured)(
           // Careless code that swallows the failure and carries on must not
           // get its next statement run outside the transaction.
           await tx`SELECT pg_sleep(30)`.catch(() => undefined);
-          let result: LateWrite = { ran: false, error: undefined };
-          try {
-            await tx`INSERT INTO accounts (owner_id) VALUES ('after')`;
-            result = { ran: true };
-          } catch (error) {
-            result = { ran: false, error };
-          } finally {
-            attempted(result);
-          }
+          const result =
+            await tx`INSERT INTO accounts (owner_id) VALUES ('after')`.then(
+              (): LateWrite => ({ ran: true }),
+              (error: unknown): LateWrite => ({ ran: false, error }),
+            );
+          attempted(result);
         })
         .then(
           () => null,
