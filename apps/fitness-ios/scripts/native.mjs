@@ -36,7 +36,8 @@ function run(command, args, options = {}) {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
-const output = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", cwd: app, ...options });
+const output = (command, args, options = {}) =>
+  execFileSync(command, args, { encoding: "utf8", cwd: app, maxBuffer: 256 * 1024 * 1024, ...options });
 
 /** Runs xcodebuild, printing its output and keeping a copy in `log`. */
 function xcodebuild(args, log, options = {}) {

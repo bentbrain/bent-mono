@@ -94,7 +94,9 @@ try {
     "testDeniedHealthAccessSendsNothing",
     "testAllowedHealthAccessSyncsTheSeededHistory",
   ];
-  for (const flow of flows) {
+  // A flow that fails runs once more on a new Simulator: a newly booted
+  // Simulator can time out launching an app. Both attempts are logged.
+  const attempt = (flow, number) => {
     const udid = newSimulator();
     try {
       run("xcrun", ["simctl", "install", udid, appPath]);
@@ -112,15 +114,15 @@ try {
           "-derivedDataPath",
           join(buildDir, "seeder"),
           "-resultBundlePath",
-          join(buildDir, `flows-${flow}-${Date.now()}.xcresult`),
+          join(buildDir, `flows-${flow}-${number}-${Date.now()}.xcresult`),
           `-only-testing:SimulatorFlows/SyncFlowTests/${flow}`,
           "test-without-building",
         ],
         { cwd: seeder, env: { ...process.env, TEST_RUNNER_FITNESS_SIM_ORIGIN: origin } },
       );
+      return true;
     } catch (error) {
-      failed = true;
-      console.error(error.message);
+      console.error(`${flow}, attempt ${number}: ${error.message}`);
       // Keep the app's own log for the failed flow; it records codes only.
       const log = spawnSync(
         "xcrun",
@@ -139,10 +141,16 @@ try {
         ],
         { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
       );
-      writeFileSync(join(buildDir, `flows-${flow}-app.log`), log.stdout ?? "");
+      writeFileSync(join(buildDir, `flows-${flow}-${number}-app.log`), log.stdout ?? "");
+      return false;
     } finally {
       removeSimulator(udid);
     }
+  };
+  for (const flow of flows) {
+    if (attempt(flow, 1)) continue;
+    console.error(`${flow} failed; running it again on a new Simulator.`);
+    if (!attempt(flow, 2)) failed = true;
   }
 } finally {
   await fetch(`${origin}/__stop`, { method: "POST" }).catch(() => undefined);
