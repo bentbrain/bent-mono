@@ -13,12 +13,19 @@ Open [stay.bent.build](https://stay.bent.build). Access is restricted to invited
 
 ## Development
 
-Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then configure `.env.local` using [`.env.example`](.env.example):
+Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then copy [`.env.example`](.env.example) to `.env.local`:
 
 ```sh
 bun install --frozen-lockfile
 cd apps/stay
 cp .env.example .env.local
+```
+
+Before starting the server, configure `.env.local` with your development Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`) and set `OWNER_EMAIL` to your Clerk development account's verified email address. The homepage requires a signed-in user matching `OWNER_EMAIL` or a Clerk guest account (`publicMetadata.guideAccess = "guest"`) before it loads the local synthetic fixtures. Set `NEXT_PUBLIC_APP_URL` to match your local dev port (`http://localhost:3000` for default `bun run dev`, or `http://localhost:3015` when running `bun run dev -- -p 3015`) so invitation links return to the local app.
+
+Then start the development server:
+
+```sh
 bun run dev
 ```
 

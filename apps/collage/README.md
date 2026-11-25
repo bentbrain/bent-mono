@@ -22,7 +22,14 @@ cd apps/collage
 
 Configure a local `.env` using the schema in [`src/env.js`](src/env.js). Required variables cover Postgres (`DATABASE_URI`), `PAYLOAD_SECRET`, Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL`) and `UPLOADTHING_TOKEN`, with optional Convex (`NEXT_PUBLIC_CONVEX_URL`), Cloudflare R2 and PostHog settings. Set `SKIP_ENV_VALIDATION=1` when running typecheck, lint or Knip without live credentials.
 
-To start a local Postgres container with `./start-database.sh`, set both `DATABASE_URI` (used by Next.js and Drizzle) and `DATABASE_URL` (read by `start-database.sh` for the container password and port) in `.env` to the same local Postgres URL using a non-default password, then run:
+To start a local Postgres container with `./start-database.sh`, set both `DATABASE_URI` (used by Next.js and Drizzle) and `DATABASE_URL` (read by `start-database.sh` to extract the container password and port) in `.env` to the same URL using the `postgres` user, `maya-collage` database, an explicit port and a URL-safe non-default password:
+
+```env
+DATABASE_URI=postgresql://postgres:<URL-SAFE-PASSWORD>@localhost:5432/maya-collage
+DATABASE_URL=postgresql://postgres:<URL-SAFE-PASSWORD>@localhost:5432/maya-collage
+```
+
+Then start the database, push the schema and run the dev server:
 
 ```sh
 ./start-database.sh

@@ -22,17 +22,28 @@ Open [drive.bent.build](https://drive.bent.build) for the overview and [drive.be
 
 ## Development
 
-Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then configure `apps/web/.env.local` using [`apps/web/.env.example`](apps/web/.env.example):
+Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then copy [`apps/web/.env.example`](apps/web/.env.example) to `apps/web/.env.local`:
 
 ```sh
 bun install --frozen-lockfile
 cd products/drive/apps/web
 cp .env.example .env.local
+```
+
+Configure `apps/web/.env.local` before migrating or starting the server:
+
+- Replace the example production URLs (`APP_URL` and `TESLA_REDIRECT_URI` default to `https://drive.bent.build`) with your local or development origin and matching registered Tesla callback (`<APP_URL>/auth/tesla/callback`). Set `ALLOW_LOCAL_OAUTH_REDIRECTS=true` when testing loopback OAuth redirects locally.
+- Point `DATABASE_URL` at a dedicated development Postgres database and set `TOKEN_ENCRYPTION_KEY`.
+- Set Clerk development keys, Tesla Fleet API credentials and both `BENT_DRIVE_ADMIN_GITHUB_USERS` and `BENT_DRIVE_ALLOWED_GITHUB_USERS` explicitly.
+
+Then run the migrations and start the development server:
+
+```sh
 bun run db:migrate
 bun run dev
 ```
 
-Set both `BENT_DRIVE_ADMIN_GITHUB_USERS` and `BENT_DRIVE_ALLOWED_GITHUB_USERS` explicitly in your environment, alongside Postgres (`DATABASE_URL`), `TOKEN_ENCRYPTION_KEY`, Clerk keys and Tesla Fleet API credentials. Keep all credentials, encryption keys, account data, tokens and vehicle records outside Git.
+Keep all credentials, encryption keys, account data, tokens and vehicle records outside Git.
 
 ## Checks
 

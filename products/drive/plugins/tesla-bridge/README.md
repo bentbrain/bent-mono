@@ -35,7 +35,16 @@ The public MCP scope is `tesla.read`. The upstream Tesla scopes are `openid offl
 
 ## Installing in Codex
 
-In this monorepo, the plugin package lives at `products/drive/plugins/tesla-bridge`. No root Codex marketplace manifest is bundled here; connect Codex directly to the hosted MCP endpoint (`https://drive.bent.build/mcp`) using `.mcp.json` and `skills/tesla-copilot/`, or point a local Codex plugin marketplace entry at `./products/drive/plugins/tesla-bridge`, install `tesla-bridge`, and open a new task so the MCP and skill configuration load.
+In this monorepo, the plugin package lives at `products/drive/plugins/tesla-bridge` (no root Codex marketplace manifest is bundled here). You can connect it in either of two ways:
+
+1. **Via a local Codex marketplace:** point a local marketplace entry at `./products/drive/plugins/tesla-bridge`, install `tesla-bridge`, and start a new task so both the MCP server (`.mcp.json`) and the `$tesla-copilot` skill (`skills/tesla-copilot/`) load together.
+2. **Direct MCP registration:** register the hosted endpoint directly in Codex MCP settings or via the CLI:
+
+```bash
+codex mcp add tesla-bridge --url https://drive.bent.build/mcp
+```
+
+If you also want to use the `$tesla-copilot` skill with direct MCP registration, copy or symlink `products/drive/plugins/tesla-bridge/skills/tesla-copilot` into your Codex skills directory (`~/.codex/skills/tesla-copilot`) and start a new task.
 
 Try:
 
