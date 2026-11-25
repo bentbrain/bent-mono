@@ -37,6 +37,8 @@ test("answers bearer routes with their own JSON, never a session handshake", asy
       code: "auth_unavailable",
     },
   ];
+  // The router serves a path with a trailing slash as the same route.
+  for (const item of [...cases]) cases.push({ ...item, path: item.path + "/" });
   for (const { method, path, data, status, code } of cases)
     for (const headers of [
       { Authorization: "Bearer ak_synthetic", ...browser },
@@ -56,11 +58,16 @@ test("answers bearer routes with their own JSON, never a session handshake", asy
     }
   for (const path of [
     "/api/health/import",
+    "/api/health/import/",
     "/api/health/devices",
+    "/api/health/devices/",
     "/api/health/devices/current",
   ]) {
     const page = await request.get(path, { headers: browser, maxRedirects: 0 });
-    expect({ path, status: page.status() }).not.toEqual({ path, status: 307 });
+    // The router may redirect to the path without its trailing slash; Clerk
+    // never answers with a handshake.
+    const location = page.headers()["location"];
+    if (location !== undefined) expect(location).toBe(path.slice(0, -1));
     expect(page.headers()["x-clerk-auth-status"]).toBeUndefined();
   }
   // The session middleware still handles pages.

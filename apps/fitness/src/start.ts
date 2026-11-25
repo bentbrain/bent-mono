@@ -24,10 +24,17 @@ export function bearerOnlyPath(pathname: string) {
     pathname.startsWith("/api/health/devices/")
   );
 }
+/** The path the router matches: trailing slashes are dropped. */
+export function routePath(pathname: string) {
+  let end = pathname.length;
+  while (end > 1 && pathname[end - 1] === "/") end--;
+  return pathname.slice(0, end);
+}
 /** Signs in browser sessions, except on routes that take bearer tokens only. */
 const sessions = createMiddleware().server((context) => {
   const server = clerk.options.server;
-  return bearerOnlyPath(new URL(context.request.url).pathname) || !server
+  return bearerOnlyPath(routePath(new URL(context.request.url).pathname)) ||
+    !server
     ? context.next()
     : server(context);
 });
