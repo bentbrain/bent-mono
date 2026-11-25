@@ -73,7 +73,8 @@ type VerifiedBearer = {
  * Why a bearer was not verified:
  * - `unconfigured`: Fitness has no Clerk keys or MCP resource.
  * - `missing`: the request has no bearer token.
- * - `invalid`: Clerk identified the token as unknown, revoked or expired.
+ * - `invalid`: Clerk identified the token as unknown, revoked or expired,
+ *   or the token's own claims show it expired or names another audience.
  * - `rejected`: Clerk did not verify the token as an accepted type, for a
  *   reason that does not show the token itself is unusable.
  * - `unavailable`: Clerk could not be reached or rejected Fitness's own
@@ -91,14 +92,21 @@ export type BearerCheck =
  * `reason`; this table lists every reason it produces for API keys and
  * OAuth tokens.
  *
- * | Clerk reason                | Produced when                                                    | Failure       |
- * | --------------------------- | ---------------------------------------------------------------- | ------------- |
- * | `token-invalid`             | The Backend API answers 404: the key or token is unknown, revoked or expired; or an OAuth JWT cannot be decoded | `invalid`     |
- * | `token-verification-failed` | An OAuth JWT fails its signature, expiry or audience check, or its signing keys cannot be loaded | `rejected`    |
- * | `token-type-mismatch`       | The token is not one of the accepted types                       | `rejected`    |
- * | `secret-key-invalid`        | The Backend API answers 401 to Fitness's secret key              | `unavailable` |
- * | `unexpected-error`          | Any other Backend API status, or a network failure               | `unavailable` |
- * | anything else               | Session-token reasons, which bearer-only requests do not reach   | `rejected`    |
+ * | Clerk reason                | Produced when                                                                                         | Failure                  |
+ * | --------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------ |
+ * | `token-invalid`             | The Backend API answers 404: the key or token is unknown, revoked or expired; or a JWT cannot be decoded | `invalid`                |
+ * | `token-verification-failed` | An OAuth JWT fails its signature, expiry or audience check, or Clerk's signing keys cannot be loaded | see below                |
+ * | `token-type-mismatch`       | The token is not one of the accepted types                                                            | `rejected`               |
+ * | `secret-key-invalid`        | The Backend API answers 401 to Fitness's secret key                                                   | `unavailable`            |
+ * | `unexpected-error`          | Any other Backend API status, or a network failure                                                    | `unavailable`            |
+ * | anything else               | Reasons bearer-only machine-token requests do not produce                                             | `unavailable`            |
+ *
+ * For an OAuth JWT, `token-verification-failed` covers both a bad token and
+ * a signing-key outage, so Fitness reads the token's own claims: an `exp` in
+ * the past, or an `aud` that does not name the MCP endpoint, makes it
+ * `invalid`. Anything else under that reason is `unavailable`, since
+ * retrying can succeed. For an opaque OAuth token, the SDK reports that
+ * reason only when the token's audience does not match, which is `invalid`.
  *
  * Only `invalid` is definitive for a device key: the app discards its key
  * only on `key_invalid`, so a reason whose cause can be on Clerk's side never
@@ -106,11 +114,40 @@ export type BearerCheck =
  */
 export const clerkReasonFailure: Record<string, BearerFailure> = {
   "token-invalid": "invalid",
-  "token-verification-failed": "rejected",
   "token-type-mismatch": "rejected",
   "secret-key-invalid": "unavailable",
   "unexpected-error": "unavailable",
 };
+
+/** Clerk allows this much clock skew when it checks expiry. */
+const clockSkewMs = 5000;
+
+/**
+ * Whether a token that failed Clerk's verification is unusable here. For a
+ * JWT, its own claims decide: it has expired, or its audience is missing or
+ * does not name `resource`. The claims are read without verifying the
+ * signature, which only chooses between refusals. An opaque token fails
+ * verification only on its audience.
+ */
+function conclusivelyUnusable(token: string, resource: string) {
+  const parts = token.split(".");
+  // Opaque tokens fail verification only on their audience.
+  if (parts.length !== 3) return true;
+  const payload = parts[1];
+  if (!payload) return false;
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return false;
+  }
+  if (!claims || typeof claims !== "object") return false;
+  const { exp, aud } = claims as { exp?: unknown; aud?: unknown };
+  if (typeof exp === "number" && exp * 1000 <= Date.now() - clockSkewMs)
+    return true;
+  const audiences = [aud].flat().filter((a) => typeof a === "string");
+  return !audiences.includes(resource);
+}
 
 /** A copy of the request carrying only its bearer token, without cookies. */
 function bearerOnly(request: Request) {
@@ -166,10 +203,17 @@ export async function verifyBearer(
       },
     };
   if (state.isAuthenticated) return { ok: false, failure: "rejected" };
-  return {
-    ok: false,
-    failure: clerkReasonFailure[String(state.reason)] ?? "rejected",
-  };
+  const reason = String(state.reason);
+  if (reason === "token-verification-failed") {
+    const token = bearer.headers.get("authorization")?.split(/\s+/)[1] ?? "";
+    return {
+      ok: false,
+      failure: conclusivelyUnusable(token, resource)
+        ? "invalid"
+        : "unavailable",
+    };
+  }
+  return { ok: false, failure: clerkReasonFailure[reason] ?? "unavailable" };
 }
 
 /**
