@@ -604,7 +604,7 @@ export async function swapEnrollment(
       const old =
         await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
       const activated =
-        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}, greatest(created_at, now())), replaced_key_ids=${tx.array(old.map((row) => z.string().parse(row.key_id)))}::text[] WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
+        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}, greatest(created_at, now())), replaced_key_ids=${old.map((row) => z.string().parse(row.key_id))}::text[] WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
       if (!activated.length) throw new NotActivated("not_pending");
       const [others] =
         await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND active AND installation_id<>${attempt.installationId}`;

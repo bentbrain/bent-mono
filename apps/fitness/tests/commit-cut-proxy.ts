@@ -28,11 +28,12 @@ const commit = /^\s*commit\s*;?\s*$/i;
  *
  * The proxy always verifies the database's certificate and host name with
  * Node's defaults. That is stricter than postgres.js, which skips
- * verification for `require`, `allow` and `prefer`. A TLS test database
- * must present a certificate valid for its host, or name its CA: a file in
- * the URL's `sslrootcert`, or in `PGSSLROOTCERT`, libpq's form of it, which
- * suits a test database URL that the driver also reads. `system` uses
- * Node's own roots.
+ * verification for `require`, `allow` and `prefer`, and with a CA file
+ * checks the certificate but not the host name. A TLS test database must
+ * present a certificate valid for its host and trusted by a root the proxy
+ * has: Node's own roots, or a CA file named in the URL's `sslrootcert`,
+ * which postgres.js reads too, or in `PGSSLROOTCERT`, libpq's form of it.
+ * `system` uses Node's own roots.
  */
 export function upstreamTls(target: URL, env = process.env) {
   const { options } = postgres(target.href);
