@@ -514,6 +514,169 @@ describe("device enrollment", () => {
   );
 
   test.skipIf(!configured)(
+    "lets only one of two new installations overlapping at the limit through",
+    async () => {
+      for (const n of [1, 2]) await enrolled(otherInstallation(n));
+      // The first enrollment for a new installation waits in Clerk's create
+      // while the second records its attempt.
+      let release = () => undefined as void;
+      fake.stall = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const creating = new Promise<void>((resolve) => {
+        fake.onCreate = resolve;
+      });
+      const firstToken = oauthToken();
+      const secondToken = oauthToken();
+      let first: Promise<Response> | undefined;
+      let second: Response;
+      try {
+        first = enroll(firstToken, {
+          installationId: otherInstallation(3),
+          deviceName: "Third iPhone",
+        });
+        await creating;
+        second = await enroll(secondToken, {
+          installationId: otherInstallation(4),
+          deviceName: "Fourth iPhone",
+        });
+      } finally {
+        release();
+        fake.stall = null;
+        fake.onCreate = null;
+      }
+      expect((await first).status).toBe(201);
+      expect(second.status).toBe(409);
+      expect(await second.json()).toMatchObject({ code: "device_limit" });
+      expect(
+        (
+          await database()`SELECT count(DISTINCT installation_id)::int AS n FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
+        )[0]?.n,
+      ).toBe(3);
+      // The refusal left its token unused: once a place frees, it enrolls.
+      const [freed] = activeFor(otherInstallation(1));
+      if (!freed) throw new Error("Expected the key.");
+      freed.revoked = true;
+      expect(
+        (
+          await enroll(secondToken, {
+            installationId: otherInstallation(4),
+            deviceName: "Fourth iPhone",
+          })
+        ).status,
+      ).toBe(201);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "fails a request that resumes after its abandoned attempt was cleaned up",
+    async () => {
+      const previous = await enrolled();
+      // This enrollment has its key from Clerk, then pauses before the swap.
+      const original = store.swapEnrollment;
+      let resume = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let reached = () => undefined as void;
+      const atSwap = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          if (args[1].installationId === installation) {
+            reached();
+            await gate;
+          }
+          return original(...args);
+        },
+      );
+      let stalled: Promise<Response> | undefined;
+      try {
+        stalled = enroll(oauthToken());
+        await atSwap;
+        // Its attempt passes the grace, and another enrollment cleans up.
+        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '11 minutes' WHERE owner_id=${owner} AND key_state='pending'`;
+        expect(
+          (
+            await enroll(oauthToken(), {
+              installationId: otherInstallation(1),
+              deviceName: "Second iPhone",
+            })
+          ).status,
+        ).toBe(201);
+        resume();
+        const response = await stalled;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+      } finally {
+        resume();
+        await stalled;
+        spy.mockRestore();
+      }
+      // The abandoned key was revoked, and the installation's key works.
+      expect((await importWith(previous)).status).toBe(200);
+      expect(activeFor(installation).map((k) => k.secret)).toEqual([previous]);
+      const [abandoned] =
+        await database()`SELECT key_state, active, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${installation} AND NOT active`;
+      expect({ ...abandoned }).toEqual({
+        key_state: "ambiguous",
+        active: false,
+        charged: true,
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "asks for a new sign-in when recording's commit reply is lost",
+    async () => {
+      const proxy = await commitCutProxy(new URL(isolated.url));
+      const pool = postgres(proxy.url, {
+        max: 3,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      const original = store.recordEnrollment;
+      const arming = spyOn(store, "recordEnrollment").mockImplementation(
+        async (...args) => {
+          proxy.arm();
+          return original(...args);
+        },
+      );
+      let creates = 0;
+      fake.onCreate = () => {
+        creates += 1;
+      };
+      const token = oauthToken();
+      setDatabaseForTests(pool);
+      let response: Response;
+      try {
+        response = await enroll(token);
+      } finally {
+        arming.mockRestore();
+        fake.onCreate = null;
+        setDatabaseForTests(isolated.pool());
+        await pool.end({ timeout: 1 }).catch(() => undefined);
+        await proxy.close();
+      }
+      expect(proxy.cuts).toBe(1);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      // Clerk was never asked for a key, yet Postgres has the commit, so the
+      // token is used.
+      expect(creates).toBe(0);
+      expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
+      const again = await enroll(token);
+      expect(again.status).toBe(409);
+      expect(await again.json()).toMatchObject({
+        code: "enrollment_token_used",
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
     "gives up on a Clerk call that does not answer",
     async () => {
       devices.setEnrollmentTiming({ clerkMs: 200 });
@@ -895,7 +1058,7 @@ describe("device enrollment", () => {
       const counted = spyOn(store, "swapOutcome").mockImplementation(
         async (...args) => {
           const outcome = await original(...args);
-          outcomes.push(outcome);
+          outcomes.push(outcome.outcome);
           return outcome;
         },
       );
@@ -915,6 +1078,14 @@ describe("device enrollment", () => {
       expect(outcomes).toEqual(["undone"]);
       expect((await importWith(previous)).status).toBe(200);
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      // Clerk made the key, so the failed attempt still counts toward the
+      // hourly limit.
+      const [failedAttempt] =
+        await database()`SELECT key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} AND NOT active ORDER BY created_at DESC LIMIT 1`;
+      expect({ ...failedAttempt }).toEqual({
+        key_state: "failed",
+        charged: true,
+      });
       const newest = fake.keys.reduce((a, b) =>
         a.createdAt >= b.createdAt ? a : b,
       );
@@ -978,7 +1149,7 @@ describe("device enrollment", () => {
       const counted = spyOn(store, "swapOutcome").mockImplementation(
         async (...args) => {
           const outcome = await originalOutcome(...args);
-          outcomes.push(outcome);
+          outcomes.push(outcome.outcome);
           return outcome;
         },
       );
@@ -1204,12 +1375,16 @@ describe("device enrollment", () => {
             ),
           ).toBeNull();
           expect(
-            await store.swapEnrollment(owner, {
-              attemptId,
-              installationId: installation,
-              keyId: "ak_id_limited_role",
-            }),
-          ).toEqual({ activated: true, replaced: [] });
+            await store.swapEnrollment(
+              owner,
+              {
+                attemptId,
+                installationId: installation,
+                keyId: "ak_id_limited_role",
+              },
+              { installations: 3 },
+            ),
+          ).toEqual({ activated: true, replaced: [], reason: null });
         } finally {
           setDatabaseForTests(isolated.pool());
         }
@@ -1291,11 +1466,15 @@ describe("device attempt windows and contention", () => {
         await importer.begin(async (tx) => {
           await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
           await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
-          swapping = store.swapEnrollment(owner, {
-            attemptId: next,
-            installationId: installation,
-            keyId: "ak_id_second",
-          });
+          swapping = store.swapEnrollment(
+            owner,
+            {
+              attemptId: next,
+              installationId: installation,
+              keyId: "ak_id_second",
+            },
+            { installations: 3 },
+          );
           await lockWaiters();
           expect(await active()).toEqual([current]);
         });
@@ -1304,17 +1483,38 @@ describe("device attempt windows and contention", () => {
         expect(await swapping).toEqual({
           activated: true,
           replaced: ["ak_id_current"],
+          reason: null,
         });
         expect(await active()).toEqual([next]);
         // An attempt that is no longer pending is never activated.
         await database()`UPDATE fitness_device_enrollments SET key_state='failed' WHERE attempt_id=${current}`;
         expect(
-          await store.swapEnrollment(owner, {
-            attemptId: current,
-            installationId: installation,
-            keyId: "ak_id_current",
-          }),
-        ).toEqual({ activated: false, replaced: [] });
+          await store.swapEnrollment(
+            owner,
+            {
+              attemptId: current,
+              installationId: installation,
+              keyId: "ak_id_current",
+            },
+            { installations: 3 },
+          ),
+        ).toEqual({ activated: false, replaced: [], reason: "not_pending" });
+        expect(await active()).toEqual([next]);
+        // Nor is one that would put more installations than the limit on
+        // active keys.
+        const extra = crypto.randomUUID();
+        await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"c".repeat(64)},${extra},${otherInstallation(1)})`;
+        expect(
+          await store.swapEnrollment(
+            owner,
+            {
+              attemptId: extra,
+              installationId: otherInstallation(1),
+              keyId: "ak_id_extra",
+            },
+            { installations: 1 },
+          ),
+        ).toEqual({ activated: false, replaced: [], reason: "device_limit" });
         expect(await active()).toEqual([next]);
       } finally {
         await importer.end();

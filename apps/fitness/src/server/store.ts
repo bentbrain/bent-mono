@@ -335,8 +335,9 @@ class Refused extends Error {
  *   digest of its raw string, which earlier enrollments recorded alone;
  * - the hourly limit is full, counting this attempt: keys created in the
  *   last hour and attempts that may have created one; or
- * - the owner's other installations with an active key, and this one,
- *   are more than the installation limit.
+ * - the owner's other installations with an active key or an attempt
+ *   still being issued, within `pendingGraceMinutes`, and this one, are
+ *   more than the installation limit.
  *
  * A transaction that waits too long on a lock or statement rolls back too,
  * with reason `busy`. Inactive records older than two days, past the token
@@ -368,8 +369,11 @@ export async function recordEnrollment(
           retryAfter: Math.max(1, Math.ceil(freed)),
         });
       }
+      // Other installations hold a place while they have an active key or
+      // an attempt still being issued, so attempts for new installations
+      // that overlap cannot pass the limit together.
       const [others] =
-        await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND active AND installation_id<>${attempt.installationId}`;
+        await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id<>${attempt.installationId} AND (active OR (key_state='pending' AND created_at > now() - make_interval(mins => ${pendingGraceMinutes})))`;
       if (Number(others?.installations ?? 0) + 1 > limits.installations)
         throw new Refused({ reason: "device_limit" });
       // Either identity recorded meanwhile means the token was used.
@@ -384,16 +388,21 @@ export async function recordEnrollment(
     throw error;
   }
 }
-/** Records what became of an attempt whose key was not issued. */
+/**
+ * Records what became of an attempt whose key was not issued. `createdAt`
+ * is when Clerk created its key, if it did; the attempt then keeps
+ * counting toward the hourly limit from then, whatever its state.
+ */
 export async function settleEnrollment(
   owner: string,
   attemptId: string,
   state: "ambiguous" | "failed",
+  createdAt: Date | null = null,
 ) {
   await underAccount(
     owner,
     (tx) =>
-      tx`UPDATE fitness_device_enrollments SET key_state=${state} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='pending'`,
+      tx`UPDATE fitness_device_enrollments SET key_state=${state}, charged_at=coalesce(charged_at, ${createdAt}) WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='pending'`,
   );
 }
 /**
@@ -455,21 +464,33 @@ export async function unchargedAmbiguous(owner: string) {
  */
 const pendingGraceMinutes = 10;
 /**
- * Which of these attempts' keys no current enrollment needs: keys whose
- * attempt is unknown, or is not active and not still pending within
- * `pendingGraceMinutes`. An active row's key, and a key another request
- * may still be swapping in, are kept.
+ * Which of these keys no current enrollment needs, in one short
+ * transaction under the account lock. First, attempts still pending after
+ * `pendingGraceMinutes` were abandoned: they become ambiguous, which can
+ * never be activated, and one whose key is listed is charged from that
+ * key's creation. Then the needed keys are an active row's key and one an
+ * attempt still pending within the grace may yet swap in; every other key
+ * is returned, for the caller to revoke.
  */
 export async function unneededKeys(
   owner: string,
-  keys: { id: string; enrollment: string | null }[],
+  keys: { id: string; enrollment: string | null; createdAt: number }[],
 ) {
   const attempts = [
     ...new Set(keys.flatMap((k) => (k.enrollment ? [k.enrollment] : []))),
   ];
-  const rows = attempts.length
-    ? await database()`SELECT attempt_id, active, key_id, key_state = 'pending' AND created_at > now() - make_interval(mins => ${pendingGraceMinutes}) AS working FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id::text IN ${database()(attempts)}`
-    : [];
+  const rows = await underAccount(owner, async (tx) => {
+    const expired =
+      await tx`UPDATE fitness_device_enrollments SET key_state='ambiguous' WHERE owner_id=${owner} AND key_state='pending' AND created_at <= now() - make_interval(mins => ${pendingGraceMinutes}) RETURNING attempt_id`;
+    for (const row of expired) {
+      const key = keys.find((k) => k.enrollment === String(row.attempt_id));
+      if (key)
+        await tx`UPDATE fitness_device_enrollments SET charged_at=coalesce(charged_at, ${new Date(key.createdAt)}) WHERE owner_id=${owner} AND attempt_id=${row.attempt_id}`;
+    }
+    return attempts.length
+      ? tx`SELECT attempt_id, active, key_id, key_state = 'pending' AS working FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id::text IN ${tx(attempts)}`
+      : [];
+  });
   const byAttempt = new Map(rows.map((row) => [String(row.attempt_id), row]));
   return keys
     .filter((key) => {
@@ -489,22 +510,35 @@ export async function deactivateKeys(owner: string, keyIds: string[]) {
       tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND active AND key_id IN ${tx(keyIds)}`,
   );
 }
-/** The attempt is no longer pending, so another request settled it. */
-class NotPending extends Error {}
+/** The swap would not activate this attempt; nothing changes. */
+class NotActivated extends Error {
+  constructor(readonly reason: "not_pending" | "device_limit") {
+    super(reason);
+  }
+}
 /**
  * Swaps the created key in as the installation's active key, in one short
  * transaction under the account lock: the installation's rows are locked,
  * its current row stops being active and this attempt's row records the
- * key, becomes active and is charged from now. The installation therefore
+ * key, becomes active and is charged from the key's creation. The installation therefore
  * always has at most one active key and never goes without one before its
- * replacement exists. If this attempt is no longer pending, nothing
- * changes. Returns whether this attempt became active, and the keys it
- * replaced, which the caller revokes after the commit. An error after the
- * COMMIT was sent throws CommitOutcomeUnknown.
+ * replacement exists. Nothing changes, and `reason` says why, if this
+ * attempt is no longer pending, or if activating it would give more
+ * installations active keys than the limit. Returns whether this attempt
+ * became active, and the keys it replaced, which the caller revokes after
+ * the commit. An error after the COMMIT was sent throws
+ * CommitOutcomeUnknown.
  */
 export async function swapEnrollment(
   owner: string,
-  attempt: { attemptId: string; installationId: string; keyId: string },
+  attempt: {
+    attemptId: string;
+    installationId: string;
+    keyId: string;
+    /** When Clerk created the key, which the attempt is charged from. */
+    createdAt?: Date;
+  },
+  limits: { installations: number },
 ) {
   try {
     return await underAccount(owner, async (tx) => {
@@ -512,16 +546,25 @@ export async function swapEnrollment(
       const old =
         await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
       const activated =
-        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=greatest(created_at, now()) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
-      if (!activated.length) throw new NotPending();
+        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}, greatest(created_at, now())) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
+      if (!activated.length) throw new NotActivated("not_pending");
+      const [others] =
+        await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND active AND installation_id<>${attempt.installationId}`;
+      if (Number(others?.installations ?? 0) + 1 > limits.installations)
+        throw new NotActivated("device_limit");
       return {
         activated: true,
         replaced: old.map((row) => z.string().parse(row.key_id)),
+        reason: null,
       };
     });
   } catch (error) {
-    if (error instanceof NotPending)
-      return { activated: false, replaced: [] as string[] };
+    if (error instanceof NotActivated)
+      return {
+        activated: false,
+        replaced: [] as string[],
+        reason: error.reason,
+      };
     throw error;
   }
 }
@@ -532,6 +575,10 @@ export async function swapEnrollment(
  * for up to five seconds.
  *
  * - `committed`: the attempt's row is issued, active and holds this key.
+ *   `replaced` lists the keys that same commit deactivated: the
+ *   installation's inactive rows whose last change, their `xmin`, is the
+ *   attempt row's. A row a later transaction changed again is left out,
+ *   for a later cleanup.
  * - `undone`: the attempt's row is not active, and the previous key, if
  *   there was one, still is.
  * - `unknown`: anything else. A lock timeout or other error is thrown.
@@ -555,15 +602,21 @@ export async function swapOutcome(attempt: {
       row?.key_state === "issued" &&
       row.active === true &&
       row.key_id === attempt.keyId
-    )
-      return "committed" as const;
+    ) {
+      const replaced =
+        await tx`SELECT key_id FROM fitness_device_enrollments WHERE owner_id=${attempt.owner} AND installation_id=${attempt.installationId} AND NOT active AND key_id IS NOT NULL AND attempt_id<>${attempt.attemptId} AND xmin = (SELECT xmin FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId})`;
+      return {
+        outcome: "committed" as const,
+        replaced: replaced.map((r) => z.string().parse(r.key_id)),
+      };
+    }
     if (
       row &&
       row.active !== true &&
       previous.length === attempt.previousKeyIds.length
     )
-      return "undone" as const;
-    return "unknown" as const;
+      return { outcome: "undone" as const, replaced: [] as string[] };
+    return { outcome: "unknown" as const, replaced: [] as string[] };
   });
 }
 /** A device key's claims and the ID Clerk verified. */

@@ -399,26 +399,35 @@ function logged(event: string, error: unknown) {
  *    in the hourly limit. Under the account lock, the same transaction
  *    refuses a used token with `409 enrollment_token_used`, a full hourly
  *    limit with `429 rate_limited`, and an installation over the limit
- *    with `409 device_limit`, counting this attempt each time. A refusal,
+ *    with `409 device_limit`, counting this attempt each time. Other
+ *    installations count while they have an active key or an attempt
+ *    still being issued, so overlapping attempts for new installations
+ *    cannot pass the limit together. A refusal,
  *    or a transaction that times out waiting, changes nothing and leaves
  *    the token unused; a timeout replies `503 issuance_pending`.
- * 4. Clerk revokes keys no enrollment needs: keys without an active row,
- *    except one another request may still be swapping in. Active keys,
- *    this installation's included, keep importing.
- * 5. Clerk creates the key with the attempt ID in its claims. A create
- *    that fails marks the attempt failed, or ambiguous when Clerk may have
- *    made the key, and replies `503 issuance_failed`. A key Clerk made for
- *    it cannot import.
+ * 4. Attempts still pending after the grace were abandoned and become
+ *    ambiguous, so they can never be activated. Clerk then revokes keys no
+ *    enrollment needs: keys without an active row, except one an attempt
+ *    still pending may yet swap in. Active keys, this installation's
+ *    included, keep importing.
+ * 5. Clerk creates the key with the attempt ID in its claims. From then
+ *    on, every change to the attempt charges it from the key's creation,
+ *    so it keeps counting toward the hourly limit whatever becomes of it.
+ *    A create that fails marks the attempt failed, or ambiguous when Clerk
+ *    may have made the key, and replies `503 issuance_failed`. A key Clerk
+ *    made for it cannot import.
  * 6. One transaction locks the installation's rows, stops its current key
  *    and makes the new one active, charged from now, if the attempt is
- *    still pending. After it commits, Clerk revokes the replaced key within
+ *    still pending and activating it keeps the installations with active
+ *    keys within the limit. After it commits, Clerk revokes the replaced key within
  *    `replacedRevokeMs`; a revoke that fails is logged, and a later
  *    enrollment's cleanup revokes the key, which can no longer import. If
  *    the swap does not happen, the current key keeps importing, the new
  *    key is revoked, and the reply is `503 issuance_failed`. If the swap's
  *    commit reply is lost, its rows are read again on another connection,
- *    waiting for a commit still in progress; when that read cannot tell,
- *    both keys are left for a later enrollment.
+ *    waiting for a commit still in progress. A committed swap's replaced
+ *    keys are the ones its own commit deactivated, and when that read
+ *    cannot tell, both keys are left for a later enrollment.
  */
 export async function handleDeviceEnroll(request: Request) {
   const wait = takeAttempt();
@@ -597,22 +606,28 @@ export async function handleDeviceEnroll(request: Request) {
     ).catch(() => undefined);
     return issuanceFailed();
   }
+  // Clerk made the key, so every change to the attempt from here on charges
+  // it to the hourly limit from the key's creation.
+  const createdAt = new Date(created.createdAt);
 
   // The swap stops the installation's current key and makes the new one
   // active together. If it does not happen, the current key keeps
   // importing and the new key is revoked.
   let previous: string[] = [];
-  let swapped = { activated: false, replaced: [] as string[] };
+  let swapped: { activated: boolean; replaced: string[] } = {
+    activated: false,
+    replaced: [],
+  };
   let revokeNew = true;
   try {
     previous = (await activeDevices(userId))
       .filter((d) => d.installationId === installationId)
       .map((d) => d.keyId);
-    swapped = await swapEnrollment(userId, {
-      attemptId,
-      installationId,
-      keyId: created.id,
-    });
+    swapped = await swapEnrollment(
+      userId,
+      { attemptId, installationId, keyId: created.id, createdAt },
+      deviceLimits,
+    );
   } catch (error) {
     logged("fitness.devices.swap_failed", error);
     if (error instanceof CommitOutcomeUnknown) {
@@ -620,7 +635,10 @@ export async function handleDeviceEnroll(request: Request) {
       // old key is inactive and the new key is the installation's only
       // one. Read the rows again, waiting for the commit, before revoking
       // anything.
-      let outcome: Awaited<ReturnType<typeof swapOutcome>> = "unknown";
+      let outcome: Awaited<ReturnType<typeof swapOutcome>> = {
+        outcome: "unknown",
+        replaced: [],
+      };
       try {
         outcome = await swapOutcome({
           owner: userId,
@@ -632,11 +650,12 @@ export async function handleDeviceEnroll(request: Request) {
       } catch (reread) {
         logged("fitness.devices.swap_unknown", reread);
       }
-      if (outcome === "committed")
-        swapped = { activated: true, replaced: previous };
+      // The read finds the keys this swap's own commit replaced.
+      if (outcome.outcome === "committed")
+        swapped = { activated: true, replaced: outcome.replaced };
       // With no answer, both keys are left for a later enrollment to
       // settle and clean up.
-      else if (outcome === "unknown") revokeNew = false;
+      else if (outcome.outcome === "unknown") revokeNew = false;
     }
   }
   if (!swapped.activated) {
@@ -645,7 +664,7 @@ export async function handleDeviceEnroll(request: Request) {
         created.id,
         "This connection could not be completed.",
       );
-      await settleEnrollment(userId, attemptId, "failed").catch(
+      await settleEnrollment(userId, attemptId, "failed", createdAt).catch(
         () => undefined,
       );
     }
