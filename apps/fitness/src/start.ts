@@ -13,11 +13,13 @@ const privateHeaders = createMiddleware().server(async ({ next }) => {
 const clerk = clerkMiddleware();
 /**
  * Routes that authenticate their own bearer tokens and never use a browser
- * session: the MCP endpoint and the iPhone sync device routes.
+ * session: the MCP endpoint, the Apple Health import and the iPhone sync
+ * device routes.
  */
 export function bearerOnlyPath(pathname: string) {
   return (
     pathname === "/api/mcp" ||
+    pathname === "/api/health/import" ||
     pathname === "/api/health/devices" ||
     pathname.startsWith("/api/health/devices/")
   );
