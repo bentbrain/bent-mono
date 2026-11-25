@@ -11,8 +11,8 @@ const browserShardCounts = {
   home: 1,
 };
 
-// These app-root files are repository and package documentation. JP excludes
-// them from Tailwind's scan and Toolbar scans its browser source directory.
+// These app-root files are repository and package documentation. JP and
+// Toolbar both exclude their README and LICENSE from Tailwind's scan.
 // Keep served content, fixtures and other Markdown in the normal scope.
 const browserDocumentation = new Set([
   "apps/jp/README.md",
