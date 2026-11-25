@@ -72,7 +72,7 @@
     "lucide-react": "0.475.0",
     "next": "16.4.4",
     "payload": "3.92.1",
-    "postgres": "3.4.9",
+    "postgres": "4.1.1",
     "posthog-js": "1.446.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
