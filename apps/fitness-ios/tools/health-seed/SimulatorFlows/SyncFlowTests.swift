@@ -164,12 +164,13 @@ final class SyncFlowTests: XCTestCase {
     XCTAssertTrue(element(app, "status-deferred").exists, app.debugDescription)
 
     // A later Sync now, waited for by its own completion time, finds
-    // nothing new.
+    // nothing new and sends no import request.
     element(app, "sync-now").tap()
     waitForSync(app, after: first)
     let again = try await serverState()
     XCTAssertEqual(again.weights.count, 3)
     XCTAssertEqual(again.runs.count, 4)
+    XCTAssertEqual(again.imports, state.imports, "The second sync sent samples again")
   }
 
   /// With Weight and Workouts allowed but not Walking + Running Distance,

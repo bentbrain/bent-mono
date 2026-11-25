@@ -178,6 +178,15 @@ public actor DeviceLifecycle {
     session.generation == generation && self.session()?.key == session.key
   }
 
+  /// Runs a sync run's checkpoint write while its session is current. The
+  /// check and the write run together on this actor, so a cutoff change, a
+  /// disconnect or a new key either happens before and stops the write, or
+  /// waits until it ends and then rebuilds or clears what it wrote.
+  public func commit(_ session: SyncSession, _ write: @Sendable () throws -> Bool) throws -> Bool {
+    guard isCurrent(session) else { return false }
+    return try write()
+  }
+
   public func storage() -> StateStorage? {
     guard let active = try? credentials.load().active, active.state == .active else { return nil }
     return states.storage(for: active)
@@ -188,12 +197,18 @@ public actor DeviceLifecycle {
   /// Exchanges a one-time OAuth token for a device key. Each attempt sends
   /// the next enrollment sequence, stored before the request goes out. The
   /// key starts in `consentPending`: nothing is read or sent until `confirm`.
+  ///
+  /// A disconnect or a declined consent at any point cancels the attempt.
+  /// It is checked after each wait, and once more just before the sequence
+  /// is taken, so a cancelled attempt never sends a request.
   public func enroll(token: String, revokeLater: Bool) async throws -> EnrollOutcome {
-    let remaining = await revokePending()
-    if remaining > 0 && !revokeLater { return .pendingRevocations(remaining) }
     let started = cancellation
+    let remaining = await revokePending()
+    guard started == cancellation else { return .superseded }
+    if remaining > 0 && !revokeLater { return .pendingRevocations(remaining) }
     guard let api = makeAPI(origin) else { return .failed(.bug("The Fitness origin is not valid.")) }
     let name = DeviceName.clean(await deviceName())
+    guard started == cancellation else { return .superseded }
     let sequence = try nextSequence()
     let action = await api.enroll(
       token: token, installationId: try credentials.installationId(), deviceName: name, sequence: sequence)
@@ -325,7 +340,8 @@ public actor DeviceLifecycle {
       switch await api.revoke(key: pending.key) {
       case .done, .alreadyInvalid: done.insert(pending.key)
       case .notDeviceKey: refused.insert(pending.key)
-      case let .retry(after): if let after { waits[pending.key] = time.addingTimeInterval(after) }
+      // The wait counts from when the reply arrived.
+      case let .retry(after): if let after { waits[pending.key] = now().addingTimeInterval(after) }
       }
     }
     guard !done.isEmpty || !refused.isEmpty || !waits.isEmpty, var latest = try? credentials.load() else {

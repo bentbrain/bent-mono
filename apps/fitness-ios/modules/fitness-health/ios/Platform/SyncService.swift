@@ -56,6 +56,9 @@ final class SyncService: @unchecked Sendable {
   struct LifecycleCheck: SessionCheck {
     let lifecycle: DeviceLifecycle
     func isCurrent(_ session: SyncSession) async -> Bool { await lifecycle.isCurrent(session) }
+    func commit(_ session: SyncSession, _ write: @Sendable () throws -> Bool) async throws -> Bool {
+      try await lifecycle.commit(session, write)
+    }
   }
 
   // MARK: Launch and triggers

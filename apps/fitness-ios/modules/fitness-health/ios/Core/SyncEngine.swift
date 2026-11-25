@@ -16,6 +16,17 @@ public struct SyncSession: Sendable, Equatable {
 /// or commits for a key that was replaced or disconnected.
 public protocol SessionCheck: Sendable {
   func isCurrent(_ session: SyncSession) async -> Bool
+  /// Runs `write` only while the session is current, as one step with that
+  /// check: a cutoff change, a disconnect or a new key cannot come between
+  /// them. Returns whether `write` ran and reported a write.
+  func commit(_ session: SyncSession, _ write: @Sendable () throws -> Bool) async throws -> Bool
+}
+
+extension SessionCheck {
+  public func commit(_ session: SyncSession, _ write: @Sendable () throws -> Bool) async throws -> Bool {
+    guard await isCurrent(session) else { return false }
+    return try write()
+  }
 }
 
 /// Why a run stopped early.
@@ -95,19 +106,23 @@ public final class WriteFence: @unchecked Sendable {
 /// Facts about the run that decide whether a sample can be sent.
 final class RunContext: @unchecked Sendable {
   private let lock = NSLock()
-  private var distanceSendable = true
+  private var userChoice = false
+  private var access = DistanceAccess(anyReadable: true)
 
-  var sendsRunsWithoutDistance: Bool {
-    get {
-      lock.lock()
-      defer { lock.unlock() }
-      return distanceSendable
-    }
-    set {
-      lock.lock()
-      distanceSendable = newValue
-      lock.unlock()
-    }
+  /// Sets the run's distance facts: the user's choice to send runs without
+  /// distance, and what Health shows the app.
+  func decide(userChoice: Bool, access: DistanceAccess) {
+    lock.lock()
+    self.userChoice = userChoice
+    self.access = access
+    lock.unlock()
+  }
+
+  /// Whether a run that started at `start` can be sent without a distance.
+  func sendsWithoutDistance(_ start: Date) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return userChoice || access.covers(start)
   }
 }
 
@@ -211,15 +226,21 @@ public struct SyncEngine: Sendable {
     if Task.isCancelled || !writes.isOpen { throw RunStop.fenced }
   }
 
-  /// Writes the checkpoint if the run is still current. The write happens
-  /// inside the fence, so an expiry either waits for it or prevents it.
+  /// Writes the checkpoint if the run is still current. The session check
+  /// and the write are one step of the session check's owner, so a cutoff
+  /// change or a disconnect either comes first and stops the write, or waits
+  /// for it. The write also happens inside the write fence, so an expiry
+  /// either waits for it or prevents it.
   private func commit(_ state: SyncState) async throws {
     try await fence()
     let written: Bool
     do {
-      written = try writes.write {
-        if Task.isCancelled { throw RunStop.fenced }
-        try storage.save(state)
+      let (writes, storage) = (self.writes, self.storage)
+      written = try await check.commit(session) {
+        try writes.write {
+          if Task.isCancelled { throw RunStop.fenced }
+          try storage.save(state)
+        }
       }
     } catch RunStop.fenced {
       throw RunStop.fenced
@@ -252,28 +273,30 @@ public struct SyncEngine: Sendable {
 
   /// Whether a sample can be sent now. A run without a distance waits 6
   /// hours for one; after that it is sent without one only when the app can
-  /// read distance at all, or the user chose to send such runs.
+  /// read distance for the run's start, or the user chose to send such runs.
   func eligibility(_ sample: HealthSample, at time: Date) -> Eligibility {
     if sample.start > time { return .deferred(.future) }
-    if case let .run(_, _, end, _, distance) = sample {
+    if case let .run(_, start, end, _, distance) = sample {
       switch distance {
       case .unknown: return .unknown
       case .none where end > time.addingTimeInterval(-limits.distanceWait): return .deferred(.awaitingDistance)
-      case .none where !context.sendsRunsWithoutDistance: return .deferred(.distanceAccess)
+      case .none where !context.sendsWithoutDistance(start): return .deferred(.distanceAccess)
       default: break
       }
     }
     return .send
   }
 
-  /// Decides once per run whether runs without a readable distance can be
-  /// sent: when Health shows the app some distance, or the user chose to.
+  /// Reads once per run what decides whether runs without a readable
+  /// distance can be sent: the user's choice, or Health showing the app
+  /// distance for the run's time.
   private func decideRunsWithoutDistance(_ state: SyncState) async throws {
     if state.sendRunsWithoutDistance {
-      context.sendsRunsWithoutDistance = true
+      context.decide(userChoice: true, access: DistanceAccess(anyReadable: false))
       return
     }
-    context.sendsRunsWithoutDistance = try await read { try await source.distanceReadable() }
+    let access = try await read { try await source.distanceAccess() }
+    context.decide(userChoice: false, access: access)
   }
 
   // MARK: Upload

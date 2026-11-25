@@ -27,10 +27,34 @@ public protocol HealthSource: Sendable {
   func samples(_ kind: SampleKind, start: Date, end: Date) async throws -> [HealthSample]
   /// The readable samples among these UUIDs.
   func samples(_ kind: SampleKind, ids: [UUID]) async throws -> [HealthSample]
-  /// Whether Health shows the app any walking and running distance. Health
-  /// does not say whether read access was denied, so without any readable
-  /// distance a run's missing distance is ambiguous.
-  func distanceReadable() async throws -> Bool
+  /// What Health shows the app of walking and running distance. Health does
+  /// not say whether read access was denied, so a run's missing distance is
+  /// ambiguous unless this shows the app could read distance for its time.
+  func distanceAccess() async throws -> DistanceAccess
+}
+
+/// How much walking and running distance the app can read.
+public struct DistanceAccess: Sendable, Equatable {
+  /// Health returned at least one distance sample.
+  public var anyReadable: Bool
+  /// The earliest date Health lets the app read distance from, when the
+  /// user shared limited history (iOS 27 and later). Nil when Health reports
+  /// no such limit. Before iOS 27 Health has no limited history, so any
+  /// readable distance means every date is readable.
+  public var readableFrom: Date?
+
+  public init(anyReadable: Bool, readableFrom: Date? = nil) {
+    self.anyReadable = anyReadable
+    self.readableFrom = readableFrom
+  }
+
+  /// Whether a run that started at `start` with no distance can be taken to
+  /// have none: the app can read distance, and for that time.
+  public func covers(_ start: Date) -> Bool {
+    guard anyReadable else { return false }
+    guard let readableFrom else { return true }
+    return start >= readableFrom
+  }
 }
 
 /// Errors that mean the device is locked and Health data is unavailable.

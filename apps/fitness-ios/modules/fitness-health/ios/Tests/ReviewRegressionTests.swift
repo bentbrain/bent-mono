@@ -281,8 +281,10 @@ final class ReviewRegressionTests: XCTestCase {
   func testExpirationWhileAwaitingTheFenceCannotCommit() async throws {
     let now = date("2026-11-20T02:00:00Z")
     var h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
-    let check = HeldCheck(3)
+    // Held at the checkpoint that follows an accepted upload.
+    let check = HeldCheck()
     h.check = check
+    h.fitness.onRequest { _ in check.arm() }
     var state = h.state
     let zero = Data("0".utf8)
     state.anchors = [.weight: zero, .run: zero]
@@ -297,6 +299,7 @@ final class ReviewRegressionTests: XCTestCase {
     background.expireAll()
     check.gate.open()
     await trigger.value
+    XCTAssertEqual(h.fitness.received.count, 1)
     XCTAssertEqual(h.state.anchors?[.weight], zero)
   }
 
@@ -487,17 +490,17 @@ final class ReviewRegressionTests: XCTestCase {
   }
 }
 
+/// A session check that holds the first check after it is armed.
 private final class HeldCheck: SessionCheck, @unchecked Sendable {
-  let count = Locked(0)
+  let armed = Locked(false)
   let gate = Gate()
-  let stopAt: Int
-  init(_ stopAt: Int) { self.stopAt = stopAt }
+  func arm() { armed.with { $0 = true } }
   func isCurrent(_ session: SyncSession) async -> Bool {
-    let step = count.with { value -> Int in
-      value += 1
-      return value
+    let hold = armed.with { armed -> Bool in
+      defer { armed = false }
+      return armed
     }
-    if step == stopAt { await gate.pass() }
+    if hold { await gate.pass() }
     return true
   }
 }

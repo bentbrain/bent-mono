@@ -70,28 +70,48 @@ final class HealthKitSource: HealthSource, @unchecked Sendable {
     return try await convert(query(Self.type(kind), HKQuery.predicateForObjects(with: Set(ids))))
   }
 
-  /// Whether any walking and running distance is readable. Health hides
-  /// whether read access was denied, so none readable is ambiguous.
-  func distanceReadable() async throws -> Bool {
-    !(try await query(Self.distance, HKQuery.predicateForSamples(withStart: nil, end: nil), limit: 1)).isEmpty
+  /// What distance the app can read: whether any is readable, and, where
+  /// Health reports limited history for distance, the earliest date it
+  /// allows. A failed lookup of that date counts as no date readable, so a
+  /// run's missing distance stays ambiguous rather than becoming 0 km.
+  func distanceAccess() async throws -> DistanceAccess {
+    let readable = !(try await query(Self.distance, HKQuery.predicateForSamples(withStart: nil, end: nil), limit: 1))
+      .isEmpty
+    guard readable else { return DistanceAccess(anyReadable: false) }
+    do {
+      return DistanceAccess(anyReadable: true, readableFrom: try await authorizedStarts([Self.distance])?[Self.distance])
+    } catch {
+      return DistanceAccess(anyReadable: true, readableFrom: .distantFuture)
+    }
   }
 
   /// The earliest date Health lets the app read, per type, when the user
   /// shared limited history. Empty where Health reports no such window.
   func limitedHistoryStarts() async -> [SampleKind: Date] {
+    guard let dates = try? await authorizedStarts([Self.bodyMass, Self.workouts]) else { return [:] }
+    var result: [SampleKind: Date] = [:]
+    if let weight = dates[Self.bodyMass] { result[.weight] = weight }
+    if let runs = dates[Self.workouts] { result[.run] = runs }
+    return result
+  }
+
+  /// Health's limited-history start per type, from iOS 27. Nil before
+  /// iOS 27, where Health has no limited history; throws when the lookup fails.
+  private func authorizedStarts(_ types: Set<HKObjectType>) async throws -> [HKObjectType: Date]? {
     #if compiler(>=6.4)
       if #available(iOS 27.0, *) {
-        let types: Set<HKObjectType> = [Self.bodyMass, Self.workouts]
-        let dates: [HKObjectType: Date]? = await withCheckedContinuation { continuation in
-          store.getEarliestAuthorizedSampleDate(for: types) { dates, _ in continuation.resume(returning: dates) }
+        return try await withCheckedThrowingContinuation { continuation in
+          store.getEarliestAuthorizedSampleDate(for: types) { dates, error in
+            if let dates {
+              continuation.resume(returning: dates)
+            } else {
+              continuation.resume(throwing: error ?? CocoaError(.featureUnsupported))
+            }
+          }
         }
-        var result: [SampleKind: Date] = [:]
-        if let weight = dates?[Self.bodyMass] { result[.weight] = weight }
-        if let runs = dates?[Self.workouts] { result[.run] = runs }
-        return result
       }
     #endif
-    return [:]
+    return nil
   }
 
   /// The earliest readable sample of a type since `start`, if any.
