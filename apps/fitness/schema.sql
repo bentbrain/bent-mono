@@ -50,20 +50,58 @@ CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(
 -- Each enrollment attempt for an iPhone sync device, keyed by the SHA-256
 -- digest of its one-time OAuth token, so a token issues at most one device
 -- key. The attempt ID is also a claim on the key it creates. key_state is
--- pending until Fitness records the created key (issued, with key_id) or
--- gives up on it (failed). A device key can import only while its attempt
--- is issued and active with the same key_id; each installation has at most
--- one active attempt. Enrollment removes inactive rows older than two days.
+-- pending while its request runs, then issued (Clerk returned the key,
+-- recorded in key_id), ambiguous (the creation had no confirmed result) or
+-- failed (no creation was attempted). A device key can import only while
+-- its attempt is issued and active with the same key_id; each installation
+-- has at most one active attempt. Enrollment removes inactive rows older
+-- than two days.
+--
+-- The table started with fewer columns. The statements below add the later
+-- ones and their constraints in place, keeping the token digests already
+-- recorded, so applying this file again is safe.
 CREATE TABLE IF NOT EXISTS fitness_device_enrollments (
   owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
   token_digest text PRIMARY KEY CHECK (token_digest ~ '^[0-9a-f]{64}$'),
-  attempt_id uuid NOT NULL UNIQUE,
   installation_id uuid NOT NULL,
-  key_state text NOT NULL DEFAULT 'pending' CHECK (key_state IN ('pending','issued','failed')),
-  key_id text,
-  active boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (NOT active OR (key_state = 'issued' AND key_id IS NOT NULL))
+  created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS attempt_id uuid;
+UPDATE fitness_device_enrollments SET attempt_id = gen_random_uuid() WHERE attempt_id IS NULL;
+ALTER TABLE fitness_device_enrollments ALTER COLUMN attempt_id SET NOT NULL;
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_state text NOT NULL DEFAULT 'pending';
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_id text;
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT false;
+-- Earlier versions checked key_state without ambiguous, and the active key
+-- under a generated name.
+ALTER TABLE fitness_device_enrollments DROP CONSTRAINT IF EXISTS fitness_device_enrollments_key_state_check;
+ALTER TABLE fitness_device_enrollments DROP CONSTRAINT IF EXISTS fitness_device_enrollments_check;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'fitness_device_enrollments'::regclass AND conname = 'fitness_device_enrollments_attempt_id_key') THEN
+    ALTER TABLE fitness_device_enrollments ADD CONSTRAINT fitness_device_enrollments_attempt_id_key UNIQUE (attempt_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'fitness_device_enrollments'::regclass AND conname = 'fitness_device_enrollment_key_state') THEN
+    ALTER TABLE fitness_device_enrollments ADD CONSTRAINT fitness_device_enrollment_key_state CHECK (key_state IN ('pending','issued','ambiguous','failed'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'fitness_device_enrollments'::regclass AND conname = 'fitness_device_enrollment_active_key') THEN
+    ALTER TABLE fitness_device_enrollments ADD CONSTRAINT fitness_device_enrollment_active_key CHECK (NOT active OR (key_state = 'issued' AND key_id IS NOT NULL));
+  END IF;
+END $$;
+DROP INDEX IF EXISTS fitness_device_enrollment_pending;
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_created ON fitness_device_enrollments(created_at);
+CREATE INDEX IF NOT EXISTS fitness_device_enrollment_owner ON fitness_device_enrollments(owner_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_device_enrollment_active ON fitness_device_enrollments(owner_id, installation_id) WHERE active;
+-- One device key issuance at a time per owner. A lease that expires_at has
+-- passed belongs to a request that ended, and the next one takes it over.
+CREATE TABLE IF NOT EXISTS fitness_device_issuance_leases (
+  owner_id text PRIMARY KEY,
+  holder uuid NOT NULL,
+  expires_at timestamptz NOT NULL
+);
+-- Enrollment attempts across all servers, per one-minute window, counted
+-- before any Clerk call. Enrollment removes windows older than an hour.
+CREATE TABLE IF NOT EXISTS fitness_device_attempt_windows (
+  window_start timestamptz PRIMARY KEY,
+  attempts integer NOT NULL
+);

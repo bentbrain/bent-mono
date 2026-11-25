@@ -113,14 +113,22 @@ beforeEach(() => {
   jwksUp = true;
 });
 
-// Readiness passes without a database; verification fails before any write.
+// Readiness and the shared attempt count pass without a database;
+// verification fails before any write.
 let tableCheck: ReturnType<typeof spyOn> | undefined;
+let attemptCount: ReturnType<typeof spyOn> | undefined;
 afterEach(() => {
   tableCheck?.mockRestore();
   tableCheck = undefined;
+  attemptCount?.mockRestore();
+  attemptCount = undefined;
 });
 function enroll(token: string) {
   tableCheck ??= spyOn(store, "enrollmentTableReady").mockResolvedValue(true);
+  attemptCount ??= spyOn(store, "countEnrollmentAttempt").mockResolvedValue({
+    attempts: 1,
+    wait: 60,
+  });
   return devices.handleDeviceEnroll(
     bearer(
       token,

@@ -311,7 +311,7 @@ const unavailable: AuthFailure = {
 export async function authenticateImport(
   request: Request,
 ): Promise<
-  | { kind: "device"; owner: string }
+  | { kind: "device"; owner: string; key: DeviceKeyClaims }
   | { kind: "owner"; owner: string; access: AgentAccess }
   | { kind: "failed"; failure: AuthFailure }
 > {
@@ -379,7 +379,7 @@ export async function authenticateImport(
   } catch {
     return fail(unavailable);
   }
-  if (!current) {
+  if (!current || !key) {
     await revokeOrphan(bearer.id);
     return fail({
       status: 401,
@@ -387,7 +387,7 @@ export async function authenticateImport(
       code: "key_invalid",
     });
   }
-  return { kind: "device", owner };
+  return { kind: "device", owner, key };
 }
 
 /**

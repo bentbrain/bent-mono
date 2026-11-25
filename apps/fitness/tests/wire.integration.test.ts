@@ -53,6 +53,7 @@ const installation = "3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0b";
 async function clean() {
   const sql = database();
   await sql`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+  await sql`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
@@ -67,6 +68,7 @@ beforeAll(async () => {
   fake.reset();
   Object.assign(process.env, environment);
   devices.setEnrollmentBudget(1000, 1000);
+  devices.setSharedEnrollmentLimit(100_000);
 });
 afterAll(async () => {
   if (configured) await clean();
@@ -331,9 +333,23 @@ test.skipIf(!configured)(
     fake.stall = null;
     fake.onCreate = null;
 
-    // Enrollment limits: three other installations hold active keys.
-    for (const n of [1, 2, 3])
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active) VALUES(${owner},${String(n).repeat(64)},${`7c1d2e3f-4a5b-4c6d-8e7f-80910111213${n}`},${`3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0${n}`},'issued',${`ak_id_wire_${n}`},true)`;
+    // Enrollment limits: three other installations hold active keys,
+    // created more than an hour ago.
+    for (const n of [1, 2, 3]) {
+      const phone = `3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0${n}`;
+      const attempt = `7c1d2e3f-4a5b-4c6d-8e7f-80910111213${n}`;
+      const key = fake.addKey({
+        secret: `ak_wire_phone_${n}`,
+        scopes: ["fitness:health:import"],
+        claims: {
+          kind: "fitness-ios",
+          installationId: phone,
+          enrollment: attempt,
+        },
+        createdAt: Date.now() - 2 * 3600_000,
+      });
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,created_at) VALUES(${owner},${String(n).repeat(64)},${attempt},${phone},'issued',${key.id},true,now() - interval '2 hours')`;
+    }
     fake.oauth.set("oat_wire_limit", {
       userId: owner,
       clientId: iosClient,

@@ -29,7 +29,7 @@ import {
 import type { DeviceEntry } from "./health-export";
 import { checkDeviceReply } from "./device-reply";
 import { BatchConflict, StoreRuleError, changeHealth } from "./store";
-import type { HealthChange, HealthLink } from "./store";
+import type { DeviceKeyClaims, HealthChange, HealthLink } from "./store";
 
 type Outcome = { date: string; status: "added" | "kept"; reason?: string };
 
@@ -408,11 +408,14 @@ function deviceOutcomes(
  * account's fails before anything is saved. `now` fixes the clock in tests.
  */
 async function importDeviceHealth(
-  owner: string,
+  key: DeviceKeyClaims,
   body: unknown,
   now = new Date(),
 ): Promise<DeviceReply> {
-  return changeHealth(owner, async (change) => {
+  return changeHealth(key.owner, async (change) => {
+    // Held until commit, so a disconnect or replacement that has not
+    // happened yet waits, and one that has stops this import.
+    if (!(await change.holdDeviceKey(key))) throw new DeviceKeyInactive();
     const records = await change.records();
     const timezone = timezoneOf(records);
     const samples = readDeviceExport(body, timezone, localDate(timezone, now));
@@ -471,8 +474,15 @@ function failure(error: string, code: ApiErrorCode, status: number) {
   return json({ error, code }, status, status === 401 ? challenge : {});
 }
 
+/** The device key stopped being its installation's active key. Nothing was saved. */
+class DeviceKeyInactive extends Error {}
+
 /** A device sync request: strict parsing and one outcome per ref. */
-async function deviceImport(owner: string, request: Request, now?: Date) {
+async function deviceImport(
+  key: DeviceKeyClaims,
+  request: Request,
+  now?: Date,
+) {
   const text = await readImportBody(request);
   if (text === null)
     return failure(
@@ -487,7 +497,7 @@ async function deviceImport(owner: string, request: Request, now?: Date) {
     return failure("Send the request as JSON.", "invalid_device_request", 400);
   }
   try {
-    return json(await importDeviceHealth(owner, body, now));
+    return json(await importDeviceHealth(key, body, now));
   } catch (error) {
     if (error instanceof HealthImportError)
       return failure(
@@ -497,6 +507,12 @@ async function deviceImport(owner: string, request: Request, now?: Date) {
       );
     if (error instanceof StoreRuleError)
       return failure(error.message, "invalid_device_request", 400);
+    if (error instanceof DeviceKeyInactive)
+      return failure(
+        "This device key is no longer valid. Connect the iPhone again.",
+        "key_invalid",
+        401,
+      );
     if (error instanceof TimezoneChanged)
       return json(
         {
@@ -542,7 +558,7 @@ export async function handleHealthImport(
     );
   }
   if (agent.kind === "device")
-    return deviceImport(agent.owner, request, options.now);
+    return deviceImport(agent.key, request, options.now);
   if (!agent.access.write)
     return json(
       { error: `Use an API key with ${agentScopes.write} access.` },
