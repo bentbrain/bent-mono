@@ -33,7 +33,7 @@ export function Health({ status, onStarted }: { status: SyncStatus; onStarted: (
     <Page title={copy.health.title} testID="screen-health">
       <Body>{copy.health.body}</Body>
       {status.healthAvailable ? null : <Notice>Health data is unavailable on this device.</Notice>}
-      {failed ? <Notice>{failed}</Notice> : null}
+      {failed ? <Notice testID="health-failed">{failed}</Notice> : null}
       <Button label={copy.health.allow} onPress={allow} busy={busy} testID="health-allow" />
       {history ? (
         <>

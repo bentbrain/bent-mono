@@ -22,14 +22,8 @@ final class SyncFlowTests: XCTestCase {
   private func seed() {
     let seeder = XCUIApplication()
     seeder.launch()
-    seeder.buttons["seed"].tap()
-    // On a newly booted Simulator, Health can take a while to show its sheet.
-    let status = seeder.staticTexts["status"]
-    let deadline = Date().addingTimeInterval(90)
-    while !status.label.hasPrefix("Seeded") && Date() < deadline {
-      if HealthSheet.appears(in: seeder, timeout: 2) { HealthSheet.allowAll(in: seeder) }
-    }
-    wait(for: status, label: "Seeded", timeout: 10)
+    HealthSheet.seed(seeder)
+    wait(for: seeder.staticTexts["status"], label: "Seeded", timeout: 10)
     seeder.terminate()
   }
 
@@ -41,6 +35,21 @@ final class SyncFlowTests: XCTestCase {
 
   private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
     app.descendants(matching: .any)[id].firstMatch
+  }
+
+  /// Asks for Health access from the Health step. On a newly booted
+  /// Simulator, HealthKit's request can time out before its sheet appears;
+  /// the app then shows the error, and the request is made again.
+  private func requestHealth(_ app: XCUIApplication, allow: Bool) {
+    for _ in 0..<3 {
+      element(app, "health-allow").tap()
+      if HealthSheet.appears(in: app, timeout: 60) {
+        if allow { HealthSheet.allowAll(in: app) } else { HealthSheet.denyAll(in: app) }
+        return
+      }
+      _ = element(app, "health-failed").waitForExistence(timeout: 30)
+    }
+    XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
   }
 
   /// Signs in through the synthetic OAuth server and confirms consent.
@@ -86,8 +95,7 @@ final class SyncFlowTests: XCTestCase {
     seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
     connect(app)
-    element(app, "health-allow").tap()
-    HealthSheet.denyAll(in: app)
+    requestHealth(app, allow: false)
     XCTAssertTrue(element(app, "readable-none").waitForExistence(timeout: 30), app.debugDescription)
     element(app, "health-start").tap()
     waitForSync(app)
@@ -110,8 +118,7 @@ final class SyncFlowTests: XCTestCase {
     seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
     connect(app)
-    element(app, "health-allow").tap()
-    HealthSheet.allowAll(in: app)
+    requestHealth(app, allow: true)
     let weight = element(app, "readable-weight")
     XCTAssertTrue(weight.waitForExistence(timeout: 30), app.debugDescription)
     XCTAssertNotEqual(weight.label, "None readable")

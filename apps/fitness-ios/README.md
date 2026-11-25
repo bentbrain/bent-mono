@@ -66,7 +66,7 @@ XCUITest drives the Health access sheet, which appears in the requesting app's w
 - Don't Allow is followed by an alert saying categories can be turned on later in the Health app.
 - The read sheet notes that background access follows Settings → General → Background App Refresh.
 
-On a newly booted Simulator, the sheet can take more than 20 seconds to appear.
+On a newly booted Simulator, the sheet can take more than 20 seconds to appear, and HealthKit's request can fail with "Authorization session timed out" before it does. The flows ask again when that happens.
 
 ### Simulator flows
 

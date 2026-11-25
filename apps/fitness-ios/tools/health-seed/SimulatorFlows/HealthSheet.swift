@@ -17,6 +17,19 @@ enum HealthSheet {
     case past30Days = "Past 30 Days and Future Data"
   }
 
+  /// Taps Seed in Health Seed and allows write access, tapping Seed again
+  /// if HealthKit's request times out before its sheet appears, as it can on
+  /// a newly booted Simulator.
+  static func seed(_ app: XCUIApplication, timeout: TimeInterval = 240) {
+    let status = app.staticTexts["status"]
+    let deadline = Date().addingTimeInterval(timeout)
+    app.buttons["seed"].tap()
+    while !status.label.hasPrefix("Seeded") && Date() < deadline {
+      if appears(in: app, timeout: 2) { allowAll(in: app) }
+      if status.label.hasPrefix("Failed") { app.buttons["seed"].tap() }
+    }
+  }
+
   /// Whether the sheet appeared within the timeout.
   static func appears(in app: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
     app.cells[selectAll].waitForExistence(timeout: timeout)
