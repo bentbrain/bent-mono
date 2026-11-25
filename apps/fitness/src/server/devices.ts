@@ -28,6 +28,7 @@ import type {
 import {
   clerkNotFound,
   deviceKeyClaims,
+  headerToken,
   invitedEmail,
   verifyBearer,
 } from "./auth";
@@ -46,7 +47,6 @@ import {
   chargeAmbiguousEnrollment,
   countEnrollmentAttempt,
   deactivateDeviceKey,
-  deactivateInstallation,
   deactivateKeys,
   enrollmentTableReady,
   enrollmentTokenUsed,
@@ -87,6 +87,7 @@ const timing = {
   deadlineMs: 45_000,
   cleanupMs: 10_000,
   createReserveMs: 15_000,
+  activationSlackMs: 5_000,
 };
 const defaultTiming = { ...timing };
 /** Sets enrollment timing, or restores the defaults, for tests. */
@@ -396,9 +397,12 @@ class ActivationFailed extends Error {}
  *    created in the last hour and attempts that may have created one, and
  *    installations with an active key.
  * 5. The attempt is recorded, which uses the token and reserves its place
- *    in the hourly limit, before any key change.
- * 6. The installation's active key stops importing, then Clerk revokes the
- *    installation's keys and any key without an active row, as cleanup.
+ *    in the hourly limit, and the installation's active key stops
+ *    importing, together in one transaction that must commit before the
+ *    time kept for the create; otherwise neither happens and the reply is
+ *    `503 issuance_pending`.
+ * 6. Clerk revokes the installation's keys and any key without an active
+ *    row, as cleanup.
  * 7. Clerk creates the key with the attempt ID in its claims, and the row
  *    records its ID, becomes active and is charged from now. If that
  *    activation does not change exactly this row, the new key is revoked
@@ -480,8 +484,7 @@ export async function handleDeviceEnroll(request: Request) {
   const installationId = parsed.data.installationId.toLowerCase();
   const deviceName = parsed.data.deviceName;
 
-  const authorization = request.headers.get("authorization") ?? "";
-  const token = authorization.trim().replace(/^Bearer\s+/i, "");
+  const token = headerToken(request) ?? "";
   const digest = createHash("sha256").update(token).digest("hex");
   const attemptId = crypto.randomUUID();
 
@@ -566,19 +569,27 @@ export async function handleDeviceEnroll(request: Request) {
         // used or the installation's key changes, so the app can retry.
         if (deadline - performance.now() < timing.createReserveMs)
           return refuse(busy());
-        // The token is used from here on, whatever happens next.
+        // Recording the attempt, which uses the token, and stopping the
+        // installation's current key commit together, and only before the
+        // time kept for the create; otherwise neither happens.
+        const cutoff = deadline - timing.createReserveMs;
         if (
-          !(await recordEnrollment(sql, lease, {
-            tokenId,
-            digest,
-            attemptId,
-            installationId,
-          }))
+          !(await recordEnrollment(
+            sql,
+            { ...lease, deadline: cutoff },
+            { tokenId, digest, attemptId, installationId },
+          ))
         )
           return refuse(tokenUsed());
         recorded = true;
+        // Writes after the create may run a little past the deadline, within
+        // the lease, so a key Clerk returns at the deadline can still become
+        // active.
+        const after = {
+          ...lease,
+          deadline: deadline + timing.activationSlackMs,
+        };
         try {
-          await deactivateInstallation(sql, lease, installationId);
           // Clean up in Clerk: this installation's keys, and keys that have
           // no active row, such as one a timed-out creation left.
           const kept = new Set(
@@ -593,11 +604,11 @@ export async function handleDeviceEnroll(request: Request) {
                 key.installationId === installationId
                   ? "Replaced by a new connection from this iPhone."
                   : "Not the active key for its iPhone.",
-                Math.min(cleanup, deadline - timing.createReserveMs),
+                Math.min(cleanup, cutoff),
               );
         } catch (error) {
           // No key was created for this attempt.
-          await settleEnrollment(sql, lease, attemptId, "failed").catch(
+          await settleEnrollment(sql, after, attemptId, "failed").catch(
             () => undefined,
           );
           throw error;
@@ -626,14 +637,14 @@ export async function handleDeviceEnroll(request: Request) {
           if (!created.secret) throw new Error("Clerk returned no key secret.");
         } catch (error) {
           // Clerk may have created the key; it cannot import either way.
-          await settleEnrollment(sql, lease, attemptId, "ambiguous").catch(
+          await settleEnrollment(sql, after, attemptId, "ambiguous").catch(
             () => undefined,
           );
           throw error;
         }
         let activated = false;
         try {
-          activated = await issueEnrollment(sql, lease, attemptId, created.id);
+          activated = await issueEnrollment(sql, after, attemptId, created.id);
         } finally {
           if (!activated)
             await revokeQuietly(

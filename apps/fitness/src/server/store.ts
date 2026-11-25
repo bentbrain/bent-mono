@@ -308,31 +308,43 @@ async function fenced(
   sql: Sql,
   lease: DeviceLease,
   target: Target,
-  write: (tx: TransactionSql) => Promise<readonly unknown[]>,
+  write: (
+    tx: TransactionSql,
+    budget: () => Promise<void>,
+  ) => Promise<readonly unknown[]>,
 ) {
-  const stillHeld = async (tx: TransactionSql) => {
-    const [valid] =
-      await tx`SELECT expires_at > clock_timestamp() AS valid FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder}`;
-    if (valid?.valid !== true) throw new DeviceLeaseLost();
-  };
   try {
     return await sql.begin(async (tx) => {
-      // No statement waits past the request's deadline.
-      if (lease.deadline !== undefined) {
+      // Before each statement that can wait, its timeout is what remains
+      // of the request's deadline, so the waits together never pass it.
+      const budget = async () => {
+        if (lease.deadline === undefined) return;
         const ms = Math.floor(lease.deadline - performance.now());
         if (ms <= 0) throw new DeviceLeaseLost();
         await tx`SELECT set_config('statement_timeout', ${String(ms)}, true)`;
-      }
+      };
+      const stillHeld = async () => {
+        const [valid] =
+          await tx`SELECT expires_at > clock_timestamp() AS valid FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder}`;
+        if (valid?.valid !== true) throw new DeviceLeaseLost();
+      };
+      await budget();
       const [held] =
         await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
       if (!held) throw new DeviceLeaseLost();
-      if (target)
+      if (target) {
+        await budget();
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${target(tx)} FOR UPDATE`;
-      await stillHeld(tx);
-      const changed = (await write(tx)).length;
+      }
+      await stillHeld();
+      await budget();
+      const changed = (await write(tx, budget)).length;
       // A write can still wait, for example on a foreign key's row, so the
-      // lease is checked again last; an expired one rolls everything back.
-      await stillHeld(tx);
+      // lease and the deadline are checked again last; either one passed
+      // rolls everything back.
+      await stillHeld();
+      if (lease.deadline !== undefined && performance.now() >= lease.deadline)
+        throw new DeviceLeaseLost();
       return changed;
     });
   } catch (error) {
@@ -394,10 +406,14 @@ export async function enrollmentTokenUsed(
   return rows.length > 0;
 }
 /**
- * Records an enrollment attempt as pending, which also marks its token as
- * used and reserves its place in the hourly limit. Returns false when the
- * token was already used. Inactive records older than two days, past the
- * token lifetime, are removed.
+ * Records an enrollment attempt as pending and stops the installation's
+ * current key from importing, together in one fenced transaction, before
+ * any key changes in Clerk. Recording marks the token as used and reserves
+ * the attempt's place in the hourly limit. If the lease or the deadline
+ * runs out first, nothing changes: the token stays unused and the current
+ * key stays active. Returns false, changing nothing, when the token was
+ * already used. Inactive records older than two days, past the token
+ * lifetime, are removed.
  */
 export async function recordEnrollment(
   sql: Sql,
@@ -412,12 +428,26 @@ export async function recordEnrollment(
   const owner = lease.owner;
   const stale = (tx: TransactionSql) =>
     tx`NOT active AND created_at < now() - interval '2 days'`;
-  const inserted = await fenced(sql, lease, stale, async (tx) => {
-    await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-    await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
-    // Either identity already recorded means the token was used.
-    return tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
-  });
+  const current = (tx: TransactionSql) =>
+    tx`owner_id=${owner} AND installation_id=${attempt.installationId} AND active`;
+  const inserted = await fenced(
+    sql,
+    lease,
+    (tx) => tx`(${stale(tx)}) OR (${current(tx)})`,
+    async (tx, budget) => {
+      await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      await budget();
+      await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
+      await budget();
+      // Either identity already recorded means the token was used.
+      const rows =
+        await tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
+      if (!rows.length) return rows;
+      await budget();
+      await tx`UPDATE fitness_device_enrollments SET active=false WHERE ${current(tx)}`;
+      return rows;
+    },
+  );
   return inserted === 1;
 }
 /**

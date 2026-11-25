@@ -669,6 +669,8 @@ describe("device enrollment", () => {
           { leaseSeconds: 1 },
           // The deadline runs out while the insert waits.
           { deadlineMs: 1200, createReserveMs: 100 },
+          // The time kept for the create starts while the insert waits.
+          { deadlineMs: 3000, createReserveMs: 2000 },
         ]) {
           devices.setEnrollmentTiming(timing);
           const token = oauthToken();
@@ -1041,6 +1043,71 @@ describe("device issuance lease and attempt windows", () => {
         expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
       } finally {
         await locker.end();
+        await store.releaseDeviceLease(database(), owner, holder);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "rolls back when two waits together pass the deadline",
+    async () => {
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      const current = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"9".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      const holder = crypto.randomUUID();
+      expect(
+        await store.acquireDeviceLease(database(), owner, holder, 90),
+      ).toBe(true);
+      const [first, second] = [client(), client()];
+      try {
+        let releaseFirst = () => undefined as void;
+        let releaseSecond = () => undefined as void;
+        const held = [
+          // An import holds the installation's current row for 600 ms...
+          first.begin(async (tx) => {
+            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve;
+              setTimeout(resolve, 600);
+            });
+          }),
+          // ...and another holds the account row for 1300 ms.
+          second.begin(async (tx) => {
+            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+            await new Promise<void>((resolve) => {
+              releaseSecond = resolve;
+              setTimeout(resolve, 1300);
+            });
+          }),
+        ];
+        await Bun.sleep(50);
+        const digest = "8".repeat(64);
+        // Each wait alone fits in one second; together they do not.
+        const begun = performance.now();
+        await expect(
+          store.recordEnrollment(
+            database(),
+            { owner, holder, deadline: performance.now() + 1000 },
+            {
+              tokenId: "oat_id_two_waits",
+              digest,
+              attemptId: crypto.randomUUID(),
+              installationId: installation,
+            },
+          ),
+        ).rejects.toBeInstanceOf(store.DeviceLeaseLost);
+        expect(performance.now() - begun).toBeLessThan(1200);
+        releaseFirst();
+        releaseSecond();
+        await Promise.all(held);
+        const used =
+          await database()`SELECT 1 FROM fitness_device_enrollments WHERE token_digest=${digest}`;
+        expect(used).toHaveLength(0);
+        const [row] =
+          await database()`SELECT active FROM fitness_device_enrollments WHERE attempt_id=${current}`;
+        expect(row?.active).toBe(true);
+      } finally {
+        await Promise.all([first.end(), second.end()]);
         await store.releaseDeviceLease(database(), owner, holder);
       }
     },
@@ -1467,10 +1534,24 @@ describe("device import", () => {
           ],
         },
       };
-      const scopeless = await post("ak_owner", legacy);
-      expect(await scopeless.json()).toMatchObject({
+      // A bare key in the Authorization header works as it always has.
+      const bareKey = await handleHealthImport(
+        new Request("http://127.0.0.1:3025/api/health/import", {
+          method: "POST",
+          headers: { authorization: "ak_owner" },
+          body: JSON.stringify(legacy),
+        }),
+        { now },
+      );
+      expect(bareKey.status).toBe(200);
+      expect(await bareKey.json()).toMatchObject({
         added: { weights: 1, runs: 0 },
         weights: [{ date: "2026-10-01", status: "added" }],
+      });
+      const scopeless = await post("ak_owner", legacy);
+      expect(await scopeless.json()).toMatchObject({
+        added: { weights: 0, runs: 0 },
+        weights: [{ date: "2026-10-01", status: "kept" }],
       });
       expect((await post("ak_read", legacy)).status).toBe(403);
       expect(await (await post("ak_write", legacy)).json()).toEqual({
