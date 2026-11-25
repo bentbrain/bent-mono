@@ -135,6 +135,41 @@ describe("bearer verification", () => {
   });
 });
 
+/** A request with the key as the whole Authorization header, without `Bearer`. */
+function bare(token: string, init: RequestInit = {}, path = "/") {
+  const headers = new Headers(init.headers);
+  headers.set("authorization", token);
+  return new Request("http://127.0.0.1:3025" + path, { ...init, headers });
+}
+
+describe("bare API keys", () => {
+  test("verify as Clerk reads them, on MCP and the import", async () => {
+    fake.addKey({ secret: "ak_owner" });
+    fake.addKey({ secret: "ak_other", scopes: ["other:scope"] });
+    expect(await auth.requireAgentOwner(bare("ak_owner"))).toEqual({
+      owner: syntheticOwner.id,
+      access: { read: true, write: true },
+    });
+    // Verified, then refused only for its scope, as before.
+    const scoped = await handleHealthImport(
+      bare("ak_other", { method: "POST", body: "{}" }, "/api/health/import"),
+    );
+    expect(scoped.status).toBe(403);
+    expect(await scoped.json()).toEqual({
+      error: "Approve Fitness read or write access for this connection.",
+    });
+    // Clerk passes the same token on, without the scheme.
+    const [sent] = fake.requests;
+    expect(sent?.request.headers.get("authorization")).toBe("Bearer ak_owner");
+    // Another scheme, or a lower-case one, has no token, as in Clerk.
+    for (const header of ["Basic ak_owner", "bearer ak_owner"])
+      expect(await auth.verifyBearer(bare(header), ["api_key"])).toEqual({
+        ok: false,
+        failure: "missing",
+      });
+  });
+});
+
 describe("MCP", () => {
   test("refuses device keys and keeps other keys' access", async () => {
     deviceKey();

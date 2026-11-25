@@ -88,11 +88,33 @@ const served = await signingKey("synthetic-served");
 const unserved = await signingKey("synthetic-unserved");
 let jwksUp = true;
 /** How the Backend API answers API key verification: Clerk's own 404, or a gateway's. */
-let keyVerify: "clerk" | "gateway" = "clerk";
+let keyVerify: "clerk" | "gateway" | "valid" = "clerk";
 const realFetch = globalThis.fetch;
 const jwksRequests: string[] = [];
 globalThis.fetch = (async (input: Request | string | URL) => {
   const url = input instanceof Request ? input.url : String(input);
+  if (url.endsWith("/api_keys/verify") && keyVerify === "valid")
+    return new Response(
+      JSON.stringify({
+        object: "api_key",
+        id: "ak_id_synthetic",
+        type: "api_key",
+        name: "Synthetic script key",
+        subject: syntheticOwner.id,
+        scopes: [],
+        claims: null,
+        revoked: false,
+        revocation_reason: null,
+        expired: false,
+        expiration: null,
+        created_by: syntheticOwner.id,
+        description: null,
+        last_used_at: null,
+        created_at: 1_700_000_000_000,
+        updated_at: 1_700_000_000_000,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
   if (url.endsWith("/api_keys/verify"))
     return keyVerify === "clerk"
       ? new Response(
@@ -309,4 +331,20 @@ test("refuses a token Clerk verifies without an ID", async () => {
   const response = await enroll(token);
   expect(response.status).toBe(401);
   expect(await response.json()).toMatchObject({ code: "unauthorized" });
+});
+
+test("accepts a bare API key in the Authorization header, as Clerk does", async () => {
+  keyVerify = "valid";
+  const bareKey = new Request("http://127.0.0.1:3025/", {
+    headers: { authorization: "ak_synthetic_script" },
+  });
+  for (const request of [bareKey, bearer("ak_synthetic_script")])
+    expect(await auth.verifyBearer(request, ["api_key"])).toMatchObject({
+      ok: true,
+      bearer: { tokenType: "api_key", id: "ak_id_synthetic", scopes: [] },
+    });
+  expect(await auth.requireAgentOwner(bareKey)).toEqual({
+    owner: syntheticOwner.id,
+    access: { read: true, write: true },
+  });
 });

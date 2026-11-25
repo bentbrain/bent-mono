@@ -160,12 +160,26 @@ function conclusivelyUnusable(token: string, resource: string) {
 
 /** A copy of the request carrying only its bearer token, without cookies. */
 function bearerOnly(request: Request) {
-  const authorization = request.headers.get("authorization") ?? "";
-  if (!/^Bearer\s+\S+$/i.test(authorization.trim())) return null;
+  const token = headerToken(request);
+  if (!token) return null;
   return new Request(request.url, {
     method: "GET",
-    headers: { authorization: authorization.trim() },
+    headers: { authorization: `Bearer ${token}` },
   });
+}
+
+/**
+ * The token in the Authorization header, read the way the pinned
+ * @clerk/backend 3.29 reads it: a value without a space is the token
+ * itself, so a bare API key works as it always has, and otherwise the
+ * scheme must be exactly `Bearer`.
+ */
+export function headerToken(request: Request) {
+  const header = request.headers.get("authorization");
+  if (!header) return null;
+  const [scheme, token] = header.split(" ", 2);
+  if (!token) return scheme || null;
+  return scheme === "Bearer" ? token : null;
 }
 
 /**
@@ -229,7 +243,7 @@ export async function verifyBearer(
   if (state.isAuthenticated) return { ok: false, failure: "rejected" };
   const reason = String(state.reason);
   if (reason === "token-verification-failed") {
-    const token = bearer.headers.get("authorization")?.split(/\s+/)[1] ?? "";
+    const token = headerToken(bearer) ?? "";
     return {
       ok: false,
       failure: conclusivelyUnusable(token, resource)
@@ -245,7 +259,7 @@ export async function verifyBearer(
     accepts.length === 1 &&
     accepts[0] === "api_key"
   ) {
-    const token = bearer.headers.get("authorization")?.split(/\s+/)[1] ?? "";
+    const token = headerToken(bearer) ?? "";
     return {
       ok: false,
       failure: (await clerkConfirmsKeyInvalid(token, options.timeoutMs))
