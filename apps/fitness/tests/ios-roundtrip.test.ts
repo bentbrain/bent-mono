@@ -33,7 +33,8 @@ const isolated = isolatedSchema("fitness_ios_wire");
 if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
-const { saveRecord } = await import("../src/server/store");
+const { saveRecord, setEnrollmentWait } = await import("../src/server/store");
+const { default: postgres } = await import("postgres");
 const { defaultSettings, settingsId } = await import("../src/domain");
 
 /** The clock the Swift side uses: midday on 20 November 2026 in Brisbane. */
@@ -79,7 +80,9 @@ function oauth(token: string) {
   });
 }
 
-const enroll = (token: string) =>
+// Each attempt counts one higher, as the app counts them.
+let sequence = 0;
+const enroll = (token: string, enrollmentSequence = ++sequence) =>
   devices.handleDeviceEnroll(
     bearer(
       token,
@@ -88,6 +91,7 @@ const enroll = (token: string) =>
         body: JSON.stringify({
           installationId: installation,
           deviceName: "Synthetic iPhone",
+          enrollmentSequence,
         }),
       },
       "/api/health/devices",
@@ -198,29 +202,55 @@ test.skipIf(!configured)(
     ).toBe(503);
     fake.failure = null;
 
-    // Another enrollment while the first is still issuing its key.
-    oauth("oat_roundtrip_first");
-    oauth("oat_roundtrip_second");
+    // Recording waits on the account row another connection holds, past
+    // its lock wait, so the token stays unused.
+    oauth("oat_roundtrip_busy");
+    setEnrollmentWait(300);
+    const holder = postgres(isolated.url, {
+      max: 1,
+      prepare: false,
+      onnotice: () => undefined,
+    });
     let release = () => undefined as void;
-    fake.stall = new Promise<void>((resolve) => {
-      release = resolve;
+    let taken = () => undefined as void;
+    const held = new Promise<void>((resolve) => {
+      taken = resolve;
     });
-    const creating = new Promise<void>((resolve) => {
-      fake.onCreate = resolve;
+    const holding = holder.begin(async (tx) => {
+      await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${syntheticOwner.id} FOR UPDATE`;
+      taken();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
     });
-    const first = enroll("oat_roundtrip_first");
-    await creating;
-    const pending = await record(
-      "enroll-issuance-pending",
-      await enroll("oat_roundtrip_second"),
-    );
-    expect(pending.headers).toEqual({ "Retry-After": "10" });
-    release();
-    const replaced = await first;
+    try {
+      await held;
+      const pending = await record(
+        "enroll-issuance-pending",
+        await enroll("oat_roundtrip_busy"),
+      );
+      expect(pending.status).toBe(503);
+      expect(pending.headers).toEqual({ "Retry-After": "10" });
+    } finally {
+      release();
+      await holding;
+      await holder.end();
+      setEnrollmentWait();
+    }
+
+    // The app connects again with a higher sequence and gets a new key.
+    oauth("oat_roundtrip_again");
+    const replaced = await enroll("oat_roundtrip_again");
     expect(replaced.status).toBe(201);
     const current = ((await replaced.json()) as { secret: string }).secret;
-    fake.stall = null;
-    fake.onCreate = null;
+
+    // An attempt from a sequence the installation already passed.
+    oauth("oat_roundtrip_stale");
+    const stale = await record(
+      "enroll-stale",
+      await enroll("oat_roundtrip_stale", 1),
+    );
+    expect(stale.status).toBe(409);
 
     // Clerk fails to create the key after the token is used.
     fake.create = "fail";

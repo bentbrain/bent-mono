@@ -7,8 +7,6 @@ public enum KeyState: String, Codable, Sendable {
   case consentPending
   /// Confirmed: sync runs.
   case active
-  /// Fitness reported the key invalid. The user reconnects to replace it.
-  case invalid
 }
 
 public struct DeviceCredential: Codable, Sendable, Equatable {
@@ -18,6 +16,8 @@ public struct DeviceCredential: Codable, Sendable, Equatable {
   public var apiOrigin: String
   public var accountTimezone: String
   public var state: KeyState
+  /// The enrollment sequence of the attempt that issued this key.
+  public var sequence: Int
 }
 
 /// A key waiting to be revoked, with the origin it was issued by.
@@ -27,25 +27,47 @@ public struct PendingRevocation: Codable, Sendable, Equatable {
   public var apiOrigin: String
 }
 
-/// The one credentials item: the current key and keys still to revoke.
-/// Every change replaces the whole item, so a key is never lost between
-/// moving it and deleting it.
+/// The one credentials item: the current key, keys still to revoke, and the
+/// installation's enrollment sequence. Every change replaces the whole item,
+/// so a key is never lost between moving it and deleting it, and a sequence
+/// is stored before it is sent.
 public struct CredentialDocument: Codable, Sendable, Equatable {
   public var active: DeviceCredential?
   public var pending: [PendingRevocation] = []
+  /// The highest enrollment sequence this installation has sent.
+  public var sequence = 0
+  /// Fitness reported the stored key invalid and it was cleared: the app
+  /// asks to connect again.
+  public var keyInvalid = false
 
-  public init(active: DeviceCredential? = nil, pending: [PendingRevocation] = []) {
+  public init(
+    active: DeviceCredential? = nil, pending: [PendingRevocation] = [], sequence: Int = 0, keyInvalid: Bool = false
+  ) {
     self.active = active
     self.pending = pending
+    self.sequence = sequence
+    self.keyInvalid = keyInvalid
   }
 
   /// Moves the current key to the revocation list.
   mutating func retireActive() {
     guard let active else { return }
-    if active.state != .invalid {
-      pending.append(PendingRevocation(key: active.key, userId: active.userId, apiOrigin: active.apiOrigin))
-    }
+    pending.append(PendingRevocation(key: active.key, userId: active.userId, apiOrigin: active.apiOrigin))
     self.active = nil
+  }
+
+  private enum CodingKeys: String, CodingKey { case active, pending, sequence, keyInvalid }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    active = try container.decodeIfPresent(DeviceCredential.self, forKey: .active)
+    pending = try container.decodeIfPresent([PendingRevocation].self, forKey: .pending) ?? []
+    sequence = try container.decodeIfPresent(Int.self, forKey: .sequence) ?? 0
+    keyInvalid = try container.decodeIfPresent(Bool.self, forKey: .keyInvalid) ?? false
+  }
+
+  mutating func revokeLater(_ credential: DeviceCredential) {
+    pending.append(PendingRevocation(key: credential.key, userId: credential.userId, apiOrigin: credential.apiOrigin))
   }
 }
 
@@ -68,13 +90,17 @@ public enum EnrollOutcome: Sendable, Equatable {
   case consentPending(email: String, accountTimezone: String)
   /// Earlier keys still need revoking. Retry, or enroll with `revokeLater`.
   case pendingRevocations(Int)
-  /// A newer connect or disconnect replaced this attempt; its key is being revoked.
+  /// A disconnect, a declined consent or a key with a higher enrollment
+  /// sequence replaced this attempt; its key is being revoked.
   case superseded
   case failed(EnrollAction)
 }
 
-/// Connects, confirms, disconnects and revokes. Each change bumps the
-/// generation, and every step that waited rechecks it before it writes.
+/// Connects, confirms, disconnects and revokes. Disconnecting, declining and
+/// changing account bump the generation, and every step that waited
+/// rechecks it before it writes. Enrollment attempts are ordered by their
+/// sequence instead: of the successful replies, the one with the highest
+/// sequence is kept, and a lower one never replaces it.
 public actor DeviceLifecycle {
   private let credentials: CredentialStore
   private let states: StateDirectory
@@ -118,35 +144,50 @@ public actor DeviceLifecycle {
 
   // MARK: Enrollment
 
-  /// Exchanges a one-time OAuth token for a device key. The key starts in
-  /// `consentPending`: nothing is read or sent until `confirm`.
+  /// Exchanges a one-time OAuth token for a device key. Each attempt sends
+  /// the next enrollment sequence, stored before the request goes out. The
+  /// key starts in `consentPending`: nothing is read or sent until `confirm`.
   public func enroll(token: String, revokeLater: Bool) async throws -> EnrollOutcome {
     let remaining = await revokePending()
     if remaining > 0 && !revokeLater { return .pendingRevocations(remaining) }
-    generation += 1
     let attempt = generation
     guard let api = makeAPI(origin) else { return .failed(.bug("The Fitness origin is not valid.")) }
     let name = DeviceName.clean(await deviceName())
-    let action = await api.enroll(token: token, installationId: try credentials.installationId(), deviceName: name)
+    let sequence = try nextSequence()
+    let action = await api.enroll(
+      token: token, installationId: try credentials.installationId(), deviceName: name, sequence: sequence)
+    // A failed attempt leaves the stored key as it is.
     guard case let .enrolled(response) = action else { return .failed(action) }
     var document = try credentials.load()
     let credential = DeviceCredential(
       key: response.secret, userId: response.userId, email: response.email,
-      apiOrigin: origin.absoluteString, accountTimezone: response.accountTimezone, state: .consentPending)
-    guard attempt == generation else {
-      // A live key for a stale attempt is revoked, never activated.
-      document.pending.append(
-        PendingRevocation(key: credential.key, userId: credential.userId, apiOrigin: credential.apiOrigin))
+      apiOrigin: origin.absoluteString, accountTimezone: response.accountTimezone, state: .consentPending,
+      sequence: sequence)
+    // A disconnect, a declined consent or an account change while this
+    // attempt ran, or a stored key from a higher sequence, wins: this key
+    // is revoked, never stored.
+    let outranked = document.active.map { $0.sequence > sequence } ?? false
+    guard attempt == generation, !outranked else {
+      document.revokeLater(credential)
       try credentials.save(document)
       _ = await revokePending()
       return .superseded
     }
     document.retireActive()
     document.active = credential
+    document.keyInvalid = false
     try credentials.save(document)
     generation += 1
     try states.clear(keeping: nil)
     return .consentPending(email: response.email, accountTimezone: response.accountTimezone)
+  }
+
+  /// The next enrollment sequence, stored before it is used.
+  private func nextSequence() throws -> Int {
+    var document = try credentials.load()
+    document.sequence += 1
+    try credentials.save(document)
+    return document.sequence
   }
 
   /// Confirms consent: the key becomes active with the chosen cutoff.
@@ -186,11 +227,15 @@ public actor DeviceLifecycle {
     try states.clear(keeping: nil)
   }
 
-  /// Fitness reported this key invalid: stop using it and ask to reconnect.
+  /// Fitness reported this key invalid during an upload. If it is still the
+  /// stored key, it is cleared, and the app asks to connect again, which
+  /// sends a higher sequence. This also recovers when a higher sequence's
+  /// key replaced it on the server and that reply was lost.
   public func markInvalid(_ session: SyncSession) throws {
     var document = try credentials.load()
     guard document.active?.key == session.key else { return }
-    document.active?.state = .invalid
+    document.active = nil
+    document.keyInvalid = true
     try credentials.save(document)
     generation += 1
   }

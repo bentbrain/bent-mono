@@ -169,6 +169,9 @@ final class RoundTripTests: XCTestCase {
     XCTAssertEqual(
       Classify.enrollReply(try reply("enroll-issuance-failed"), now: now), .reauthorize(code: "issuance_failed"))
     XCTAssertEqual(
+      Classify.enrollReply(try reply("enroll-stale"), now: now),
+      .retrySameToken(after: 0, code: "stale_enrollment"))
+    XCTAssertEqual(
       Classify.enrollReply(try reply("enroll-auth-unavailable"), now: now),
       .retrySameToken(after: nil, code: "auth_unavailable"))
     // Import outages, both Authorization forms, and mixed refs.

@@ -200,7 +200,7 @@ final class SyncService: @unchecked Sendable {
       "retryPending": await coordinator.retryPending,
     ]
     guard let active = document.active else {
-      status["state"] = "signedOut"
+      status["state"] = document.keyInvalid ? "invalid" : "signedOut"
       return status
     }
     status["state"] = active.state.rawValue

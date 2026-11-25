@@ -128,6 +128,9 @@ public enum Classify {
       return .enrolled(response)
     case (503, "issuance_pending"), (429, "rate_limited"), (503, "auth_unavailable"):
       return .retrySameToken(after: after, code: reply.code ?? "")
+    case (409, "stale_enrollment"):
+      // A new attempt sends a higher sequence; the token is still unused.
+      return .retrySameToken(after: 0, code: "stale_enrollment")
     case (400, "invalid_request"):
       return .bug(message)
     case (503, "issuance_failed"), (409, "enrollment_token_used"), (401, _):

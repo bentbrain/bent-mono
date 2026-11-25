@@ -160,6 +160,9 @@ final class WireTests: XCTestCase {
     guard case .refused(code: "enrollment_unavailable", _) =
       Classify.enrollReply(try WireFixtures.reply("error-enrollment-unavailable"), now: now)
     else { return XCTFail("enrollment_unavailable") }
+    XCTAssertEqual(
+      Classify.enrollReply(try WireFixtures.reply("error-stale-enrollment"), now: now),
+      .retrySameToken(after: 0, code: "stale_enrollment"))
     XCTAssertEqual(Classify.enrollReply(nil, now: now), .reauthorize(code: "lost_reply"))
     let malformed = HTTPReply(status: 201, body: Data(#"{"secret":""}"#.utf8))
     XCTAssertEqual(Classify.enrollReply(malformed, now: now), .reauthorize(code: "malformed_reply"))

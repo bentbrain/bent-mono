@@ -43,6 +43,54 @@ final class MemoryStates: StateDirectory, @unchecked Sendable {
   var count: Int { stores.get.filter { (try? $0.value.load()) != nil }.count }
 }
 
+/// A gate a test opens to let a held request finish.
+final class Gate: @unchecked Sendable {
+  private struct State {
+    var isOpen = false
+    var isReached = false
+    var waiters: [CheckedContinuation<Void, Never>] = []
+    var arrivals: [CheckedContinuation<Void, Never>] = []
+  }
+  private let state = Locked(State())
+
+  /// Called by the held request: waits until the gate opens.
+  func pass() async {
+    let arrived = state.with { state in
+      state.isReached = true
+      defer { state.arrivals = [] }
+      return state.arrivals
+    }
+    arrived.forEach { $0.resume() }
+    await withCheckedContinuation { continuation in
+      let open = state.with { state in
+        if !state.isOpen { state.waiters.append(continuation) }
+        return state.isOpen
+      }
+      if open { continuation.resume() }
+    }
+  }
+
+  /// Waits until the held request reaches the gate.
+  func reached() async {
+    await withCheckedContinuation { continuation in
+      let reached = state.with { state in
+        if !state.isReached { state.arrivals.append(continuation) }
+        return state.isReached
+      }
+      if reached { continuation.resume() }
+    }
+  }
+
+  func open() {
+    let waiting = state.with { state in
+      state.isOpen = true
+      defer { state.waiters = [] }
+      return state.waiters
+    }
+    waiting.forEach { $0.resume() }
+  }
+}
+
 /// The device routes in memory, per origin.
 final class FakeDevices: HTTPTransport, @unchecked Sendable {
   struct State {
@@ -52,26 +100,35 @@ final class FakeDevices: HTTPTransport, @unchecked Sendable {
     var enrollScripts: [HTTPReply?] = []
     var onEnroll: (@Sendable () async -> Void)?
     var userId = "user_syntheticdeviceowner"
+    /// The enrollment sequences received, in order.
+    var sequences: [Int] = []
+    /// Requests for these sequences wait at their gate before replying.
+    var gates: [Int: Gate] = [:]
+    /// Requests for these sequences get this reply.
+    var replies: [Int: HTTPReply?] = [:]
   }
   let state = Locked(State())
   var revoked: [String] { state.get.revoked }
+  var sequences: [Int] { state.get.sequences }
 
   func send(_ request: URLRequest) async -> HTTPReply? {
     if state.get.offline { return nil }
     let path = request.url?.path ?? ""
     let key = request.value(forHTTPHeaderField: "Authorization")?.replacingOccurrences(of: "Bearer ", with: "") ?? ""
     if path == "/api/health/devices" {
+      let json = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+      let sequence = json?["enrollmentSequence"] as? Int ?? 0
+      state.with { $0.sequences.append(sequence) }
       if let hook = state.get.onEnroll { await hook() }
+      if let gate = state.get.gates[sequence] { await gate.pass() }
+      if let reply = state.get.replies[sequence] { return reply }
       let scripted: HTTPReply?? = state.with { state in
         state.enrollScripts.isEmpty ? Optional<HTTPReply?>.none : .some(state.enrollScripts.removeFirst())
       }
       if case let .some(reply) = scripted { return reply }
-      let (secret, user) = state.with { state -> (String, String) in
-        state.issued += 1
-        return ("ak_issued_\(state.issued)", state.userId)
-      }
+      let user = state.get.userId
       let body = """
-        {"secret":"\(secret)","accountTimezone":"Australia/Brisbane","userId":"\(user)",\
+        {"secret":"ak_issued_\(sequence)","accountTimezone":"Australia/Brisbane","userId":"\(user)",\
         "email":"fitness-device+clerk_test@example.com"}
         """
       return HTTPReply(status: 201, body: Data(body.utf8))
@@ -223,9 +280,106 @@ final class LifecycleTests: XCTestCase {
     XCTAssertNil(value8)
     let value9 = await device.isCurrent(session)
     XCTAssertFalse(value9)
-    // Reconnecting replaces the invalid key without revoking it again.
+    // The key is cleared and the app asks to connect again.
+    XCTAssertNil(try credentials.load().active)
+    XCTAssertTrue(try credentials.load().keyInvalid)
+    // Reconnecting sends a higher sequence and does not revoke the old key.
     _ = try await device.enroll(token: "oat_2", revokeLater: false)
+    XCTAssertEqual(devices.sequences, [1, 2])
+    XCTAssertEqual(try credentials.load().active?.sequence, 2)
+    XCTAssertFalse(try credentials.load().keyInvalid)
     XCTAssertEqual(devices.revoked, [])
+  }
+
+  func testKeyInvalidLeavesANewerStoredKeyAlone() async throws {
+    let device = lifecycle()
+    _ = try await device.enroll(token: "oat_1", revokeLater: false)
+    _ = try await device.confirm(cutoff: Date())
+    let first = await device.session()
+    let old = try XCTUnwrap(first)
+    _ = try await device.enroll(token: "oat_2", revokeLater: false)
+    // An upload with the replaced key reports it invalid; the newer one stays.
+    try await device.markInvalid(old)
+    XCTAssertEqual(try credentials.load().active?.key, "ak_issued_2")
+    XCTAssertFalse(try credentials.load().keyInvalid)
+  }
+
+  // MARK: Enrollment sequence
+
+  func testTheSequenceIncreasesForEveryAttemptAndSurvivesRelaunch() async throws {
+    let device = lifecycle()
+    _ = try await device.enroll(token: "oat_1", revokeLater: false)
+    // A lost reply still used its sequence.
+    devices.state.with { $0.enrollScripts = [nil] }
+    _ = try await device.enroll(token: "oat_2", revokeLater: false)
+    XCTAssertEqual(try credentials.load().sequence, 2)
+    let relaunched = lifecycle()
+    _ = try await relaunched.enroll(token: "oat_3", revokeLater: false)
+    XCTAssertEqual(devices.sequences, [1, 2, 3])
+    XCTAssertEqual(try credentials.load().active?.sequence, 3)
+  }
+
+  func testTheSequenceIsStoredBeforeTheRequestIsSent() async throws {
+    let device = lifecycle()
+    let stored = Locked(-1)
+    let credentials = self.credentials
+    devices.state.with { state in
+      state.onEnroll = { stored.with { $0 = (try? credentials.load().sequence) ?? -1 } }
+    }
+    _ = try await device.enroll(token: "oat_1", revokeLater: false)
+    XCTAssertEqual(stored.get, 1)
+  }
+
+  func testStaleEnrollmentRetriesTheSameTokenWithAHigherSequence() async throws {
+    let device = lifecycle()
+    let stale = HTTPReply(
+      status: 409, body: Data(#"{"error":"Connected again since.","code":"stale_enrollment"}"#.utf8))
+    devices.state.with { $0.replies[1] = stale }
+    let refused = try await device.enroll(token: "oat_1", revokeLater: false)
+    XCTAssertEqual(refused, .failed(.retrySameToken(after: 0, code: "stale_enrollment")))
+    XCTAssertNil(try credentials.load().active)
+    let retried = try await device.enroll(token: "oat_1", revokeLater: false)
+    guard case .consentPending = retried else { return XCTFail("\(retried)") }
+    XCTAssertEqual(devices.sequences, [1, 2])
+    XCTAssertEqual(try credentials.load().active?.sequence, 2)
+  }
+
+  func testAnEarlierSuccessIsKeptWhenALaterAttemptFails() async throws {
+    let device = lifecycle()
+    _ = try await device.enroll(token: "oat_1", revokeLater: false)
+    // Attempt A (sequence 2) is held; attempt B (sequence 3) fails meanwhile.
+    let gate = Gate()
+    devices.state.with { state in
+      state.gates[2] = gate
+      state.replies[3] = HTTPReply(
+        status: 503, body: Data(#"{"error":"Sign in again.","code":"issuance_failed"}"#.utf8))
+    }
+    let first = Task { try await device.enroll(token: "oat_a", revokeLater: false) }
+    await gate.reached()
+    let second = try await device.enroll(token: "oat_b", revokeLater: false)
+    XCTAssertEqual(second, .failed(.reauthorize(code: "issuance_failed")))
+    gate.open()
+    let kept = try await first.value
+    guard case .consentPending = kept else { return XCTFail("\(kept)") }
+    XCTAssertEqual(try credentials.load().active?.key, "ak_issued_2")
+    XCTAssertEqual(try credentials.load().active?.sequence, 2)
+    XCTAssertFalse(devices.revoked.contains("fitness.example.test ak_issued_2"))
+  }
+
+  func testALowerSequenceSuccessAfterAHigherOneIsRevoked() async throws {
+    let device = lifecycle()
+    // Attempt A (sequence 1) is held while attempt B (sequence 2) succeeds.
+    let gate = Gate()
+    devices.state.with { $0.gates[1] = gate }
+    let first = Task { try await device.enroll(token: "oat_a", revokeLater: false) }
+    await gate.reached()
+    let second = try await device.enroll(token: "oat_b", revokeLater: false)
+    guard case .consentPending = second else { return XCTFail("\(second)") }
+    gate.open()
+    let late = try await first.value
+    XCTAssertEqual(late, .superseded)
+    XCTAssertEqual(try credentials.load().active?.key, "ak_issued_2")
+    XCTAssertEqual(devices.revoked, ["fitness.example.test ak_issued_1"])
   }
 
   func testGenerationsFenceOldSessions() async throws {

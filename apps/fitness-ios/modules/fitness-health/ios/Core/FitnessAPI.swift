@@ -68,9 +68,12 @@ public struct FitnessAPI: Sendable {
     return Classify.importReply(reply, submitted: body.submitted, now: clock())
   }
 
-  public func enroll(token: String, installationId: UUID, deviceName: String) async -> EnrollAction {
+  public func enroll(token: String, installationId: UUID, deviceName: String, sequence: Int) async -> EnrollAction {
     let body = try? JSONSerialization.data(
-      withJSONObject: ["installationId": installationId.uuidString.lowercased(), "deviceName": deviceName],
+      withJSONObject: [
+        "installationId": installationId.uuidString.lowercased(), "deviceName": deviceName,
+        "enrollmentSequence": sequence,
+      ] as [String: Any],
       options: [.sortedKeys])
     let reply = await transport.send(request("api/health/devices", method: "POST", bearer: token, body: body))
     return Classify.enrollReply(reply, now: clock())
