@@ -381,7 +381,10 @@ jobs:
       - name: Build the production app and the seeder
         working-directory: apps/fitness-ios
         env:
-          XCODEBUILD_SETTINGS: CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+          # Whole-module compiles, which the Swift extractor reads in full.
+          XCODEBUILD_SETTINGS: >-
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+            SWIFT_COMPILATION_MODE=wholemodule
         run: |
           node scripts/native.mjs prebuild
           node scripts/native.mjs build
@@ -427,6 +430,17 @@ jobs:
       - name: Require complete extraction
         working-directory: apps/fitness-ios
         run: node scripts/codeql-coverage.mjs "$RUNNER_TEMP/codeql_databases/swift" "$NATIVE_BUILD_DIR/app"
+      - name: Retain the CodeQL extractor logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codeql-swift-extractor-logs
+          path: |
+            ${{ runner.temp }}/codeql_databases/swift/log
+            ${{ runner.temp }}/codeql_databases/swift/diagnostic
+            ${{ runner.temp }}/codeql_databases/diagnostic
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Retain original CodeQL report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
