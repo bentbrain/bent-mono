@@ -391,8 +391,9 @@ export function readHealthExport(
  * Reads a device sync request. Every entry is checked before anything is
  * saved: a missing, malformed or repeated ref, an unsupported entry or one
  * Fitness cannot read fails the whole request with the entry's path. Samples
- * dated after today or outside the app's limits are skipped. A sample whose
- * instant was already sent in the request, for the same type, is a duplicate.
+ * dated after today or outside the app's limits are skipped. The first ref
+ * at each instant, per type, gets its own outcome, skipped or not; later
+ * refs at that instant are duplicates.
  */
 export function readDeviceExport(
   body: unknown,
@@ -417,6 +418,9 @@ export function readDeviceExport(
   const sent = { weights: 0, runs: 0 };
   const unreadable = (path: string, reason: string) =>
     new HealthImportError(`${path}: ${reason}`, "invalid_device_request");
+  // Instants claimed in request order, per type.
+  const weightInstants = new Set<string>();
+  const runStarts = new Set<string>();
 
   for (const [m, metric] of metrics.entries()) {
     const factor = kgPer.get(metric.units.toLowerCase());
@@ -428,29 +432,26 @@ export function readDeviceExport(
     for (const [p, point] of metric.data.entries()) {
       sent.weights++;
       const dated = datedWeight(point, factor, timezone, today);
-      const entry = { ref: point.ref, type: "weight" as const };
-      if ("skip" in dated) {
-        if (dated.code === null)
-          throw unreadable(
-            `data.metrics.${m}.data.${p}.${dated.field}`,
-            dated.skip.reason,
-          );
-        skipped.push(dated.skip);
-        entries.push({
-          ...entry,
-          at: null,
-          skip: dated.code,
-          duplicate: false,
-        });
+      if ("skip" in dated && dated.code === null)
+        throw unreadable(
+          `data.metrics.${m}.data.${p}.${dated.field}`,
+          dated.skip.reason,
+        );
+      // The first ref at an instant claims it, whatever its outcome.
+      const at = healthInstant(point.date)?.toISOString() ?? null;
+      const entry = { ref: point.ref, type: "weight" as const, at };
+      if (at === null || weightInstants.has(at)) {
+        entries.push({ ...entry, skip: null, duplicate: true });
         continue;
       }
-      const added = collected.weight(dated.sample);
-      entries.push({
-        ...entry,
-        at: dated.sample.at,
-        skip: null,
-        duplicate: !added,
-      });
+      weightInstants.add(at);
+      if ("skip" in dated) {
+        skipped.push(dated.skip);
+        entries.push({ ...entry, skip: dated.code, duplicate: false });
+        continue;
+      }
+      collected.weight(dated.sample);
+      entries.push({ ...entry, skip: null, duplicate: false });
     }
   }
 
@@ -462,24 +463,22 @@ export function readDeviceExport(
         `Unreadable end "${workout.end.slice(0, 40)}".`,
       );
     const dated = datedRun(workout, timezone, today);
-    const entry = { ref: workout.ref, type: "run" as const };
-    if ("skip" in dated) {
-      if (dated.code === null)
-        throw unreadable(
-          `data.workouts.${w}.${dated.field}`,
-          dated.skip.reason,
-        );
-      skipped.push(dated.skip);
-      entries.push({ ...entry, at: null, skip: dated.code, duplicate: false });
+    if ("skip" in dated && dated.code === null)
+      throw unreadable(`data.workouts.${w}.${dated.field}`, dated.skip.reason);
+    const at = healthInstant(workout.start)?.toISOString() ?? null;
+    const entry = { ref: workout.ref, type: "run" as const, at };
+    if (at === null || runStarts.has(at)) {
+      entries.push({ ...entry, skip: null, duplicate: true });
       continue;
     }
-    const added = collected.run(dated.sample);
-    entries.push({
-      ...entry,
-      at: dated.sample.start,
-      skip: null,
-      duplicate: !added,
-    });
+    runStarts.add(at);
+    if ("skip" in dated) {
+      skipped.push(dated.skip);
+      entries.push({ ...entry, skip: dated.code, duplicate: false });
+      continue;
+    }
+    collected.run(dated.sample);
+    entries.push({ ...entry, skip: null, duplicate: false });
   }
 
   return {
