@@ -925,6 +925,115 @@ describe("device issuance lease and attempt windows", () => {
   );
 
   test.skipIf(!configured)(
+    "fails an activation that waited on its enrollment row past the lease's expiry",
+    async () => {
+      const holder = crypto.randomUUID();
+      const attemptId = crypto.randomUUID();
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      // A lease that expires while the activation waits.
+      expect(
+        await store.acquireDeviceLease(database(), owner, holder, 0.4),
+      ).toBe(true);
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"c".repeat(64)},${attemptId},${installation})`;
+      const locker = client();
+      try {
+        let activation: Promise<boolean> | undefined;
+        await locker.begin(async (tx) => {
+          // Another transaction, such as an import, holds the row.
+          await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${attemptId} FOR UPDATE`;
+          activation = store.issueEnrollment(
+            database(),
+            { owner, holder },
+            attemptId,
+            "ak_id_waited_row",
+          );
+          activation.catch(() => undefined);
+          await Bun.sleep(800);
+        });
+        await expect(activation).rejects.toBeInstanceOf(store.DeviceLeaseLost);
+        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
+      } finally {
+        await locker.end();
+        await store.releaseDeviceLease(database(), owner, holder);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "never leaves two active keys or a wrongly active one under contention",
+    async () => {
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      const current = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"d".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      const active = async () =>
+        (
+          await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
+        ).map((r) => r.attempt_id);
+      // A replacement whose deactivation waits behind an import's hold on the
+      // current row, while its lease runs out, changes nothing.
+      const slow = crypto.randomUUID();
+      expect(await store.acquireDeviceLease(database(), owner, slow, 0.4)).toBe(
+        true,
+      );
+      const importer = client();
+      try {
+        let replacing: Promise<void> | undefined;
+        await importer.begin(async (tx) => {
+          await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
+          replacing = store.deactivateInstallation(
+            database(),
+            { owner, holder: slow },
+            installation,
+          );
+          replacing.catch(() => undefined);
+          await Bun.sleep(800);
+        });
+        await expect(replacing).rejects.toBeInstanceOf(store.DeviceLeaseLost);
+        expect(await active()).toEqual([current]);
+      } finally {
+        await importer.end();
+        await store.releaseDeviceLease(database(), owner, slow);
+      }
+      // A second activation for the installation while its key is still
+      // active fails, so the installation never has two active keys.
+      const holder = crypto.randomUUID();
+      expect(
+        await store.acquireDeviceLease(database(), owner, holder, 90),
+      ).toBe(true);
+      try {
+        const next = crypto.randomUUID();
+        await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"e".repeat(64)},${next},${installation})`;
+        await expect(
+          store.issueEnrollment(
+            database(),
+            { owner, holder },
+            next,
+            "ak_id_second",
+          ),
+        ).rejects.toThrow();
+        expect(await active()).toEqual([current]);
+        // With the current key deactivated first, the next one activates.
+        await store.deactivateInstallation(
+          database(),
+          { owner, holder },
+          installation,
+        );
+        expect(
+          await store.issueEnrollment(
+            database(),
+            { owner, holder },
+            next,
+            "ak_id_second",
+          ),
+        ).toBe(true);
+        expect(await active()).toEqual([next]);
+      } finally {
+        await store.releaseDeviceLease(database(), owner, holder);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
     "refuses an attempt over the cap without waiting on the counter",
     async () => {
       await database()`DELETE FROM fitness_device_attempt_windows`;
