@@ -63,4 +63,4 @@ uv run --with pyyaml \
 
 On another machine, use the validator shipped with that installation's plugin-creator skill.
 
-The web service is developed and deployed from `apps/web` in the same Git repository. See the root [`README.md`](../../README.md) and [`DEPLOYMENT.md`](../../DEPLOYMENT.md). Code deployments must use the GitHub-connected Vercel project.
+The web service is developed and deployed from `apps/web` in this product directory. See the [Drive README](../../README.md) and [`apps/web/README.md`](../../apps/web/README.md). Production deployments use the repository's Vercel release workflow.

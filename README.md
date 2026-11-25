@@ -4,15 +4,15 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 
 | Application | Domains | Source |
 | --- | --- | --- |
-| Website | bent.build, www.bent.build | apps/www |
-| Blog | jp.bent.build | apps/jp |
-| Stay guide | stay.bent.build | apps/stay |
-| Feedback toolbar | toolbar.bent.build | [apps/toolbar](apps/toolbar/README.md) |
-| Collage | maya-collage.bent.build, maya-collages.bent.build | apps/collage |
-| Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
-| Home | home.bent.build | apps/home |
-| Trackmap | trackmap.bent.build | apps/trackmap |
-| Fitness | fitness.bent.build | apps/fitness |
+| Website | [bent.build](https://bent.build), www.bent.build | [apps/www](apps/www/README.md) |
+| Blog | [jp.bent.build](https://jp.bent.build) | [apps/jp](apps/jp/README.md) |
+| Stay guide | [stay.bent.build](https://stay.bent.build) | [apps/stay](apps/stay/README.md) |
+| Feedback toolbar | [toolbar.bent.build](https://toolbar.bent.build) | [apps/toolbar](apps/toolbar/README.md) |
+| Collage | [maya-collage.bent.build](https://maya-collage.bent.build), maya-collages.bent.build | [apps/collage](apps/collage/README.md) |
+| Drive | [drive.bent.build](https://drive.bent.build), tesla.bent.build | [products/drive](products/drive/README.md) |
+| Home | [home.bent.build](https://home.bent.build) | [apps/home](apps/home/README.md) |
+| Trackmap | [trackmap.bent.build](https://trackmap.bent.build) | [apps/trackmap](apps/trackmap/README.md) |
+| Fitness | [fitness.bent.build](https://fitness.bent.build) | [apps/fitness](apps/fitness/README.md) |
 
 `deployments.json` lists the apps and their deployment settings. Drive keeps its internal packages and services under `products/`.
 
