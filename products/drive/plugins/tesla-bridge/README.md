@@ -33,18 +33,19 @@ The plugin declares the MCP resource as `https://drive.bent.build/mcp`. Codex di
 
 The public MCP scope is `tesla.read`. The upstream Tesla scopes are `openid offline_access vehicle_device_data`. For vehicle-action requests, explain that this connection supports reading vehicle data only.
 
-## Installing in Codex
+## Connecting
 
-In this monorepo, the plugin package lives at `products/drive/plugins/tesla-bridge` (no root Codex marketplace manifest is bundled here). You can connect it in either of two ways:
+The hosted service at `https://drive.bent.build/mcp` supports ChatGPT custom MCP connectors; follow the connection guide at [drive.bent.build/docs](https://drive.bent.build/docs). Under Drive's default production configuration (`ALLOW_LOCAL_OAUTH_REDIRECTS=false`), OAuth dynamic client registration allows only ChatGPT connector callbacks and rejects loopback callbacks (including Codex CLI's default local OAuth callback) with `invalid_redirect_uri`.
 
-1. **Via a local Codex marketplace:** point a local marketplace entry at `./products/drive/plugins/tesla-bridge`, install `tesla-bridge`, and start a new task so both the MCP server (`.mcp.json`) and the `$tesla-copilot` skill (`skills/tesla-copilot/`) load together.
-2. **Direct MCP registration:** register the hosted endpoint directly in Codex MCP settings or via the CLI:
+In this monorepo, the plugin package lives at `products/drive/plugins/tesla-bridge` (no root Codex marketplace manifest is bundled here). To test with Codex CLI against a local development instance of `products/drive/apps/web` that has `ALLOW_LOCAL_OAUTH_REDIRECTS=true`:
+
+1. Register your local MCP endpoint in Codex:
 
 ```bash
-codex mcp add tesla-bridge --url https://drive.bent.build/mcp
+codex mcp add tesla-bridge --url http://localhost:3000/mcp
 ```
 
-If you also want to use the `$tesla-copilot` skill with direct MCP registration, copy or symlink `products/drive/plugins/tesla-bridge/skills/tesla-copilot` into your Codex skills directory (`~/.codex/skills/tesla-copilot`) and start a new task.
+2. Optionally copy or symlink `products/drive/plugins/tesla-bridge/skills/tesla-copilot` into your Codex skills directory (`~/.codex/skills/tesla-copilot`) and open a new task so `$tesla-copilot` is available.
 
 Try:
 

@@ -1,6 +1,6 @@
 # Drive
 
-Bent Drive Copilot is a read-only Tesla MCP server for ChatGPT and Codex.
+Bent Drive Copilot is a read-only Tesla MCP server for ChatGPT, with a Codex plugin package for local development.
 
 Open [drive.bent.build](https://drive.bent.build) for the overview and [drive.bent.build/docs](https://drive.bent.build/docs) for the connection guide. Connecting requires an invited GitHub account and a Tesla account.
 
@@ -13,12 +13,12 @@ Open [drive.bent.build](https://drive.bent.build) for the overview and [drive.be
 
 ## Workspace layout
 
-| Path | Package | Role |
-| --- | --- | --- |
-| [`apps/web`](apps/web/README.md) | `@bent-build/drive-copilot-web` | Next.js web service for `drive.bent.build` and `tesla.bent.build`, handling Clerk/GitHub sign-in, Tesla OAuth, Postgres storage and `/mcp` |
-| `packages/tesla-contracts` | `@bent-build/tesla-contracts` | Shared Zod schemas and TypeScript contracts |
-| [`plugins/tesla-bridge`](plugins/tesla-bridge/README.md) | `@tesla-bridge/mcp-server` | Codex plugin (`tesla-copilot` skill and `.mcp.json`) plus local stdio and HTTP MCP server tooling |
-| `tooling/eslint`, `tooling/typescript` | `@bent-build/eslint-config`, `@bent-build/tsconfig` | Shared lint and TypeScript configuration |
+| Path                                                     | Package                                             | Role                                                                                                                     |
+| -------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| [`apps/web`](apps/web/README.md)                         | `@bent-build/drive-copilot-web`                     | Next.js web service for `drive.bent.build` and `tesla.bent.build`, handling Clerk/GitHub sign-in, Tesla OAuth and `/mcp` |
+| `packages/tesla-contracts`                               | `@bent-build/tesla-contracts`                       | Shared Zod schemas and TypeScript contracts                                                                              |
+| [`plugins/tesla-bridge`](plugins/tesla-bridge/README.md) | `@tesla-bridge/mcp-server`                          | Codex plugin (`tesla-copilot` skill and `.mcp.json`) plus local stdio and HTTP MCP server tooling                        |
+| `tooling/eslint`, `tooling/typescript`                   | `@bent-build/eslint-config`, `@bent-build/tsconfig` | Shared lint and TypeScript configuration                                                                                 |
 
 ## Development
 
