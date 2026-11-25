@@ -24,6 +24,15 @@ describe("variants", () => {
     expect(settings.oauth.resource).toBe("http://127.0.0.1:3025/api/mcp");
   });
 
+  test("only development builds may use a local HTTP issuer", () => {
+    const local = { FITNESS_OAUTH_ISSUER: "http://127.0.0.1:3025", FITNESS_OAUTH_CLIENT_ID: "client_1" };
+    expect(appSettings("development", local).oauth.issuer).toBe("http://127.0.0.1:3025");
+    expect(() => appSettings("production", local)).toThrow();
+    expect(appSettings("production", { FITNESS_OAUTH_ISSUER: "https://clerk.example.com/" }).oauth.issuer).toBe(
+      "https://clerk.example.com",
+    );
+  });
+
   test("production refuses another origin", () => {
     expect(() => appSettings("production", { FITNESS_ORIGIN: "http://127.0.0.1:3025" })).toThrow();
   });

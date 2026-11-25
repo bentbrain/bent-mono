@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.author         = 'bent.build'
   s.homepage       = 'https://fitness.bent.build'
   s.license        = { :type => 'UNLICENSED' }
-  s.platforms      = { :ios => '17.0' }
+  s.platforms      = { :ios => '16.4' }
   s.source         = { :git => '' }
   s.static_framework = true
   s.swift_version  = '5.9'

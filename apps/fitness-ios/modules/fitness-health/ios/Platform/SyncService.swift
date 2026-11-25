@@ -30,7 +30,7 @@ final class SyncService: @unchecked Sendable {
     lifecycle = DeviceLifecycle(
       credentials: KeychainCredentials(service: "\(Bundle.main.bundleIdentifier ?? "build.bent.fitness").sync"),
       states: states, origin: origin,
-      deviceName: { DeviceName.clean(UIDevice.current.name) },
+      deviceName: { await MainActor.run { UIDevice.current.name } },
       makeAPI: { url in
         // Revocations for keys from another origin use their own origin.
         let transport = FitnessAPI.sameOrigin(url, pinned) ? transport : PinnedTransport(origin: url)
@@ -73,7 +73,8 @@ final class SyncService: @unchecked Sendable {
     guard await lifecycle.session() != nil else { return }
     registerObservers()
     await enableBackgroundDelivery()
-    if foreground || (await coordinator.retryPending) {
+    let retry = await coordinator.retryPending
+    if foreground || retry {
       await coordinator.trigger(mode: foreground ? .foreground : .background)
     }
   }
@@ -140,8 +141,13 @@ final class SyncService: @unchecked Sendable {
 
   // MARK: Actions
 
+  /// Asks for read access, then registers fresh observers and background
+  /// delivery, since ones registered before access was answered can stop.
   func requestHealthAccess() async throws {
     try await health.requestAuthorization(toShare: [], read: HealthKitSource.readTypes)
+    await stopObservers()
+    registerObservers()
+    await enableBackgroundDelivery()
   }
 
   func confirm(cutoff: Date) async throws {
@@ -209,6 +215,7 @@ final class SyncService: @unchecked Sendable {
     status["unreadableRetired"] = state.unreadableRetired
     status["paused"] = Dictionary(uniqueKeysWithValues: state.paused.map { ($0.key.rawValue, $0.value) })
     status["backfilling"] = !state.incrementalEnabled
+    status["backfillStarted"] = state.backfill != nil || state.anchors != nil
     status["backfillThrough"] = state.backfill?.through ?? NSNull()
     return status
   }

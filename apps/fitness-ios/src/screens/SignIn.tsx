@@ -7,7 +7,11 @@ import { Body, Button, Notice, Page } from "../ui/parts";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-export function SignIn({ onChange, title = copy.signIn.title, body = copy.signIn.body }: {
+export function SignIn({
+  onChange,
+  title = copy.signIn.title,
+  body = copy.signIn.body,
+}: {
   onChange: () => void;
   title?: string;
   body?: string;

@@ -322,6 +322,22 @@ jobs:
       - run: node scripts/native.mjs artifact
       - run: node scripts/native.mjs seeder
       - run: node scripts/native.mjs core-test
+      - name: Start a temporary Postgres for the round trip
+        run: |
+          brew install postgresql@16
+          pg="$(brew --prefix postgresql@16)/bin"
+          data="$RUNNER_TEMP/postgres"
+          "$pg/initdb" -D "$data" -U test --auth=trust > /dev/null
+          "$pg/pg_ctl" -D "$data" -o "-p 55432 -k $RUNNER_TEMP -c listen_addresses=127.0.0.1" \
+            -l "$RUNNER_TEMP/postgres.log" -w start
+          "$pg/createdb" -h 127.0.0.1 -p 55432 -U test fitness_test
+          echo "POSTGRES_BIN=$pg" >> "$GITHUB_ENV"
+          echo "FITNESS_TEST_DATABASE_URL=postgres://test@127.0.0.1:55432/fitness_test" >> "$GITHUB_ENV"
+      - run: node scripts/roundtrip.mjs
+      - name: Stop Postgres
+        if: always()
+        run: |
+          if [ -n "${POSTGRES_BIN:-}" ]; then "$POSTGRES_BIN/pg_ctl" -D "$RUNNER_TEMP/postgres" -w stop; fi
   codeql-swift:
     name: CodeQL Swift
     runs-on: macos-26
@@ -348,9 +364,14 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           node scripts/native.mjs xcode 26.6
       - uses: ./.github/actions/setup
-      - name: Generate the production native project
+      - name: Generate the production native project and build its dependencies
         working-directory: apps/fitness-ios
-        run: node scripts/native.mjs prebuild
+        run: |
+          node scripts/native.mjs prebuild
+          # Third-party pods build before tracing starts. The traced build
+          # below compiles every first-party Swift file again.
+          XCODEBUILD_SETTINGS="CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO" node scripts/native.mjs build
+          node scripts/native.mjs touch-sources
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
         env:
@@ -378,6 +399,7 @@ jobs:
           node scripts/native.mjs build
           node scripts/native.mjs seeder
           node scripts/native.mjs core-build
+          node scripts/native.mjs artifact
       - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:
           category: fitness-codeql-swift

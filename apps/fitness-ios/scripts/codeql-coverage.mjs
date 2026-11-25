@@ -53,12 +53,12 @@ function compiledSources(root) {
     }
   };
   walk(join(root, "Build/Intermediates.noindex"), 0);
-  const target = lists.filter((list) => /FitnessSync\.build\/.*\/FitnessSync\.SwiftFileList$/.test(list));
+  const target = lists.filter((list) => /\/(FitnessSync(?:Dev)?)\.build\/.*\/\1\.SwiftFileList$/.test(list));
   if (!target.length) throw new Error("The app target's Swift file list is missing.");
   return target.flatMap((list) =>
     readFileSync(list, "utf8")
       .split("\n")
-      .map((line) => line.trim())
+      .map((line) => line.trim().replace(/\\(.)/g, "$1"))
       .filter(Boolean)
       .map(real),
   );
@@ -76,6 +76,4 @@ if (missing.length) {
   console.error(`CodeQL did not extract ${missing.length} Swift files:\n${missing.join("\n")}`);
   process.exit(1);
 }
-console.log(
-  `CodeQL extracted all ${tracked.length} tracked and ${compiled.length} app-compiled Swift files.`,
-);
+console.log(`CodeQL extracted all ${tracked.length} tracked and ${compiled.length} app-compiled Swift files.`);

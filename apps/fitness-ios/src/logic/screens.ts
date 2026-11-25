@@ -3,8 +3,8 @@ import type { SyncStatus } from "../../modules/fitness-health";
 export type Screen = "loading" | "signIn" | "consent" | "health" | "status" | "reconnect";
 
 /**
- * The screen for the native status. An active key without a finished first
- * sync shows the Health step, which asks for access and runs the backfill.
+ * The screen for the native status. An active key whose first sync has not
+ * started shows the Health step, which asks for access and starts it.
  */
 export function screenFor(status: SyncStatus | null, healthStepDone: boolean): Screen {
   if (!status) return "loading";
@@ -16,6 +16,8 @@ export function screenFor(status: SyncStatus | null, healthStepDone: boolean): S
     case "invalid":
       return "reconnect";
     case "active":
-      return !healthStepDone && status.backfilling && !status.lastSyncAt ? "health" : "status";
+      return !healthStepDone && status.backfilling && !status.backfillStarted && !status.lastSyncAt
+        ? "health"
+        : "status";
   }
 }

@@ -1,10 +1,7 @@
 // Native settings for the fitness-health module: HealthKit read access with
 // background delivery, the Health purpose string, and the Fitness origin the
 // module pins every request to.
-const {
-  withEntitlementsPlist,
-  withInfoPlist,
-} = require("expo/config-plugins");
+const { withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 
 const shareDescription =
   "Fitness Sync reads your weigh-ins and running workouts and sends them to your Fitness account.";

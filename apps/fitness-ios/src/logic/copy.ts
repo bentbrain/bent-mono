@@ -37,8 +37,7 @@ export const copy = {
     allow: "Choose Health access",
     readable: "Readable history",
     none: "None readable",
-    noneHint:
-      "Fitness Sync can't read any samples. Check Settings → Health → Data Access & Devices → Fitness Sync.",
+    noneHint: "Fitness Sync can't read any samples. Check Settings → Health → Data Access & Devices → Fitness Sync.",
     start: "Start the first sync",
     keepOpen: "Keep Fitness Sync open until the first sync finishes.",
   },

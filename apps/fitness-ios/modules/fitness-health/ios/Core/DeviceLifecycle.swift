@@ -80,12 +80,12 @@ public actor DeviceLifecycle {
   private let states: StateDirectory
   private let origin: URL
   private let makeAPI: @Sendable (URL) -> FitnessAPI?
-  private let deviceName: @Sendable () -> String
+  private let deviceName: @Sendable () async -> String
   private var generation = 0
 
   public init(
     credentials: CredentialStore, states: StateDirectory, origin: URL,
-    deviceName: @escaping @Sendable () -> String,
+    deviceName: @escaping @Sendable () async -> String,
     makeAPI: @escaping @Sendable (URL) -> FitnessAPI?
   ) {
     self.credentials = credentials
@@ -126,8 +126,8 @@ public actor DeviceLifecycle {
     generation += 1
     let attempt = generation
     guard let api = makeAPI(origin) else { return .failed(.bug("The Fitness origin is not valid.")) }
-    let action = await api.enroll(
-      token: token, installationId: try credentials.installationId(), deviceName: DeviceName.clean(deviceName()))
+    let name = DeviceName.clean(await deviceName())
+    let action = await api.enroll(token: token, installationId: try credentials.installationId(), deviceName: name)
     guard case let .enrolled(response) = action else { return .failed(action) }
     var document = try credentials.load()
     let credential = DeviceCredential(

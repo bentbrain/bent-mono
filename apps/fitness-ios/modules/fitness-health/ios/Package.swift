@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
   name: "FitnessHealthCore",
-  platforms: [.iOS(.v17), .macOS(.v14)],
+  platforms: [.iOS("16.4"), .macOS(.v14)],
   products: [
     .library(name: "FitnessHealthCore", targets: ["FitnessHealthCore"])
   ],

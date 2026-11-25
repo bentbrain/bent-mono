@@ -74,7 +74,11 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
         <TypeCounts key={type} type={type} lines={countLines(status.counts, type)} />
       ))}
       {status.runsWithoutDistance ? <Body muted>{copy.status.withoutDistance(status.runsWithoutDistance)}</Body> : null}
-      {status.deferred ? <Body muted testID="status-deferred">{copy.status.waiting(status.deferred)}</Body> : null}
+      {status.deferred ? (
+        <Body muted testID="status-deferred">
+          {copy.status.waiting(status.deferred)}
+        </Body>
+      ) : null}
       {status.unreadableRetired ? (
         <Body muted>
           {copy.status.unreadable(status.unreadableRetired)} {copy.settings.resyncHint}

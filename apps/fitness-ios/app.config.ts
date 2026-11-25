@@ -34,17 +34,13 @@ const config: ExpoConfig = {
           NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeHealth",
           NSPrivacyCollectedDataTypeLinked: true,
           NSPrivacyCollectedDataTypeTracking: false,
-          NSPrivacyCollectedDataTypePurposes: [
-            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
-          ],
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
         },
         {
           NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeFitness",
           NSPrivacyCollectedDataTypeLinked: true,
           NSPrivacyCollectedDataTypeTracking: false,
-          NSPrivacyCollectedDataTypePurposes: [
-            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
-          ],
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
         },
       ],
     },

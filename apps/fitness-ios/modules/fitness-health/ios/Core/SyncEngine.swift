@@ -76,7 +76,7 @@ public struct SyncEngine: Sendable {
   public init(
     source: HealthSource, api: FitnessAPI, storage: StateStorage, check: SessionCheck,
     session: SyncSession, deviceTimeZone: TimeZone = .current, limits: SyncLimits = SyncLimits(),
-    now: @escaping @Sendable () -> Date = Date.init
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.source = source
     self.api = api

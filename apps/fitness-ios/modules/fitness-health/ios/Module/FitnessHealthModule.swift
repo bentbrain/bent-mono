@@ -12,9 +12,8 @@ public final class FitnessHealthModule: Module {
     Events("onStatus")
 
     OnStartObserving {
-      SyncService.shared.onResult = { [weak self] status in
-        self?.sendEvent("onStatus", status)
-      }
+      let listener = Listener(module: self)
+      SyncService.shared.onResult = { status in listener.send(status) }
     }
 
     OnStopObserving {
@@ -71,6 +70,13 @@ public final class FitnessHealthModule: Module {
       try await self.service.lifecycle.resyncFromEarliest()
     }
   }
+}
+
+/// Sends status events to the module while it is alive.
+private final class Listener: @unchecked Sendable {
+  weak var module: FitnessHealthModule?
+  init(module: FitnessHealthModule) { self.module = module }
+  func send(_ status: [String: Any]) { module?.sendEvent("onStatus", status) }
 }
 
 /// Enrollment outcomes as plain values for JavaScript.

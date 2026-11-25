@@ -19,8 +19,7 @@ const variants = {
 } as const;
 
 export function resolveVariant(value: string | undefined): Variant {
-  if (value === undefined || value === "" || value === "production")
-    return "production";
+  if (value === undefined || value === "" || value === "production") return "production";
   if (value === "development") return "development";
   throw new Error("Set APP_VARIANT to development or production.");
 }
@@ -36,8 +35,7 @@ export function developmentOrigin(value: string) {
   const local = url.hostname === "127.0.0.1" || url.hostname === "localhost";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local))
     throw new Error("FITNESS_ORIGIN must use HTTPS, or HTTP on 127.0.0.1 or localhost.");
-  if (url.origin !== value.replace(/\/$/, ""))
-    throw new Error("Set FITNESS_ORIGIN to an origin, without a path.");
+  if (url.origin !== value.replace(/\/$/, "")) throw new Error("Set FITNESS_ORIGIN to an origin, without a path.");
   return { origin: url.origin, local };
 }
 
@@ -61,10 +59,12 @@ export type AppSettings = {
   oauth: OAuthSettings;
 };
 
-function issuerFrom(value: string | undefined) {
+/** Clerk's issuer: HTTPS, or HTTP on this Mac for a development build. */
+function issuerFrom(variant: Variant, value: string | undefined) {
   if (!value) return "";
   const url = new URL(value);
-  if (url.protocol !== "https:" && !["127.0.0.1", "localhost"].includes(url.hostname))
+  const local = ["127.0.0.1", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(variant === "development" && url.protocol === "http:" && local))
     throw new Error("FITNESS_OAUTH_ISSUER must use HTTPS.");
   return url.href.replace(/\/$/, "");
 }
@@ -75,10 +75,7 @@ function issuerFrom(value: string | undefined) {
  * "Fitness Sync iOS" application. Without them the app explains that sign-in
  * is not configured in this build.
  */
-export function appSettings(
-  variant: Variant,
-  environment: Record<string, string | undefined>,
-): AppSettings {
+export function appSettings(variant: Variant, environment: Record<string, string | undefined>): AppSettings {
   const base = variants[variant];
   let fitnessOrigin = productionOrigin;
   // Development builds load JavaScript from Metro on this Mac.
@@ -97,7 +94,7 @@ export function appSettings(
     fitnessOrigin,
     allowLocalNetworking,
     oauth: {
-      issuer: issuerFrom(environment.FITNESS_OAUTH_ISSUER?.trim()),
+      issuer: issuerFrom(variant, environment.FITNESS_OAUTH_ISSUER?.trim()),
       clientId: environment.FITNESS_OAUTH_CLIENT_ID?.trim() ?? "",
       redirectUri: `${scheme}://oauth`,
       resource: `${fitnessOrigin}/api/mcp`,

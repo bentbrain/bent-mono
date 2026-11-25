@@ -23,6 +23,8 @@ export type SyncStatus = {
   unreadableRetired?: number;
   paused?: Partial<Record<"weight" | "run", string>>;
   backfilling?: boolean;
+  /** Whether the first sync has recorded its starting point. */
+  backfillStarted?: boolean;
   backfillThrough?: string | null;
 };
 

@@ -30,9 +30,8 @@ export async function connect(deps: ConnectDeps, revokeLater = false): Promise<C
   }
   for (let attempt = 0; ; attempt++) {
     const outcome = await deps.enroll(token, revokeLater);
-    if (outcome.kind !== "failed" || outcome.action !== "retrySameToken" || attempt >= backoffMs.length)
-      return outcome;
-    const wait = outcome.retryAfter === null ? backoffMs[attempt] ?? maxWaitMs : outcome.retryAfter * 1000;
+    if (outcome.kind !== "failed" || outcome.action !== "retrySameToken" || attempt >= backoffMs.length) return outcome;
+    const wait = outcome.retryAfter === null ? (backoffMs[attempt] ?? maxWaitMs) : outcome.retryAfter * 1000;
     await deps.sleep(Math.min(wait, maxWaitMs));
   }
 }

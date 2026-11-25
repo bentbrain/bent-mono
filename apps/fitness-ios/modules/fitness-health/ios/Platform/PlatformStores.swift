@@ -169,13 +169,16 @@ final class UIKitBackgroundTime: BackgroundTime, @unchecked Sendable {
   /// Tasks still open, so each is ended exactly once.
   private var open = Set<Int>()
 
+  nonisolated init() {}
+
   nonisolated func begin(expired: @escaping @Sendable () -> Void) async -> Int {
     await MainActor.run {
-      var id = UIBackgroundTaskIdentifier.invalid
-      id = UIApplication.shared.beginBackgroundTask(withName: "Fitness sync") { [weak self] in
+      let task = TaskID()
+      let id = UIApplication.shared.beginBackgroundTask(withName: "Fitness sync") { [weak self] in
         expired()
-        self?.finish(id.rawValue)
+        self?.finish(task.value)
       }
+      task.value = id.rawValue
       if id != .invalid { open.insert(id.rawValue) }
       return id.rawValue
     }
@@ -183,6 +186,11 @@ final class UIKitBackgroundTime: BackgroundTime, @unchecked Sendable {
 
   nonisolated func end(_ id: Int) async {
     await MainActor.run { finish(id) }
+  }
+
+  /// The task's ID, set once UIKit returns it.
+  private final class TaskID: @unchecked Sendable {
+    var value = UIBackgroundTaskIdentifier.invalid.rawValue
   }
 
   private func finish(_ id: Int) {

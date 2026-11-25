@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createFingerprintAsync } from "@expo/fingerprint";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const fingerprint = async () =>
-  (await createFingerprintAsync(root, { platforms: ["ios"], silent: true })).hash;
+const fingerprint = async () => (await createFingerprintAsync(root, { platforms: ["ios"], silent: true })).hash;
 
 async function withChange(path, line, check) {
   const file = new URL(`../${path}`, import.meta.url);

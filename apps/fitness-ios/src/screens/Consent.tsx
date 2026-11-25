@@ -52,7 +52,13 @@ export function Consent({ status, onChange }: { status: SyncStatus; onChange: ()
         />
       ))}
       <Button label={copy.consent.confirm} onPress={confirm} busy={busy} testID="consent-confirm" />
-      <Button label={copy.consent.decline} appearance="outline" onPress={decline} disabled={busy} testID="consent-decline" />
+      <Button
+        label={copy.consent.decline}
+        appearance="outline"
+        onPress={decline}
+        disabled={busy}
+        testID="consent-decline"
+      />
     </Page>
   );
 }

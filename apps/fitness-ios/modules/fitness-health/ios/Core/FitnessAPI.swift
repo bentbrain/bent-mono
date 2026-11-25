@@ -13,7 +13,7 @@ public struct FitnessAPI: Sendable {
   private let clock: @Sendable () -> Date
 
   /// `origin` must be an origin: a scheme, host and optional port, no path.
-  public init(origin: URL, transport: HTTPTransport, clock: @escaping @Sendable () -> Date = Date.init) throws {
+  public init(origin: URL, transport: HTTPTransport, clock: @escaping @Sendable () -> Date = { Date() }) throws {
     guard let scheme = origin.scheme, ["https", "http"].contains(scheme), origin.host != nil,
       origin.path.isEmpty || origin.path == "/", origin.query == nil
     else { throw APIError.invalidOrigin }

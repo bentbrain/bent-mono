@@ -45,7 +45,7 @@ export async function authorize(settings: OAuthSettings): Promise<string> {
   const result = await request.promptAsync(discovery, { preferEphemeralSession: true });
   if (result.type === "cancel" || result.type === "dismiss") throw new SignInCancelled();
   if (result.type !== "success" || !result.params.code)
-    throw new Error(result.type === "error" ? result.error?.message ?? "Sign-in failed." : "Sign-in failed.");
+    throw new Error(result.type === "error" ? (result.error?.message ?? "Sign-in failed.") : "Sign-in failed.");
   const tokens = await exchangeCodeAsync(
     {
       clientId: settings.clientId,

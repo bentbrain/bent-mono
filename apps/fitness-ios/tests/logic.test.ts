@@ -27,6 +27,8 @@ describe("screens", () => {
     expect(screenFor(active, true)).toBe("status");
     expect(screenFor({ ...active, lastSyncAt: 1 }, false)).toBe("status");
     expect(screenFor({ ...active, backfilling: false }, false)).toBe("status");
+    // A relaunch during the first sync goes to its progress.
+    expect(screenFor({ ...active, backfillStarted: true }, false)).toBe("status");
   });
 });
 
@@ -104,7 +106,9 @@ describe("connect", () => {
     expect(await connect({ authorize: async () => Promise.reject(new SignInCancelled()), enroll, sleep })).toEqual({
       kind: "cancelled",
     });
-    expect(await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), enroll, sleep })).toEqual({
+    expect(
+      await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), enroll, sleep }),
+    ).toEqual({
       kind: "signInFailed",
       message: "state_mismatch",
     });
@@ -135,7 +139,9 @@ describe("copy", () => {
     expect(messages.every((message) => message !== "server")).toBe(true);
     expect(enrollMessage({ kind: "failed", action: "deviceLimit", message: "x" })).toContain("API keys");
     expect(enrollMessage({ kind: "pendingRevocations", count: 2 })).toContain("2 earlier keys");
-    expect(enrollMessage({ kind: "failed", action: "reauthorize", code: "issuance_failed" })).toContain("Sign in again");
+    expect(enrollMessage({ kind: "failed", action: "reauthorize", code: "issuance_failed" })).toContain(
+      "Sign in again",
+    );
   });
 
   test("every sync error code has guidance", () => {
