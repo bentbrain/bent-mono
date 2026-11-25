@@ -1,10 +1,52 @@
 # Stay
 
-Authenticated guest guide, owner-managed drafts and invitations, AI answers grounded in the published guide and official manuals, Wi-Fi QR access, and limited home controls.
+Stay is an authenticated apartment guide for invited guests, with owner-managed content, AI answers grounded in the guide and appliance manuals, Wi-Fi QR access and limited local home controls.
 
-Bun manages this workspace. Run `bun run dev`, `bun run test`, `bun run lint`, `bun run typecheck`, and `bun run build` from this directory after the root workspace install.
+Open [stay.bent.build](https://stay.bent.build). Access is restricted to invited guests and the verified host account.
 
-## Private content
+<img src="../www/assets/screenshots/stay-desktop.webp" width="720" alt="Stay guest guide on desktop with sample content, a search box, the Ask AI button and the home controls card.">
+
+- Searchable house guide with client-side fuzzy search, authenticated photos and an evacuation view.
+- AI assistant that answers guest questions from the published guide and official appliance manuals.
+- Wi-Fi password and QR code, plus controls for the apartment lights, TV and robot vacuum routed through a limited local server bridge.
+- Host editor (`/edit`) built with TipTap for managing drafts and published content, alongside guest invitation controls (`/guests`) restricted to the verified `OWNER_EMAIL`.
+
+## Development
+
+Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then copy [`.env.example`](.env.example) to `.env.local`:
+
+```sh
+bun install --frozen-lockfile
+cd apps/stay
+cp .env.example .env.local
+```
+
+Before starting the server, configure `.env.local` with your development Clerk keys (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`) and set `OWNER_EMAIL` to your Clerk development account's verified email address. The homepage requires a signed-in user matching `OWNER_EMAIL` or a Clerk guest account (`publicMetadata.guideAccess = "guest"`) before it loads the local synthetic fixtures. Set `NEXT_PUBLIC_APP_URL` to match your local dev port (`http://localhost:3000` for default `bun run dev`, or `http://localhost:3015` when running `bun run dev -- -p 3015`) so invitation links return to the local app.
+
+Then start the development server:
+
+```sh
+bun run dev
+```
+
+Local and preview runs use synthetic fixtures while preserving the same Clerk authentication and authorization boundaries as production.
+
+## Checks
+
+Run checks from `apps/stay`:
+
+```sh
+bun run lint
+bun run format:check
+bun run typecheck
+bun run test
+bun run knip
+bun run build
+```
+
+`bun run test` covers chat grounding, manual search, guide loading, CMS workflows, rich-text sanitization, home controls and privacy checks.
+
+## Private content and deployment
 
 The public repository contains synthetic local and preview content. Production reads from the existing private Vercel Blob store. Unavailable storage or content stops the request; fixtures are restricted to local and preview use. Keep the old deployment serving guests until the private content and asset preparation below is verified.
 

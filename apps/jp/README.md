@@ -1,18 +1,27 @@
-# jp.bent.build
+# Japan blog
 
-A blog built with Astro and emDash on Cloudflare Workers, with D1 records and R2 media.
+A travel blog built with Astro and emDash on Cloudflare Workers, with D1 records and R2 media.
 
-Public blog, categorised gallery, geolocated media map and beer counter. The owner uses a TipTap rich text editor with shadcn/Base UI controls and emDash passkey login. Owner tools preserve original media, fill missing capture metadata and export Instagram stories as PNG or animated MP4.
+Open [jp.bent.build](https://jp.bent.build). The blog, gallery, map and email signup are public; owner tools require passkey or email-link sign-in.
 
-The application uses Tailwind utilities and shadcn components on Base UI. Theme tokens and the official shadcn state utilities live in `src/styles/globals.css`.
+<img src="../www/assets/screenshots/jp-desktop.webp" width="720" alt="Japan blog on desktop with the email signup, a map of Japan with photo pins and three recent posts.">
+
+- Public blog, categorised photo/video gallery, geotagged Japan media map and daily beer counter.
+- Owner workspace with a TipTap rich-text editor, media capture metadata and ordering, optional linked shop designs, and Instagram Story PNG/MP4 exports rendered in the browser with WebCodecs.
+- Scheduled email digests sent through Resend with React Email templates and Cloudflare-optimised JPEG image variants.
+- Styled with Tailwind utilities, shadcn components on Base UI, and `@bent/design-tokens` (`src/styles/globals.css`).
+
+## Layout and media behaviour
 
 The homepage reads newest to oldest by post day, left to right and then down. Equal days use descending record IDs for stable pagination. Cards share the height of the tallest card in each row, with equal 16px gaps and unused final-row cells on the right.
 
-Blog cards use a bounded horizontal carousel below 601px, with photos and videos fitted without cropping. Swipe horizontally or use the navigation buttons; vertical touch gestures scroll the page. Native video controls remain available. At wider widths, cards stack media vertically at equal widths and natural heights, followed by any attached shop design. Individual post pages retain their existing carousel. New gallery selections start in capture-time order, oldest first. Drag the gallery handles or use the earlier/later buttons in either owner editor to arrange them. Dragging scrolls the editor panel or page to reach offscreen media. Saved gallery order is preserved, including when more media is added.
+Blog cards use a bounded horizontal carousel below 601px, with photos and videos fitted without cropping. Swipe horizontally or use the navigation buttons; vertical touch gestures scroll the page. Native video controls remain available. At wider widths, cards stack media vertically at equal widths and natural heights, followed by any attached shop design. Individual post pages retain their existing carousel.
+
+New gallery selections start in capture-time order, oldest first. Drag the gallery handles or use the earlier/later buttons in either owner editor to arrange them. Dragging scrolls the editor panel or page to reach offscreen media. Saved gallery order is preserved, including when more media is added.
 
 ## Development
 
-Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then run app commands from `apps/jp`.
+Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then run app commands from `apps/jp`:
 
 ```sh
 bun install --frozen-lockfile
@@ -23,6 +32,10 @@ bun run dev
 ```
 
 Save the generated encryption key in the ignored `.env`. EmDash applies the schema on the first request. Development-only setup is available at `/_emdash/api/setup/dev-bypass`; it never works in a production build. `bun run demo` adds removable sample content to the local database only. Production seeds exclude sample entries.
+
+## Checks
+
+Run checks from `apps/jp`:
 
 ```sh
 bun run lint
@@ -62,25 +75,11 @@ Category icon jobs emit one bounded `category_icon_generation` terminal diagnost
 
 ## Feedback toolbar
 
-The shared layout loads the independent [feedback-toolbar](https://github.com/bentbrain/feedback-toolbar) once from https://toolbar.bent.build. Production CI supplies `PUBLIC_FEEDBACK_SERVER=https://toolbar.bent.build` and `PUBLIC_FEEDBACK_PROJECT_ID=prj_bc74b93bb6f44574`. Both values are public; incomplete or invalid configuration fails instead of loading an unintended script.
+The shared layout loads the independent [feedback-toolbar](../toolbar/README.md) once from https://toolbar.bent.build. Production CI supplies `PUBLIC_FEEDBACK_SERVER=https://toolbar.bent.build` and `PUBLIC_FEEDBACK_PROJECT_ID=prj_bc74b93bb6f44574`. Both values are public; incomplete or invalid configuration fails instead of loading an unintended script.
 
 Toolbar sign-in uses its own GitHub account and Japan project membership. Blog owner login remains independent. Content and controls carry stable `data-feedback-id` attributes; the owner page body uses `data-feedback-redact` so controls remain selectable while unpublished drafts and metadata are excluded from captured text and accessible labels, including dialogs rendered outside the main content. The accompanying `data-feedback-private` marker on the main content keeps older embeds from capturing that content. Comments still require explicit submission.
 
 The public `.feedback-toolbar.json` links local agent tools to this Japan project. Agent credentials stay in private user configuration outside the repository. An existing harness can use the connector's MCP tools to read threads and claim explicitly queued work; its schedule and execution permissions remain in that harness.
-
-## Deployment and repository controls
-
-PRs run strict ESLint, formatting, TypeScript, unit and full-flow tests, Knip and a production build. Main requires all nine quality and security checks, an up-to-date branch and resolved review conversations, with administrator enforcement. A separate T3 GPT-6.1 agent must review the exact PR head against the current main base before merge or auto-merge. Any head or base change requires another review. GitHub reviewer approvals are not required for this single-contributor repository. The complete authorization and review procedure lives in [AGENTS.md](AGENTS.md).
-
-The `Independent review` commit status links the reviewed head SHA to independent review evidence. The owner may add that exact context to required branch-protection checks after the policy PR passes review. Preserve the existing nine contexts, strict checks, administrator enforcement and resolved-conversation requirement. Until that control change, agents must still enforce the documented review gate. Publish review status through the commit-status API; do not create an Actions job with the same name or treat a CI result as review evidence.
-
-The review status is a PR merge gate. Squash merging creates a different main SHA; Quality runs again on main, and Deploy verifies its exact checked-out SHA through `scripts/require-checks.mjs`, which delegates to the monorepo root release checker. The checker requires the current main commit and authoritative complete Quality run, including every applicable monorepo check. Requiring the PR-head review status on the new squash SHA would block normal deployment, and copying success would falsely attest to a review of that SHA. Agents must use normal CI deployment and cannot push to main, bypass protection or deploy manually.
-
-Secrets and local data are excluded from Git. Deployment configuration lives in `wrangler.jsonc`; application secrets belong in Cloudflare's encrypted secret storage. The verified deployment supplies `OPENAI_API_KEY` and `EMDASH_ENCRYPTION_KEY` from GitHub Actions secrets through a temporary private secrets file. EmDash validates the encryption key before Wrangler starts; missing or malformed keys block deployment without changing the Worker. Generate encryption keys with `emdash secrets generate`; preserve the existing key when encrypted plugin settings already exist. Replacing the key requires separate owner authorization under `AGENTS.md`.
-
-The production account is the sole author. Public account creation and invitations are disabled. First-time passkey setup requires a short-lived private setup cookie. Generate a setup capability and keep it private; clear `SETUP_TOKEN` after registering the owner account.
-
-Email-link sign-in uses EmDash's native Cloudflare email provider and the `EMAIL` sending binding. It sends from `login@auth.jp.bent.build`; Cloudflare Email Sending must be enabled for `auth.jp.bent.build` with its generated DKIM, SPF and return-path records. This sending subdomain is separate from the existing `bent.build` inbound mail forwarding. Passkeys remain available, and email links sign in only to an existing account. Open the emailed link in the browser session you want to authenticate.
 
 ## Newsletter
 
@@ -96,7 +95,23 @@ The Cloudflare `IMAGES` binding makes JPEG copies bounded to 1120 × 3360 pixels
 
 Private send records and a revision-fenced lease prevent overlapping dispatch. The newsletter hook has a ten-minute timeout with a nine-minute send lease, including time for the final publication checks. Photos are prepared in batches of at most four, preserving their order. Expired preparation cannot create or send a broadcast. Each scheduled check reconciles interrupted runs against their saved provider ID after the active lease expires. A delivered broadcast is recorded as sent; a verified unsent draft stays blocked for owner recovery. Unknown outcomes never trigger a fresh broadcast automatically. The owner can resume an unchanged saved draft or discard a verified unsent draft so changed entries return to the next scheduled digest. A lost deletion response remains blocked until its saved ID is reconciled. Newsletter preview pages are private and sandboxed, and confirmation pages disable caching and referrers.
 
-## Design review and sample assets
+## Deployment and repository controls
+
+PRs run the monorepo `Quality` workflow (`lint`, `typecheck`, `test`, `knip`, `build`, `test:integration`, `browser`, `public-source`, `secret-scan`, `dependencies`, `CodeQL` and `Release qualification`). Merging into `main` requires passing required checks, an up-to-date branch, resolved review conversations, administrator enforcement and an independent review of the exact PR head against the current `main` base. Any head or base change requires another review. GitHub reviewer approvals are not required for this single-contributor repository. See [`AGENTS.md`](AGENTS.md) and the root [Releases](../../README.md#releases) documentation for the full authorization and release policy.
+
+The `Independent review` commit status links the reviewed head SHA to independent review evidence on the pull request. Publish review status through the commit-status API; do not create an Actions job with the same name or treat a CI result as review evidence.
+
+The review status is a PR merge gate. Squash merging creates a different `main` SHA; `Quality` runs again on `main`, and the root `Deploy JP` workflow (`.github/workflows/deploy-jp.yml`) verifies its exact checked-out SHA directly through `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA"` before installing and again immediately before release (`apps/jp/scripts/require-checks.mjs` delegates to that same root checker). The checker verifies that the commit is still current `main`, that every job in the latest canonical `main` `Quality` run (including `Release qualification`) succeeded, and that the merged PR's exact head passed both GitHub's native `CodeQL` check and the `Independent review` status linked to the PR. The workflow also verifies there are no unapproved pending D1 migrations (`scripts/require-no-pending-migrations.mjs DB`). Requiring the PR-head review status on the new squash SHA would block normal deployment, and copying success would falsely attest to a review of that SHA. Agents must use normal CI deployment and cannot push to `main`, bypass protection or deploy manually.
+
+Secrets and local data are excluded from Git. Deployment configuration lives in `wrangler.jsonc`; application secrets belong in Cloudflare's encrypted secret storage. The guarded `Deploy JP` workflow runs `node scripts/deploy-verified.mjs --preserve-existing-secrets`, which checks the existing Worker secret names `EMDASH_ENCRYPTION_KEY`, `OPENAI_API_KEY` and `OWNER_EMAIL` without replacing their values. Missing names, failed metadata retrieval and simultaneous replacement values block deployment. Keep the original encryption key so existing settings remain decryptable.
+
+The no-argument `node scripts/deploy-verified.mjs` wrapper instead supplies `OPENAI_API_KEY` and `EMDASH_ENCRYPTION_KEY` through a temporary private secrets file and retains its temporary-file cleanup and cancellation checks. EmDash validates the encryption key before Wrangler starts; missing or malformed keys block deployment without changing the Worker. Generate encryption keys with `emdash secrets generate`; preserve the existing key when encrypted plugin settings already exist. Replacing the key requires separate owner authorization under `AGENTS.md`.
+
+The production account is the sole author. Public account creation and invitations are disabled. First-time passkey setup requires a short-lived private setup cookie. Generate a setup capability and keep it private; clear `SETUP_TOKEN` after registering the owner account.
+
+Email-link sign-in uses EmDash's native Cloudflare email provider and the `EMAIL` sending binding. It sends from `login@auth.jp.bent.build`; Cloudflare Email Sending must be enabled for `auth.jp.bent.build` with its generated DKIM, SPF and return-path records. This sending subdomain is separate from the existing `bent.build` inbound mail forwarding. Passkeys remain available, and email links sign in only to an existing account. Open the emailed link in the browser session you want to authenticate.
+
+## Design review, sample assets and licence
 
 `node mockups/server.mjs` serves the approved mockups at `http://127.0.0.1:4317`. Their publishing and export actions are simulations. Saved feedback and private tunnel credentials live in the ignored `review-data/` directory.
 
@@ -106,4 +121,4 @@ For an existing database, add the optional field before deploying this feature: 
 
 The interface follows shop.bent.build and stay.bent.build. The shirt mark belongs to the same owner. Sample photographs and provenance are listed in `mockups/assets/sources.json`; the sample video pans a sample photograph. The application map uses Natural Earth's public-domain 1:10m country geometry, with its pinned source recorded in `src/lib/japan.json`. Geist Mono uses the SIL Open Font License. Dependency licences remain with their packages.
 
-The guarded monorepo Deploy route uses `node scripts/deploy-verified.mjs --preserve-existing-secrets` after the release checker. This mode verifies the existing Worker secret names `EMDASH_ENCRYPTION_KEY`, `OPENAI_API_KEY` and `OWNER_EMAIL` before deployment. It checks secret names only and preserves their values. Missing names, failed metadata retrieval and simultaneous replacement values block deployment. Keep the original encryption key so existing settings remain decryptable. The no-argument wrapper still requires supplied encryption and API keys and retains its private temporary-file cleanup and cancellation checks.
+MIT licensed. See [`LICENSE`](LICENSE).
