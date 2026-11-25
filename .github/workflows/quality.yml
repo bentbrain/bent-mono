@@ -83,7 +83,7 @@ jobs:
       - id: scope
         run: node scripts/ci-scope.mjs
   browser-suite:
-    name: Browser ${{ matrix.app }} (${{ matrix.part }}/${{ matrix.total }})
+    name: ${{ matrix.name }}
     needs: browser-scope
     if: needs.browser-scope.outputs.has_work == 'true'
     runs-on: ubuntu-24.04
@@ -141,21 +141,21 @@ jobs:
     needs: [browser-scope, browser-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
       - name: Require all selected browser suites
         env:
           SCOPE_RESULT: ${{ needs.browser-scope.result }}
           HAS_WORK: ${{ needs.browser-scope.outputs.has_work }}
+          BROWSER_MATRIX: ${{ needs.browser-scope.outputs.matrix }}
           SUITE_RESULT: ${{ needs.browser-suite.result }}
-        run: |
-          if [[ "$SCOPE_RESULT" == success && "$HAS_WORK" == false && "$SUITE_RESULT" == skipped ]]; then
-            echo 'No browser suites selected.'
-          elif [[ "$SCOPE_RESULT" == success && "$HAS_WORK" == true && "$SUITE_RESULT" == success ]]; then
-            echo 'All selected browser suites passed.'
-          else
-            echo "::error::Browser validation incomplete (scope=$SCOPE_RESULT, work=$HAS_WORK, suites=$SUITE_RESULT)"
-            exit 1
-          fi
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/require-browser-suites.mjs
   public-source:
     name: public-source
     runs-on: ubuntu-latest

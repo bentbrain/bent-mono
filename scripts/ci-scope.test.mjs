@@ -141,14 +141,14 @@ test("main pushes, weekly runs and manual dispatches select full browser coverag
 
 test("the browser matrix lists each selected suite and each shard once", () => {
   assert.deepEqual(browserMatrix({ packages: [blog, toolbar, packages[0]] }), [
-    { app: "trackmap", part: 1, total: 1 },
-    { app: "jp", part: 1, total: 4 },
-    { app: "jp", part: 2, total: 4 },
-    { app: "jp", part: 3, total: 4 },
-    { app: "jp", part: 4, total: 4 },
-    { app: "toolbar", part: 1, total: 3 },
-    { app: "toolbar", part: 2, total: 3 },
-    { app: "toolbar", part: 3, total: 3 },
+    { app: "trackmap", part: 1, total: 1, name: "Browser trackmap (1/1)" },
+    { app: "jp", part: 1, total: 4, name: "Browser jp (1/4)" },
+    { app: "jp", part: 2, total: 4, name: "Browser jp (2/4)" },
+    { app: "jp", part: 3, total: 4, name: "Browser jp (3/4)" },
+    { app: "jp", part: 4, total: 4, name: "Browser jp (4/4)" },
+    { app: "toolbar", part: 1, total: 3, name: "Browser toolbar (1/3)" },
+    { app: "toolbar", part: 2, total: 3, name: "Browser toolbar (2/3)" },
+    { app: "toolbar", part: 3, total: 3, name: "Browser toolbar (3/3)" },
   ]);
 });
 

@@ -165,6 +165,7 @@ export function browserMatrix(scope) {
           app,
           part: index + 1,
           total,
+          name: `Browser ${app} (${index + 1}/${total})`,
         }))
       : [],
   );

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
 import { hasNoPendingMigrations } from "./require-no-pending-migrations.mjs";
+import { requireBrowserSuites } from "./require-browser-suites.mjs";
 
 const sha = "a".repeat(40);
 const head = "b".repeat(40);
@@ -32,26 +32,53 @@ test("the production aggregate depends on every Quality job and runs after failu
 });
 
 test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {
-  const job = qualityJob(await qualitySource(), "browser");
+  const source = await qualitySource();
+  const job = qualityJob(source, "browser");
   assert.match(job, /^    name: browser$\n    if: always\(\)$/m);
-  const script = job.split("\n        run: |\n")[1];
-  assert.ok(script);
-  for (const [scope, work, suites, expected] of [
-    ["success", "true", "success", 0],
-    ["success", "false", "skipped", 0],
-    ["success", "true", "skipped", 1],
-    ["success", "true", "failure", 1],
-    ["success", "true", "cancelled", 1],
-    ["success", "false", "failure", 1],
-    ["failure", "false", "skipped", 1],
-    ["skipped", "false", "skipped", 1],
-    ["success", "", "skipped", 1],
+  assert.ok(job.includes("BROWSER_MATRIX: ${{ needs.browser-scope.outputs.matrix }}"));
+  assert.ok(job.includes("run: node scripts/require-browser-suites.mjs"));
+  assert.ok(qualityJob(source, "browser-suite").includes("name: ${{ matrix.name }}"));
+
+  const env = {
+    SCOPE_RESULT: "success", HAS_WORK: "false", SUITE_RESULT: "skipped",
+    BROWSER_MATRIX: JSON.stringify({ include: [] }),
+  };
+  let lookups = 0;
+  const readJobs = () => { lookups++; return []; };
+  assert.equal(requireBrowserSuites(env, readJobs), "No browser suites selected.");
+  for (const override of [
+    { SCOPE_RESULT: "failure" },
+    { SCOPE_RESULT: "skipped" },
+    { SUITE_RESULT: "failure" },
+    { SUITE_RESULT: "success" },
+    { HAS_WORK: "" },
+    { HAS_WORK: "true" },
+    { BROWSER_MATRIX: "{}" },
+    { BROWSER_MATRIX: '{"include":[{}]}' },
   ]) {
-    const result = spawnSync("bash", ["-c", script], {
-      env: { ...process.env, SCOPE_RESULT: scope, HAS_WORK: work, SUITE_RESULT: suites },
-    });
-    assert.equal(result.status, expected, `${scope}/${work}/${suites}`);
+    assert.throws(() => requireBrowserSuites({ ...env, ...override }, readJobs));
   }
+  assert.equal(lookups, 0, "An empty or invalid plan does not query the Actions API.");
+});
+
+test("a successful matrix summary still requires one completed success for every shard", () => {
+  const include = ["Browser jp (1/2)", "Browser jp (2/2)"].map(name => ({ name }));
+  const env = {
+    SCOPE_RESULT: "success", HAS_WORK: "true", SUITE_RESULT: "success",
+    BROWSER_MATRIX: JSON.stringify({ include }), GITHUB_RUN_ID: "23",
+  };
+  const [first, second] = include.map(({ name }) => ({ name, run_id: 23, status: "completed", conclusion: "success" }));
+  assert.equal(requireBrowserSuites(env, () => [first, second]), "All 2 selected browser jobs passed.");
+  assert.throws(() => requireBrowserSuites(env, () => [first]), /found 0/);
+  assert.throws(() => requireBrowserSuites(env, () => [first, second, second]), /found 2/);
+  for (const override of [
+    { conclusion: "cancelled" }, { conclusion: "failure" }, { conclusion: "skipped" },
+    { status: "in_progress", conclusion: null }, { run_id: 22 },
+  ]) {
+    assert.throws(() => requireBrowserSuites(env, () => [first, { ...second, ...override }]), /Browser jp \(2\/2\) did not pass/);
+  }
+  for (const result of ["failure", "cancelled", "skipped"])
+    assert.throws(() => requireBrowserSuites({ ...env, SUITE_RESULT: result }, () => [first, second]), /validation incomplete/);
 });
 test("only the pinned Wrangler no-pending result permits the migration-free release route", () => {
   assert.equal(hasNoPendingMigrations("Resource location: remote\n\n✅ No migrations to apply!\n"), true);
