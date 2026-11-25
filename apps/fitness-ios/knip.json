@@ -11,13 +11,7 @@
     "modules/fitness-health/*.{ts,js}"
   ],
   "ignoreDependencies": [
-    "react-native-safe-area-context",
-    "expo-application",
-    "expo-auth-session",
-    "expo-constants",
-    "expo-crypto",
-    "expo-web-browser",
-    "@bent/design-tokens",
-    "expo-updates"
+    "expo-updates",
+    "expo-web-browser"
   ]
 }

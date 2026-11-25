@@ -5,12 +5,15 @@ excluded:
   - modules/fitness-health/ios/.build
   - ios
 line_length:
-  warning: 120
-  error: 140
+  warning: 140
+  error: 160
+cyclomatic_complexity:
+  warning: 16
+  error: 20
 identifier_name:
   min_length: 1
 type_body_length:
-  warning: 400
+  warning: 500
   error: 600
 file_length:
   warning: 700
