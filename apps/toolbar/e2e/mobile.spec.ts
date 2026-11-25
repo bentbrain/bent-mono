@@ -206,6 +206,10 @@ test('the public example keeps its source link visible without a session', async
     await expect(source).toBeInViewport({ ratio: 1 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   }
+  const markFill = () => source.locator('svg').evaluate((mark) => getComputedStyle(mark).fill);
+  expect(await markFill()).toBe('rgb(0, 0, 0)');
+  await page.emulateMedia({ colorScheme: 'dark', forcedColors: 'active' });
+  expect(await markFill()).toBe('rgb(255, 255, 255)');
 });
 
 test('long replies and toolbar controls stay reachable on narrow and short touch screens', async ({

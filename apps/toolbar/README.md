@@ -4,7 +4,7 @@ Feedback Toolbar lets you start a thread on a website element and send it to a c
 
 [Open the hosted example website](https://toolbar.bent.build/example). To try the toolbar there, sign in to the feedback service, add the example's origin to your project, and open it from Installation.
 
-<a href="assets/toolbar-demo.gif"><img src="assets/toolbar-demo.gif" width="720" alt="37-second demo showing element selection, a feedback thread and reply, and a result from a local test runner."></a>
+<a href="https://github.com/bentbrain/bent-mono/blob/main/apps/toolbar/assets/toolbar-demo.gif"><img src="https://raw.githubusercontent.com/bentbrain/bent-mono/main/apps/toolbar/assets/toolbar-demo.gif" width="720" alt="37-second demo showing element selection, a feedback thread and reply, and a result from a local test runner."></a>
 
 - A JavaScript loader mounts a cross-origin iframe inside a closed shadow root, keeping the toolbar's styles separate from the host page.
 - The feedback service handles sign-in and project membership independently of the host website. Toolbar tokens stay on the service origin.
