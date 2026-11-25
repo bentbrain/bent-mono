@@ -272,7 +272,7 @@ export async function acquireDeviceLease(
   }
 }
 export async function releaseDeviceLease(
-  sql: Sql,
+  sql: Sql | TransactionSql,
   owner: string,
   holder: string,
 ) {
@@ -299,7 +299,18 @@ export async function withDeviceLease<T>(
   try {
     return await work(sql, lease);
   } finally {
-    await releaseDeviceLease(sql, owner, lease.holder);
+    // A lease that cannot be released expires on its own, so the work's
+    // own result, or error, stands.
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SELECT set_config('statement_timeout', '5s', true)`;
+        await releaseDeviceLease(tx, owner, lease.holder);
+      });
+    } catch (error) {
+      console.error("fitness.devices.lease_release_failed", {
+        name: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 }
 /** Rows a fenced write changes, or none, as a condition on the enrollment table. */
@@ -604,14 +615,44 @@ export async function swapEnrollment(
   return { activated: changed === 1, replaced };
 }
 /**
- * Whether an attempt's swap committed: its row is issued, active and
- * holds this key ID. Reads on its own connection from the pool, for when
- * the swap's commit reply was lost.
+ * What became of a swap whose commit reply was lost, read on a connection
+ * of its own. The attempt's row and the installation's previous rows are
+ * read FOR SHARE, so the read waits for a swap that is still committing,
+ * for up to five seconds.
+ *
+ * - `committed`: the attempt's row is issued, active and holds this key.
+ * - `undone`: the attempt's row is not active, and the previous key, if
+ *   there was one, still is.
+ * - `unknown`: anything else. A lock timeout or other error is thrown.
  */
-export async function swapCommitted(attemptId: string, keyId: string) {
-  const [row] =
-    await database()`SELECT key_state = 'issued' AND active AND key_id = ${keyId} AS committed FROM fitness_device_enrollments WHERE attempt_id=${attemptId}`;
-  return row?.committed === true;
+export async function swapOutcome(attempt: {
+  owner: string;
+  attemptId: string;
+  installationId: string;
+  keyId: string;
+  previousKeyIds: string[];
+}) {
+  return database().begin(async (tx) => {
+    await tx`SELECT set_config('lock_timeout', '5s', true)`;
+    const [row] =
+      await tx`SELECT key_state, active, key_id FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId} FOR SHARE`;
+    const previous = attempt.previousKeyIds.length
+      ? await tx`SELECT key_id FROM fitness_device_enrollments WHERE owner_id=${attempt.owner} AND installation_id=${attempt.installationId} AND active AND key_id IN ${tx(attempt.previousKeyIds)} FOR SHARE`
+      : [];
+    if (
+      row?.key_state === "issued" &&
+      row.active === true &&
+      row.key_id === attempt.keyId
+    )
+      return "committed" as const;
+    if (
+      row &&
+      row.active !== true &&
+      previous.length === attempt.previousKeyIds.length
+    )
+      return "undone" as const;
+    return "unknown" as const;
+  });
 }
 /** A device key's claims and the ID Clerk verified. */
 export type DeviceKeyClaims = {

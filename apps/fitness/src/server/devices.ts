@@ -52,7 +52,7 @@ import {
   enrollmentTableReady,
   enrollmentTokenUsed,
   hourlyCharges,
-  swapCommitted,
+  swapOutcome,
   swapEnrollment,
   recordEnrollment,
   settleEnrollment,
@@ -657,19 +657,31 @@ export async function handleDeviceEnroll(request: Request) {
           });
         } catch (error) {
           if (!(error instanceof CommitOutcomeUnknown)) throw error;
-          // The commit may have landed, in which case the old key is
-          // already inactive and the new key is the installation's only
-          // one. Read the row again before revoking anything.
+          // The commit may have landed, or still be landing, in which case
+          // the old key is inactive and the new key is the installation's
+          // only one. Read the rows again, waiting for the commit, before
+          // revoking anything.
+          let outcome: Awaited<ReturnType<typeof swapOutcome>> = "unknown";
           try {
-            if (await swapCommitted(attemptId, created.id))
-              swapped = { activated: true, replaced: previous };
+            outcome = await swapOutcome({
+              owner: userId,
+              attemptId,
+              installationId,
+              keyId: created.id,
+              previousKeyIds: previous,
+            });
           } catch (reread) {
-            // With no answer, the new key is left for the next enrollment
-            // to settle and clean up.
-            revokeNew = false;
             console.error("fitness.devices.swap_unknown", {
               name: reread instanceof Error ? reread.name : typeof reread,
             });
+          }
+          if (outcome === "committed")
+            swapped = { activated: true, replaced: previous };
+          else if (outcome === "unknown") {
+            // With no answer, both keys are left for the next enrollment
+            // to settle and clean up.
+            revokeNew = false;
+            console.error("fitness.devices.swap_unknown", { outcome });
             throw error;
           }
         } finally {

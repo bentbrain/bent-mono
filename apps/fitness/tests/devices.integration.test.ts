@@ -26,6 +26,8 @@ const isolated = isolatedSchema("fitness_devices");
 if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
 const { default: postgres } = await import("postgres");
+const { createServer, connect } = await import("node:net");
+const { setDatabaseForTests } = await import("../src/server/db");
 const { database } = await import("../src/server/db");
 const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
@@ -789,6 +791,8 @@ describe("device enrollment", () => {
       const secret = (await response.json()).secret;
       const key = fake.keys.find((k) => k.secret === secret);
       expect(key?.revoked).toBe(false);
+      // Recovery revoked the replaced key in Clerk after the swap.
+      expect(fake.keys.find((k) => k.secret === previous)?.revoked).toBe(true);
       expect((await importWith(secret)).status).toBe(200);
       const old = await importWith(previous);
       expect(old.status).toBe(401);
@@ -806,7 +810,7 @@ describe("device enrollment", () => {
         throw new store.CommitOutcomeUnknown(new Error("Connection closed"));
       };
       const swap = spyOn(store, "swapEnrollment").mockImplementation(lostReply);
-      const reread = spyOn(store, "swapCommitted").mockRejectedValue(
+      const reread = spyOn(store, "swapOutcome").mockRejectedValue(
         new Error("Connection refused"),
       );
       let response: Response;
@@ -846,10 +850,20 @@ describe("device enrollment", () => {
         END $$;
         CREATE CONSTRAINT TRIGGER fitness_test_fail_commit AFTER UPDATE ON fitness_device_enrollments
           DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fitness_test_fail_commit();`);
+      const original = store.swapOutcome;
+      const outcomes: string[] = [];
+      const counted = spyOn(store, "swapOutcome").mockImplementation(
+        async (...args) => {
+          const outcome = await original(...args);
+          outcomes.push(outcome);
+          return outcome;
+        },
+      );
       let response: Response;
       try {
         response = await enroll(oauthToken());
       } finally {
+        counted.mockRestore();
         await sql.unsafe(`
           DROP TRIGGER fitness_test_fail_commit ON fitness_device_enrollments;
           DROP FUNCTION fitness_test_fail_commit();
@@ -857,12 +871,148 @@ describe("device enrollment", () => {
       }
       expect(response.status).toBe(503);
       expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      // The commit error reached the recovery read, which found it undone.
+      expect(outcomes).toEqual(["undone"]);
       expect((await importWith(previous)).status).toBe(200);
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
       const newest = fake.keys.reduce((a, b) =>
         a.createdAt >= b.createdAt ? a : b,
       );
       expect(newest.revoked).toBe(true);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "waits for a swap whose connection drops while it is still committing",
+    async () => {
+      const previous = await enrolled();
+      const sql = database();
+      // COMMIT sleeps for a second in a deferred trigger, holding the row.
+      await sql.unsafe(`
+        CREATE TABLE fitness_test_slow_commits (on_commit boolean);
+        INSERT INTO fitness_test_slow_commits VALUES (true);
+        CREATE FUNCTION fitness_test_slow_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.active AND EXISTS (SELECT 1 FROM fitness_test_slow_commits) THEN
+            PERFORM pg_sleep(1);
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE CONSTRAINT TRIGGER fitness_test_slow_commit AFTER UPDATE ON fitness_device_enrollments
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fitness_test_slow_commit();`);
+      // A proxy that forwards the swap's COMMIT, then drops the app's side
+      // of the connection while Postgres goes on committing.
+      const target = new URL(isolated.url);
+      let armed = false;
+      const proxy = createServer((client) => {
+        const upstream = connect(Number(target.port), target.hostname);
+        client.on("data", (chunk) => {
+          upstream.write(chunk);
+          if (
+            armed &&
+            chunk.toString("latin1").toLowerCase().includes("commit")
+          ) {
+            armed = false;
+            client.destroy();
+          }
+        });
+        upstream.on("data", (chunk) => {
+          if (!client.destroyed) client.write(chunk);
+        });
+        client.on("error", () => undefined);
+        upstream.on("error", () => undefined);
+        upstream.on("close", () => client.destroy());
+        client.on("close", () => setTimeout(() => upstream.end(), 5000));
+      });
+      await new Promise<void>((resolve) =>
+        proxy.listen(0, "127.0.0.1", () => resolve()),
+      );
+      const address = proxy.address();
+      const proxied = new URL(isolated.url);
+      proxied.port = String(
+        typeof address === "object" && address ? address.port : 0,
+      );
+      const pool = postgres(proxied.href, {
+        max: 3,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      const originalSwap = store.swapEnrollment;
+      const arming = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          armed = true;
+          return originalSwap(...args);
+        },
+      );
+      const originalOutcome = store.swapOutcome;
+      const outcomes: string[] = [];
+      const counted = spyOn(store, "swapOutcome").mockImplementation(
+        async (...args) => {
+          const outcome = await originalOutcome(...args);
+          outcomes.push(outcome);
+          return outcome;
+        },
+      );
+      setDatabaseForTests(pool);
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        arming.mockRestore();
+        counted.mockRestore();
+        setDatabaseForTests(isolated.pool());
+        await pool.end({ timeout: 1 }).catch(() => undefined);
+        proxy.close();
+        await sql.unsafe(`
+          DROP TRIGGER fitness_test_slow_commit ON fitness_device_enrollments;
+          DROP FUNCTION fitness_test_slow_commit();
+          DROP TABLE fitness_test_slow_commits;`);
+      }
+      // The recovery read waited for the commit and found it.
+      expect(outcomes).toEqual(["committed"]);
+      expect(response.status).toBe(201);
+      const secret = (await response.json()).secret;
+      expect(fake.keys.find((k) => k.secret === secret)?.revoked).toBe(false);
+      expect(fake.keys.find((k) => k.secret === previous)?.revoked).toBe(true);
+      expect((await importWith(secret)).status).toBe(200);
+      expect((await importWith(previous)).status).toBe(401);
+    },
+    20_000,
+  );
+
+  test.skipIf(!configured)(
+    "returns the new key even when the lease cannot be released",
+    async () => {
+      await enrolled();
+      const sql = database();
+      await sql.unsafe(`
+        CREATE TABLE fitness_test_release_failures (on_release boolean);
+        INSERT INTO fitness_test_release_failures VALUES (true);
+        CREATE FUNCTION fitness_test_fail_release() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM fitness_test_release_failures) THEN
+            RAISE EXCEPTION 'synthetic release failure';
+          END IF;
+          RETURN OLD;
+        END $$;
+        CREATE TRIGGER fitness_test_fail_release BEFORE DELETE ON fitness_device_issuance_leases
+          FOR EACH ROW EXECUTE FUNCTION fitness_test_fail_release();`);
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        await sql.unsafe(`
+          DROP TRIGGER fitness_test_fail_release ON fitness_device_issuance_leases;
+          DROP FUNCTION fitness_test_fail_release();
+          DROP TABLE fitness_test_release_failures;`);
+      }
+      expect(response.status).toBe(201);
+      const secret = (await response.json()).secret;
+      expect((await importWith(secret)).status).toBe(200);
+      // The lease stayed behind, to expire on its own.
+      const [lease] =
+        await sql`SELECT expires_at > now() AS live FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
+      expect(lease?.live).toBe(true);
     },
   );
 

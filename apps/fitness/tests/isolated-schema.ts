@@ -23,6 +23,11 @@ export function isolatedSchema(prefix: string) {
   return {
     /** The database URL whose connections use only this schema. */
     url: url?.href ?? "",
+    /** The pool the app uses while the schema exists. */
+    pool() {
+      if (!pool) throw new Error("Create the schema first.");
+      return pool;
+    },
     async create() {
       await admin(`CREATE SCHEMA ${schema}`);
       pool = postgres(url?.href ?? "", {
