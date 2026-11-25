@@ -12,16 +12,17 @@
 //   node scripts/native.mjs replay-swift        compile the first-party Swift again from
 //                                               the build logs, for CodeQL
 //
-// Build output goes to NATIVE_BUILD_DIR, or a directory under the system
-// temporary directory, never into the repository.
+// Build output goes to NATIVE_BUILD_DIR, or ~/Library/Caches/fitness-ios-build,
+// never into the repository.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const buildDir = resolve(process.env.NATIVE_BUILD_DIR || join(tmpdir(), "fitness-ios-build"));
+// Build output stays in this user's caches unless NATIVE_BUILD_DIR names another place.
+const buildDir = resolve(process.env.NATIVE_BUILD_DIR || join(homedir(), "Library/Caches/fitness-ios-build"));
 const derived = join(buildDir, "app");
 const seederDerived = join(buildDir, "seeder");
 const core = join(app, "modules/fitness-health/ios");

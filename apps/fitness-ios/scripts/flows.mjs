@@ -10,14 +10,15 @@
 // at the end.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const fitness = resolve(app, "../fitness");
 const seeder = join(app, "tools/health-seed");
-const buildDir = resolve(process.env.NATIVE_BUILD_DIR || join(tmpdir(), "fitness-ios-build"));
+// Build output stays in this user's caches unless NATIVE_BUILD_DIR names another place.
+const buildDir = resolve(process.env.NATIVE_BUILD_DIR || join(homedir(), "Library/Caches/fitness-ios-build"));
 const port = Number(process.env.FITNESS_IOS_SIM_PORT || 39125);
 const origin = `http://127.0.0.1:${port}`;
 if (!process.env.FITNESS_TEST_DATABASE_URL) {

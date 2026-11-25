@@ -48,7 +48,7 @@ node scripts/native.mjs core-test   # XCTest for the Swift module
 node scripts/native.mjs lint        # SwiftLint
 ```
 
-Build output goes to `NATIVE_BUILD_DIR`, or a directory under the system temporary directory.
+Build output goes to `NATIVE_BUILD_DIR`, or `~/Library/Caches/fitness-ios-build`.
 
 `modules/fitness-health` is a local Expo module. `ios/Core` holds the sync engine with no HealthKit or UIKit dependency, and `ios/Package.swift` builds it with its XCTest suite on its own. `ios/Platform` adapts it to HealthKit, the Keychain, files, `URLSession` and background time, and `ios/Module` exposes it to JavaScript. The config plugin adds the HealthKit and background-delivery entitlements and the Health read purpose string.
 
