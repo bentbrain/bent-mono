@@ -31,6 +31,106 @@ async function dimensions(page: Page) {
     }),
   );
 }
+
+async function decodeMediaImages(page: Page) {
+  await page.locator('#media-list img').evaluateAll(async (images) => {
+    await Promise.all(
+      images.map((image) =>
+        image instanceof HTMLImageElement
+          ? image.decode()
+          : Promise.reject(new Error('Image missing')),
+      ),
+    );
+  });
+}
+
+test('desktop media details stay visible while scrolling the library', async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  const source = image(120, 180);
+  const categories = Array.from({ length: 30 }, (_, index) => ({
+    label: `synthetic category ${String(index + 1)}`,
+    normalized: `synthetic category ${String(index + 1)}`,
+    state: 'default',
+    canRetry: false,
+  }));
+  await page.route('**/api/trip/categories', (route) =>
+    route.fulfill({ json: { categories, icons: [] } }),
+  );
+  await page.route('**/api/trip/media', (route) =>
+    route.fulfill({
+      json: {
+        items: Array.from({ length: 18 }, (_, index) => ({
+          id: `synthetic-${String(index + 1)}`,
+          status: 'draft',
+          _rev: 'synthetic',
+          data: {
+            title: `synthetic photo ${String(index + 1)}`,
+            source_url: source,
+            captured_at: '2099-10-15T01:23:45.678Z',
+            latitude: 35.6895,
+            longitude: 139.6917,
+          },
+        })),
+      },
+    }),
+  );
+  await page.goto('/_emdash/api/auth/dev-bypass?redirect=/owner/media');
+  await page.waitForURL((url) => url.pathname === '/owner/media');
+  const tiles = page.locator('#media-list button');
+  await expect(tiles).toHaveCount(18);
+  await decodeMediaImages(page);
+  const lastTile = page.getByRole('button', {
+    name: 'synthetic photo 18, draft',
+  });
+  await lastTile.focus();
+  const selectedAt = await page.evaluate(() => scrollY);
+  expect(selectedAt).toBeGreaterThan(800);
+  await page.keyboard.press('Enter');
+  await expect(lastTile).toBeFocused();
+  await expect(lastTile).toHaveAttribute('aria-pressed', 'true');
+  const title = page.getByLabel('title', { exact: true });
+  await expect(title).toHaveValue('synthetic photo 18');
+  await expect(
+    page.getByRole('checkbox', { name: 'synthetic category 30', exact: true }),
+  ).toHaveCount(1);
+  expect(await page.evaluate(() => scrollY)).toBe(selectedAt);
+  if (process.env.MEDIA_STICKY_EVIDENCE_PATH)
+    await page.screenshot({ path: process.env.MEDIA_STICKY_EVIDENCE_PATH });
+
+  const panel = page.locator('#media-details');
+  const panelTop = () =>
+    panel.evaluate((element) => element.getBoundingClientRect().top);
+  const stickyTop = await panelTop();
+  const headerBottom = await page
+    .locator('.site-header')
+    .evaluate((element) => element.getBoundingClientRect().bottom);
+  expect(stickyTop).toBeGreaterThanOrEqual(headerBottom);
+  await expect(title).toBeInViewport();
+  await page.evaluate(() => {
+    scrollBy(0, -400);
+  });
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(selectedAt - 400);
+  await expect.poll(panelTop).toBeCloseTo(stickyTop, 0);
+
+  await lastTile.focus();
+  await page.keyboard.press('Tab');
+  await expect(title).toBeFocused();
+  const editingAt = await page.evaluate(() => scrollY);
+  await panel.hover();
+  await page.mouse.wheel(0, 220);
+  await expect
+    .poll(() => panel.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  expect(await page.evaluate(() => scrollY)).toBe(editingAt);
+  const save = panel.getByRole('button', { name: 'SAVE', exact: true });
+  await save.focus();
+  await expect(save).toBeFocused();
+  await expect(save).toBeInViewport();
+  expect(await page.evaluate(() => scrollY)).toBe(editingAt);
+});
+
 for (const width of [1792, 390])
   for (const colorScheme of ['light', 'dark'])
     test(`media tiles retain their image bounds through selection at ${String(width)}px ${colorScheme}`, async ({
@@ -117,15 +217,7 @@ for (const width of [1792, 390])
       try {
         await page.reload();
         await expect(page.locator('#media-list button')).toHaveCount(2);
-        await page.locator('#media-list img').evaluateAll(async (images) => {
-          await Promise.all(
-            images.map((image) =>
-              image instanceof HTMLImageElement
-                ? image.decode()
-                : Promise.reject(new Error('Image missing')),
-            ),
-          );
-        });
+        await decodeMediaImages(page);
         const closed = await dimensions(page);
         for (const title of ['synthetic portrait', 'synthetic landscape']) {
           const tile = page.getByRole('button', {
