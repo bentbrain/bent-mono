@@ -162,6 +162,42 @@ function importWith(secret: string) {
     { now },
   );
 }
+/** Waits until `count` backends in this database are waiting on a lock. */
+async function lockWaiters(count = 1) {
+  for (let n = 0; n < 500; n++) {
+    const [row] =
+      await database()`SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    if ((row?.waiting ?? 0) >= count) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Expected ${count} backend(s) waiting on a lock.`);
+}
+/** Waits until the owner's issuance lease has expired. */
+async function leaseExpired() {
+  for (let n = 0; n < 500; n++) {
+    const [row] =
+      await database()`SELECT expires_at < clock_timestamp() AS expired FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
+    if (row?.expired === true) return;
+    await Bun.sleep(10);
+  }
+  throw new Error("Expected the lease to expire.");
+}
+/** Holds the owner's account row from another connection until released. */
+function holdAccount(sql: ReturnType<typeof postgres>) {
+  let release = () => undefined as void;
+  let locked = () => undefined as void;
+  const taken = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const done = sql.begin(async (tx) => {
+    await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+    locked();
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  });
+  return { taken, done, release: () => release() };
+}
 /** The owner's enrollment attempts, oldest first. */
 async function rows() {
   const found =
@@ -664,31 +700,33 @@ describe("device enrollment", () => {
         onnotice: () => undefined,
       });
       try {
-        for (const timing of [
-          // The lease runs out while the insert waits.
-          { leaseSeconds: 1 },
-          // The deadline runs out while the insert waits.
-          { deadlineMs: 1200, createReserveMs: 100 },
-          // The time kept for the create starts while the insert waits.
-          { deadlineMs: 3000, createReserveMs: 2000 },
-        ]) {
+        for (const [timing, release] of [
+          // The lease runs out while the write waits; the import then lets go.
+          [{ leaseSeconds: 1 }, "after the lease"],
+          // The deadline runs out while the write waits.
+          [{ deadlineMs: 1200, createReserveMs: 100 }, "after the reply"],
+          // The time kept for the create starts while the write waits.
+          [{ deadlineMs: 3000, createReserveMs: 2000 }, "after the reply"],
+        ] as const) {
           devices.setEnrollmentTiming(timing);
           const token = oauthToken();
           const before = await rows();
-          let response: Response | undefined;
-          await importer.begin(async (tx) => {
-            // An import holds the account row, which recording the attempt
-            // waits on through its foreign key.
-            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
-            const pending = enroll(token);
-            await Bun.sleep(1500);
-            await tx`SELECT 1`;
-            void pending.then((r) => {
-              response = r;
-            });
-          });
-          for (let n = 0; n < 50 && !response; n++) await Bun.sleep(50);
-          if (!response) throw new Error("Expected the enrollment to finish.");
+          // An import holds the account row, which the enrollment's first
+          // write locks.
+          const held = holdAccount(importer);
+          await held.taken;
+          const pending = enroll(token);
+          await lockWaiters();
+          let response: Response;
+          if (release === "after the lease") {
+            await leaseExpired();
+            held.release();
+            response = await pending;
+          } else {
+            response = await pending;
+            held.release();
+          }
+          await held.done;
           expect(response.status).toBe(503);
           expect(await response.json()).toMatchObject({
             code: "issuance_pending",
@@ -706,6 +744,118 @@ describe("device enrollment", () => {
         await importer.end();
       }
     },
+    30_000,
+  );
+
+  test.skipIf(!configured)(
+    "keeps the current key when the create fails, or comes after the deadline",
+    async () => {
+      const previous = await enrolled();
+      fake.create = "fail";
+      const failed = await enroll(oauthToken());
+      expect(failed.status).toBe(503);
+      expect(await failed.json()).toMatchObject({ code: "issuance_failed" });
+      expect((await importWith(previous)).status).toBe(200);
+      fake.create = "ok";
+      // Recording commits only after the deadline, so the create cannot start.
+      devices.setEnrollmentTiming({ deadlineMs: 1000, createReserveMs: 200 });
+      const original = store.recordEnrollment;
+      const late: typeof original = async (...args) => {
+        const recorded = await original(...args);
+        await Bun.sleep(1100);
+        return recorded;
+      };
+      const spy = spyOn(store, "recordEnrollment").mockImplementation(late);
+      const token = oauthToken();
+      try {
+        const response = await enroll(token);
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+      } finally {
+        spy.mockRestore();
+        devices.setEnrollmentTiming();
+      }
+      expect((await importWith(previous)).status).toBe(200);
+      expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      // The token was used, so a fresh sign-in is needed.
+      expect((await enroll(token)).status).toBe(409);
+      expect(fake.keys.filter((k) => !k.revoked)).toHaveLength(1);
+    },
+    30_000,
+  );
+
+  test.skipIf(!configured)(
+    "activates within the grace after the deadline, and not after it",
+    async () => {
+      const locker = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        for (const release of ["within the grace", "after the grace"]) {
+          const previous = await enrolled();
+          devices.setEnrollmentTiming({
+            deadlineMs: 1500,
+            createReserveMs: 200,
+            cleanupMs: 200,
+            activationSlackMs: 1500,
+          });
+          // Hold the create until the account is held, so the swap waits.
+          let releaseCreate = () => undefined as void;
+          fake.stall = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+          });
+          const creating = new Promise<void>((resolve) => {
+            fake.onCreate = resolve;
+          });
+          const begun = performance.now();
+          const pending = enroll(oauthToken());
+          await creating;
+          const held = holdAccount(locker);
+          await held.taken;
+          releaseCreate();
+          await lockWaiters();
+          let response: Response;
+          if (release === "within the grace") {
+            // Past the deadline, inside the grace.
+            await Bun.sleep(
+              Math.max(0, begun + 1500 + 400 - performance.now()),
+            );
+            held.release();
+            response = await pending;
+          } else {
+            // The swap's statement times out at the end of the grace.
+            response = await pending;
+            held.release();
+          }
+          await held.done;
+          fake.stall = null;
+          fake.onCreate = null;
+          devices.setEnrollmentTiming();
+          if (release === "within the grace") {
+            expect(response.status).toBe(201);
+            const secret = (await response.json()).secret;
+            expect((await importWith(secret)).status).toBe(200);
+            expect((await importWith(previous)).status).toBe(401);
+          } else {
+            expect(response.status).toBe(503);
+            expect(await response.json()).toMatchObject({
+              code: "issuance_failed",
+            });
+            expect((await importWith(previous)).status).toBe(200);
+            expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+          }
+        }
+      } finally {
+        fake.stall = null;
+        devices.setEnrollmentTiming();
+        await locker.end();
+      }
+    },
+    30_000,
   );
 
   test.skipIf(!configured)(
@@ -827,32 +977,60 @@ describe("device enrollment", () => {
           connection: { search_path: schema },
         });
       };
-      const owner = connect();
+      const admin = connect();
       const limited = connect(role);
       try {
-        expect(await devices.deviceEnrollmentReady(owner)).toBe(false);
-        await owner.unsafe(
+        expect(await devices.deviceEnrollmentReady(admin)).toBe(false);
+        await admin.unsafe(
           await Bun.file(new URL("../schema.sql", import.meta.url)).text(),
         );
-        expect(await devices.deviceEnrollmentReady(owner)).toBe(true);
-        await owner.unsafe(
+        expect(await devices.deviceEnrollmentReady(admin)).toBe(true);
+        await admin.unsafe(
           `GRANT USAGE ON SCHEMA ${schema} TO ${role}; GRANT SELECT ON ALL TABLES IN SCHEMA ${schema} TO ${role}`,
         );
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
-        await owner.unsafe(
+        await admin.unsafe(
           `GRANT INSERT, UPDATE, DELETE ON ${schema}.fitness_device_enrollments, ${schema}.fitness_device_issuance_leases TO ${role}; GRANT INSERT, UPDATE ON ${schema}.fitness_device_attempt_windows TO ${role}; GRANT INSERT ON ${schema}.fitness_accounts TO ${role}`,
         );
         // Pruning old attempt windows needs DELETE too.
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
-        await owner.unsafe(
+        await admin.unsafe(
           `GRANT DELETE ON ${schema}.fitness_device_attempt_windows TO ${role}`,
         );
+        // Locking the account with SELECT ... FOR UPDATE needs UPDATE.
+        expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
+        await admin.unsafe(
+          `GRANT UPDATE ON ${schema}.fitness_accounts TO ${role}`,
+        );
         expect(await devices.deviceEnrollmentReady(limited)).toBe(true);
-        await owner`DROP TABLE fitness_device_enrollments`;
-        expect(await devices.deviceEnrollmentReady(owner)).toBe(false);
+        // A role readiness accepts can run the guarded writes.
+        const holder = crypto.randomUUID();
+        const attemptId = crypto.randomUUID();
+        expect(await store.acquireDeviceLease(limited, owner, holder, 90)).toBe(
+          true,
+        );
+        const lease = { owner, holder };
+        expect(
+          await store.recordEnrollment(limited, lease, {
+            tokenId: "oat_id_limited_role",
+            digest: "7".repeat(64),
+            attemptId,
+            installationId: installation,
+          }),
+        ).toBe(true);
+        expect(
+          await store.swapEnrollment(limited, lease, {
+            attemptId,
+            installationId: installation,
+            keyId: "ak_id_limited_role",
+          }),
+        ).toEqual({ activated: true, replaced: [] });
+        await store.releaseDeviceLease(limited, owner, holder);
+        await admin`DROP TABLE fitness_device_enrollments CASCADE`;
+        expect(await devices.deviceEnrollmentReady(admin)).toBe(false);
       } finally {
         await limited.end();
-        await owner.end();
+        await admin.end();
         await sql.unsafe(`DROP SCHEMA ${schema} CASCADE`);
         await sql.unsafe(`DROP OWNED BY ${role}`);
         await sql.unsafe(`DROP ROLE ${role}`);
@@ -1028,12 +1206,17 @@ describe("device issuance lease and attempt windows", () => {
         await locker.begin(async (tx) => {
           await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${owner} FOR UPDATE`;
           // The activation starts while the lease is valid, then waits.
-          activation = store.issueEnrollment(
-            database(),
-            { owner, holder },
-            attemptId,
-            "ak_id_waited",
-          );
+          activation = store
+            .swapEnrollment(
+              database(),
+              { owner, holder },
+              {
+                attemptId: attemptId,
+                installationId: installation,
+                keyId: "ak_id_waited",
+              },
+            )
+            .then((r) => r.activated);
           activation.catch(() => undefined);
           await Bun.sleep(200);
           await tx`UPDATE fitness_device_issuance_leases SET expires_at = clock_timestamp() + interval '300 milliseconds' WHERE owner_id=${owner}`;
@@ -1054,6 +1237,9 @@ describe("device issuance lease and attempt windows", () => {
       await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
       const current = crypto.randomUUID();
       await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"9".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      // An old, inactive row that recording prunes, so it locks it.
+      const old = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,created_at) VALUES(${owner},${"6".repeat(64)},${old},${otherInstallation(7)},'failed',now() - interval '3 days')`;
       const holder = crypto.randomUUID();
       expect(
         await store.acquireDeviceLease(database(), owner, holder, 90),
@@ -1071,9 +1257,9 @@ describe("device issuance lease and attempt windows", () => {
               setTimeout(resolve, 600);
             });
           }),
-          // ...and another the installation's current row for 1300 ms.
+          // ...and another the old row for 1300 ms.
           second.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
+            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${old} FOR SHARE`;
             await new Promise<void>((resolve) => {
               releaseSecond = resolve;
               setTimeout(resolve, 1300);
@@ -1130,12 +1316,17 @@ describe("device issuance lease and attempt windows", () => {
         await locker.begin(async (tx) => {
           // Another transaction, such as an import, holds the row.
           await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${attemptId} FOR UPDATE`;
-          activation = store.issueEnrollment(
-            database(),
-            { owner, holder },
-            attemptId,
-            "ak_id_waited_row",
-          );
+          activation = store
+            .swapEnrollment(
+              database(),
+              { owner, holder },
+              {
+                attemptId: attemptId,
+                installationId: installation,
+                keyId: "ak_id_waited_row",
+              },
+            )
+            .then((r) => r.activated);
           activation.catch(() => undefined);
           await Bun.sleep(800);
         });
@@ -1183,8 +1374,8 @@ describe("device issuance lease and attempt windows", () => {
         await importer.end();
         await store.releaseDeviceLease(database(), owner, slow);
       }
-      // A second activation for the installation while its key is still
-      // active fails, so the installation never has two active keys.
+      // A swap stops the current key and activates the next one together,
+      // so the installation never has two active keys.
       const holder = crypto.randomUUID();
       expect(
         await store.acquireDeviceLease(database(), owner, holder, 90),
@@ -1192,29 +1383,17 @@ describe("device issuance lease and attempt windows", () => {
       try {
         const next = crypto.randomUUID();
         await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"e".repeat(64)},${next},${installation})`;
-        await expect(
-          store.issueEnrollment(
-            database(),
-            { owner, holder },
-            next,
-            "ak_id_second",
-          ),
-        ).rejects.toThrow();
-        expect(await active()).toEqual([current]);
-        // With the current key deactivated first, the next one activates.
-        await store.deactivateInstallation(
-          database(),
-          { owner, holder },
-          installation,
-        );
         expect(
-          await store.issueEnrollment(
+          await store.swapEnrollment(
             database(),
             { owner, holder },
-            next,
-            "ak_id_second",
+            {
+              attemptId: next,
+              installationId: installation,
+              keyId: "ak_id_second",
+            },
           ),
-        ).toBe(true);
+        ).toEqual({ activated: true, replaced: ["ak_id_current"] });
         expect(await active()).toEqual([next]);
       } finally {
         await store.releaseDeviceLease(database(), owner, holder);
@@ -1351,51 +1530,89 @@ describe("device import against a reconnect", () => {
     const response = importWith(secret).finally(() => spy.mockRestore());
     return { response, waiting, release };
   }
+  /** A fresh account each round, so the hourly limit stays out of it. */
+  async function freshRound() {
+    await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+    fake.keys = [];
+  }
+  const activeRows = async () =>
+    (
+      await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
+    ).length;
 
   test.skipIf(!configured)(
-    "finishes both a reconnect and an import already holding the account",
+    "commits an import that holds the account before the reconnect",
     async () => {
-      for (let round = 0; round < 5; round++) {
-        // A fresh account each round, so the hourly limit stays out of it.
-        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
-        fake.keys = [];
+      for (let round = 0; round < 3; round++) {
+        await freshRound();
         const secret = await enrolled();
         const paused = importInsideItsLock(secret);
         await paused.waiting;
-        // The reconnect starts while the import holds the account row.
         const reconnect = enroll(oauthToken());
-        await Bun.sleep(100 + round * 50);
+        // The reconnect waits on the account row the import holds.
+        await lockWaiters();
         paused.release();
         const [imported, reconnected] = await Promise.all([
           paused.response,
           reconnect,
         ]);
-        // The import came first and committed, or it found its key replaced.
-        expect([200, 401]).toContain(imported.status);
-        if (imported.status === 401)
-          expect(await imported.json()).toMatchObject({ code: "key_invalid" });
+        expect(imported.status).toBe(200);
         expect(reconnected.status).toBe(201);
-        expect(activeFor(installation)).toHaveLength(1);
+        expect(await activeRows()).toBe(1);
+        expect((await importWith(secret)).status).toBe(401);
       }
     },
+    30_000,
   );
 
   test.skipIf(!configured)(
-    "finishes both when the import reaches the account after the reconnect",
+    "refuses an import that reaches the account after the swap",
     async () => {
-      for (let round = 0; round < 5; round++) {
-        // A fresh account each round, so the hourly limit stays out of it.
-        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
-        fake.keys = [];
-        const secret = await enrolled();
-        const reconnect = enroll(oauthToken());
-        await Bun.sleep(round * 5);
-        const imported = await importWith(secret);
-        const reconnected = await reconnect;
-        expect([200, 401]).toContain(imported.status);
-        expect(reconnected.status).toBe(201);
+      const locker = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        for (let round = 0; round < 3; round++) {
+          await freshRound();
+          const secret = await enrolled();
+          let releaseCreate = () => undefined as void;
+          fake.stall = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+          });
+          const creating = new Promise<void>((resolve) => {
+            fake.onCreate = resolve;
+          });
+          const reconnect = enroll(oauthToken());
+          await creating;
+          // The swap queues on the account row first, then the import.
+          const held = holdAccount(locker);
+          await held.taken;
+          releaseCreate();
+          await lockWaiters(1);
+          const imported = importWith(secret);
+          await lockWaiters(2);
+          held.release();
+          await held.done;
+          const [reconnected, refused] = await Promise.all([
+            reconnect,
+            imported,
+          ]);
+          fake.stall = null;
+          fake.onCreate = null;
+          expect(reconnected.status).toBe(201);
+          expect(refused.status).toBe(401);
+          expect(await refused.json()).toMatchObject({ code: "key_invalid" });
+          expect(await activeRows()).toBe(1);
+        }
+      } finally {
+        fake.stall = null;
+        fake.onCreate = null;
+        await locker.end();
       }
     },
+    30_000,
   );
 });
 

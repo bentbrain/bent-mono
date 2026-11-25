@@ -51,7 +51,7 @@ import {
   enrollmentTableReady,
   enrollmentTokenUsed,
   hourlyCharges,
-  issueEnrollment,
+  swapEnrollment,
   recordEnrollment,
   settleEnrollment,
   settlePendingEnrollments,
@@ -397,17 +397,18 @@ class ActivationFailed extends Error {}
  *    created in the last hour and attempts that may have created one, and
  *    installations with an active key.
  * 5. The attempt is recorded, which uses the token and reserves its place
- *    in the hourly limit, and the installation's active key stops
- *    importing, together in one transaction that must commit before the
- *    time kept for the create; otherwise neither happens and the reply is
+ *    in the hourly limit, in a transaction that must commit before the
+ *    time kept for the create; otherwise nothing changes and the reply is
  *    `503 issuance_pending`.
- * 6. Clerk revokes the installation's keys and any key without an active
- *    row, as cleanup.
- * 7. Clerk creates the key with the attempt ID in its claims, and the row
- *    records its ID, becomes active and is charged from now. If that
- *    activation does not change exactly this row, the new key is revoked
- *    and the reply is `503 issuance_failed`. A creation without a confirmed
- *    result makes the attempt ambiguous; a key it created cannot import.
+ * 6. Clerk revokes keys without an active row, as cleanup. Active keys,
+ *    this installation's included, keep importing.
+ * 7. Clerk creates the key with the attempt ID in its claims. One
+ *    transaction then stops the installation's current key and makes the
+ *    new one active, charged from now; after it commits, Clerk revokes the
+ *    replaced key. If the create or the swap fails, the current key keeps
+ *    importing, the new key is revoked, and the reply is `503
+ *    issuance_failed`. A creation without a confirmed result makes the
+ *    attempt ambiguous; a key it created cannot import.
  */
 export async function handleDeviceEnroll(request: Request) {
   const deadline = deadlineIn(timing.deadlineMs);
@@ -569,9 +570,10 @@ export async function handleDeviceEnroll(request: Request) {
         // used or the installation's key changes, so the app can retry.
         if (deadline - performance.now() < timing.createReserveMs)
           return refuse(busy());
-        // Recording the attempt, which uses the token, and stopping the
-        // installation's current key commit together, and only before the
-        // time kept for the create; otherwise neither happens.
+        // Recording the attempt, which uses the token, commits only before
+        // the time kept for the create; otherwise nothing changes. The
+        // installation's current key keeps importing until its replacement
+        // is swapped in.
         const cutoff = deadline - timing.createReserveMs;
         if (
           !(await recordEnrollment(
@@ -590,20 +592,15 @@ export async function handleDeviceEnroll(request: Request) {
           deadline: deadline + timing.activationSlackMs,
         };
         try {
-          // Clean up in Clerk: this installation's keys, and keys that have
-          // no active row, such as one a timed-out creation left.
-          const kept = new Set(
-            active
-              .filter((d) => d.installationId !== installationId)
-              .map((d) => d.keyId),
-          );
+          // Clean up in Clerk: keys that have no active row, such as one a
+          // timed-out creation left. Active keys, this installation's
+          // included, stay until they are replaced.
+          const kept = new Set(active.map((d) => d.keyId));
           for (const key of keys)
             if (key.active && !kept.has(key.id))
               await revokeQuietly(
                 key.id,
-                key.installationId === installationId
-                  ? "Replaced by a new connection from this iPhone."
-                  : "Not the active key for its iPhone.",
+                "Not the active key for its iPhone.",
                 Math.min(cleanup, cutoff),
               );
         } catch (error) {
@@ -642,17 +639,30 @@ export async function handleDeviceEnroll(request: Request) {
           );
           throw error;
         }
-        let activated = false;
+        // The swap stops the installation's current key and makes the new
+        // one active together. If it fails, the current key keeps importing
+        // and the new key is revoked.
+        let swapped = { activated: false, replaced: [] as string[] };
         try {
-          activated = await issueEnrollment(sql, after, attemptId, created.id);
+          swapped = await swapEnrollment(sql, after, {
+            attemptId,
+            installationId,
+            keyId: created.id,
+          });
         } finally {
-          if (!activated)
+          if (!swapped.activated)
             await revokeQuietly(
               created.id,
               "This connection could not be completed.",
             );
         }
-        if (!activated) throw new ActivationFailed();
+        if (!swapped.activated) throw new ActivationFailed();
+        for (const keyId of swapped.replaced)
+          await revokeQuietly(
+            keyId,
+            "Replaced by a new connection from this iPhone.",
+            deadline + timing.activationSlackMs,
+          );
         return {
           ok: true,
           secret: created.secret,

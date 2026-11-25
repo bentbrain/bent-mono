@@ -418,14 +418,14 @@ export async function enrollmentTokenUsed(
   return rows.length > 0;
 }
 /**
- * Records an enrollment attempt as pending and stops the installation's
- * current key from importing, together in one fenced transaction, before
- * any key changes in Clerk. Recording marks the token as used and reserves
- * the attempt's place in the hourly limit. If the lease or the deadline
- * runs out first, nothing changes: the token stays unused and the current
- * key stays active. Returns false, changing nothing, when the token was
- * already used. Inactive records older than two days, past the token
- * lifetime, are removed.
+ * Records an enrollment attempt as pending, in one fenced transaction
+ * before any key changes in Clerk. Recording marks the token as used and
+ * reserves the attempt's place in the hourly limit; the installation's
+ * current key keeps importing until its replacement is swapped in. If the
+ * lease or the deadline runs out first, nothing changes and the token stays
+ * unused. Returns false, changing nothing, when the token was already used.
+ * Inactive records older than two days, past the token lifetime, are
+ * removed.
  */
 export async function recordEnrollment(
   sql: Sql,
@@ -440,24 +440,12 @@ export async function recordEnrollment(
   const owner = lease.owner;
   const stale = (tx: TransactionSql) =>
     tx`NOT active AND created_at < now() - interval '2 days'`;
-  const current = (tx: TransactionSql) =>
-    tx`owner_id=${owner} AND installation_id=${attempt.installationId} AND active`;
-  const inserted = await fenced(
-    sql,
-    lease,
-    (tx) => tx`(${stale(tx)}) OR (${current(tx)})`,
-    async (tx, budget) => {
-      await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
-      await budget();
-      // Either identity already recorded means the token was used.
-      const rows =
-        await tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
-      if (!rows.length) return rows;
-      await budget();
-      await tx`UPDATE fitness_device_enrollments SET active=false WHERE ${current(tx)}`;
-      return rows;
-    },
-  );
+  const inserted = await fenced(sql, lease, stale, async (tx, budget) => {
+    await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
+    await budget();
+    // Either identity already recorded means the token was used.
+    return tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
+  });
   return inserted === 1;
 }
 /**
@@ -576,24 +564,30 @@ export async function deactivateInstallation(
   );
 }
 /**
- * Records the created key, which makes it the installation's active key and
- * charges the hourly limit from now, when Clerk has returned it. Returns
- * whether exactly this attempt changed.
+ * Swaps the created key in as the installation's active key, in one fenced
+ * transaction: the installation's current row stops being active and this
+ * attempt's row records the key, becomes active and is charged from now,
+ * so the installation always has at most one active key and never goes
+ * without one before its replacement exists. Returns whether this attempt
+ * became active, and the keys it replaced, which the caller revokes after
+ * the commit.
  */
-export async function issueEnrollment(
+export async function swapEnrollment(
   sql: Sql,
   lease: DeviceLease,
-  attemptId: string,
-  keyId: string,
+  attempt: { attemptId: string; installationId: string; keyId: string },
 ) {
-  const changed = await fenced(
-    sql,
-    lease,
-    (tx) => tx`attempt_id=${attemptId} AND key_state='pending'`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${keyId}, active=true, charged_at=greatest(created_at, now()) WHERE attempt_id=${attemptId} AND key_state='pending' RETURNING 1`,
-  );
-  return changed === 1;
+  let replaced: string[] = [];
+  const rows = (tx: TransactionSql) =>
+    tx`owner_id=${lease.owner} AND ((installation_id=${attempt.installationId} AND active) OR attempt_id=${attempt.attemptId})`;
+  const changed = await fenced(sql, lease, rows, async (tx, budget) => {
+    const old =
+      await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
+    replaced = old.map((row) => z.string().parse(row.key_id));
+    await budget();
+    return tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=greatest(created_at, now()) WHERE attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
+  });
+  return { activated: changed === 1, replaced };
 }
 /** A device key's claims and the ID Clerk verified. */
 export type DeviceKeyClaims = {
@@ -653,7 +647,8 @@ const windowColumns = ["window_start", "attempts"];
 /**
  * Whether enrollment can use its tables, in one query: each table and its
  * columns are in the connection's schema, and the database user may read,
- * add, change and remove their rows and add accounts. Nothing is written.
+ * add, change and remove their rows, and add and lock accounts (SELECT ...
+ * FOR UPDATE needs UPDATE). Nothing is written.
  * has_table_privilege is true when any listed privilege is held, so each
  * one is checked on its own, and only for tables that exist.
  */
@@ -675,7 +670,9 @@ export async function enrollmentTableReady(sql: Sql = database()) {
         ELSE ${grants("fitness_device_enrollments")}
           AND ${grants("fitness_device_issuance_leases")}
           AND ${grants("fitness_device_attempt_windows")}
+          AND has_table_privilege(current_user, 'fitness_accounts', 'SELECT')
           AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT')
+          AND has_table_privilege(current_user, 'fitness_accounts', 'UPDATE')
       END AS granted`;
   return (
     row?.columns ===
