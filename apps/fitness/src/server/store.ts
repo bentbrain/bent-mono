@@ -266,38 +266,64 @@ export async function withDeviceLease<T>(
     await releaseDeviceLease(sql, owner, lease.holder);
   }
 }
-/** The lease row, while this request holds it, locked for the statement. */
-function heldLease(sql: Sql, lease: DeviceLease) {
-  return sql`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} AND expires_at > now() FOR SHARE`;
+/** This request's lease row, locked for the statement. */
+function leaseRow(sql: Sql, lease: DeviceLease) {
+  return sql`SELECT expires_at FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
 }
 const fencedRow = z.object({ held: z.number(), changed: z.number() });
 /**
  * Runs one write only while the lease is held, and returns the rows it
  * changed. Throws DeviceLeaseLost when the lease is not held.
+ *
+ * The lease row is locked first. Its expiry is then compared with
+ * clock_timestamp(), the time after any wait for that lock, not now(),
+ * which is when the statement started; a write that waited past the
+ * lease's expiry changes nothing.
  */
 async function fenced(sql: Sql, lease: DeviceLease, write: ReturnType<Sql>) {
   const [row] =
-    await sql`WITH held AS (${heldLease(sql, lease)}), changed AS (${write}) SELECT (SELECT count(*) FROM held)::int AS held, (SELECT count(*) FROM changed)::int AS changed`;
+    await sql`WITH lease AS (${leaseRow(sql, lease)}), held AS (SELECT 1 FROM lease WHERE expires_at > clock_timestamp()), changed AS (${write}) SELECT (SELECT count(*) FROM held)::int AS held, (SELECT count(*) FROM changed)::int AS changed`;
   const result = fencedRow.parse(row);
   if (result.held !== 1) throw new DeviceLeaseLost();
   return result.changed;
 }
+/** The minute this server last found the shared attempt window full. */
+let fullMinute: number | null = null;
+/** Forgets that the current attempt window was full, for tests. */
+export function forgetFullAttemptWindow() {
+  fullMinute = null;
+}
 /**
  * Counts one enrollment attempt in the current one-minute window, across
  * every server, unless the window already holds `cap`. Returns whether the
- * attempt fits and the seconds until the next window. The first attempt in
- * a window removes windows older than an hour.
+ * attempt fits and the seconds until the next window.
+ *
+ * A request that arrives once the window is full never waits on its row:
+ * this server remembers a full window until it rolls over, and otherwise
+ * reads the count without a lock before trying to add to it. The upsert
+ * still adds only while the count is under the cap, for requests that
+ * arrive together. The first attempt in a window removes windows older
+ * than an hour.
  */
 export async function countEnrollmentAttempt(
   cap: number,
   sql: Sql = database(),
 ) {
-  const wait = Math.max(1, 60 - Math.floor((Date.now() / 1000) % 60));
-  if (cap < 1) return { allowed: false, wait };
+  const now = Date.now();
+  const minute = Math.floor(now / 60_000);
+  const wait = Math.max(1, 60 - Math.floor((now / 1000) % 60));
+  const full = () => {
+    fullMinute = minute;
+    return { allowed: false, wait };
+  };
+  if (cap < 1 || fullMinute === minute) return { allowed: false, wait };
+  const [current] =
+    await sql`SELECT attempts FROM fitness_device_attempt_windows WHERE window_start = date_trunc('minute', now())`;
+  if (current && Number(current.attempts) >= cap) return full();
   const rows =
     await sql`INSERT INTO fitness_device_attempt_windows(window_start, attempts) VALUES(date_trunc('minute', now()), 1) ON CONFLICT (window_start) DO UPDATE SET attempts = fitness_device_attempt_windows.attempts + 1 WHERE fitness_device_attempt_windows.attempts < ${cap} RETURNING attempts`;
   const [row] = rows;
-  if (!row) return { allowed: false, wait };
+  if (!row) return full();
   if (row.attempts === 1)
     await sql`DELETE FROM fitness_device_attempt_windows WHERE window_start < now() - interval '1 hour'`;
   return { allowed: true, wait };

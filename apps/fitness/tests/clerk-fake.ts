@@ -67,10 +67,15 @@ function signedIn(auth: Record<string, unknown>) {
   };
 }
 
-/** A Backend API error reply, as the SDK throws it. */
-function apiError(status: number) {
+/**
+ * A Backend API error reply, as the SDK throws it: with Clerk's error code
+ * when Clerk answered, or none, as from a gateway.
+ */
+function apiError(status: number, code?: string) {
   return new ClerkAPIResponseError(`Clerk responded ${status}`, {
-    data: [],
+    data: code
+      ? [{ code, message: "not found", long_message: "not found" }]
+      : [],
     status,
   });
 }
@@ -111,6 +116,10 @@ function createFake() {
     revokeFails: new Set<string>(),
     /** Key IDs whose lookup fails without an answer. */
     getFails: new Set<string>(),
+    /** Key IDs whose lookup gets a gateway 404 without Clerk's error. */
+    gatewayMissing: new Set<string>(),
+    /** Holds each key list call until it settles. */
+    listStall: null as Promise<void> | null,
     pageSize: 100,
     clock: () => Date.now(),
     requests: [] as { request: Request; options: Record<string, unknown> }[],
@@ -125,6 +134,8 @@ function createFake() {
       fake.create = "ok";
       fake.revokeFails.clear();
       fake.getFails.clear();
+      fake.gatewayMissing.clear();
+      fake.listStall = null;
       fake.pageSize = 100;
       fake.requests = [];
       fake.listCalls = 0;
@@ -248,6 +259,7 @@ function createFake() {
         offset?: number;
       }) {
         fake.listCalls++;
+        if (fake.listStall) await fake.listStall;
         const all = fake.keys
           .filter((k) => k.subject === params.subject)
           .filter((k) => params.includeInvalid || (!k.revoked && !k.expired))
@@ -286,14 +298,15 @@ function createFake() {
       },
       async get(apiKeyId: string) {
         if (fake.getFails.has(apiKeyId)) throw apiError(502);
+        if (fake.gatewayMissing.has(apiKeyId)) throw apiError(404);
         const key = fake.keys.find((k) => k.id === apiKeyId);
-        if (!key) throw apiError(404);
+        if (!key) throw apiError(404, "resource_not_found");
         return { ...key };
       },
       async revoke(params: { apiKeyId: string }) {
         if (fake.revokeFails.has(params.apiKeyId)) throw apiError(500);
         const key = fake.keys.find((k) => k.id === params.apiKeyId);
-        if (!key) throw apiError(404);
+        if (!key) throw apiError(404, "resource_not_found");
         key.revoked = true;
         return { ...key };
       },

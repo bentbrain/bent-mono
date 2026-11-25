@@ -23,7 +23,7 @@ if (process.env.CI && !configured)
   throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");
 // This suite runs in a schema of its own, dropped when it ends.
 const isolated = isolatedSchema("fitness_devices");
-if (configured) configure(isolated.url);
+if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
 const { default: postgres } = await import("postgres");
 const { database } = await import("../src/server/db");
@@ -70,18 +70,15 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
-  if (!configured) return;
-  await database().end();
-  await isolated.drop();
-  // Later suites use the shared test database.
-  process.env.DATABASE_URL = process.env.FITNESS_TEST_DATABASE_URL;
+  if (configured) await isolated.drop();
 });
 beforeEach(async () => {
   fake.reset();
   Object.assign(process.env, environment);
   devices.setEnrollmentBudget(1000, 1000);
   devices.setSharedEnrollmentLimit(100_000);
-  devices.setEnrollmentClerkTimeout(10_000);
+  store.forgetFullAttemptWindow();
+  devices.setEnrollmentTiming();
   if (configured) {
     await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
     await database()`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
@@ -365,7 +362,7 @@ describe("device enrollment", () => {
   test.skipIf(!configured)(
     "gives up on a Clerk call that does not answer",
     async () => {
-      devices.setEnrollmentClerkTimeout(200);
+      devices.setEnrollmentTiming({ clerkMs: 200 });
       fake.stall = new Promise<void>(() => undefined);
       const begun = Date.now();
       const stalled = await enroll(oauthToken());
@@ -577,6 +574,59 @@ describe("device enrollment", () => {
       expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
       expect(await rows()).toEqual(before);
       expect((await importWith(kept)).status).toBe(200);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps a key active on a 404 without Clerk's not-found error",
+    async () => {
+      const kept = await enrolled(otherInstallation(1));
+      const [keptKey] = activeFor(otherInstallation(1));
+      if (!keptKey) throw new Error("Expected the key.");
+      fake.gatewayMissing.add(keptKey.id);
+      const before = await rows();
+      const response = await enroll(oauthToken());
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
+      expect(await rows()).toEqual(before);
+      expect((await importWith(kept)).status).toBe(200);
+      // Clerk's own not-found answer frees the place.
+      fake.gatewayMissing.clear();
+      fake.keys = fake.keys.filter((k) => k !== keptKey);
+      expect((await enroll(oauthToken())).status).toBe(201);
+      expect((await rows()).filter((r) => r.active).length).toBe(1);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "skips a stalled key list without using the time kept for the create",
+    async () => {
+      const current = await enrolled();
+      fake.listStall = new Promise<void>(() => undefined);
+      // Cleanup may run until the deadline less the create's reserve, and
+      // stalls that long, so too little time is left to create a key.
+      devices.setEnrollmentTiming({
+        deadlineMs: 1000,
+        cleanupMs: 5000,
+        createReserveMs: 600,
+      });
+      const token = oauthToken();
+      const before = await rows();
+      const refused = await enroll(token);
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toMatchObject({ code: "issuance_pending" });
+      expect(await rows()).toEqual(before);
+      expect((await importWith(current)).status).toBe(200);
+      // With its own budget, a stalled list is skipped and the enrollment
+      // goes on with the same token.
+      devices.setEnrollmentTiming({
+        deadlineMs: 5000,
+        cleanupMs: 300,
+        createReserveMs: 600,
+      });
+      const replaced = await enroll(token);
+      expect(replaced.status).toBe(201);
+      expect((await importWith(current)).status).toBe(401);
     },
   );
 
@@ -838,6 +888,74 @@ describe("device issuance lease and attempt windows", () => {
     },
   );
 
+  test.skipIf(!configured)(
+    "fails a write that waited on the lease past its expiry",
+    async () => {
+      const holder = crypto.randomUUID();
+      const attemptId = crypto.randomUUID();
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      expect(
+        await store.acquireDeviceLease(database(), owner, holder, 90),
+      ).toBe(true);
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"b".repeat(64)},${attemptId},${installation})`;
+      const locker = client();
+      try {
+        let activation: Promise<boolean> | undefined;
+        await locker.begin(async (tx) => {
+          await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${owner} FOR UPDATE`;
+          // The activation starts while the lease is valid, then waits.
+          activation = store.issueEnrollment(
+            database(),
+            { owner, holder },
+            attemptId,
+            "ak_id_waited",
+          );
+          activation.catch(() => undefined);
+          await Bun.sleep(200);
+          await tx`UPDATE fitness_device_issuance_leases SET expires_at = clock_timestamp() + interval '300 milliseconds' WHERE owner_id=${owner}`;
+          await Bun.sleep(600);
+        });
+        await expect(activation).rejects.toBeInstanceOf(store.DeviceLeaseLost);
+        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
+      } finally {
+        await locker.end();
+        await store.releaseDeviceLease(database(), owner, holder);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "refuses an attempt over the cap without waiting on the counter",
+    async () => {
+      await database()`DELETE FROM fitness_device_attempt_windows`;
+      store.forgetFullAttemptWindow();
+      const cap = 2;
+      expect((await store.countEnrollmentAttempt(cap)).allowed).toBe(true);
+      expect((await store.countEnrollmentAttempt(cap)).allowed).toBe(true);
+      const locker = client();
+      try {
+        await locker.begin(async (tx) => {
+          // Another server holds the full window's row.
+          await tx`SELECT 1 FROM fitness_device_attempt_windows FOR UPDATE`;
+          for (const remembered of [false, true]) {
+            if (!remembered) store.forgetFullAttemptWindow();
+            const begun = performance.now();
+            const result = await store.countEnrollmentAttempt(cap);
+            expect(result.allowed).toBe(false);
+            expect(performance.now() - begun).toBeLessThan(500);
+          }
+        });
+        const [window] =
+          await database()`SELECT attempts FROM fitness_device_attempt_windows`;
+        // Unless the minute turned over during the test.
+        if (window) expect(window.attempts).toBeLessThanOrEqual(cap);
+      } finally {
+        await locker.end();
+        store.forgetFullAttemptWindow();
+      }
+    },
+  );
+
   test.skipIf(!configured)("checks readiness in one query", async () => {
     const queries: string[] = [];
     const counted = postgres(url, {
@@ -994,9 +1112,15 @@ ${EARLIER_ENROLLMENTS}`);
         await isolated.unsafe(current);
         await isolated.unsafe(current);
         const kept =
-          await isolated`SELECT token_digest, key_state, active FROM fitness_device_enrollments`;
+          await isolated`SELECT token_digest, key_state, active, charged_at = created_at AS charged FROM fitness_device_enrollments`;
+        // An issued key counts toward the hourly limit from when it was recorded.
         expect(kept.map((r) => ({ ...r }))).toEqual([
-          { token_digest: digest, key_state: "issued", active: false },
+          {
+            token_digest: digest,
+            key_state: "issued",
+            active: false,
+            charged: true,
+          },
         ]);
         expect(await devices.deviceEnrollmentReady(isolated)).toBe(true);
         // The upgraded table takes the new state and enforces its rules.

@@ -38,7 +38,7 @@ if (process.env.CI && !configured)
   throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");
 // This suite runs in a schema of its own, dropped when it ends.
 const isolated = isolatedSchema("fitness_wire");
-if (configured) configure(isolated.url);
+if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
 const { database } = await import("../src/server/db");
 const devices = await import("../src/server/devices");
@@ -73,13 +73,10 @@ beforeAll(async () => {
   Object.assign(process.env, environment);
   devices.setEnrollmentBudget(1000, 1000);
   devices.setSharedEnrollmentLimit(100_000);
+  devices.setEnrollmentTiming();
 });
 afterAll(async () => {
-  if (!configured) return;
-  await database().end();
-  await isolated.drop();
-  // Later suites use the shared test database.
-  process.env.DATABASE_URL = process.env.FITNESS_TEST_DATABASE_URL;
+  if (configured) await isolated.drop();
 });
 
 const ref = (prefix: "w" | "r", n: number) =>

@@ -64,19 +64,30 @@ const deviceLimits = {
   bytes: 4096,
   /** Seconds a client waits before retrying while another enrollment runs. */
   busySeconds: 10,
-  /** Every Clerk call in one enrollment starts and finishes within this many ms. */
-  deadlineMs: 45_000,
   /** Seconds an issuance lease lasts, well past the deadline. */
   leaseSeconds: 90,
-  /** Milliseconds a readiness result is reused for. */
-  readinessMs: 30_000,
+  /** Milliseconds a ready result is reused for. */
+  readyMs: 30_000,
+  /** Milliseconds a not-ready result is reused for, so a migration shows soon. */
+  notReadyMs: 5_000,
 } as const;
 
-/** How long each Clerk call during enrollment may take. */
-let clerkTimeoutMs = 10_000;
-/** Sets the Clerk call timeout, for tests. */
-export function setEnrollmentClerkTimeout(ms: number) {
-  clerkTimeoutMs = ms;
+/**
+ * Enrollment timing, in milliseconds on the monotonic clock: each Clerk
+ * call's limit, the deadline every call in an enrollment starts and ends
+ * within, the share of it cleanup may use, and the time kept back for
+ * creating the key.
+ */
+const timing = {
+  clerkMs: 10_000,
+  deadlineMs: 45_000,
+  cleanupMs: 10_000,
+  createReserveMs: 15_000,
+};
+const defaultTiming = { ...timing };
+/** Sets enrollment timing, or restores the defaults, for tests. */
+export function setEnrollmentTiming(changes: Partial<typeof timing> = {}) {
+  Object.assign(timing, defaultTiming, changes);
 }
 class ClerkTimeout extends Error {}
 /** A deadline on the monotonic clock. */
@@ -91,7 +102,7 @@ function deadlineIn(ms: number) {
  * attempt limits bound how much such work there can be.
  */
 function bounded<T>(call: () => Promise<T>, deadline: number): Promise<T> {
-  const ms = Math.min(clerkTimeoutMs, deadline - performance.now());
+  const ms = Math.min(timing.clerkMs, deadline - performance.now());
   if (ms <= 0) return Promise.reject(new ClerkTimeout());
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -219,7 +230,8 @@ export function forgetEnrollmentReadiness() {
  * `enabled`, FITNESS_DEVICE_CLIENT_IDS lists the app's OAuth clients, the
  * Clerk keys are valid, the MCP resource is valid, and the enrollment tables
  * are present with the access enrollment needs. The tables are checked in
- * one query, and the result, ready or not, is reused for 30 seconds.
+ * one query; a ready result is reused for 30 seconds and a not-ready one
+ * for 5, so a migration shows soon.
  */
 export async function deviceEnrollmentReady(
   sql?: Parameters<typeof enrollmentTableReady>[0],
@@ -233,7 +245,11 @@ export async function deviceEnrollmentReady(
   )
     return false;
   if (sql) return enrollmentTableReady(sql).catch(() => false);
-  if (readiness && performance.now() - readiness.at < deviceLimits.readinessMs)
+  if (
+    readiness &&
+    performance.now() - readiness.at <
+      (readiness.ready ? deviceLimits.readyMs : deviceLimits.notReadyMs)
+  )
     return readiness.ready;
   const ready = await enrollmentTableReady().catch(() => false);
   readiness = { ready, at: performance.now() };
@@ -297,16 +313,32 @@ async function deviceKeys(owner: string, deadline: number) {
 class KeyCheckInconclusive extends Error {}
 
 /**
+ * The Backend API's error code for a resource that does not exist. The
+ * pinned @clerk/backend 3.29 parses it from the JSON error body into
+ * `errors[].code`; @clerk/shared 4.45.1 names `resource_not_found` as the
+ * code Clerk returns for a missing resource. A 404 from a gateway carries
+ * no Clerk error body, so it parses to no errors. The dev-instance spike
+ * must confirm this code for a deleted API key.
+ */
+const notFoundCode = "resource_not_found";
+
+/**
  * Whether Clerk confirms this key can no longer be used: it is revoked or
- * expired, or Clerk answers 404 because it was deleted. Any other failure
- * is inconclusive and throws KeyCheckInconclusive.
+ * expired, or Clerk reports it does not exist. Any other answer, including
+ * a 404 without Clerk's not-found error, is inconclusive and throws
+ * KeyCheckInconclusive.
  */
 async function keyGone(keyId: string, deadline: number) {
   try {
     const key = await bounded(() => clerkClient().apiKeys.get(keyId), deadline);
     return key.revoked || key.expired;
   } catch (error) {
-    if (isClerkAPIResponseError(error) && error.status === 404) return true;
+    if (
+      isClerkAPIResponseError(error) &&
+      error.status === 404 &&
+      error.errors.some((e) => e.code === notFoundCode)
+    )
+      return true;
     throw new KeyCheckInconclusive();
   }
 }
@@ -315,7 +347,7 @@ async function keyGone(keyId: string, deadline: number) {
 async function revokeQuietly(
   apiKeyId: string,
   reason: string,
-  deadline = deadlineIn(clerkTimeoutMs),
+  deadline = deadlineIn(timing.clerkMs),
 ) {
   try {
     await bounded(
@@ -366,7 +398,11 @@ class ActivationFailed extends Error {}
  *    the enrollment with `503 auth_unavailable` and changes nothing.
  * 3. Clerk's key list finds keys left by ambiguous attempts, which then
  *    count toward the hourly limit from their creation, and keys to clean
- *    up. A key missing from the list is never treated as gone.
+ *    up. A key missing from the list is never treated as gone. Listing and
+ *    cleanup have their own budget and never use the time kept back for
+ *    the create; a list that runs out of time is skipped. With less than
+ *    that time left before the token would be used, the enrollment stops
+ *    with `503 issuance_pending` and changes neither.
  * 4. The limits are checked in Postgres, counting the new key: keys
  *    created in the last hour and attempts that may have created one, and
  *    installations with an active key.
@@ -381,7 +417,7 @@ class ActivationFailed extends Error {}
  *    result makes the attempt ambiguous; a key it created cannot import.
  */
 export async function handleDeviceEnroll(request: Request) {
-  const deadline = deadlineIn(deviceLimits.deadlineMs);
+  const deadline = deadlineIn(timing.deadlineMs);
   const wait = takeAttempt();
   if (wait > 0) return rateLimited(wait);
   if (!(await deviceEnrollmentReady())) return unavailable();
@@ -394,7 +430,7 @@ export async function handleDeviceEnroll(request: Request) {
   const check = await verifyBearer(request, ["oauth_token"], {
     timeoutMs: Math.max(
       0,
-      Math.min(clerkTimeoutMs, deadline - performance.now()),
+      Math.min(timing.clerkMs, deadline - performance.now()),
     ),
   });
   if (!check.ok) {
@@ -477,10 +513,16 @@ export async function handleDeviceEnroll(request: Request) {
         await deactivateKeys(sql, lease, gone);
         const active = before.filter((d) => !gone.includes(d.keyId));
 
-        // The list only finds keys; a key it leaves out is not gone.
+        // Cleanup has its own budget and never takes the time kept back
+        // for the create. The list only finds keys; a key it leaves out is
+        // not gone. A list that fails or runs out of time is skipped.
+        const cleanup = Math.min(
+          deadlineIn(timing.cleanupMs),
+          deadline - timing.createReserveMs,
+        );
         let keys: DeviceKey[] = [];
         try {
-          keys = await deviceKeys(userId, deadline);
+          keys = await deviceKeys(userId, cleanup);
         } catch (error) {
           console.error("fitness.devices.list_failed", {
             name: error instanceof Error ? error.name : typeof error,
@@ -522,6 +564,11 @@ export async function handleDeviceEnroll(request: Request) {
             ),
           );
 
+        const timezone = await accountTimezone(sql, userId);
+        // Without time left to create the key, stop before the token is
+        // used or the installation's key changes, so the app can retry.
+        if (deadline - performance.now() < timing.createReserveMs)
+          return refuse(busy());
         // The token is used from here on, whatever happens next.
         if (
           !(await recordEnrollment(sql, lease, {
@@ -532,9 +579,7 @@ export async function handleDeviceEnroll(request: Request) {
         )
           return refuse(tokenUsed());
         recorded = true;
-        let timezone: string;
         try {
-          timezone = await accountTimezone(sql, userId);
           await deactivateInstallation(sql, lease, installationId);
           // Clean up in Clerk: this installation's keys, and keys that have
           // no active row, such as one a timed-out creation left.
@@ -550,7 +595,7 @@ export async function handleDeviceEnroll(request: Request) {
                 key.installationId === installationId
                   ? "Replaced by a new connection from this iPhone."
                   : "Not the active key for its iPhone.",
-                deadline,
+                Math.min(cleanup, deadline - timing.createReserveMs),
               );
         } catch (error) {
           // No key was created for this attempt.
