@@ -5586,6 +5586,18 @@
       "perPrContracts": [],
       "representatives": [],
       "disposition": "Photo popup metadata and delayed image sizing across mixed orientations."
+    },
+    {
+      "file": "tests/browser/media-layout.spec.ts",
+      "titlePath": [
+        "media-layout.spec.ts",
+        "desktop media details stay visible while scrolling the library"
+      ],
+      "perPrBrowser": true,
+      "fullBrowser": true,
+      "perPrContracts": [],
+      "representatives": [],
+      "disposition": "Desktop media details stay visible and scroll independently after keyboard selection."
     }
   ]
 }

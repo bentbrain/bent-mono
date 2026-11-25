@@ -873,7 +873,7 @@ function MediaManager() {
         </div>
         <Card
           id="media-details"
-          className="max-h-[min(40rem,calc(100dvh-10rem))] gap-0 overflow-y-auto border-0 border-t py-4 shadow-none min-[601px]:border-t-0 min-[601px]:border-l min-[601px]:py-0"
+          className="max-h-[min(40rem,calc(100dvh-10rem))] gap-0 overflow-y-auto border-0 border-t py-4 shadow-none min-[601px]:top-16 min-[601px]:border-t-0 min-[601px]:border-l min-[601px]:py-0 min-[601px]:has-[form]:sticky"
         >
           <CardContent className="px-0 min-[601px]:pl-6">
             {selected && !selecting && (
