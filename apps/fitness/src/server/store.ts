@@ -204,11 +204,14 @@ export async function accountTimezone(
     ? settingsSchema.parse(configuration.data).timezone
     : "UTC";
 }
+/** Another request holds the owner's device lock. */
+export class DeviceLockBusy extends Error {}
 /**
  * Runs device key changes for an owner one at a time, under a per-owner
- * advisory lock held on one connection. Statements on that connection
- * commit as they run, so an enrollment attempt is recorded before Clerk is
- * called and stays recorded if the call fails.
+ * advisory lock held on one connection. The lock is not waited for: when
+ * another request holds it, this throws DeviceLockBusy. Statements on the
+ * connection commit as they run, so an enrollment attempt is recorded
+ * before Clerk is called and stays recorded if the call fails.
  */
 export async function withDeviceLock<T>(
   owner: string,
@@ -217,7 +220,9 @@ export async function withDeviceLock<T>(
   const sql = await database().reserve();
   const key = "fitness-devices:" + owner;
   try {
-    await sql`SELECT pg_advisory_lock(hashtextextended(${key}, 0))`;
+    const [row] =
+      await sql`SELECT pg_try_advisory_lock(hashtextextended(${key}, 0)) AS locked`;
+    if (row?.locked !== true) throw new DeviceLockBusy();
     try {
       return await work(sql);
     } finally {
@@ -234,8 +239,8 @@ export async function enrollmentTokenUsed(sql: Sql, digest: string) {
 }
 /**
  * Records an enrollment attempt as pending, which also marks its token as
- * used. Returns false when the token was already used. Records older than
- * two days, past the token lifetime, are removed.
+ * used. Returns false when the token was already used. Inactive records
+ * older than two days, past the token lifetime, are removed.
  */
 export async function recordEnrollment(
   sql: Sql,
@@ -247,44 +252,118 @@ export async function recordEnrollment(
   },
 ) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${attempt.owner}) ON CONFLICT DO NOTHING`;
-  await sql`DELETE FROM fitness_device_enrollments WHERE created_at < now() - interval '2 days'`;
+  await sql`DELETE FROM fitness_device_enrollments WHERE NOT active AND created_at < now() - interval '2 days'`;
   const rows =
     await sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${attempt.owner},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING token_digest`;
   return rows.length === 1;
 }
-const pendingRow = z.object({
+/**
+ * Marks the owner's other pending attempts failed. Under the device lock no
+ * other attempt is running, so a pending one had no confirmed key; a key it
+ * created later cannot import.
+ */
+export async function failPendingEnrollments(sql: Sql, owner: string) {
+  await sql`UPDATE fitness_device_enrollments SET key_state='failed' WHERE owner_id=${owner} AND key_state='pending'`;
+}
+const activeRow = z.object({
   attempt_id: z.string(),
   installation_id: z.string(),
-  age: z.coerce.number(),
+  key_id: z.string(),
 });
-/** The owner's enrollment attempts whose key Fitness has not confirmed, with their age in seconds. */
-export async function pendingEnrollments(sql: Sql, owner: string) {
+/** The owner's active device keys, one per installation. */
+export async function activeDevices(sql: Sql, owner: string) {
   const rows =
-    await sql`SELECT attempt_id, installation_id, extract(epoch FROM now() - created_at) AS age FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='pending'`;
+    await sql`SELECT attempt_id, installation_id, key_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`;
   return rows.map((row) => {
-    const r = pendingRow.parse(row);
+    const r = activeRow.parse(row);
     return {
       attemptId: r.attempt_id,
       installationId: r.installation_id,
-      ageSeconds: r.age,
+      keyId: r.key_id,
     };
   });
 }
-export async function settleEnrollment(
+/** Stops an installation's active key from importing. */
+export async function deactivateInstallation(
+  sql: Sql,
+  owner: string,
+  installationId: string,
+) {
+  await sql`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${installationId} AND active`;
+}
+/** Records the created key, which makes it the installation's active key. */
+export async function issueEnrollment(
   sql: Sql,
   attemptId: string,
-  state: "issued" | "failed",
+  keyId: string,
 ) {
-  await sql`UPDATE fitness_device_enrollments SET key_state=${state} WHERE attempt_id=${attemptId} AND key_state='pending'`;
+  await sql`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${keyId}, active=true WHERE attempt_id=${attemptId} AND key_state='pending'`;
+}
+/** A device key's claims and the ID Clerk verified. */
+export type DeviceKeyClaims = {
+  owner: string;
+  keyId: string;
+  enrollment: string;
+  installationId: string;
+};
+/**
+ * Whether this key is its installation's active key: the attempt it names
+ * belongs to the owner and installation, is issued and active, and
+ * recorded this key ID.
+ */
+export async function deviceKeyActive(
+  key: DeviceKeyClaims,
+  sql: Sql = database(),
+) {
+  const rows =
+    await sql`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${key.enrollment} AND owner_id=${key.owner} AND installation_id=${key.installationId} AND key_state='issued' AND active AND key_id=${key.keyId}`;
+  return rows.length === 1;
 }
 /**
- * Whether the device enrollment table, with its attempt columns, is in the
- * connection's schema.
+ * Deactivates this key's attempt when it is the installation's active key.
+ * Returns whether it was.
  */
-export async function enrollmentTableExists(sql: Sql = database()) {
-  const [row] =
-    await sql`SELECT count(*)::int AS columns FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='fitness_device_enrollments' AND column_name IN ('attempt_id','key_state')`;
-  return row?.columns === 2;
+export async function deactivateDeviceKey(sql: Sql, key: DeviceKeyClaims) {
+  const rows =
+    await sql`UPDATE fitness_device_enrollments SET active=false WHERE attempt_id=${key.enrollment} AND owner_id=${key.owner} AND installation_id=${key.installationId} AND key_state='issued' AND active AND key_id=${key.keyId} RETURNING attempt_id`;
+  return rows.length === 1;
+}
+const enrollmentColumns = [
+  "owner_id",
+  "token_digest",
+  "attempt_id",
+  "installation_id",
+  "key_state",
+  "key_id",
+  "active",
+  "created_at",
+];
+/**
+ * Whether enrollment can use its table: the table and its columns are in
+ * the connection's schema, and the database user may read, add, change and
+ * remove its rows and add accounts. Nothing is written.
+ */
+export async function enrollmentTableReady(sql: Sql = database()) {
+  const [row] = await sql`
+    SELECT
+      (SELECT count(*)::int FROM information_schema.columns
+        WHERE table_schema=current_schema()
+          AND table_name='fitness_device_enrollments'
+          AND column_name IN ${sql(enrollmentColumns)}) AS columns,
+      to_regclass('fitness_device_enrollments') IS NOT NULL
+        AND to_regclass('fitness_accounts') IS NOT NULL AS present`;
+  if (row?.columns !== enrollmentColumns.length || row.present !== true)
+    return false;
+  // has_table_privilege is true when any listed privilege is held, so each
+  // one is checked on its own.
+  const [grants] = await sql`
+    SELECT
+      has_table_privilege(current_user, 'fitness_device_enrollments', 'SELECT')
+      AND has_table_privilege(current_user, 'fitness_device_enrollments', 'INSERT')
+      AND has_table_privilege(current_user, 'fitness_device_enrollments', 'UPDATE')
+      AND has_table_privilege(current_user, 'fitness_device_enrollments', 'DELETE')
+      AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT') AS granted`;
+  return grants?.granted === true;
 }
 async function lockAccount(sql: TransactionSql, owner: string) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;

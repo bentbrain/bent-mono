@@ -103,6 +103,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  devices.setEnrollmentBudget(1000, 1000);
   fake.reset();
   Object.assign(process.env, environment);
   fake.backend = createClerkClient({
@@ -119,7 +120,7 @@ afterEach(() => {
   tableCheck = undefined;
 });
 function enroll(token: string) {
-  tableCheck ??= spyOn(store, "enrollmentTableExists").mockResolvedValue(true);
+  tableCheck ??= spyOn(store, "enrollmentTableReady").mockResolvedValue(true);
   return devices.handleDeviceEnroll(
     bearer(
       token,
@@ -187,4 +188,17 @@ test("treats a bad signature as retryable", async () => {
     ok: false,
     failure: "unavailable",
   });
+});
+
+test("bounds signing-key fetches for unknown key IDs with the enrollment budget", async () => {
+  devices.setEnrollmentBudget(10, 5);
+  jwksRequests.length = 0;
+  const token = await accessToken(unserved);
+  const statuses: number[] = [];
+  for (let i = 0; i < 20; i++) statuses.push((await enroll(token)).status);
+  // The SDK reports an unknown key ID with the same reason as an outage.
+  expect(statuses.filter((s) => s === 503)).toHaveLength(5);
+  expect(statuses.filter((s) => s === 429)).toHaveLength(15);
+  expect(jwksRequests.length).toBeLessThanOrEqual(5);
+  expect(jwksRequests.length).toBeGreaterThan(0);
 });

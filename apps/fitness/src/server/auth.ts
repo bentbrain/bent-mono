@@ -1,7 +1,9 @@
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
-import { fitnessScopes } from "@bent/fitness-contracts";
+import { deviceKeyKind, fitnessScopes } from "@bent/fitness-contracts";
 import type { ApiErrorCode } from "@bent/fitness-contracts";
 import { allowedEmails, configurationReady, mcpResource } from "./config";
+import { deviceKeyActive } from "./store";
+import type { DeviceKeyClaims } from "./store";
 
 export class AgentAuthError extends Error {}
 /** The token is valid but grants no Fitness access. */
@@ -167,6 +169,7 @@ function bearerOnly(request: Request) {
 export async function verifyBearer(
   request: Request,
   accepts: BearerToken[],
+  options: { timeoutMs?: number } = {},
 ): Promise<BearerCheck> {
   const resource = mcpResource();
   if (!configurationReady() || !resource)
@@ -174,17 +177,31 @@ export async function verifyBearer(
   const bearer = bearerOnly(request);
   if (!bearer) return { ok: false, failure: "missing" };
   let state;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    state = await clerkClient().authenticateRequest(bearer, {
+    const verification = clerkClient().authenticateRequest(bearer, {
       acceptsToken: accepts,
       // Clerk checks OAuth tokens against this audience. API keys have none.
       audience: resource,
       publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY,
       secretKey: process.env.CLERK_SECRET_KEY,
     });
+    const timeoutMs = options.timeoutMs;
+    state =
+      timeoutMs === undefined
+        ? await verification
+        : await Promise.race([
+            verification,
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), timeoutMs);
+            }),
+          ]);
   } catch (error) {
     return { ok: false, failure: "unavailable", error };
+  } finally {
+    clearTimeout(timer);
   }
+  if (!state) return { ok: false, failure: "unavailable" };
   const result = state.toAuth();
   if (
     result?.isAuthenticated &&
@@ -353,5 +370,70 @@ export async function authenticateImport(
           error: "This account needs an invitation. Contact the app owner.",
           code: "unauthorized",
         });
-  return device ? { kind: "device", owner } : { kind: "owner", owner, access };
+  if (!device) return { kind: "owner", owner, access };
+  // Only the key recorded on its installation's active enrollment imports.
+  const key = deviceKeyClaims(bearer);
+  let current: boolean;
+  try {
+    current = key !== null && (await deviceKeyActive(key));
+  } catch {
+    return fail(unavailable);
+  }
+  if (!current) {
+    await revokeOrphan(bearer.id);
+    return fail({
+      status: 401,
+      error: "This device key is no longer valid. Connect the iPhone again.",
+      code: "key_invalid",
+    });
+  }
+  return { kind: "device", owner };
+}
+
+/**
+ * The enrollment a device key names in its claims, or null when the key
+ * has no iPhone sync claims in the expected form.
+ */
+export function deviceKeyClaims(
+  bearer: VerifiedBearer,
+): DeviceKeyClaims | null {
+  const claims = bearer.claims;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (
+    !bearer.userId ||
+    claims?.kind !== deviceKeyKind ||
+    typeof claims.enrollment !== "string" ||
+    typeof claims.installationId !== "string" ||
+    !uuid.test(claims.enrollment) ||
+    !uuid.test(claims.installationId)
+  )
+    return null;
+  return {
+    owner: bearer.userId,
+    keyId: bearer.id,
+    enrollment: claims.enrollment,
+    installationId: claims.installationId,
+  };
+}
+
+/** Revokes a device key that cannot import, as cleanup. Failure is logged. */
+async function revokeOrphan(apiKeyId: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      clerkClient().apiKeys.revoke({
+        apiKeyId,
+        revocationReason: "Not the active key for its iPhone.",
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Timed out")), 10_000);
+      }),
+    ]);
+  } catch (error) {
+    console.error("fitness.devices.revoke_failed", {
+      name: error instanceof Error ? error.name : typeof error,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }

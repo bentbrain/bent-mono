@@ -89,6 +89,10 @@ function createFake() {
      * Clerk is still creating it, so the key appears on `appear()`.
      */
     create: "ok" as "ok" | "fail" | "lost" | "late",
+    /** Holds each key creation until it settles. */
+    stall: null as Promise<void> | null,
+    /** Runs when a key creation starts. */
+    onCreate: null as (() => void) | null,
     /** Keys Clerk is still creating. */
     inflight: [] as FakeKey[],
     /** Runs after each key list call. */
@@ -122,6 +126,8 @@ function createFake() {
       fake.clock = () => Date.now();
       fake.inflight = [];
       fake.afterList = null;
+      fake.stall = null;
+      fake.onCreate = null;
       fake.backend = null;
     },
     /** Finishes the keys Clerk was still creating. */
@@ -254,6 +260,8 @@ function createFake() {
         scopes?: string[];
         claims?: Claims | null;
       }) {
+        fake.onCreate?.();
+        if (fake.stall) await fake.stall;
         if (fake.create === "fail") throw new ClerkAPIError(500);
         const key = fake.addKey({
           secret: `ak_secret_${fake.sequence + 1}`,

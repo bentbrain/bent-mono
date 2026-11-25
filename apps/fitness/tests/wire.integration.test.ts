@@ -66,6 +66,7 @@ beforeAll(async () => {
   await clean();
   fake.reset();
   Object.assign(process.env, environment);
+  devices.setEnrollmentBudget(1000, 1000);
 });
 afterAll(async () => {
   if (configured) await clean();
@@ -307,16 +308,32 @@ test.skipIf(!configured)(
     );
     await record("error-key-invalid", await importAs(device, deviceBody([])));
 
-    // Enrollment limits.
-    for (const n of [1, 2, 3])
-      fake.addKey({
-        secret: `ak_wire_phone_${n}`,
-        scopes: ["fitness:health:import"],
-        claims: {
-          kind: "fitness-ios",
-          installationId: `3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0${n}`,
-        },
+    // A second enrollment while the first is still issuing its key.
+    for (const token of ["oat_wire_first", "oat_wire_second"])
+      fake.oauth.set(token, {
+        userId: owner,
+        clientId: iosClient,
+        scopes: ["openid", "fitness:health:enroll"],
+        aud: resource,
       });
+    let release = () => undefined as void;
+    fake.stall = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const creating = new Promise<void>((resolve) => {
+      fake.onCreate = resolve;
+    });
+    const first = enroll("oat_wire_first");
+    await creating;
+    await record("error-issuance-pending", await enroll("oat_wire_second"));
+    release();
+    expect((await first).status).toBe(201);
+    fake.stall = null;
+    fake.onCreate = null;
+
+    // Enrollment limits: three other installations hold active keys.
+    for (const n of [1, 2, 3])
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active) VALUES(${owner},${String(n).repeat(64)},${`7c1d2e3f-4a5b-4c6d-8e7f-80910111213${n}`},${`3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0${n}`},'issued',${`ak_id_wire_${n}`},true)`;
     fake.oauth.set("oat_wire_limit", {
       userId: owner,
       clientId: iosClient,
@@ -331,16 +348,6 @@ test.skipIf(!configured)(
     );
     process.env.FITNESS_DEVICE_ENROLLMENT =
       environment.FITNESS_DEVICE_ENROLLMENT;
-    // An earlier attempt for this installation whose key creation had no
-    // confirmed outcome.
-    await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"1".repeat(64)},${"5d1e3c2b-0a9f-4e8d-8c7b-6a5f4e3d2c1b"},${installation})`;
-    fake.oauth.set("oat_wire_pending", {
-      userId: owner,
-      clientId: iosClient,
-      scopes: ["openid", "fitness:health:enroll"],
-      aud: resource,
-    });
-    await record("error-issuance-pending", await enroll("oat_wire_pending"));
 
     // Replies to other keys.
     fake.addKey({ secret: "ak_wire_owner" });

@@ -21,6 +21,7 @@ const { handleMcp } = await import("../src/server/mcp-http");
 beforeEach(() => {
   fake.reset();
   Object.assign(process.env, environment);
+  devices.setEnrollmentBudget(1000, 1000);
 });
 afterEach(() => {
   for (const key of Object.keys(process.env))
@@ -210,6 +211,14 @@ describe("Health import authentication", () => {
     expect((await post("ak_device")).status).toBe(503);
   });
 
+  test("refuses a device key that names no enrollment and revokes it", async () => {
+    const key = deviceKey();
+    const response = await post("ak_device");
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ code: "key_invalid" });
+    expect(key.revoked).toBe(true);
+  });
+
   test("refuses a device key whose account is no longer invited", async () => {
     deviceKey();
     process.env.FITNESS_ALLOWED_EMAILS = "someone-else@example.com";
@@ -253,6 +262,13 @@ describe("Device enrollment availability", () => {
       },
     ],
     ["the Clerk secret key", () => delete process.env.CLERK_SECRET_KEY],
+    [
+      "a publishable key Clerk accepts",
+      () => {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY =
+          "pk_test_" + Buffer.from("localhost$").toString("base64");
+      },
+    ],
     [
       "a well-formed publishable key",
       () => {
@@ -309,32 +325,25 @@ describe("Device disconnect", () => {
       bearer(token, { method: "DELETE" }, "/api/health/devices/current"),
     );
 
-  test("revokes the verified device key, then reports it invalid", async () => {
+  test("is retryable when Clerk cannot verify the key", async () => {
     const key = deviceKey();
     fake.failure = "network";
     const down = await revoke("ak_device");
     expect(down.status).toBe(503);
     expect(await down.json()).toMatchObject({ code: "auth_unavailable" });
     expect(key.revoked).toBe(false);
+  });
 
-    fake.failure = null;
-    const done = await revoke("ak_device");
-    expect(done.status).toBe(204);
-    expect(done.headers.get("cache-control")).toBe("no-store");
+  test("reports a key without its enrollment as invalid and revokes it", async () => {
+    const key = deviceKey();
+    const response = await revoke("ak_device");
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ code: "key_invalid" });
     expect(key.revoked).toBe(true);
-
-    // A retry after a lost reply is definitive.
+    // A retry after the key is revoked is definitive too.
     const again = await revoke("ak_device");
     expect(again.status).toBe(401);
     expect(await again.json()).toMatchObject({ code: "key_invalid" });
-  });
-
-  test("keeps the key when Clerk cannot revoke it", async () => {
-    const key = deviceKey();
-    fake.revokeFails.add(key.id);
-    const response = await revoke("ak_device");
-    expect(response.status).toBe(503);
-    expect(key.revoked).toBe(false);
   });
 
   test("revokes only iPhone sync keys", async () => {
@@ -351,5 +360,23 @@ describe("Device disconnect", () => {
     const response = await revoke("ak_device");
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
+  });
+});
+
+describe("Device enrollment budget", () => {
+  test("refuses attempts over the budget before any other check", async () => {
+    devices.setEnrollmentBudget(10, 2);
+    const enroll = () =>
+      devices.handleDeviceEnroll(
+        bearer("eyJhbGciOiJSUzI1NiJ9.e30.x", { method: "POST", body: "{}" }),
+      );
+    // The database is unreachable, so the first attempts are unavailable.
+    expect((await enroll()).status).toBe(503);
+    expect((await enroll()).status).toBe(503);
+    const limited = await enroll();
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ code: "rate_limited" });
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(fake.requests).toHaveLength(0);
   });
 });

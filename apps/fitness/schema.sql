@@ -47,18 +47,23 @@ CREATE INDEX IF NOT EXISTS fitness_health_sample_record ON fitness_health_sample
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_weight_date ON fitness_records(owner_id, (data->>'date')) WHERE deleted=false AND data->>'kind'='weight';
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_active_workout ON fitness_records(owner_id) WHERE deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(owner_id, (data->>'workoutId')) WHERE deleted=false AND data->>'kind'='workoutCorrection';
--- Each one-time OAuth token used to enroll an iPhone sync device, by SHA-256
--- digest, so a token issues at most one device key. The attempt ID is also a
--- claim on the key it creates. key_state is pending until Fitness confirms
--- the key exists (issued) or that no key was created (failed). Enrollment
--- removes rows older than two days.
+-- Each enrollment attempt for an iPhone sync device, keyed by the SHA-256
+-- digest of its one-time OAuth token, so a token issues at most one device
+-- key. The attempt ID is also a claim on the key it creates. key_state is
+-- pending until Fitness records the created key (issued, with key_id) or
+-- gives up on it (failed). A device key can import only while its attempt
+-- is issued and active with the same key_id; each installation has at most
+-- one active attempt. Enrollment removes inactive rows older than two days.
 CREATE TABLE IF NOT EXISTS fitness_device_enrollments (
   owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
   token_digest text PRIMARY KEY CHECK (token_digest ~ '^[0-9a-f]{64}$'),
   attempt_id uuid NOT NULL UNIQUE,
   installation_id uuid NOT NULL,
   key_state text NOT NULL DEFAULT 'pending' CHECK (key_state IN ('pending','issued','failed')),
-  created_at timestamptz NOT NULL DEFAULT now()
+  key_id text,
+  active boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (NOT active OR (key_state = 'issued' AND key_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_created ON fitness_device_enrollments(created_at);
-CREATE INDEX IF NOT EXISTS fitness_device_enrollment_pending ON fitness_device_enrollments(owner_id) WHERE key_state='pending';
+CREATE UNIQUE INDEX IF NOT EXISTS fitness_device_enrollment_active ON fitness_device_enrollments(owner_id, installation_id) WHERE active;

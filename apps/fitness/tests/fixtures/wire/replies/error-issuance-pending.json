@@ -1,7 +1,7 @@
 {
   "status": 503,
   "body": {
-    "error": "An earlier connection is still being set up. Try again shortly.",
+    "error": "Another connection is being set up. Try again shortly.",
     "code": "issuance_pending"
   }
 }
