@@ -28,13 +28,36 @@ export function AppSection({ app }: Readonly<{ app: ShowcaseApp }>) {
               {app.tagline}
             </p>
           </div>
-          <Button asChild size="lg" className="w-full font-mono sm:w-auto">
-            <a href={`https://${app.domain}/`}>
-              Open
-              <span className="sr-only"> {app.name}</span>
-              <span aria-hidden="true">↗</span>
-            </a>
-          </Button>
+          <div className="flex w-full gap-2 sm:w-auto">
+            {app.source ? (
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="flex-1 font-mono sm:flex-none"
+              >
+                <a href={app.source} target="_blank" rel="noopener noreferrer">
+                  Source
+                  <span className="sr-only">
+                    {" "}
+                    code for {app.name} (opens in a new tab)
+                  </span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+              </Button>
+            ) : null}
+            <Button asChild size="lg" className="flex-1 font-mono sm:flex-none">
+              <a
+                href={`https://${app.domain}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open
+                <span className="sr-only"> {app.name} (opens in a new tab)</span>
+                <span aria-hidden="true">↗</span>
+              </a>
+            </Button>
+          </div>
         </header>
       </div>
 
@@ -53,6 +76,7 @@ export function AppSection({ app }: Readonly<{ app: ShowcaseApp }>) {
           className="order-first md:order-none"
           image={app.mobile.image}
           alt={app.mobile.alt}
+          statusBar={app.mobile.statusBar}
         />
       </div>
 
