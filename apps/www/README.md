@@ -5,6 +5,17 @@ The Next.js landing website for [bent.build](https://bent.build) and `www.bent.b
 - Showcases every application on the bent.build subdomains with desktop and phone previews, access notes, links to each live site and, for apps in this repository, their GitHub folder.
 - Stores each app's metadata, screenshots and source URL in [`lib/apps.ts`](lib/apps.ts), rendered by `components/showcase`.
 - Bundles fonts locally with `next/font/local` and imports shared design tokens from `@bent/design-tokens`.
+- Sends page views, clicks, referrers, UTM parameters and visitor location to the PostHog `bent.build` project. [`instrumentation-client.ts`](instrumentation-client.ts) starts PostHog when `NEXT_PUBLIC_POSTHOG_KEY` is set, and `next.config.ts` routes its requests through `/ingest` on the site's own domain.
+
+## Analytics
+
+The Vercel project sets `NEXT_PUBLIC_POSTHOG_KEY` for production deployments only, so local and preview builds send no events. To test analytics locally, set the variable when starting the development server:
+
+```sh
+NEXT_PUBLIC_POSTHOG_KEY=phc_... bun run --cwd apps/www dev
+```
+
+View traffic sources and locations in PostHog's Web analytics dashboard for the `bent.build` project.
 
 ## Development
 
