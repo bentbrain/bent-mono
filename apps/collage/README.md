@@ -58,7 +58,11 @@ docker run --rm -d --name maya-collage-test-db \
   -e POSTGRES_USER=test \
   -e POSTGRES_PASSWORD=test \
   -e POSTGRES_DB=payload_migration_test \
-  -p 5433:5432 postgres:16
+  -p 127.0.0.1:5433:5432 postgres:16
+
+until docker exec maya-collage-test-db pg_isready -h 127.0.0.1 -U test -d payload_migration_test >/dev/null 2>&1; do
+  sleep 1
+done
 
 SKIP_ENV_VALIDATION=1 \
 PAYLOAD_SECRET=synthetic-build-fixture \
