@@ -40,6 +40,7 @@ import {
   mcpResource,
 } from "./config";
 import {
+  CommitOutcomeUnknown,
   DeviceLeaseBusy,
   DeviceLeaseLost,
   accountTimezone,
@@ -51,6 +52,7 @@ import {
   enrollmentTableReady,
   enrollmentTokenUsed,
   hourlyCharges,
+  swapCommitted,
   swapEnrollment,
   recordEnrollment,
   settleEnrollment,
@@ -642,15 +644,36 @@ export async function handleDeviceEnroll(request: Request) {
         // The swap stops the installation's current key and makes the new
         // one active together. If it fails, the current key keeps importing
         // and the new key is revoked.
-        let swapped = { activated: false, replaced: [] as string[] };
+        const previous = active
+          .filter((d) => d.installationId === installationId)
+          .map((d) => d.keyId);
+        let swapped = { activated: false, replaced: previous };
+        let revokeNew = true;
         try {
           swapped = await swapEnrollment(sql, after, {
             attemptId,
             installationId,
             keyId: created.id,
           });
+        } catch (error) {
+          if (!(error instanceof CommitOutcomeUnknown)) throw error;
+          // The commit may have landed, in which case the old key is
+          // already inactive and the new key is the installation's only
+          // one. Read the row again before revoking anything.
+          try {
+            if (await swapCommitted(attemptId, created.id))
+              swapped = { activated: true, replaced: previous };
+          } catch (reread) {
+            // With no answer, the new key is left for the next enrollment
+            // to settle and clean up.
+            revokeNew = false;
+            console.error("fitness.devices.swap_unknown", {
+              name: reread instanceof Error ? reread.name : typeof reread,
+            });
+            throw error;
+          }
         } finally {
-          if (!swapped.activated)
+          if (!swapped.activated && revokeNew)
             await revokeQuietly(
               created.id,
               "This connection could not be completed.",
@@ -678,6 +701,8 @@ export async function handleDeviceEnroll(request: Request) {
       name: error instanceof Error ? error.name : typeof error,
     });
     if (error instanceof ActivationFailed) return issuanceFailed();
+    // A write whose commit reply was lost may have used the token.
+    if (error instanceof CommitOutcomeUnknown) return issuanceFailed();
     if (error instanceof DeviceLeaseLost)
       return recorded ? issuanceFailed() : busy();
     // Before the attempt is recorded, the token is unused and can retry.

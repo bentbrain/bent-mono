@@ -219,6 +219,16 @@ export async function accountTimezone(
 export class DeviceLeaseBusy extends Error {}
 /** The request no longer holds its lease; another may have taken it over. */
 export class DeviceLeaseLost extends Error {}
+/**
+ * COMMIT failed or its reply was lost, so the transaction may or may not
+ * have committed. Errors before COMMIT always roll back and are thrown as
+ * they are.
+ */
+export class CommitOutcomeUnknown extends Error {
+  constructor(readonly reason: unknown) {
+    super("The commit's outcome is unknown.");
+  }
+}
 /** A held device issuance lease. */
 export type DeviceLease = {
   owner: string;
@@ -314,6 +324,8 @@ async function fenced(
     budget: () => Promise<void>,
   ) => Promise<readonly unknown[]>,
 ) {
+  // Set once the work is done, so an error after it comes from COMMIT.
+  let committing = false;
   try {
     return await sql.begin(async (tx) => {
       // Before each statement that can wait, its timeout is what remains
@@ -357,9 +369,11 @@ async function fenced(
       await stillHeld();
       if (lease.deadline !== undefined && performance.now() >= lease.deadline)
         throw new DeviceLeaseLost();
+      committing = true;
       return changed;
     });
   } catch (error) {
+    if (committing) throw new CommitOutcomeUnknown(error);
     if (lockWaitEnded(error)) throw new DeviceLeaseLost();
     throw error;
   }
@@ -588,6 +602,16 @@ export async function swapEnrollment(
     return tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=greatest(created_at, now()) WHERE attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
   });
   return { activated: changed === 1, replaced };
+}
+/**
+ * Whether an attempt's swap committed: its row is issued, active and
+ * holds this key ID. Reads on its own connection from the pool, for when
+ * the swap's commit reply was lost.
+ */
+export async function swapCommitted(attemptId: string, keyId: string) {
+  const [row] =
+    await database()`SELECT key_state = 'issued' AND active AND key_id = ${keyId} AS committed FROM fitness_device_enrollments WHERE attempt_id=${attemptId}`;
+  return row?.committed === true;
 }
 /** A device key's claims and the ID Clerk verified. */
 export type DeviceKeyClaims = {

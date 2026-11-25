@@ -699,34 +699,53 @@ describe("device enrollment", () => {
         prepare: false,
         onnotice: () => undefined,
       });
+      const original = store.recordEnrollment;
+      const spy = spyOn(store, "recordEnrollment");
       try {
         for (const [timing, release] of [
-          // The lease runs out while the write waits; the import then lets go.
+          // The lease runs out while recording waits; the import then lets go.
           [{ leaseSeconds: 1 }, "after the lease"],
-          // The deadline runs out while the write waits.
+          // The deadline runs out while recording waits.
           [{ deadlineMs: 1200, createReserveMs: 100 }, "after the reply"],
-          // The time kept for the create starts while the write waits.
+          // The time kept for the create starts while recording waits.
           [{ deadlineMs: 3000, createReserveMs: 2000 }, "after the reply"],
         ] as const) {
           devices.setEnrollmentTiming(timing);
           const token = oauthToken();
           const before = await rows();
-          // An import holds the account row, which the enrollment's first
-          // write locks.
-          const held = holdAccount(importer);
-          await held.taken;
+          // The import takes the account row just as the enrollment starts
+          // to record its attempt, so recording is the write that waits.
+          let held: ReturnType<typeof holdAccount> | undefined;
+          let recordingFailed: unknown;
+          let reached = () => undefined as void;
+          const recording = new Promise<void>((resolve) => {
+            reached = resolve;
+          });
+          spy.mockImplementation(async (...args) => {
+            held = holdAccount(importer);
+            await held.taken;
+            reached();
+            try {
+              return await original(...args);
+            } catch (error) {
+              recordingFailed = error;
+              throw error;
+            }
+          });
           const pending = enroll(token);
+          await recording;
           await lockWaiters();
           let response: Response;
           if (release === "after the lease") {
             await leaseExpired();
-            held.release();
+            held?.release();
             response = await pending;
           } else {
             response = await pending;
-            held.release();
+            held?.release();
           }
-          await held.done;
+          await held?.done;
+          expect(recordingFailed).toBeInstanceOf(store.DeviceLeaseLost);
           expect(response.status).toBe(503);
           expect(await response.json()).toMatchObject({
             code: "issuance_pending",
@@ -734,17 +753,117 @@ describe("device enrollment", () => {
           expect(await rows()).toEqual(before);
           expect((await importWith(previous)).status).toBe(200);
           // The token was not used, so it enrolls once nothing waits.
+          spy.mockImplementation(original);
           devices.setEnrollmentTiming();
           const enrolledNow = await enroll(token);
           expect(enrolledNow.status).toBe(201);
           previous = (await enrolledNow.json()).secret;
         }
       } finally {
+        spy.mockRestore();
         devices.setEnrollmentTiming();
         await importer.end();
       }
     },
     30_000,
+  );
+
+  test.skipIf(!configured)(
+    "keeps the new key when the swap's commit reply is lost",
+    async () => {
+      const previous = await enrolled();
+      const original = store.swapEnrollment;
+      // The swap commits, then its connection drops before the reply.
+      const lostReply: typeof original = async (...args) => {
+        await original(...args);
+        throw new store.CommitOutcomeUnknown(new Error("Connection closed"));
+      };
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(lostReply);
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        spy.mockRestore();
+      }
+      expect(response.status).toBe(201);
+      const secret = (await response.json()).secret;
+      const key = fake.keys.find((k) => k.secret === secret);
+      expect(key?.revoked).toBe(false);
+      expect((await importWith(secret)).status).toBe(200);
+      const old = await importWith(previous);
+      expect(old.status).toBe(401);
+      expect(await old.json()).toMatchObject({ code: "key_invalid" });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "leaves the new key in place when the swap's outcome cannot be read",
+    async () => {
+      await enrolled();
+      const originalSwap = store.swapEnrollment;
+      const lostReply: typeof originalSwap = async (...args) => {
+        await originalSwap(...args);
+        throw new store.CommitOutcomeUnknown(new Error("Connection closed"));
+      };
+      const swap = spyOn(store, "swapEnrollment").mockImplementation(lostReply);
+      const reread = spyOn(store, "swapCommitted").mockRejectedValue(
+        new Error("Connection refused"),
+      );
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        swap.mockRestore();
+        reread.mockRestore();
+      }
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      // The newest key, the one this enrollment created, was not revoked.
+      const newest = fake.keys.reduce((a, b) =>
+        a.createdAt >= b.createdAt ? a : b,
+      );
+      expect(newest.claims?.enrollment).toEqual(expect.any(String));
+      expect(newest.revoked).toBe(false);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "revokes the new key when a commit failure leaves the swap undone",
+    async () => {
+      const previous = await enrolled();
+      const sql = database();
+      // A check that fails only at COMMIT, so the commit's outcome is
+      // unknown to the swap and the row has to be read again.
+      await sql.unsafe(`
+        CREATE TABLE fitness_test_commit_failures (on_commit boolean);
+        INSERT INTO fitness_test_commit_failures VALUES (true);
+        CREATE FUNCTION fitness_test_fail_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.active AND EXISTS (SELECT 1 FROM fitness_test_commit_failures) THEN
+            RAISE EXCEPTION 'synthetic commit failure';
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE CONSTRAINT TRIGGER fitness_test_fail_commit AFTER UPDATE ON fitness_device_enrollments
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fitness_test_fail_commit();`);
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        await sql.unsafe(`
+          DROP TRIGGER fitness_test_fail_commit ON fitness_device_enrollments;
+          DROP FUNCTION fitness_test_fail_commit();
+          DROP TABLE fitness_test_commit_failures;`);
+      }
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      expect((await importWith(previous)).status).toBe(200);
+      expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      const newest = fake.keys.reduce((a, b) =>
+        a.createdAt >= b.createdAt ? a : b,
+      );
+      expect(newest.revoked).toBe(true);
+    },
   );
 
   test.skipIf(!configured)(
