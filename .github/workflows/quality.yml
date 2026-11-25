@@ -283,7 +283,7 @@ jobs:
   fitness-ios-native:
     name: fitness-ios-native
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: apps/fitness-ios
@@ -334,6 +334,16 @@ jobs:
           echo "POSTGRES_BIN=$pg" >> "$GITHUB_ENV"
           echo "FITNESS_TEST_DATABASE_URL=postgres://test@127.0.0.1:55432/fitness_test" >> "$GITHUB_ENV"
       - run: node scripts/roundtrip.mjs
+      - name: Run the Simulator flows against the local harness
+        run: node scripts/flows.mjs
+      - name: Retain the Simulator flow results
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fitness-ios-flows
+          path: ${{ runner.temp }}/fitness-ios/flows-*.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Stop Postgres
         if: always()
         run: |
@@ -347,6 +357,8 @@ jobs:
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
       CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
       APP_VARIANT: production
+      # The analysis covers Swift, so the JavaScript bundle is not built.
+      SKIP_BUNDLING: '1'
     permissions:
       contents: read
       security-events: write
@@ -396,9 +408,9 @@ jobs:
         env:
           XCODEBUILD_SETTINGS: CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
         run: |
-          node scripts/native.mjs build
-          node scripts/native.mjs seeder
-          node scripts/native.mjs core-build
+          time node scripts/native.mjs build
+          time node scripts/native.mjs seeder
+          time node scripts/native.mjs core-build
           node scripts/native.mjs artifact
       - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:

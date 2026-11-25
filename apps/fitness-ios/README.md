@@ -58,14 +58,22 @@ A Simulator build signed to run locally, with no paid team, carries its HealthKi
 
 `tools/health-seed` is a separate Simulator-only Xcode project. Its Health Seed app (`build.bent.fitness.healthseed`) asks for write access and writes synthetic samples relative to today: weigh-ins over three days, two on one day, and one two days ahead; an outdoor run and a treadmill run with distance; a run without distance; and a run whose distance sample is attached after the workout is saved. Each sample has a sync identifier, so seeding again replaces it. Launch it with `-action seed` or `-action clear` to run without a tap. Fitness Sync can read these samples only when its own read access is allowed, since another app wrote them.
 
-XCUITest drives the Health access sheet, which appears in the requesting app's window. The sheet's "Select All" cell has the identifier `UIA.Health.AuthSheet.AllCategoryButton`, each type has a switch, and Allow and Don't Allow are at the end of the list. `SimulatorFlows/HealthSheet.swift` allows or denies with them.
+XCUITest drives the Health access sheet, which appears in the requesting app's window. `SimulatorFlows/HealthSheet.swift` allows or denies with it:
+
+- The "Select All" cell has the identifier `UIA.Health.AuthSheet.AllCategoryButton`, and each type has a switch.
+- The confirming button at the end of the list is Allow for a write request, such as the seeder's, and Continue for a read-only request, such as Fitness Sync's.
+- On iOS 27.2, a read request then asks how much history to share: "Past 30 Days and Future Data" or "All Recorded Data and Future Data". Allow stays disabled until one is chosen. The Health step shows the earliest weigh-in and run the app can read, so a 30-day choice shows there.
+- Don't Allow is followed by an alert saying categories can be turned on later in the Health app.
+- The read sheet notes that background access follows Settings → General → Background App Refresh.
+
+On a newly booted Simulator, the sheet can take more than 20 seconds to appear.
 
 ### Simulator flows
 
 `scripts/flows.mjs` builds the development variant against a local harness, then runs each flow on a new Simulator:
 
 - **Denied:** sign in, confirm consent, deny Health access. The app shows that it can read nothing, the sync sends nothing, and Disconnect revokes the key.
-- **Allowed:** sign in, confirm consent, allow Health access. The sync sends the earliest weigh-in for each seeded day and the four runs, with 5, 4.2 and 3.1 km and one without a distance. The weigh-in dated ahead waits, and a second sync sends nothing new.
+- **Allowed:** sign in, confirm consent, allow Health access to all history. The sync sends the earliest weigh-in for each seeded day and the four runs: 5 and 4.2 km recorded with their workouts, 3.1 km from the distance sample attached after the workout was saved, and 0 km for the run without a distance. The weigh-in dated ahead waits, and a second sync sends nothing new.
 
 The harness (`apps/fitness/tests/ios-simulator.harness.test.ts`) serves the real Fitness device and import handlers on Postgres with the synthetic Clerk fake, plus a synthetic OAuth server that signs in a synthetic account and checks the PKCE verifier and redirect URI. No Clerk instance or secret is involved.
 
@@ -92,9 +100,9 @@ Quality runs three jobs for this app:
 
 - `fitness-ios` (Ubuntu): typecheck, lint, knip, unit tests, `expo config` for both variants, `expo-doctor` and the fingerprint check.
 - `fitness-ios-native` (macOS 26 with Xcode 26.6): SwiftLint, production prebuild, Simulator build, the artifact check, the seeder build, the XCTest suite, and the round trip with a temporary Homebrew `postgresql@16`.
-- `CodeQL Swift` (macOS 26 with Xcode 26.6 and Rosetta): a traced build of the production app, the seeder and its UI tests, and the module's XCTest targets, analysed with both security suites under the category `fitness-codeql-swift`. It requires zero raw findings, checks that every tracked Swift file and every Swift file the app target compiles was extracted, and keeps the original SARIF.
+- `CodeQL Swift` (macOS 26 with Xcode 26.6 and Rosetta): the third-party pods build first without tracing. The traced build then compiles every first-party Swift file: the production app target, including the Swift prebuild generates, the fitness-health module, the seeder and its UI tests, and the module's XCTest targets. It analyses them with both security suites under the category `fitness-codeql-swift`, requires zero raw findings, checks that every tracked Swift file and every Swift file the app target compiles was extracted, and keeps the original SARIF.
 
-The artifact check reads the production Simulator build: exactly the HealthKit and background-delivery entitlements, a Health read purpose string and no write purpose string, no local networking, and no seeder files or symbols.
+The artifact check reads the production Simulator build: exactly the HealthKit and background-delivery entitlements, a Health read purpose string and no write purpose string, no local networking, the fitness-health module linked in, and no seeder files or symbols. Expo leaves out a local module whose minimum iOS version is above the app's, so the module's podspec matches the app's iOS 16.4.
 
 `expo-doctor` runs with `react` excluded from its version check: the workspace uses React 19.3.1, and SDK 58 lists 19.3.0.
 

@@ -23,8 +23,13 @@ final class SyncFlowTests: XCTestCase {
     let seeder = XCUIApplication()
     seeder.launch()
     seeder.buttons["seed"].tap()
-    if HealthSheet.appears(in: seeder, timeout: 20) { HealthSheet.allowAll(in: seeder) }
-    wait(for: seeder.staticTexts["status"], label: "Seeded", timeout: 60)
+    // On a newly booted Simulator, Health can take a while to show its sheet.
+    let status = seeder.staticTexts["status"]
+    let deadline = Date().addingTimeInterval(90)
+    while !status.label.hasPrefix("Seeded") && Date() < deadline {
+      if HealthSheet.appears(in: seeder, timeout: 2) { HealthSheet.allowAll(in: seeder) }
+    }
+    wait(for: status, label: "Seeded", timeout: 10)
     seeder.terminate()
   }
 
