@@ -16,6 +16,8 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 
 `deployments.json` lists the apps and their deployment settings. Drive keeps its internal packages and services under `products/`.
 
+`apps/fitness-ios` is Fitness Sync, an Expo iPhone app that sends Apple Health weigh-ins and runs to Fitness. Its README covers setup, the Simulator workflow and its tests.
+
 ## Development
 
 Use Node.js 24 and Bun 1.4.4.
@@ -35,7 +37,7 @@ The root `bun.lock` manages workspace dependencies.
 
 CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Weekly and manually dispatched Quality runs execute the full regression suite. Root automation changes and incomplete comparison history trigger validation of every workspace.
 
-Quality runs full CodeQL analysis with both security suites, requires zero raw findings across the repository and retains the original SARIF report. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
+Quality runs full CodeQL analysis of the JavaScript and TypeScript and of the iPhone app's Swift, with both security suites. It requires zero raw findings across the repository and retains each original SARIF report. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
 
 ## Trackmap
 

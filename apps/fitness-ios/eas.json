@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": "27.11.0",
+    "requireCommit": true,
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false
+  },
+  "build": {
+    "base": {
+      "node": "24.18.0",
+      "bun": "1.4.4",
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": false,
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "development"
+      },
+      "environment": "development"
+    },
+    "production": {
+      "extends": "base",
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "production"
+      },
+      "environment": "production"
+    }
+  }
+}

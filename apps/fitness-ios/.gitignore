@@ -1,0 +1,26 @@
+# Expo and prebuild output
+.expo/
+dist/
+/ios/
+/android/
+expo-env.d.ts
+
+# Native build output
+build/
+DerivedData/
+*.xcresult
+modules/fitness-health/ios/.build/
+modules/fitness-health/ios/.swiftpm/
+tools/health-seed/build/
+tools/health-seed/*.xcodeproj/xcuserdata/
+tools/health-seed/*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Signing material
+*.p8
+*.p12
+*.mobileprovision
+*.jks
+*.key
+
+# Metro
+.metro-health-check*

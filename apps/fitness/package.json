@@ -16,7 +16,8 @@
     "fixtures:wire": "FITNESS_WIRE_FIXTURES=update bun scripts/bounded-test.ts tests/wire.integration.test.ts",
     "knip": "bun scripts/routes.ts && knip",
     "test:browser": "playwright test",
-    "db:migrate": "bun scripts/migrate.ts"
+    "db:migrate": "bun scripts/migrate.ts",
+    "test:ios-roundtrip": "bun test tests/ios-roundtrip.test.ts"
   },
   "dependencies": {
     "@bent/design-tokens": "workspace:*",

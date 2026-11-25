@@ -1,0 +1,101 @@
+import XCTest
+
+/// Drives the Health access sheet, which HealthKit shows inside the app's
+/// own window. The sheet lists a "Select All" cell and a switch per type,
+/// then a confirming button at the end of the list: Allow, or on iOS 27 for
+/// a read-only request, Continue. iOS 27 then asks how much history to share,
+/// the past 30 days or all of it, before Allow. Don't Allow is followed by an
+/// alert that points to the Health app.
+@MainActor
+enum HealthSheet {
+  static let selectAll = "UIA.Health.AuthSheet.AllCategoryButton"
+  static let timeBounded = "HealthUI.HKAuthorizationTimeBoundedView"
+
+  /// The history choices the sheet offers for read access.
+  enum History: String {
+    case all = "All Recorded Data and Future Data"
+    case past30Days = "Past 30 Days and Future Data"
+  }
+
+  /// Taps Seed in Health Seed and allows write access, tapping Seed again
+  /// if HealthKit's request times out before its sheet appears, as it can on
+  /// a newly booted Simulator.
+  static func seed(_ app: XCUIApplication, timeout: TimeInterval = 240) {
+    let status = app.staticTexts["status"]
+    let deadline = Date().addingTimeInterval(timeout)
+    app.buttons["seed"].tap()
+    while !status.label.hasPrefix("Seeded") && Date() < deadline {
+      if appears(in: app, timeout: 2) { allowAll(in: app) }
+      if status.label.hasPrefix("Failed") { app.buttons["seed"].tap() }
+    }
+  }
+
+  /// Whether the sheet appeared within the timeout.
+  static func appears(in app: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
+    app.cells[selectAll].waitForExistence(timeout: timeout)
+  }
+
+  /// Turns on every requested type and allows access.
+  static func allowAll(in app: XCUIApplication, history: History = .all, timeout: TimeInterval = 15) {
+    guard appears(in: app, timeout: timeout) else {
+      XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
+      return
+    }
+    app.cells[selectAll].tap()
+    // iOS 27 labels the button Continue for read-only requests.
+    tapLabel(["Allow", "Continue"], in: app)
+    // Read requests can then ask how much history to share.
+    let window = app.navigationBars[timeBounded]
+    if window.waitForExistence(timeout: 5) {
+      tapLabel([history.rawValue], in: app)
+      tapLabel(["Allow"], in: app)
+    }
+  }
+
+  /// Turns on only the listed types, by their names in the sheet, such as
+  /// "Weight", and allows access.
+  static func allow(_ types: [String], in app: XCUIApplication, timeout: TimeInterval = 15) {
+    guard appears(in: app, timeout: timeout) else {
+      XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
+      return
+    }
+    for type in types {
+      let toggle = app.switches.matching(NSPredicate(format: "identifier ENDSWITH %@", ".\(type).SwitchCell.Switch"))
+        .firstMatch
+      var swipes = 0
+      while !toggle.isHittable && swipes < 6 {
+        app.tables.firstMatch.swipeUp()
+        swipes += 1
+      }
+      toggle.tap()
+    }
+    tapLabel(["Allow", "Continue"], in: app)
+    let window = app.navigationBars[timeBounded]
+    if window.waitForExistence(timeout: 5) {
+      tapLabel([History.all.rawValue], in: app)
+      tapLabel(["Allow"], in: app)
+    }
+  }
+
+  /// Leaves every type off and closes the sheet.
+  static func denyAll(in app: XCUIApplication, timeout: TimeInterval = 15) {
+    guard appears(in: app, timeout: timeout) else {
+      XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
+      return
+    }
+    tapLabel(["Don\u{2019}t Allow"], in: app)
+    // HealthKit then says categories can be turned on later in Health.
+    let done = app.buttons["OK"]
+    if done.waitForExistence(timeout: 10) { done.tap() }
+  }
+
+  private static func tapLabel(_ labels: [String], in app: XCUIApplication) {
+    let element = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).firstMatch
+    var swipes = 0
+    while !element.isHittable && swipes < 6 {
+      app.tables.firstMatch.swipeUp()
+      swipes += 1
+    }
+    element.tap()
+  }
+}

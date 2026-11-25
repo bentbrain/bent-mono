@@ -14,8 +14,23 @@ export function validateManifest(manifest) {
   }
 }
 
-export function classifyReports(reports) {
+/** The query packs a report may come from, by analyzed language. */
+export const queryPacks = { javascript: "codeql/javascript-queries", swift: "codeql/swift-queries" };
+
+export function parseLanguages(value = "javascript") {
+  const languages = value.split(",").map(language => language.trim()).filter(Boolean);
+  if (!languages.length || languages.some(language => !Object.hasOwn(queryPacks, language)) ||
+      new Set(languages).size !== languages.length) {
+    fail(`CodeQL languages must be distinct values from: ${Object.keys(queryPacks).join(", ")}.`);
+  }
+  return languages;
+}
+
+export function classifyReports(reports, languages = ["javascript"]) {
   if (!Array.isArray(reports) || !reports.length) fail("CodeQL produced no analysis reports.");
+  const packs = languages.map(language => queryPacks[language]);
+  if (!packs.length || packs.some(pack => !pack)) fail("CodeQL languages are unknown.");
+  const analyzed = new Set();
   let raw = 0;
   for (const report of reports) {
     if (!object(report) || report.version !== "2.1.0" || !Array.isArray(report.runs) || !report.runs.length) {
@@ -29,10 +44,12 @@ export function classifyReports(reports) {
           run.tool.extensions?.some(extension => extension.name === "codeql-action/pr-diff-range")) {
         fail("CodeQL requires full analysis.");
       }
-      const pack = run.tool.extensions?.find(extension => extension.name === "codeql/javascript-queries");
-      if (!text(pack?.semanticVersion) || !Array.isArray(pack.rules) || !pack.rules.length) {
+      const found = run.tool.extensions?.filter(extension => packs.includes(extension.name)) ?? [];
+      const pack = found[0];
+      if (found.length !== 1 || !text(pack?.semanticVersion) || !Array.isArray(pack.rules) || !pack.rules.length) {
         fail("CodeQL query-pack metadata is missing.");
       }
+      analyzed.add(pack.name);
       for (const { rules } of [run.tool.driver, ...(run.tool.extensions ?? [])]) {
         if (rules !== undefined && (!Array.isArray(rules) || rules.some(rule => !text(rule?.id)) ||
             new Set(rules.map(rule => rule.id)).size !== rules.length)) {
@@ -52,6 +69,8 @@ export function classifyReports(reports) {
       raw += run.results.length;
     }
   }
+  const missing = packs.filter(pack => !analyzed.has(pack));
+  if (missing.length) fail(`CodeQL reports are missing ${missing.join(", ")}.`);
   if (raw) fail(`CodeQL requires zero raw findings; received ${raw}.`);
   return { raw };
 }
@@ -66,6 +85,7 @@ export async function readReports(directory) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const manifest = new URL("../.github/codeql/reviewed-flows.json", import.meta.url);
   validateManifest(JSON.parse(await readFile(manifest, "utf8")));
-  const counts = classifyReports(await readReports(process.env.SARIF_DIRECTORY));
-  console.log(`CodeQL: ${counts.raw} raw findings.`);
+  const languages = parseLanguages(process.env.CODEQL_LANGUAGES);
+  const counts = classifyReports(await readReports(process.env.SARIF_DIRECTORY), languages);
+  console.log(`CodeQL (${languages.join(", ")}): ${counts.raw} raw findings.`);
 }
