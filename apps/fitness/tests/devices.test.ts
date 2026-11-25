@@ -62,7 +62,17 @@ describe("bearer verification", () => {
       });
     expect(await check("oat_expired", ["oauth_token"])).toEqual({
       ok: false,
-      failure: "rejected",
+      failure: "invalid",
+    });
+    fake.oauth.set("oat_elsewhere", {
+      userId: syntheticOwner.id,
+      clientId: iosClient,
+      scopes: [],
+      aud: "https://other.example.com/api/mcp",
+    });
+    expect(await check("oat_elsewhere", ["oauth_token"])).toEqual({
+      ok: false,
+      failure: "invalid",
     });
     expect(await check("eyJhbGciOiJSUzI1NiJ9.e30.x", ["api_key"])).toEqual({
       ok: false,
@@ -102,7 +112,6 @@ describe("bearer verification", () => {
   test("documents a failure for every reason it maps", () => {
     expect(auth.clerkReasonFailure).toEqual({
       "token-invalid": "invalid",
-      "token-verification-failed": "rejected",
       "token-type-mismatch": "rejected",
       "secret-key-invalid": "unavailable",
       "unexpected-error": "unavailable",
@@ -244,6 +253,26 @@ describe("Device enrollment availability", () => {
       },
     ],
     ["the Clerk secret key", () => delete process.env.CLERK_SECRET_KEY],
+    [
+      "a well-formed publishable key",
+      () => {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY =
+          "pk_test_" + Buffer.from("example.invalid").toString("base64");
+      },
+    ],
+    [
+      "a publishable key for a Clerk instance",
+      () => {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY =
+          "pk_prod_ZXhhbXBsZS5pbnZhbGlkJA";
+      },
+    ],
+    [
+      "a well-formed secret key",
+      () => {
+        process.env.CLERK_SECRET_KEY = "synthetic";
+      },
+    ],
     ["the invitation list", () => delete process.env.FITNESS_ALLOWED_EMAILS],
     [
       "a valid MCP resource",

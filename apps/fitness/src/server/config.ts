@@ -65,3 +65,17 @@ export function deviceClientIds() {
 export function deviceEnrollmentEnabled() {
   return process.env.FITNESS_DEVICE_ENROLLMENT?.trim() === "enabled";
 }
+/**
+ * Whether the Clerk keys are well formed: a publishable key whose encoded
+ * Frontend API host ends in `$`, and a secret key.
+ */
+export function clerkKeysValid() {
+  const publishable = process.env.VITE_CLERK_PUBLISHABLE_KEY?.trim() ?? "";
+  const secret = process.env.CLERK_SECRET_KEY?.trim() ?? "";
+  const encoded = /^pk_(?:test|live)_([A-Za-z0-9+/=_-]+)$/.exec(
+    publishable,
+  )?.[1];
+  if (!encoded || !/^sk_(?:test|live)_\S+$/.test(secret)) return false;
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  return /^[a-z0-9.-]+\$$/i.test(decoded);
+}

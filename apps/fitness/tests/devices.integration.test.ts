@@ -22,6 +22,7 @@ if (process.env.CI && !configured)
   throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");
 if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
+const { default: postgres } = await import("postgres");
 const { database } = await import("../src/server/db");
 const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
@@ -61,9 +62,11 @@ beforeAll(async () => {
 afterAll(async () => {
   if (configured) await clean();
 });
-beforeEach(() => {
+beforeEach(async () => {
   fake.reset();
   Object.assign(process.env, environment);
+  if (configured)
+    await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
 });
 
 function oauthToken(
@@ -103,6 +106,16 @@ function enroll(
       ? new Request("http://127.0.0.1:3025/api/health/devices", init)
       : bearer(token, init, "/api/health/devices"),
   );
+}
+/** Ages the owner's enrollment attempts past the settle window. */
+async function settleWindowPassed() {
+  await database()`UPDATE fitness_device_enrollments SET created_at = created_at - interval '6 minutes' WHERE owner_id=${owner}`;
+}
+/** The owner's enrollment attempt states, oldest first. */
+async function states() {
+  const rows =
+    await database()`SELECT key_state FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY created_at`;
+  return rows.map((r) => r.key_state);
 }
 const activeFor = (id: string) =>
   fake.keys.filter((k) => !k.revoked && k.claims?.installationId === id);
@@ -358,7 +371,85 @@ describe("device enrollment", () => {
       expect(await retry.json()).toMatchObject({
         code: "enrollment_token_used",
       });
+      // Clerk may still create the key, so a fresh sign-in waits.
+      const waiting = await enroll(oauthToken());
+      expect(waiting.status).toBe(503);
+      expect(await waiting.json()).toMatchObject({ code: "issuance_pending" });
+      expect(Number(waiting.headers.get("retry-after"))).toBeGreaterThan(0);
+      await settleWindowPassed();
       expect((await enroll(oauthToken())).status).toBe(201);
+      expect(await states()).toEqual(["failed", "issued"]);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "waits for a key that appears after the retry started",
+    async () => {
+      fake.create = "late";
+      expect((await enroll(oauthToken())).status).toBe(503);
+      // The key appears while the retry is reading the key list.
+      fake.afterList = () => fake.appear();
+      const retry = await enroll(oauthToken());
+      expect(retry.status).toBe(503);
+      expect(await retry.json()).toMatchObject({ code: "issuance_pending" });
+      fake.afterList = null;
+      fake.create = "ok";
+      const [late] = activeFor(installation);
+      expect(late?.claims?.enrollment).toEqual(expect.any(String));
+      const fresh = await enroll(oauthToken());
+      expect(fresh.status).toBe(201);
+      expect(late?.revoked).toBe(true);
+      expect(activeFor(installation)).toHaveLength(1);
+      expect(await states()).toEqual(["issued", "issued"]);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "revokes a key that appears after the settle window",
+    async () => {
+      fake.create = "late";
+      expect((await enroll(oauthToken())).status).toBe(503);
+      await settleWindowPassed();
+      fake.create = "ok";
+      // The window has passed with no key, so the attempt failed.
+      expect((await enroll(oauthToken())).status).toBe(201);
+      expect(await states()).toEqual(["failed", "issued"]);
+      // The late key appears, and the next enrollment for the installation
+      // revokes it.
+      const [late] = fake.inflight;
+      fake.appear();
+      expect(activeFor(installation)).toHaveLength(2);
+      expect((await enroll(oauthToken())).status).toBe(201);
+      expect(activeFor(installation)).toHaveLength(1);
+      expect(late?.revoked).toBe(true);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "counts unsettled attempts toward the installation limit",
+    async () => {
+      for (const n of [1, 2])
+        fake.addKey({
+          secret: `ak_phone_${n}`,
+          scopes: ["fitness:health:import"],
+          claims: { kind: "fitness-ios", installationId: otherInstallation(n) },
+        });
+      // A third installation's key creation had no confirmed outcome.
+      fake.create = "late";
+      const third = await enroll(oauthToken(), {
+        installationId: otherInstallation(3),
+        deviceName: "Third iPhone",
+      });
+      expect(third.status).toBe(503);
+      fake.create = "ok";
+      const fourth = await enroll(oauthToken());
+      expect(fourth.status).toBe(503);
+      expect(await fourth.json()).toMatchObject({ code: "issuance_pending" });
+      // Once the third key appears, the limit is certain.
+      fake.appear();
+      const full = await enroll(oauthToken());
+      expect(full.status).toBe(409);
+      expect(await full.json()).toMatchObject({ code: "device_limit" });
     },
   );
 
@@ -408,7 +499,7 @@ describe("device enrollment", () => {
 
   test.skipIf(!configured)("removes token records after two days", async () => {
     const digest = "0".repeat(64);
-    await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,installation_id,created_at) VALUES(${owner},${digest},${installation},now() - interval '3 days')`;
+    await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,created_at) VALUES(${owner},${digest},${crypto.randomUUID()},${installation},now() - interval '3 days')`;
     expect((await enroll(oauthToken())).status).toBe(201);
     const rows =
       await database()`SELECT 1 FROM fitness_device_enrollments WHERE token_digest=${digest}`;
@@ -416,22 +507,30 @@ describe("device enrollment", () => {
   });
 
   test.skipIf(!configured)(
-    "is unavailable until the enrollment table exists",
+    "checks the enrollment table on every readiness check",
     async () => {
-      const sql = database();
-      devices.forgetEnrollmentTable();
-      await sql`ALTER TABLE fitness_device_enrollments RENAME TO fitness_device_enrollments_hidden`;
+      // A schema of its own, so the shared tables are never touched.
+      const schema = "fitness_ready_" + crypto.randomUUID().replaceAll("-", "");
+      await database().unsafe(`CREATE SCHEMA ${schema}`);
+      const isolated = postgres(process.env.FITNESS_TEST_DATABASE_URL ?? "", {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+        connection: { search_path: schema },
+      });
       try {
-        expect(await devices.deviceEnrollmentReady()).toBe(false);
-        const ready = await devices.handleDeviceReady();
-        expect(ready.status).toBe(503);
-        expect((await enroll(oauthToken())).status).toBe(503);
+        expect(await devices.deviceEnrollmentReady(isolated)).toBe(false);
+        await isolated.unsafe(
+          await Bun.file(new URL("../schema.sql", import.meta.url)).text(),
+        );
+        expect(await devices.deviceEnrollmentReady(isolated)).toBe(true);
+        await isolated`DROP TABLE fitness_device_enrollments`;
+        expect(await devices.deviceEnrollmentReady(isolated)).toBe(false);
       } finally {
-        await sql`ALTER TABLE fitness_device_enrollments_hidden RENAME TO fitness_device_enrollments`;
+        await isolated.end();
+        await database().unsafe(`DROP SCHEMA ${schema} CASCADE`);
       }
-      const ready = await devices.handleDeviceReady();
-      expect(ready.status).toBe(200);
-      expect(await ready.json()).toEqual({ enrollment: "enabled" });
+      expect(await devices.deviceEnrollmentReady()).toBe(true);
     },
   );
 });

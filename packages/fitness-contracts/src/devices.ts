@@ -33,6 +33,7 @@ export const apiErrorCodes = [
   "rate_limited",
   "auth_unavailable",
   "enrollment_unavailable",
+  "issuance_pending",
   "issuance_failed",
   "server_error",
 ] as const;

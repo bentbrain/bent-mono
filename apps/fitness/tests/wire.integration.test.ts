@@ -331,6 +331,16 @@ test.skipIf(!configured)(
     );
     process.env.FITNESS_DEVICE_ENROLLMENT =
       environment.FITNESS_DEVICE_ENROLLMENT;
+    // An earlier attempt for this installation whose key creation had no
+    // confirmed outcome.
+    await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"1".repeat(64)},${"5d1e3c2b-0a9f-4e8d-8c7b-6a5f4e3d2c1b"},${installation})`;
+    fake.oauth.set("oat_wire_pending", {
+      userId: owner,
+      clientId: iosClient,
+      scopes: ["openid", "fitness:health:enroll"],
+      aud: resource,
+    });
+    await record("error-issuance-pending", await enroll("oat_wire_pending"));
 
     // Replies to other keys.
     fake.addKey({ secret: "ak_wire_owner" });

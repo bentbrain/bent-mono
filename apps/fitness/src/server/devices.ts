@@ -20,6 +20,7 @@ import type {
 } from "@bent/fitness-contracts";
 import { invitedEmail, verifyBearer } from "./auth";
 import {
+  clerkKeysValid,
   configurationReady,
   deviceClientIds,
   deviceEnrollmentEnabled,
@@ -27,9 +28,12 @@ import {
 } from "./config";
 import {
   accountTimezone,
-  consumeEnrollmentToken,
   enrollmentTableExists,
-  withAccountLock,
+  enrollmentTokenUsed,
+  pendingEnrollments,
+  recordEnrollment,
+  settleEnrollment,
+  withDeviceLock,
 } from "./store";
 
 const deviceLimits = {
@@ -39,6 +43,11 @@ const deviceLimits = {
   perHour: 5,
   /** Enrollment request bodies. */
   bytes: 4096,
+  /**
+   * Seconds an attempt whose key creation had no confirmed outcome blocks
+   * the enrollments it could affect, while Clerk may still create its key.
+   */
+  settleSeconds: 300,
 } as const;
 
 const noStore = { "Cache-Control": "no-store" };
@@ -70,6 +79,12 @@ const authUnavailable = () =>
     "auth_unavailable",
     "Account services are unavailable. Try again shortly.",
   );
+const tokenUsed = () =>
+  failure(
+    409,
+    "enrollment_token_used",
+    "This sign-in was already used to connect a device. Sign in again.",
+  );
 const issuanceFailed = () =>
   failure(
     503,
@@ -77,33 +92,28 @@ const issuanceFailed = () =>
     "The device key could not be issued. Sign in again to retry.",
   );
 
-let tableReady = false;
-/** Forgets the enrollment table check, so tests can repeat it. */
-export function forgetEnrollmentTable() {
-  tableReady = false;
-}
-
 /**
  * Whether iPhone sync enrollment is available: FITNESS_DEVICE_ENROLLMENT is
- * `enabled`, FITNESS_DEVICE_CLIENT_IDS lists the app's OAuth clients, Clerk
- * and the MCP resource are configured, and the enrollment table exists. The
- * table check runs once per process after it succeeds.
+ * `enabled`, FITNESS_DEVICE_CLIENT_IDS lists the app's OAuth clients, the
+ * Clerk keys are well formed, the MCP resource is valid, and the enrollment
+ * table exists. Each call checks the table again.
  */
-export async function deviceEnrollmentReady() {
+export async function deviceEnrollmentReady(
+  sql?: Parameters<typeof enrollmentTableExists>[0],
+) {
   if (
     !deviceEnrollmentEnabled() ||
     deviceClientIds().size === 0 ||
     !configurationReady() ||
+    !clerkKeysValid() ||
     !mcpResource()
   )
     return false;
-  if (tableReady) return true;
   try {
-    tableReady = await enrollmentTableExists();
+    return await enrollmentTableExists(sql);
   } catch {
     return false;
   }
-  return tableReady;
 }
 
 /** GET /api/health/devices/ready: whether the app can enroll. */
@@ -116,6 +126,8 @@ export async function handleDeviceReady() {
 type DeviceKey = {
   id: string;
   installationId: string | null;
+  /** The enrollment attempt that created the key. */
+  enrollment: string | null;
   active: boolean;
   createdAt: number;
 };
@@ -123,6 +135,7 @@ type DeviceKey = {
 /** Every iPhone sync key the owner has, including revoked and expired ones. */
 async function deviceKeys(owner: string) {
   const keys: DeviceKey[] = [];
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
   // Clerk may return fewer keys per page than asked for, so the offset moves
   // by what each page held.
   for (let offset = 0, pages = 0; ; pages++) {
@@ -137,10 +150,8 @@ async function deviceKeys(owner: string) {
       if (key.claims?.kind === deviceKeyKind)
         keys.push({
           id: key.id,
-          installationId:
-            typeof key.claims.installationId === "string"
-              ? key.claims.installationId
-              : null,
+          installationId: text(key.claims.installationId),
+          enrollment: text(key.claims.enrollment),
           active: !key.revoked && !key.expired,
           createdAt: key.createdAt,
         });
@@ -164,11 +175,18 @@ async function readBody(request: Request) {
  *
  * The token must be a Clerk OAuth access token for the MCP resource with
  * fitness:health:enroll, issued to a client in FITNESS_DEVICE_CLIENT_IDS,
- * for an invited account. Each token enrolls once: its digest is committed
- * before any key changes, so a retry after any later failure needs a new
- * sign-in. Key changes for an owner run one at a time under the account
- * lock. Enrolling an installation revokes its earlier keys, including one
- * left by an enrollment whose reply was lost.
+ * for an invited account. Key changes for an owner run one at a time under
+ * a per-owner lock:
+ *
+ * 1. Earlier attempts whose key creation had no confirmed outcome settle:
+ *    a key carrying the attempt ID marks it issued, and an attempt older
+ *    than the settle window without one is failed. A younger one counts
+ *    toward the limits, and one for this installation refuses the
+ *    enrollment with `503 issuance_pending`.
+ * 2. The limits are checked, counting the new key.
+ * 3. The attempt is recorded, which uses the token, before any key change.
+ * 4. This installation's active keys are revoked and the new key is created
+ *    with the attempt ID in its claims.
  */
 export async function handleDeviceEnroll(request: Request) {
   if (!(await deviceEnrollmentReady())) return unavailable();
@@ -235,28 +253,47 @@ export async function handleDeviceEnroll(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.trim().replace(/^Bearer\s+/i, "");
   const digest = createHash("sha256").update(token).digest("hex");
-  try {
-    if (!(await consumeEnrollmentToken(userId, digest, installationId)))
-      return failure(
-        409,
-        "enrollment_token_used",
-        "This sign-in was already used to connect a device. Sign in again.",
-      );
-  } catch (error) {
-    console.error("fitness.devices.token_record_failed", {
-      name: error instanceof Error ? error.name : typeof error,
-    });
-    return issuanceFailed();
-  }
+  const attemptId = crypto.randomUUID();
 
   type Issued =
     | { ok: true; secret: string; accountTimezone: string }
     | { ok: false; response: Response };
+  const refuse = (response: Response): Issued => ({ ok: false, response });
+  const pending = (seconds: number) =>
+    refuse(
+      failure(
+        503,
+        "issuance_pending",
+        "An earlier connection is still being set up. Try again shortly.",
+        { "Retry-After": String(Math.max(1, Math.ceil(seconds))) },
+      ),
+    );
+  let recorded = false;
   let issued: Issued;
   try {
-    issued = await withAccountLock(userId, async (sql): Promise<Issued> => {
-      const timezone = await accountTimezone(sql, userId);
+    issued = await withDeviceLock(userId, async (sql): Promise<Issued> => {
+      if (await enrollmentTokenUsed(sql, digest)) return refuse(tokenUsed());
       const keys = await deviceKeys(userId);
+      // Settle earlier attempts whose key creation had no confirmed outcome.
+      // A key carrying the attempt's ID shows it was created. Without one,
+      // the attempt still counts until the settle window has passed.
+      const unsettled: { installationId: string; ageSeconds: number }[] = [];
+      for (const attempt of await pendingEnrollments(sql, userId)) {
+        if (keys.some((k) => k.enrollment === attempt.attemptId))
+          await settleEnrollment(sql, attempt.attemptId, "issued");
+        else if (attempt.ageSeconds >= deviceLimits.settleSeconds)
+          await settleEnrollment(sql, attempt.attemptId, "failed");
+        else unsettled.push(attempt);
+      }
+      const wait = Math.max(
+        0,
+        ...unsettled.map((a) => deviceLimits.settleSeconds - a.ageSeconds),
+      );
+      // A key from this installation's earlier attempt may still appear, and
+      // the replacement could not revoke it.
+      if (unsettled.some((a) => a.installationId === installationId))
+        return pending(wait);
+
       const hourAgo = Date.now() - 3600_000;
       const recent = keys
         .filter((k) => k.createdAt > hourAgo)
@@ -264,47 +301,74 @@ export async function handleDeviceEnroll(request: Request) {
         .sort((a, b) => a - b);
       if (recent.length + 1 > deviceLimits.perHour) {
         const oldest = recent[recent.length - deviceLimits.perHour] ?? hourAgo;
-        const wait = Math.max(1, Math.ceil((oldest - hourAgo) / 1000));
-        return {
-          ok: false,
-          response: failure(
+        const retry = Math.max(1, Math.ceil((oldest - hourAgo) / 1000));
+        return refuse(
+          failure(
             429,
             "rate_limited",
             "Too many devices were connected in the last hour. Try again later.",
-            { "Retry-After": String(wait) },
+            { "Retry-After": String(retry) },
           ),
-        };
+        );
       }
+      if (recent.length + unsettled.length + 1 > deviceLimits.perHour)
+        return pending(wait);
       const others = new Set(
         keys
           .filter((k) => k.active && k.installationId !== installationId)
           .map((k) => k.installationId ?? k.id),
       );
       if (others.size + 1 > deviceLimits.installations)
-        return {
-          ok: false,
-          response: failure(
+        return refuse(
+          failure(
             409,
             "device_limit",
             `Up to ${deviceLimits.installations} iPhones can sync. Revoke one under Manage account → API keys, then connect again.`,
           ),
-        };
-      // Replace this installation's keys, including any a lost reply left.
-      for (const key of keys)
-        if (key.active && key.installationId === installationId)
-          await clerkClient().apiKeys.revoke({
-            apiKeyId: key.id,
-            revocationReason: "Replaced by a new connection from this iPhone.",
-          });
+        );
+      for (const attempt of unsettled) others.add(attempt.installationId);
+      if (others.size + 1 > deviceLimits.installations) return pending(wait);
+
+      // The token is used from here on, whatever happens next.
+      if (
+        !(await recordEnrollment(sql, {
+          owner: userId,
+          digest,
+          attemptId,
+          installationId,
+        }))
+      )
+        return refuse(tokenUsed());
+      recorded = true;
+      let timezone: string;
+      try {
+        timezone = await accountTimezone(sql, userId);
+        // Replace this installation's keys, including any a lost reply or a
+        // late creation left.
+        for (const key of keys)
+          if (key.active && key.installationId === installationId)
+            await clerkClient().apiKeys.revoke({
+              apiKeyId: key.id,
+              revocationReason:
+                "Replaced by a new connection from this iPhone.",
+            });
+      } catch (error) {
+        // No key was created for this attempt.
+        await settleEnrollment(sql, attemptId, "failed").catch(() => undefined);
+        throw error;
+      }
+      // If creation fails, Clerk may still have created the key, so the
+      // attempt stays pending until a later enrollment finds out.
       const created = await clerkClient().apiKeys.create({
         name: `iPhone sync: ${deviceName}`,
         subject: userId,
         description:
           "Imports Apple Health weigh-ins and runs from the Fitness Sync app.",
         scopes: [fitnessScopes.healthImport],
-        claims: { kind: deviceKeyKind, installationId },
+        claims: { kind: deviceKeyKind, installationId, enrollment: attemptId },
         createdBy: userId,
       });
+      await settleEnrollment(sql, attemptId, "issued");
       if (!created.secret) throw new Error("Clerk returned no key secret.");
       return { ok: true, secret: created.secret, accountTimezone: timezone };
     });
@@ -312,7 +376,8 @@ export async function handleDeviceEnroll(request: Request) {
     console.error("fitness.devices.issuance_failed", {
       name: error instanceof Error ? error.name : typeof error,
     });
-    return issuanceFailed();
+    // Before the attempt is recorded, the token is unused and can retry.
+    return recorded ? issuanceFailed() : authUnavailable();
   }
   if (!issued.ok) return issued.response;
   const reply: DeviceEnrollResponse = {

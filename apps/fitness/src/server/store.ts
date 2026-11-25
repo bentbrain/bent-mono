@@ -193,20 +193,6 @@ export async function changeOnce(
   });
 }
 const storedResult = z.record(z.string(), z.json());
-/**
- * Runs work in one transaction holding the account lock, so changes for an
- * owner, including ones made through other services, happen one at a time.
- */
-export async function withAccountLock<T>(
-  owner: string,
-  work: (sql: TransactionSql) => Promise<T>,
-): Promise<T> {
-  const result = await database().begin(async (sql) => {
-    await lockAccount(sql, owner);
-    return { value: await work(sql) };
-  });
-  return result.value;
-}
 /** The account timezone, from its settings. */
 export async function accountTimezone(
   sql: Sql | TransactionSql,
@@ -219,28 +205,86 @@ export async function accountTimezone(
     : "UTC";
 }
 /**
- * Records a device enrollment token as used, in its own committed
- * transaction under the account lock. Returns false when the token was
- * already used. Records older than two days, past the token lifetime, are
- * removed.
+ * Runs device key changes for an owner one at a time, under a per-owner
+ * advisory lock held on one connection. Statements on that connection
+ * commit as they run, so an enrollment attempt is recorded before Clerk is
+ * called and stays recorded if the call fails.
  */
-export async function consumeEnrollmentToken(
+export async function withDeviceLock<T>(
   owner: string,
-  digest: string,
-  installationId: string,
+  work: (sql: Sql) => Promise<T>,
+): Promise<T> {
+  const sql = await database().reserve();
+  const key = "fitness-devices:" + owner;
+  try {
+    await sql`SELECT pg_advisory_lock(hashtextextended(${key}, 0))`;
+    try {
+      return await work(sql);
+    } finally {
+      await sql`SELECT pg_advisory_unlock(hashtextextended(${key}, 0))`;
+    }
+  } finally {
+    sql.release();
+  }
+}
+export async function enrollmentTokenUsed(sql: Sql, digest: string) {
+  const rows =
+    await sql`SELECT 1 FROM fitness_device_enrollments WHERE token_digest=${digest}`;
+  return rows.length > 0;
+}
+/**
+ * Records an enrollment attempt as pending, which also marks its token as
+ * used. Returns false when the token was already used. Records older than
+ * two days, past the token lifetime, are removed.
+ */
+export async function recordEnrollment(
+  sql: Sql,
+  attempt: {
+    owner: string;
+    digest: string;
+    attemptId: string;
+    installationId: string;
+  },
 ) {
-  return withAccountLock(owner, async (sql) => {
-    await sql`DELETE FROM fitness_device_enrollments WHERE created_at < now() - interval '2 days'`;
-    const rows =
-      await sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,installation_id) VALUES(${owner},${digest},${installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING token_digest`;
-    return rows.length === 1;
+  await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${attempt.owner}) ON CONFLICT DO NOTHING`;
+  await sql`DELETE FROM fitness_device_enrollments WHERE created_at < now() - interval '2 days'`;
+  const rows =
+    await sql`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${attempt.owner},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING token_digest`;
+  return rows.length === 1;
+}
+const pendingRow = z.object({
+  attempt_id: z.string(),
+  installation_id: z.string(),
+  age: z.coerce.number(),
+});
+/** The owner's enrollment attempts whose key Fitness has not confirmed, with their age in seconds. */
+export async function pendingEnrollments(sql: Sql, owner: string) {
+  const rows =
+    await sql`SELECT attempt_id, installation_id, extract(epoch FROM now() - created_at) AS age FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='pending'`;
+  return rows.map((row) => {
+    const r = pendingRow.parse(row);
+    return {
+      attemptId: r.attempt_id,
+      installationId: r.installation_id,
+      ageSeconds: r.age,
+    };
   });
 }
-/** Whether the device enrollment table exists in the database. */
-export async function enrollmentTableExists() {
+export async function settleEnrollment(
+  sql: Sql,
+  attemptId: string,
+  state: "issued" | "failed",
+) {
+  await sql`UPDATE fitness_device_enrollments SET key_state=${state} WHERE attempt_id=${attemptId} AND key_state='pending'`;
+}
+/**
+ * Whether the device enrollment table, with its attempt columns, is in the
+ * connection's schema.
+ */
+export async function enrollmentTableExists(sql: Sql = database()) {
   const [row] =
-    await database()`SELECT to_regclass('fitness_device_enrollments') IS NOT NULL AS present`;
-  return row?.present === true;
+    await sql`SELECT count(*)::int AS columns FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='fitness_device_enrollments' AND column_name IN ('attempt_id','key_state')`;
+  return row?.columns === 2;
 }
 async function lockAccount(sql: TransactionSql, owner: string) {
   await sql`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;

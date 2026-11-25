@@ -84,8 +84,22 @@ function createFake() {
     /** Makes authenticateRequest itself throw. */
     throws: false,
     usersDown: false,
-    /** Key creation: fails, or saves the key and then fails. */
-    create: "ok" as "ok" | "fail" | "lost",
+    /**
+     * Key creation: fails; saves the key and then fails; or fails while
+     * Clerk is still creating it, so the key appears on `appear()`.
+     */
+    create: "ok" as "ok" | "fail" | "lost" | "late",
+    /** Keys Clerk is still creating. */
+    inflight: [] as FakeKey[],
+    /** Runs after each key list call. */
+    afterList: null as (() => void) | null,
+    /** Verifies bearers with this client instead, such as the real SDK. */
+    backend: null as {
+      authenticateRequest(
+        request: Request,
+        options: Record<string, unknown>,
+      ): Promise<unknown>;
+    } | null,
     /** Key IDs whose revocation fails. */
     revokeFails: new Set<string>(),
     pageSize: 100,
@@ -106,6 +120,14 @@ function createFake() {
       fake.listCalls = 0;
       fake.sequence = 0;
       fake.clock = () => Date.now();
+      fake.inflight = [];
+      fake.afterList = null;
+      fake.backend = null;
+    },
+    /** Finishes the keys Clerk was still creating. */
+    appear() {
+      fake.keys.push(...fake.inflight);
+      fake.inflight = [];
     },
     /** Adds a key directly, as one created earlier. */
     addKey(key: Partial<FakeKey> & { secret: string }) {
@@ -153,10 +175,13 @@ function createFake() {
         claims: key.claims,
       });
     }
+    // Opaque OAuth tokens: the Backend API answers 404 for unknown and
+    // expired ones, and the SDK checks the audience of the token it returns.
     const oauth = fake.oauth.get(token);
-    if (!oauth) return signedOut("token-invalid", "oauth_token");
+    if (!oauth || oauth.expired)
+      return signedOut("token-invalid", "oauth_token");
     const aud = oauth.aud === undefined ? [] : [oauth.aud].flat();
-    if (oauth.expired || !aud.includes(String(audience)))
+    if (!aud.includes(String(audience)))
       return signedOut("token-verification-failed", "oauth_token");
     return signedIn({
       tokenType: "oauth_token",
@@ -174,6 +199,8 @@ function createFake() {
       options: Record<string, unknown>,
     ) {
       fake.requests.push({ request, options });
+      if (fake.backend)
+        return fake.backend.authenticateRequest(request, options);
       if (fake.throws) throw new Error("Network unreachable");
       const header = request.headers.get("authorization") ?? "";
       const token = header.replace(/^Bearer\s+/i, "");
@@ -215,6 +242,7 @@ function createFake() {
           .sort((a, b) => b.createdAt - a.createdAt);
         const limit = Math.min(params.limit ?? 10, fake.pageSize);
         const offset = params.offset ?? 0;
+        fake.afterList?.();
         return {
           data: all.slice(offset, offset + limit).map((k) => ({ ...k })),
           totalCount: all.length,
@@ -235,6 +263,11 @@ function createFake() {
           claims: params.claims ?? null,
         });
         if (fake.create === "lost") throw new Error("Request timed out");
+        if (fake.create === "late") {
+          fake.keys.splice(fake.keys.indexOf(key), 1);
+          fake.inflight.push(key);
+          throw new Error("Request timed out");
+        }
         return { ...key };
       },
       async revoke(params: { apiKeyId: string }) {
