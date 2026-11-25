@@ -55,10 +55,20 @@ public final class FitnessHealthModule: Module {
       return await self.service.status()
     }
 
-    AsyncFunction("sendRunsWithoutDistance") { () async throws -> [String: Any] in
-      try await self.service.lifecycle.sendRunsWithoutDistance()
+    // Sends the runs the status screen showed, for the enrollment it showed.
+    // If either changed, nothing is approved and the fresh status says so.
+    AsyncFunction("sendRunsWithoutDistance") { (runs: [String], enrollmentId: String) async throws -> [String: Any] in
+      do {
+        try await self.service.lifecycle.sendRunsWithoutDistance(runs: runs, enrollmentId: enrollmentId)
+      } catch LifecycleError.waitingRunsChanged, LifecycleError.enrollmentChanged {
+        var status = await self.service.status()
+        status["approval"] = "changed"
+        return status
+      }
       await self.service.syncNow()
-      return await self.service.status()
+      var status = await self.service.status()
+      status["approval"] = "approved"
+      return status
     }
 
     AsyncFunction("requestHealthAccess") { () async throws in

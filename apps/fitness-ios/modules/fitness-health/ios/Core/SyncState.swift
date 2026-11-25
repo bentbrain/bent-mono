@@ -104,6 +104,13 @@ public struct SyncState: Codable, Sendable, Equatable {
   /// that wait later need their own choice.
   public var approvedWithoutDistance: Set<String> = []
 
+  /// The runs waiting for distance access that the user has not chosen to
+  /// send yet, by sample UUID, sorted. The status screen shows these, and
+  /// its choice names exactly them.
+  public var runsAwaitingDistanceAccess: [String] {
+    deferred.filter { $0.value.reason == .distanceAccess && !approvedWithoutDistance.contains($0.key) }.keys.sorted()
+  }
+
   public init(cutoff: Date, accountTimezone: String) {
     self.cutoff = cutoff
     earliestCutoff = cutoff

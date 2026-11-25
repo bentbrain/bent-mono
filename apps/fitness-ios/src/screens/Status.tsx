@@ -11,6 +11,9 @@ import { Body, Button, Choice, Heading, Notice, Page, Row } from "../ui/parts";
 export function Status({ status, onChange }: { status: SyncStatus; onChange: () => void }) {
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [waitingChanged, setWaitingChanged] = useState(false);
+  // The runs the button names; the choice covers exactly these.
+  const waitingRuns = status.distanceWaitingRuns ?? [];
 
   async function syncNow() {
     setSyncing(true);
@@ -25,7 +28,8 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
   async function sendWithoutDistance() {
     setSyncing(true);
     try {
-      await FitnessHealth.sendRunsWithoutDistance();
+      const next = await FitnessHealth.sendRunsWithoutDistance(waitingRuns, status.enrollmentId ?? "");
+      setWaitingChanged(next.approval === "changed");
     } finally {
       setSyncing(false);
       onChange();
@@ -90,13 +94,12 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
           {copy.status.waiting(status.deferred)}
         </Body>
       ) : null}
-      {status.runsAwaitingDistanceAccess ? (
+      {waitingRuns.length ? (
         <>
-          <Notice testID="status-distance-access">
-            {copy.status.distanceAccess(status.runsAwaitingDistanceAccess)}
-          </Notice>
+          <Notice testID="status-distance-access">{copy.status.distanceAccess(waitingRuns.length)}</Notice>
+          {waitingChanged ? <Notice testID="status-waiting-changed">{copy.status.waitingChanged}</Notice> : null}
           <Button
-            label={copy.status.sendWithoutDistance(status.runsAwaitingDistanceAccess)}
+            label={copy.status.sendWithoutDistance(waitingRuns.length)}
             appearance="outline"
             onPress={sendWithoutDistance}
             disabled={syncing}

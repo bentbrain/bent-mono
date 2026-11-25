@@ -32,8 +32,9 @@ final class FollowupRegressionTests: XCTestCase {
 
   /// The reviewer's reproduction: the checkpoint write itself is in
   /// progress when the cutoff is changed. The cutoff change waits for the
-  /// write, then rebuilds from the new cutoff, so the writes complete in
-  /// that order.
+  /// write, then rebuilds from the new cutoff. The run may write another
+  /// checkpoint before the change reaches the lifecycle, but none after it:
+  /// no write with the old cutoff follows the first with the new one.
   func testACutoffChangeWaitsForACheckpointWriteInProgress() async throws {
     let old = date("2026-11-10T00:00:00Z")
     let new = date("2026-11-15T00:00:00Z")
@@ -56,7 +57,11 @@ final class FollowupRegressionTests: XCTestCase {
     directory.release.signal()
     _ = try? await run.value
     try await narrowing.value
-    XCTAssertEqual(directory.writes.get, [old, new])
+    let writes = directory.writes.get
+    XCTAssertEqual(writes.first, old, "The held checkpoint")
+    XCTAssertEqual(writes.last, new, "\(writes)")
+    let firstNew = try XCTUnwrap(writes.firstIndex(of: new))
+    XCTAssertFalse(writes[firstNew...].contains(old), "An old-cutoff write followed the new cutoff: \(writes)")
     XCTAssertEqual(try store.load()?.cutoff, new)
     try await assertExcludedSampleStaysUnsent(h, device: device, store: store)
   }
@@ -202,27 +207,83 @@ final class FollowupRegressionTests: XCTestCase {
     XCTAssertEqual((workouts?.first?["distance"] as? [String: Any])?["qty"] as? Double, 4.2)
   }
 
-  /// The user's choice sends the runs waiting now. A run that starts waiting
-  /// later needs its own choice.
-  func testSendingWithoutDistanceCoversOnlyTheRunsWaitingNow() async throws {
+  /// The user's choice sends the runs the status screen showed. A run that
+  /// starts waiting later needs its own choice.
+  func testSendingWithoutDistanceCoversOnlyTheRunsShown() async throws {
     let now = date("2026-11-20T02:00:00Z")
-    let states = MemoryStates()
-    let (device, store) = try await activeLifecycle(cutoff: date("2026-11-10T00:00:00Z"), states: states)
+    let (device, store) = try await activeLifecycle(cutoff: date("2026-11-10T00:00:00Z"), states: MemoryStates())
     let h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
     h.health.distanceStart(.unavailable)
     let first = Sample.run(1, date("2026-11-12T02:00:00Z"), km: RunDistance.none)
     h.health.add(first)
-    try await engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device))
-      .run(mode: .foreground)
+    try await sync(h, device, store, .foreground)
     XCTAssertTrue(h.fitness.sentRefs.isEmpty)
-    let approved = try await device.sendRunsWithoutDistance()
+    let shown = try await screen(device, store)
+    XCTAssertEqual(shown.runs, [first.id.uuidString.lowercased()])
+    let approved = try await device.sendRunsWithoutDistance(runs: shown.runs, enrollmentId: shown.enrollmentId)
     XCTAssertEqual(approved, 1)
+    // Approved runs leave the list the screen offers.
+    let afterChoice = try await screen(device, store)
+    XCTAssertEqual(afterChoice.runs, [])
     let later = Sample.run(2, date("2026-11-14T02:00:00Z"), km: RunDistance.none)
     h.health.add(later)
-    try await engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device))
-      .run(mode: .foreground)
+    try await sync(h, device, store, .foreground)
     XCTAssertEqual(h.fitness.sentRefs, [first.ref])
     XCTAssertEqual(try store.load()?.deferred[later.id.uuidString.lowercased()]?.reason, .distanceAccess)
+    XCTAssertEqual(try store.load()?.approvedWithoutDistance, [])
+  }
+
+  /// The reviewer's reproduction: the screen shows one run, a background
+  /// sync adds a second before the tap, and the tap names the one run shown.
+  /// The choice is refused, nothing is sent, and the refreshed screen shows
+  /// both runs for a new choice.
+  func testAStaleOneRunChoiceSendsNothingAfterASecondRunWaits() async throws {
+    let now = date("2026-11-20T02:00:00Z")
+    let (device, store) = try await activeLifecycle(cutoff: date("2026-11-10T00:00:00Z"), states: MemoryStates())
+    let h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
+    h.health.distanceStart(.unavailable)
+    let first = Sample.run(1, date("2026-11-12T02:00:00Z"), km: RunDistance.none)
+    let next = Sample.run(2, date("2026-11-14T02:00:00Z"), km: RunDistance.none)
+    h.health.add(first)
+    try await sync(h, device, store, .foreground)
+    let shown = try await screen(device, store)
+    XCTAssertEqual(shown.runs.count, 1)
+    h.health.add(next)
+    try await sync(h, device, store, .background)
+    do {
+      try await device.sendRunsWithoutDistance(runs: shown.runs, enrollmentId: shown.enrollmentId)
+      XCTFail("A choice for a list that changed was accepted")
+    } catch LifecycleError.waitingRunsChanged {}
+    try await sync(h, device, store, .foreground)
+    XCTAssertTrue(h.fitness.sentRefs.isEmpty)
+    let refreshed = try await screen(device, store)
+    XCTAssertEqual(refreshed.runs.count, 2)
+    // A new tap on the refreshed screen sends both.
+    try await device.sendRunsWithoutDistance(runs: refreshed.runs, enrollmentId: refreshed.enrollmentId)
+    try await sync(h, device, store, .foreground)
+    XCTAssertEqual(Set(h.fitness.sentRefs), [first.ref, next.ref])
+  }
+
+  /// A choice shown for another enrollment approves nothing.
+  func testAChoiceForAnotherEnrollmentApprovesNothing() async throws {
+    let now = date("2026-11-20T02:00:00Z")
+    let (device, store) = try await activeLifecycle(cutoff: date("2026-11-10T00:00:00Z"), states: MemoryStates())
+    let h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
+    h.health.distanceStart(.unavailable)
+    h.health.add(Sample.run(1, date("2026-11-12T02:00:00Z"), km: RunDistance.none))
+    try await sync(h, device, store, .foreground)
+    let shown = try await screen(device, store)
+    do {
+      try await device.sendRunsWithoutDistance(runs: shown.runs, enrollmentId: "another-enrollment")
+      XCTFail("A choice for another enrollment was accepted")
+    } catch LifecycleError.enrollmentChanged {}
+    // An empty list is never a choice.
+    do {
+      try await device.sendRunsWithoutDistance(runs: [], enrollmentId: shown.enrollmentId)
+      XCTFail("An empty choice was accepted")
+    } catch LifecycleError.waitingRunsChanged {}
+    try await sync(h, device, store, .foreground)
+    XCTAssertTrue(h.fitness.sentRefs.isEmpty)
     XCTAssertEqual(try store.load()?.approvedWithoutDistance, [])
   }
 
@@ -245,6 +306,18 @@ final class FollowupRegressionTests: XCTestCase {
   }
 
   // MARK: Helpers
+
+  /// What the status screen shows: the waiting runs and the enrollment.
+  private func screen(_ device: DeviceLifecycle, _ store: StateStorage) async throws -> (
+    runs: [String], enrollmentId: String
+  ) {
+    let enrollment = try await device.document().active?.enrollmentId
+    return (try XCTUnwrap(store.load()).runsAwaitingDistanceAccess, try XCTUnwrap(enrollment))
+  }
+
+  private func sync(_ h: Harness, _ device: DeviceLifecycle, _ store: StateStorage, _ mode: RunMode) async throws {
+    try await engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device)).run(mode: mode)
+  }
 
   /// A lifecycle with a confirmed key whose first sync has started.
   private func activeLifecycle(cutoff: Date, states: StateDirectory) async throws -> (DeviceLifecycle, StateStorage) {

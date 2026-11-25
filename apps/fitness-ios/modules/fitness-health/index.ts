@@ -26,12 +26,16 @@ export type SyncStatus = {
   /** Whether the first sync has recorded its starting point. */
   backfillStarted?: boolean;
   backfillThrough?: string | null;
-  /** The pending enrollment the consent screen shows; consent and decline name it. */
+  /** The current enrollment. Consent, decline and the status screen's choices name the one they showed. */
   enrollmentId?: string;
   /** Consent is confirmed and the Health step has not started the first sync. */
   awaitingHealthStep?: boolean;
   /** Runs waiting because the app cannot tell whether it may read distance. */
   runsAwaitingDistanceAccess?: number;
+  /** The runs the status screen offers to send without a distance, by sample UUID. */
+  distanceWaitingRuns?: string[];
+  /** After `sendRunsWithoutDistance`: whether the runs shown were approved, or had changed. */
+  approval?: "approved" | "changed";
   /** Keys Fitness would not revoke from the iPhone; revoke them in Fitness. */
   manualRevocations?: number;
 };
@@ -64,7 +68,8 @@ type FitnessHealthNative = {
   confirmConsent(cutoffMs: number, enrollmentId: string): Promise<void>;
   declineConsent(enrollmentId: string): Promise<number>;
   startFirstSync(): Promise<SyncStatus>;
-  sendRunsWithoutDistance(): Promise<SyncStatus>;
+  /** Sends exactly the runs the status screen showed, for the enrollment it showed. */
+  sendRunsWithoutDistance(runs: string[], enrollmentId: string): Promise<SyncStatus>;
   requestHealthAccess(): Promise<void>;
   readableHistory(): Promise<ReadableHistory>;
   syncNow(): Promise<SyncStatus>;

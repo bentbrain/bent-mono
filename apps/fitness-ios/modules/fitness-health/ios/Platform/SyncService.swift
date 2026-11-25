@@ -254,7 +254,8 @@ final class SyncService: @unchecked Sendable {
     status["state"] = active.state.rawValue
     status["email"] = active.email
     status["accountTimezone"] = active.accountTimezone
-    if active.state == .consentPending { status["enrollmentId"] = active.enrollmentId }
+    // Consent and the status screen's choices name the enrollment shown.
+    status["enrollmentId"] = active.enrollmentId
     guard active.state == .active, let state = try? await lifecycle.storage()?.load() else { return status }
     var totals: [String: Int] = [:]
     for run in state.history {
@@ -268,7 +269,11 @@ final class SyncService: @unchecked Sendable {
     status["counts"] = totals
     status["runsWithoutDistance"] = state.runsWithoutDistance
     status["deferred"] = state.deferred.count
-    status["runsAwaitingDistanceAccess"] = state.deferred.values.filter { $0.reason == .distanceAccess }.count
+    // The runs the status screen offers to send without a distance; its
+    // choice names exactly these.
+    let waiting = state.runsAwaitingDistanceAccess
+    status["runsAwaitingDistanceAccess"] = waiting.count
+    status["distanceWaitingRuns"] = waiting
     status["unreadableRetired"] = state.unreadableRetired
     status["paused"] = Dictionary(uniqueKeysWithValues: state.paused.map { ($0.key.rawValue, $0.value) })
     status["awaitingHealthStep"] = state.awaitingHealthStep

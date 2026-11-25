@@ -128,8 +128,12 @@ public struct EnrollmentAttempt: Sendable, Equatable {
 }
 
 public enum LifecycleError: Error, Equatable {
-  /// Consent or decline named an enrollment that is no longer pending.
+  /// Consent, decline or a choice on the status screen named an enrollment
+  /// that is no longer the current one.
   case enrollmentChanged
+  /// The runs waiting for distance access are no longer the ones the status
+  /// screen showed; it shows the new list for another choice.
+  case waitingRunsChanged
 }
 
 /// Connects, confirms, disconnects and revokes.
@@ -399,16 +403,23 @@ public actor DeviceLifecycle {
     generation += 1
   }
 
-  /// Lets the runs waiting for distance access now be sent without a
-  /// distance. Runs that start waiting later are not included. Returns how
-  /// many runs were approved.
+  /// Lets the runs the status screen showed be sent without a distance.
+  /// `runs` and `enrollmentId` are what the screen showed; the choice is
+  /// refused unless that enrollment is still the active one and exactly
+  /// those runs are still waiting, so it never covers a run the user did
+  /// not see. Returns how many runs were approved.
   @discardableResult
-  public func sendRunsWithoutDistance() throws -> Int {
-    guard let storage = storage(), var state = try storage.load() else { return 0 }
-    let waiting = state.deferred.filter { $0.value.reason == .distanceAccess }.keys
-    state.approvedWithoutDistance.formUnion(waiting)
+  public func sendRunsWithoutDistance(runs: [String], enrollmentId: String) throws -> Int {
+    guard let active = try credentials.load().active, active.state == .active, active.enrollmentId == enrollmentId
+    else { throw LifecycleError.enrollmentChanged }
+    guard let storage = storage(), var state = try storage.load() else { throw LifecycleError.waitingRunsChanged }
+    let shown = Set(runs.map { $0.lowercased() })
+    guard !shown.isEmpty, Set(state.runsAwaitingDistanceAccess) == shown else {
+      throw LifecycleError.waitingRunsChanged
+    }
+    state.approvedWithoutDistance.formUnion(shown)
     try storage.save(state)
     generation += 1
-    return waiting.count
+    return shown.count
   }
 }

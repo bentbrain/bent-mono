@@ -58,6 +58,7 @@ export const copy = {
     unreadable: (count: number) => `${count} ${count === 1 ? "item" : "items"} could not be read and stopped waiting.`,
     distanceAccess: (count: number) =>
       `${count} ${count === 1 ? "run is" : "runs are"} waiting for distance access. Health shows no distance for ${count === 1 ? "this run" : "these runs"}, and Fitness Sync can't tell whether none was recorded or distance isn't shared for ${count === 1 ? "its date" : "their dates"}. To share it, allow Walking + Running Distance with all history in Settings → Health → Data Access & Devices → Fitness Sync. If no distance was recorded, send ${count === 1 ? "the run" : "them"} without one, and Fitness records 0 km.`,
+    waitingChanged: "The waiting runs changed, so nothing was sent. Check the count and tap again.",
     sendWithoutDistance: (count: number) => `Send ${count} ${count === 1 ? "run" : "runs"} without distance`,
     manualRevocations: (count: number) =>
       `${count} earlier ${count === 1 ? "key" : "keys"} could not be revoked from this iPhone. Revoke ${count === 1 ? "it" : "them"} under Manage account → API keys in Fitness.`,
