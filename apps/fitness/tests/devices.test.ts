@@ -188,6 +188,19 @@ describe("Health import authentication", () => {
     });
   });
 
+  test("needs Clerk's own not-found answer to call a key invalid", async () => {
+    fake.addKey({ secret: "ak_revoked", revoked: true });
+    fake.verifyGateway = true;
+    const response = await post("ak_revoked");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
+    const disconnect = await devices.handleDeviceRevoke(
+      bearer("ak_revoked", { method: "DELETE" }, "/api/health/devices/current"),
+    );
+    expect(disconnect.status).toBe(503);
+    expect(await disconnect.json()).toMatchObject({ code: "auth_unavailable" });
+  });
+
   test("keeps the legacy 401 for a missing or mismatched bearer", async () => {
     for (const token of [null, "oat_session"]) {
       const response = await post(token);

@@ -87,10 +87,30 @@ async function accessToken(
 const served = await signingKey("synthetic-served");
 const unserved = await signingKey("synthetic-unserved");
 let jwksUp = true;
+/** How the Backend API answers API key verification: Clerk's own 404, or a gateway's. */
+let keyVerify: "clerk" | "gateway" = "clerk";
 const realFetch = globalThis.fetch;
 const jwksRequests: string[] = [];
 globalThis.fetch = (async (input: Request | string | URL) => {
   const url = input instanceof Request ? input.url : String(input);
+  if (url.endsWith("/api_keys/verify"))
+    return keyVerify === "clerk"
+      ? new Response(
+          JSON.stringify({
+            errors: [
+              {
+                code: "resource_not_found",
+                message: "not found",
+                long_message: "API key not found",
+              },
+            ],
+          }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        )
+      : new Response("Not Found", {
+          status: 404,
+          headers: { "content-type": "text/plain" },
+        });
   if (!url.endsWith("/v1/jwks"))
     throw new Error(`Unexpected request to ${url}`);
   jwksRequests.push(url);
@@ -112,6 +132,7 @@ beforeEach(() => {
     publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY,
   });
   jwksUp = true;
+  keyVerify = "clerk";
 });
 
 // Readiness and the shared attempt count pass without a database;
@@ -210,4 +231,39 @@ test("bounds signing-key fetches for unknown key IDs with the enrollment budget"
   expect(statuses.filter((s) => s === 429)).toHaveLength(15);
   expect(jwksRequests.length).toBeLessThanOrEqual(5);
   expect(jwksRequests.length).toBeGreaterThan(0);
+});
+
+test("calls an API key invalid only on Clerk's own not-found answer", async () => {
+  const { handleHealthImport } = await import("../src/server/health");
+  const importWith = () =>
+    handleHealthImport(
+      bearer(
+        "ak_synthetic_unknown",
+        { method: "POST", body: "{}" },
+        "/api/health/import",
+      ),
+    );
+  const disconnect = () =>
+    devices.handleDeviceRevoke(
+      bearer(
+        "ak_synthetic_unknown",
+        { method: "DELETE" },
+        "/api/health/devices/current",
+      ),
+    );
+  expect(
+    await auth.verifyBearer(bearer("ak_synthetic_unknown"), ["api_key"]),
+  ).toEqual({ ok: false, failure: "invalid" });
+  for (const response of [await importWith(), await disconnect()]) {
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ code: "key_invalid" });
+  }
+  keyVerify = "gateway";
+  expect(
+    await auth.verifyBearer(bearer("ak_synthetic_unknown"), ["api_key"]),
+  ).toEqual({ ok: false, failure: "unavailable" });
+  for (const response of [await importWith(), await disconnect()]) {
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
+  }
 });

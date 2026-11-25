@@ -16,7 +16,6 @@
  */
 import { createHash } from "node:crypto";
 import { clerkClient } from "@clerk/tanstack-react-start/server";
-import { isClerkAPIResponseError } from "@clerk/shared/error";
 import {
   DeviceEnrollRequest,
   deviceKeyKind,
@@ -26,7 +25,12 @@ import type {
   ApiErrorCode,
   DeviceEnrollResponse,
 } from "@bent/fitness-contracts";
-import { deviceKeyClaims, invitedEmail, verifyBearer } from "./auth";
+import {
+  clerkNotFound,
+  deviceKeyClaims,
+  invitedEmail,
+  verifyBearer,
+} from "./auth";
 import {
   clerkKeysValid,
   configurationReady,
@@ -313,16 +317,6 @@ async function deviceKeys(owner: string, deadline: number) {
 class KeyCheckInconclusive extends Error {}
 
 /**
- * The Backend API's error code for a resource that does not exist. The
- * pinned @clerk/backend 3.29 parses it from the JSON error body into
- * `errors[].code`; @clerk/shared 4.45.1 names `resource_not_found` as the
- * code Clerk returns for a missing resource. A 404 from a gateway carries
- * no Clerk error body, so it parses to no errors. The dev-instance spike
- * must confirm this code for a deleted API key.
- */
-const notFoundCode = "resource_not_found";
-
-/**
  * Whether Clerk confirms this key can no longer be used: it is revoked or
  * expired, or Clerk reports it does not exist. Any other answer, including
  * a 404 without Clerk's not-found error, is inconclusive and throws
@@ -333,12 +327,7 @@ async function keyGone(keyId: string, deadline: number) {
     const key = await bounded(() => clerkClient().apiKeys.get(keyId), deadline);
     return key.revoked || key.expired;
   } catch (error) {
-    if (
-      isClerkAPIResponseError(error) &&
-      error.status === 404 &&
-      error.errors.some((e) => e.code === notFoundCode)
-    )
-      return true;
+    if (clerkNotFound(error)) return true;
     throw new KeyCheckInconclusive();
   }
 }

@@ -1,4 +1,5 @@
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
+import { isClerkAPIResponseError } from "@clerk/shared/error";
 import { deviceKeyKind, fitnessScopes } from "@bent/fitness-contracts";
 import type { ApiErrorCode } from "@bent/fitness-contracts";
 import { allowedEmails, configurationReady, mcpResource } from "./config";
@@ -109,6 +110,12 @@ export type BearerCheck =
  * `invalid`. Anything else under that reason is `unavailable`, since
  * retrying can succeed. For an opaque OAuth token, the SDK reports that
  * reason only when the token's audience does not match, which is `invalid`.
+ *
+ * The SDK reports any Backend API 404 from API key verification as
+ * `token-invalid`, including a gateway's. For an API key, Fitness asks
+ * Clerk once more with `apiKeys.verify`, and only Clerk's own
+ * `resource_not_found` answer makes the key `invalid`; anything else is
+ * `unavailable`.
  *
  * Only `invalid` is definitive for a device key: the app discards its key
  * only on `key_invalid`, so a reason whose cause can be on Clerk's side never
@@ -230,7 +237,65 @@ export async function verifyBearer(
         : "unavailable",
     };
   }
-  return { ok: false, failure: clerkReasonFailure[reason] ?? "unavailable" };
+  const failure = clerkReasonFailure[reason] ?? "unavailable";
+  // For an API key, token-invalid covers any 404 from the Backend API, a
+  // gateway's included, so one direct check decides whether Clerk says so.
+  if (
+    failure === "invalid" &&
+    accepts.length === 1 &&
+    accepts[0] === "api_key"
+  ) {
+    const token = bearer.headers.get("authorization")?.split(/\s+/)[1] ?? "";
+    return {
+      ok: false,
+      failure: (await clerkConfirmsKeyInvalid(token, options.timeoutMs))
+        ? "invalid"
+        : "unavailable",
+    };
+  }
+  return { ok: false, failure };
+}
+
+/**
+ * The Backend API's error code for a resource that does not exist. The
+ * pinned @clerk/backend 3.29 parses it from the JSON error body into
+ * `errors[].code`; @clerk/shared 4.45.1 names `resource_not_found` as the
+ * code Clerk returns for a missing resource. A 404 from a gateway carries
+ * no Clerk error body, so it parses to no errors. The dev-instance spike
+ * must confirm this code for a deleted API key and for an unknown, revoked
+ * or expired one at `api_keys/verify`.
+ */
+const clerkNotFoundCode = "resource_not_found";
+
+/** Whether the error is Clerk's own 404 with its not-found code. */
+export function clerkNotFound(error: unknown) {
+  return (
+    isClerkAPIResponseError(error) &&
+    error.status === 404 &&
+    error.errors.some((e) => e.code === clerkNotFoundCode)
+  );
+}
+
+/**
+ * Asks Clerk directly, with `apiKeys.verify`, whether an API key is
+ * invalid: only Clerk's own not-found answer confirms it. A key Clerk now
+ * accepts, any other error, or no answer in time does not.
+ */
+async function clerkConfirmsKeyInvalid(secret: string, timeoutMs = 10_000) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      clerkClient().apiKeys.verify(secret),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Timed out")), timeoutMs);
+      }),
+    ]);
+    return false;
+  } catch (error) {
+    return clerkNotFound(error);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

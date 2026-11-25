@@ -111,6 +111,7 @@ function createFake() {
         request: Request,
         options: Record<string, unknown>,
       ): Promise<unknown>;
+      apiKeys?: { verify(secret: string): Promise<unknown> };
     } | null,
     /** Key IDs whose revocation fails. */
     revokeFails: new Set<string>(),
@@ -118,6 +119,8 @@ function createFake() {
     getFails: new Set<string>(),
     /** Key IDs whose lookup gets a gateway 404 without Clerk's error. */
     gatewayMissing: new Set<string>(),
+    /** Key verification gets a gateway 404 without Clerk's error. */
+    verifyGateway: false,
     /** Holds each key list call until it settles. */
     listStall: null as Promise<void> | null,
     pageSize: 100,
@@ -136,6 +139,7 @@ function createFake() {
       fake.getFails.clear();
       fake.gatewayMissing.clear();
       fake.listStall = null;
+      fake.verifyGateway = false;
       fake.pageSize = 100;
       fake.requests = [];
       fake.listCalls = 0;
@@ -294,6 +298,14 @@ function createFake() {
           fake.inflight.push(key);
           throw new Error("Request timed out");
         }
+        return { ...key };
+      },
+      async verify(secret: string) {
+        if (fake.backend?.apiKeys) return fake.backend.apiKeys.verify(secret);
+        if (fake.verifyGateway) throw apiError(404);
+        const key = fake.keys.find((k) => k.secret === secret);
+        if (!key || key.revoked || key.expired)
+          throw apiError(404, "resource_not_found");
         return { ...key };
       },
       async get(apiKeyId: string) {
