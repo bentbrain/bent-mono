@@ -8,7 +8,7 @@ Open [maya-collage.bent.build](https://maya-collage.bent.build) to browse the pu
 
 - Public feed ordered newest first with infinite scroll, showing each collage with its maker and creation date, plus per-maker profile pages.
 - Square canvas editor (`/create`) powered by Fabric.js with sticker categories, solid/gradient/image backgrounds, layer ordering, undo history and PNG downloads.
-- Makers can keep collages private, publish them to the feed, edit or delete their work, and choose whether NSFW collages are shown.
+- Makers can publish collages to the public feed or keep them off the public feed, edit or delete their work, and choose whether NSFW collages are shown. Saving uploads the rendered JPEG to public object storage; the visibility setting hides the collage from the public feed, while anyone with the direct image URL can still view the uploaded file.
 - Built with Next.js, Clerk authentication, tRPC, Payload CMS (managing stickers, categories and backgrounds), Drizzle/Postgres, Convex and Cloudflare R2 / UploadThing media storage.
 
 ## Development
