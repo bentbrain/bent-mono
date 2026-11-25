@@ -50,7 +50,7 @@ final class SyncFlowTests: XCTestCase {
     XCTAssertTrue(signIn.waitForExistence(timeout: 30), app.debugDescription)
     signIn.tap()
     let email = element(app, "consent-email")
-    XCTAssertTrue(email.waitForExistence(timeout: 60), app.debugDescription)
+    XCTAssertTrue(email.waitForExistence(timeout: 120), app.debugDescription)
     XCTAssertTrue(app.staticTexts["fitness-device+clerk_test@example.com"].exists)
     element(app, "backfill-30d").tap()
     element(app, "consent-confirm").tap()

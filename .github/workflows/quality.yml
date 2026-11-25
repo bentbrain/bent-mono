@@ -341,7 +341,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: fitness-ios-flows
-          path: ${{ runner.temp }}/fitness-ios/flows-*.xcresult
+          path: |
+            ${{ runner.temp }}/fitness-ios/flows-*.xcresult
+            ${{ runner.temp }}/fitness-ios/flows-*-app.log
           if-no-files-found: ignore
           retention-days: 7
       - name: Stop Postgres
@@ -384,7 +386,6 @@ jobs:
           node scripts/native.mjs prebuild
           node scripts/native.mjs build
           node scripts/native.mjs seeder
-          node scripts/native.mjs artifact
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
         env:

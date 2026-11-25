@@ -119,6 +119,13 @@ final class SyncService: @unchecked Sendable {
     try? await health.disableAllBackgroundDelivery()
   }
 
+  /// Logs an enrollment's outcome by kind and code only.
+  func logEnrollment(_ outcome: [String: Any]) {
+    let kind = outcome["kind"] as? String ?? "unknown"
+    let detail = (outcome["code"] as? String) ?? (outcome["action"] as? String) ?? ""
+    log.info("enroll_outcome kind=\(kind, privacy: .public) code=\(detail, privacy: .public)")
+  }
+
   // MARK: Results
 
   private func finished(_ result: RunResult) async {

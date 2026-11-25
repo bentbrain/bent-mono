@@ -9,7 +9,7 @@
 // starts unanswered. The Simulator, the harness and its schema are removed
 // at the end.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,6 +120,25 @@ try {
     } catch (error) {
       failed = true;
       console.error(error.message);
+      // Keep the app's own log for the failed flow; it records codes only.
+      const log = spawnSync(
+        "xcrun",
+        [
+          "simctl",
+          "spawn",
+          udid,
+          "log",
+          "show",
+          "--last",
+          "10m",
+          "--style",
+          "compact",
+          "--predicate",
+          'process BEGINSWITH "FitnessSync"',
+        ],
+        { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+      );
+      writeFileSync(join(buildDir, `flows-${flow}-app.log`), log.stdout ?? "");
     } finally {
       removeSimulator(udid);
     }

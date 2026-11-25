@@ -30,7 +30,9 @@ public final class FitnessHealthModule: Module {
 
     AsyncFunction("enroll") { (token: String, revokeLater: Bool) async throws -> [String: Any] in
       let outcome = try await self.service.lifecycle.enroll(token: token, revokeLater: revokeLater)
-      return EnrollOutcomeJSON.encode(outcome)
+      let encoded = EnrollOutcomeJSON.encode(outcome)
+      self.service.logEnrollment(encoded)
+      return encoded
     }
 
     AsyncFunction("confirmConsent") { (cutoffMs: Double) async throws in
