@@ -109,12 +109,27 @@ export function Choice({
   );
 }
 
-export function Row({ label, value, testID }: { label: string; value: string; testID?: string }) {
+export function Row({
+  label,
+  value,
+  testID,
+  exact,
+}: {
+  label: string;
+  value: string;
+  testID?: string;
+  /** A precise value for assistive technology and tests, such as a timestamp. */
+  exact?: string;
+}) {
   const theme = useTheme();
   return (
     <View style={[styles.row, { borderColor: theme.border }]}>
       <Text style={[styles.body, { color: theme.muted }]}>{label}</Text>
-      <Text testID={testID} style={[styles.body, { color: theme.foreground }]}>
+      <Text
+        testID={testID}
+        accessibilityValue={exact === undefined ? undefined : { text: exact }}
+        style={[styles.body, { color: theme.foreground }]}
+      >
         {value}
       </Text>
     </View>

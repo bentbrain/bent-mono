@@ -30,12 +30,14 @@ export function SignIn({
         authorize: () => authorize(settings),
         enroll: (token, later) => FitnessHealth.enroll(token, later),
         sleep,
+        now: () => Date.now(),
       },
       revokeLater,
     );
     setBusy(false);
     if (result.kind === "cancelled") return;
     if (result.kind === "signInFailed") return setMessage(result.message);
+    if (result.kind === "tokenExpires") return setMessage(copy.signIn.tryLater(result.retryAfter));
     if (result.kind === "consentPending") return onChange();
     setPending(result.kind === "pendingRevocations");
     setMessage(enrollMessage(result));

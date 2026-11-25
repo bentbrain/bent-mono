@@ -15,20 +15,19 @@ const base: SyncStatus = {
 
 describe("screens", () => {
   test("follow the key state", () => {
-    expect(screenFor(null, false)).toBe("loading");
-    expect(screenFor(base, false)).toBe("signIn");
-    expect(screenFor({ ...base, state: "consentPending" }, false)).toBe("consent");
-    expect(screenFor({ ...base, state: "invalid" }, false)).toBe("reconnect");
+    expect(screenFor(null)).toBe("loading");
+    expect(screenFor(base)).toBe("signIn");
+    expect(screenFor({ ...base, state: "consentPending" })).toBe("consent");
+    expect(screenFor({ ...base, state: "invalid" })).toBe("reconnect");
+    expect(screenFor({ ...base, state: "locked" })).toBe("locked");
   });
 
-  test("an active key shows the Health step until the first sync starts", () => {
-    const active: SyncStatus = { ...base, state: "active", backfilling: true, lastSyncAt: null };
-    expect(screenFor(active, false)).toBe("health");
-    expect(screenFor(active, true)).toBe("status");
-    expect(screenFor({ ...active, lastSyncAt: 1 }, false)).toBe("status");
-    expect(screenFor({ ...active, backfilling: false }, false)).toBe("status");
-    // A relaunch during the first sync goes to its progress.
-    expect(screenFor({ ...active, backfillStarted: true }, false)).toBe("status");
+  test("an active key shows the Health step until it starts the first sync", () => {
+    const active: SyncStatus = { ...base, state: "active", awaitingHealthStep: true, lastSyncAt: null };
+    expect(screenFor(active)).toBe("health");
+    // The wait is stored natively, so a relaunch returns to the step.
+    expect(screenFor({ ...active, backfillStarted: true })).toBe("health");
+    expect(screenFor({ ...active, awaitingHealthStep: false })).toBe("status");
   });
 });
 
@@ -45,56 +44,92 @@ describe("cutoff", () => {
 
 describe("connect", () => {
   const consent: EnrollOutcome = { kind: "consentPending", email: "a@example.com", accountTimezone: "UTC" };
+  const signedIn =
+    (token: string, expiresAt: number | null = null) =>
+    async () => ({ token, expiresAt });
 
-  test("retries busy replies with the same token after Retry-After", async () => {
+  test("retries busy replies with the same token after exactly Retry-After", async () => {
     const tokens: string[] = [];
     const waits: number[] = [];
     const replies: EnrollOutcome[] = [
       { kind: "failed", action: "retrySameToken", code: "issuance_pending", retryAfter: 10 },
+      { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 120 },
       { kind: "failed", action: "retrySameToken", code: "auth_unavailable", retryAfter: null },
       consent,
     ];
     let authorized = 0;
     const result = await connect({
-      authorize: async () => `oat_${++authorized}`,
+      authorize: async () => ({ token: `oat_${++authorized}`, expiresAt: null }),
       enroll: async (token) => {
         tokens.push(token);
         return replies.shift() ?? consent;
       },
       sleep: async (ms) => void waits.push(ms),
+      now: () => 0,
     });
     expect(result).toEqual(consent);
-    expect(tokens).toEqual(["oat_1", "oat_1", "oat_1"]);
-    expect(waits).toEqual([10_000, 5_000]);
+    expect(tokens).toEqual(["oat_1", "oat_1", "oat_1", "oat_1"]);
+    expect(waits).toEqual([10_000, 120_000, 10_000]);
     expect(authorized).toBe(1);
   });
 
-  test("stops retrying after three waits", async () => {
-    const busy: EnrollOutcome = { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 600 };
-    let calls = 0;
+  test("a stale enrollment retries at once with the same token", async () => {
     const waits: number[] = [];
+    const replies: EnrollOutcome[] = [
+      { kind: "failed", action: "retrySameToken", code: "stale_enrollment", retryAfter: 0 },
+      consent,
+    ];
     const result = await connect({
-      authorize: async () => "oat_1",
+      authorize: signedIn("oat_1"),
+      enroll: async () => replies.shift() ?? consent,
+      sleep: async (ms) => void waits.push(ms),
+      now: () => 0,
+    });
+    expect(result).toEqual(consent);
+    expect(waits).toEqual([0]);
+  });
+
+  test("ends the attempt when the token would expire before the retry", async () => {
+    let calls = 0;
+    const result = await connect({
+      authorize: signedIn("oat_1", 60_000),
+      enroll: async () => {
+        calls++;
+        return { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 3600 };
+      },
+      sleep: async () => undefined,
+      now: () => 0,
+    });
+    expect(result).toEqual({ kind: "tokenExpires", retryAfter: 3600 });
+    expect(calls).toBe(1);
+  });
+
+  test("stops retrying after three waits", async () => {
+    const busy: EnrollOutcome = { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 5 };
+    let calls = 0;
+    const result = await connect({
+      authorize: signedIn("oat_1"),
       enroll: async () => {
         calls++;
         return busy;
       },
-      sleep: async (ms) => void waits.push(ms),
+      sleep: async () => undefined,
+      now: () => 0,
     });
     expect(result).toEqual(busy);
     expect(calls).toBe(4);
-    expect(waits).toEqual([60_000, 60_000, 60_000]);
   });
 
   test("ends on a reply that needs a fresh sign-in", async () => {
     let calls = 0;
     const result = await connect({
-      authorize: async () => "oat_1",
+      authorize: signedIn("oat_1"),
       enroll: async () => {
         calls++;
         return { kind: "failed", action: "reauthorize", code: "enrollment_token_used" };
       },
       sleep: async () => undefined,
+      now: () => 0,
     });
     expect(result).toEqual({ kind: "failed", action: "reauthorize", code: "enrollment_token_used" });
     expect(calls).toBe(1);
@@ -103,27 +138,28 @@ describe("connect", () => {
   test("reports a cancelled or failed sign-in", async () => {
     const enroll = async () => consent;
     const sleep = async () => undefined;
-    expect(await connect({ authorize: async () => Promise.reject(new SignInCancelled()), enroll, sleep })).toEqual({
-      kind: "cancelled",
-    });
+    const now = () => 0;
+    expect(await connect({ authorize: async () => Promise.reject(new SignInCancelled()), enroll, sleep, now })).toEqual(
+      {
+        kind: "cancelled",
+      },
+    );
     expect(
-      await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), enroll, sleep }),
-    ).toEqual({
-      kind: "signInFailed",
-      message: "state_mismatch",
-    });
+      await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), enroll, sleep, now }),
+    ).toEqual({ kind: "signInFailed", message: "state_mismatch" });
   });
 
   test("passes revoke-later through", async () => {
     let later: boolean | undefined;
     await connect(
       {
-        authorize: async () => "oat_1",
+        authorize: signedIn("oat_1"),
         enroll: async (_token, revokeLater) => {
           later = revokeLater;
           return consent;
         },
         sleep: async () => undefined,
+        now: () => 0,
       },
       true,
     );
@@ -165,5 +201,8 @@ describe("copy", () => {
     expect(copy.consent.promise.join(" ")).toContain("background");
     expect(copy.consent.disconnect).toContain("revokes");
     expect(copy.status.withoutDistance(1)).toContain("1 run was");
+    expect(copy.status.distanceAccess(2)).toContain("2 runs are waiting for distance access");
+    expect(copy.status.manualRevocations(1)).toContain("API keys");
+    expect(copy.signIn.tryLater(3600)).toContain("3600 seconds");
   });
 });

@@ -35,12 +35,23 @@ public final class FitnessHealthModule: Module {
       return encoded
     }
 
-    AsyncFunction("confirmConsent") { (cutoffMs: Double) async throws in
-      try await self.service.confirm(cutoff: Date(timeIntervalSince1970: cutoffMs / 1000))
+    AsyncFunction("confirmConsent") { (cutoffMs: Double, enrollmentId: String) async throws in
+      try await self.service.confirm(cutoff: Date(timeIntervalSince1970: cutoffMs / 1000), enrollmentId: enrollmentId)
     }
 
-    AsyncFunction("declineConsent") { () async throws -> Int in
-      try await self.service.lifecycle.decline()
+    AsyncFunction("declineConsent") { (enrollmentId: String) async throws -> Int in
+      try await self.service.decline(enrollmentId: enrollmentId)
+    }
+
+    AsyncFunction("startFirstSync") { () async throws -> [String: Any] in
+      try await self.service.startFirstSync()
+      return await self.service.status()
+    }
+
+    AsyncFunction("sendRunsWithoutDistance") { () async throws -> [String: Any] in
+      try await self.service.lifecycle.sendRunsWithoutDistance()
+      await self.service.syncNow()
+      return await self.service.status()
     }
 
     AsyncFunction("requestHealthAccess") { () async throws in

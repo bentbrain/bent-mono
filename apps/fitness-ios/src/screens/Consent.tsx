@@ -4,34 +4,35 @@ import { FitnessHealth } from "../../modules/fitness-health";
 import { copy, fitnessHost } from "../logic/copy";
 import { backfillChoices, cutoffFor } from "../logic/cutoff";
 import type { BackfillChoice } from "../logic/cutoff";
-import { Body, Button, Choice, Heading, Page, Row } from "../ui/parts";
+import { Body, Button, Choice, Heading, Notice, Page, Row } from "../ui/parts";
 
 export function Consent({ status, onChange }: { status: SyncStatus; onChange: () => void }) {
   const [choice, setChoice] = useState<BackfillChoice>("1y");
   const [busy, setBusy] = useState(false);
+  const [changed, setChanged] = useState(false);
+  // Consent and decline name the enrollment this screen shows, so they never
+  // act on a key for another account that replaced it.
+  const enrollmentId = status.enrollmentId ?? "";
 
-  async function confirm() {
+  async function act(action: () => Promise<unknown>) {
     setBusy(true);
+    setChanged(false);
     try {
-      await FitnessHealth.confirmConsent(cutoffFor(choice, Date.now()));
+      await action();
+    } catch {
+      setChanged(true);
     } finally {
       setBusy(false);
       onChange();
     }
   }
 
-  async function decline() {
-    setBusy(true);
-    try {
-      await FitnessHealth.declineConsent();
-    } finally {
-      setBusy(false);
-      onChange();
-    }
-  }
+  const confirm = () => act(() => FitnessHealth.confirmConsent(cutoffFor(choice, Date.now()), enrollmentId));
+  const decline = () => act(() => FitnessHealth.declineConsent(enrollmentId));
 
   return (
     <Page title={copy.consent.title} testID="screen-consent">
+      {changed ? <Notice testID="consent-changed">{copy.consent.changed}</Notice> : null}
       <Row label="Account" value={status.email ?? ""} testID="consent-email" />
       <Body>{copy.consent.types}</Body>
       <Body>{copy.consent.destination(fitnessHost(status.origin))}</Body>

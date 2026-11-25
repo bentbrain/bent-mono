@@ -8,6 +8,10 @@ public enum DeferralReason: String, Codable, Sendable {
   case awaitingDistance
   /// Fitness skipped it as dated after today in the account timezone.
   case serverFuture
+  /// A run with no readable distance while the app cannot tell whether it
+  /// may read distance. It waits until a distance appears or the user
+  /// chooses to send runs without one.
+  case distanceAccess
 }
 
 /// A sample held back until it becomes eligible.
@@ -92,6 +96,11 @@ public struct SyncState: Codable, Sendable, Equatable {
   public var runsWithoutDistance = 0
   /// The latest runs' counts, newest last, at most 30.
   public var history: [RunSummary] = []
+  /// Consent is confirmed but the Health step has not started the first
+  /// sync yet, so nothing runs.
+  public var awaitingHealthStep = false
+  /// The user chose to send runs that have no readable distance.
+  public var sendRunsWithoutDistance = false
 
   public init(cutoff: Date, accountTimezone: String) {
     self.cutoff = cutoff
@@ -115,16 +124,35 @@ public protocol StateStorage: Sendable {
   func clear() throws
 }
 
-/// A state file under a directory, written with an atomic replace. The
-/// platform layer adds file protection and backup exclusion.
+/// How the platform keeps the state private: the directory is prepared
+/// (excluded from backups) before the first write, every write uses these
+/// options, and `verify` checks the written file.
+public struct FileProtection: Sendable {
+  public var writeOptions: Data.WritingOptions
+  public var prepareDirectory: @Sendable (URL) throws -> Void
+  public var verify: @Sendable (URL) throws -> Void
+
+  public init(
+    writeOptions: Data.WritingOptions = [.atomic],
+    prepareDirectory: @escaping @Sendable (URL) throws -> Void = { _ in },
+    verify: @escaping @Sendable (URL) throws -> Void = { _ in }
+  ) {
+    self.writeOptions = writeOptions.union(.atomic)
+    self.prepareDirectory = prepareDirectory
+    self.verify = verify
+  }
+}
+
+/// A state file under a directory. Each write replaces the file atomically,
+/// with the file's protection given as it is written.
 public final class FileStateStorage: StateStorage, @unchecked Sendable {
   public let file: URL
-  private let afterWrite: @Sendable (URL) throws -> Void
+  private let protection: FileProtection
   private let lock = NSLock()
 
-  public init(directory: URL, afterWrite: @escaping @Sendable (URL) throws -> Void = { _ in }) {
+  public init(directory: URL, protection: FileProtection = FileProtection()) {
     file = directory.appendingPathComponent("state.json")
-    self.afterWrite = afterWrite
+    self.protection = protection
   }
 
   public func load() throws -> SyncState? {
@@ -137,20 +165,25 @@ public final class FileStateStorage: StateStorage, @unchecked Sendable {
   public func save(_ state: SyncState) throws {
     lock.lock()
     defer { lock.unlock() }
-    try FileManager.default.createDirectory(
-      at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let directory = file.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try protection.prepareDirectory(directory)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
-    try encoder.encode(state).write(to: file, options: [.atomic])
-    try afterWrite(file)
+    try encoder.encode(state).write(to: file, options: protection.writeOptions)
+    try protection.verify(file)
   }
 
+  /// Removes the state. A missing state is fine; any other failure throws.
   public func clear() throws {
     lock.lock()
     defer { lock.unlock() }
-    let directory = file.deletingLastPathComponent()
-    if FileManager.default.fileExists(atPath: directory.path) {
-      try FileManager.default.removeItem(at: directory)
+    do {
+      try FileManager.default.removeItem(at: file.deletingLastPathComponent())
+    } catch CocoaError.fileNoSuchFile {
+      return
+    } catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) {
+      return
     }
   }
 }

@@ -15,6 +15,8 @@ export const copy = {
     body: "Fitness Sync sends your weigh-ins and runs from Apple Health to your Fitness account. Sign in with the account you use for Fitness.",
     button: "Sign in to Fitness",
     unconfigured: "Sign-in is not set up in this build.",
+    tryLater: (seconds: number) =>
+      `Fitness asked to wait ${seconds} seconds, longer than this sign-in lasts. Sign in again after that.`,
   },
   consent: {
     title: "Confirm what syncs",
@@ -29,6 +31,7 @@ export const copy = {
       "Disconnect in Settings stops syncing, revokes this iPhone's key and clears what the app stored about your Health data. Entries already in Fitness stay there.",
     history: "History to send",
     confirm: "Confirm and continue",
+    changed: "The connection changed while this screen was open. Check the account above, then confirm again.",
     decline: "Cancel and revoke",
   },
   health: {
@@ -39,6 +42,7 @@ export const copy = {
     none: "None readable",
     noneHint: "Fitness Sync can't read any samples. Check Settings → Health → Data Access & Devices → Fitness Sync.",
     start: "Start the first sync",
+    allowedFrom: "Health shares history from",
     keepOpen: "Keep Fitness Sync open until the first sync finishes.",
   },
   status: {
@@ -52,6 +56,11 @@ export const copy = {
       `${count} ${count === 1 ? "run was" : "runs were"} sent without a distance. Add the distance in Fitness if you need it.`,
     waiting: (count: number) => `${count} ${count === 1 ? "sample is" : "samples are"} waiting until they are due.`,
     unreadable: (count: number) => `${count} ${count === 1 ? "item" : "items"} could not be read and stopped waiting.`,
+    distanceAccess: (count: number) =>
+      `${count} ${count === 1 ? "run is" : "runs are"} waiting for distance access. Turn on Walking + Running Distance in Settings → Health → Data Access & Devices → Fitness Sync, or send them without a distance.`,
+    sendWithoutDistance: "Send runs without distance",
+    manualRevocations: (count: number) =>
+      `${count} earlier ${count === 1 ? "key" : "keys"} could not be revoked from this iPhone. Revoke ${count === 1 ? "it" : "them"} under Manage account → API keys in Fitness.`,
   },
   settings: {
     title: "Settings",
@@ -60,6 +69,10 @@ export const copy = {
     resyncHint: "Sends everything from your earliest chosen start again. Fitness skips what it already has.",
     disconnect: "Disconnect",
     version: (version: string, build: string) => `Version ${version} (${build})`,
+  },
+  locked: {
+    title: "Unlock this iPhone",
+    body: "Fitness Sync keeps its connection locked until this iPhone is unlocked after a restart.",
   },
   reconnect: {
     title: "Connect again",

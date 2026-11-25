@@ -5,7 +5,7 @@ import { copy } from "../logic/copy";
 import { formatDay } from "../logic/format";
 import { Body, Button, Heading, Notice, Page, Row } from "../ui/parts";
 
-export function Health({ status, onStarted }: { status: SyncStatus; onStarted: () => void }) {
+export function Health({ status, onStarted }: { status: SyncStatus; onStarted: (next: SyncStatus) => void }) {
   const [history, setHistory] = useState<ReadableHistory | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -23,9 +23,11 @@ export function Health({ status, onStarted }: { status: SyncStatus; onStarted: (
     }
   }
 
+  // Starting is stored natively, so a relaunch never skips this step and
+  // the first sync never begins before it.
   async function start() {
-    onStarted();
-    await FitnessHealth.syncNow();
+    const next = await FitnessHealth.startFirstSync();
+    onStarted(next);
   }
 
   const readable = history && (history.weight || history.run);
@@ -40,6 +42,20 @@ export function Health({ status, onStarted }: { status: SyncStatus; onStarted: (
           <Heading>{copy.health.readable}</Heading>
           <Row label="Weigh-ins from" value={formatDay(history.weight) ?? copy.health.none} testID="readable-weight" />
           <Row label="Runs from" value={formatDay(history.run) ?? copy.health.none} testID="readable-run" />
+          {history.weightAllowedFrom ? (
+            <Row
+              label={`${copy.health.allowedFrom} (weigh-ins)`}
+              value={formatDay(history.weightAllowedFrom) ?? ""}
+              testID="allowed-weight"
+            />
+          ) : null}
+          {history.runAllowedFrom ? (
+            <Row
+              label={`${copy.health.allowedFrom} (runs)`}
+              value={formatDay(history.runAllowedFrom) ?? ""}
+              testID="allowed-run"
+            />
+          ) : null}
           {readable ? null : <Notice testID="readable-none">{copy.health.noneHint}</Notice>}
           <Body muted>{copy.health.keepOpen}</Body>
           <Button label={copy.health.start} onPress={start} testID="health-start" />

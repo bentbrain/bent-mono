@@ -9,6 +9,7 @@ import { Consent } from "./screens/Consent";
 import { Health } from "./screens/Health";
 import { SignIn } from "./screens/SignIn";
 import { Status } from "./screens/Status";
+import { Body, Page } from "./ui/parts";
 import { useTheme } from "./ui/theme";
 
 export default function App() {
@@ -22,7 +23,6 @@ export default function App() {
 function Root() {
   const theme = useTheme();
   const [status, setStatus] = useState<SyncStatus | null>(null);
-  const [healthStepDone, setHealthStepDone] = useState(false);
 
   const refresh = useCallback(() => {
     FitnessHealth.getStatus().then(setStatus, () => undefined);
@@ -40,12 +40,18 @@ function Root() {
     };
   }, [refresh]);
 
-  switch (screenFor(status, healthStepDone)) {
+  switch (screenFor(status)) {
     case "loading":
       return (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.background }}>
           <ActivityIndicator />
         </View>
+      );
+    case "locked":
+      return (
+        <Page title={copy.locked.title} testID="screen-locked">
+          <Body>{copy.locked.body}</Body>
+        </Page>
       );
     case "signIn":
       return <SignIn onChange={refresh} />;
@@ -54,15 +60,7 @@ function Root() {
     case "consent":
       return status ? <Consent status={status} onChange={refresh} /> : null;
     case "health":
-      return status ? (
-        <Health
-          status={status}
-          onStarted={() => {
-            setHealthStepDone(true);
-            refresh();
-          }}
-        />
-      ) : null;
+      return status ? <Health status={status} onStarted={setStatus} /> : null;
     case "status":
       return status ? <Status status={status} onChange={refresh} /> : null;
   }

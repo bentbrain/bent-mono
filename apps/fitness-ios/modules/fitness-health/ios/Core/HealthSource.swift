@@ -27,6 +27,10 @@ public protocol HealthSource: Sendable {
   func samples(_ kind: SampleKind, start: Date, end: Date) async throws -> [HealthSample]
   /// The readable samples among these UUIDs.
   func samples(_ kind: SampleKind, ids: [UUID]) async throws -> [HealthSample]
+  /// Whether Health shows the app any walking and running distance. Health
+  /// does not say whether read access was denied, so without any readable
+  /// distance a run's missing distance is ambiguous.
+  func distanceReadable() async throws -> Bool
 }
 
 /// Errors that mean the device is locked and Health data is unavailable.

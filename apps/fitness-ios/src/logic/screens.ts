@@ -1,14 +1,17 @@
 import type { SyncStatus } from "../../modules/fitness-health";
 
-export type Screen = "loading" | "signIn" | "consent" | "health" | "status" | "reconnect";
+export type Screen = "loading" | "locked" | "signIn" | "consent" | "health" | "status" | "reconnect";
 
 /**
- * The screen for the native status. An active key whose first sync has not
- * started shows the Health step, which asks for access and starts it.
+ * The screen for the native status. An active key whose first sync waits
+ * for the Health step shows that step; the wait is stored natively, so a
+ * relaunch comes back to it.
  */
-export function screenFor(status: SyncStatus | null, healthStepDone: boolean): Screen {
+export function screenFor(status: SyncStatus | null): Screen {
   if (!status) return "loading";
   switch (status.state) {
+    case "locked":
+      return "locked";
     case "signedOut":
       return "signIn";
     case "consentPending":
@@ -16,8 +19,6 @@ export function screenFor(status: SyncStatus | null, healthStepDone: boolean): S
     case "invalid":
       return "reconnect";
     case "active":
-      return !healthStepDone && status.backfilling && !status.backfillStarted && !status.lastSyncAt
-        ? "health"
-        : "status";
+      return status.awaitingHealthStep ? "health" : "status";
   }
 }

@@ -21,16 +21,26 @@ public struct AccountDays: Sendable {
     return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
   }
 
-  /// The start of an account date given as yyyy-MM-dd.
+  /// The start of an account date given as yyyy-MM-dd. Built from midday,
+  /// so a day whose midnight does not exist still starts at its first hour.
   public func start(of day: String) -> Date? {
     let parts = day.split(separator: "-").compactMap { Int($0) }
-    guard parts.count == 3 else { return nil }
-    return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    guard parts.count == 3,
+      let midday = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
+    else { return nil }
+    return calendar.startOfDay(for: midday)
   }
 
   public func start(containing date: Date) -> Date { calendar.startOfDay(for: date) }
 
+  /// The start of the day `days` after the one containing `dayStart`. Each
+  /// boundary is the start of its own day, so a daylight-saving change at
+  /// midnight never carries an hour of offset into later days.
   public func next(_ dayStart: Date, by days: Int = 1) -> Date {
-    calendar.date(byAdding: .day, value: days, to: dayStart) ?? dayStart.addingTimeInterval(Double(days) * 86_400)
+    let base = calendar.startOfDay(for: dayStart)
+    let midday = calendar.date(byAdding: .hour, value: 12, to: base) ?? base.addingTimeInterval(12 * 3600)
+    let target = calendar.date(byAdding: .day, value: days, to: midday)
+      ?? midday.addingTimeInterval(Double(days) * 86_400)
+    return calendar.startOfDay(for: target)
   }
 }

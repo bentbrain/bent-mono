@@ -52,6 +52,31 @@ enum HealthSheet {
     }
   }
 
+  /// Turns on only the listed types, by their names in the sheet, such as
+  /// "Weight", and allows access.
+  static func allow(_ types: [String], in app: XCUIApplication, timeout: TimeInterval = 15) {
+    guard appears(in: app, timeout: timeout) else {
+      XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
+      return
+    }
+    for type in types {
+      let toggle = app.switches.matching(NSPredicate(format: "identifier ENDSWITH %@", ".\(type).SwitchCell.Switch"))
+        .firstMatch
+      var swipes = 0
+      while !toggle.isHittable && swipes < 6 {
+        app.tables.firstMatch.swipeUp()
+        swipes += 1
+      }
+      toggle.tap()
+    }
+    tapLabel(["Allow", "Continue"], in: app)
+    let window = app.navigationBars[timeBounded]
+    if window.waitForExistence(timeout: 5) {
+      tapLabel([History.all.rawValue], in: app)
+      tapLabel(["Allow"], in: app)
+    }
+  }
+
   /// Leaves every type off and closes the sheet.
   static func denyAll(in app: XCUIApplication, timeout: TimeInterval = 15) {
     guard appears(in: app, timeout: timeout) else {

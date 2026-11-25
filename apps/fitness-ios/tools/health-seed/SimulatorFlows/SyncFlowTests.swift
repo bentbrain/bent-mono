@@ -40,11 +40,17 @@ final class SyncFlowTests: XCTestCase {
   /// Asks for Health access from the Health step. On a newly booted
   /// Simulator, HealthKit's request can time out before its sheet appears;
   /// the app then shows the error, and the request is made again.
-  private func requestHealth(_ app: XCUIApplication, allow: Bool) {
+  private enum Access { case all, none, withoutDistance }
+
+  private func requestHealth(_ app: XCUIApplication, _ access: Access) {
     for _ in 0..<3 {
       element(app, "health-allow").tap()
       if HealthSheet.appears(in: app, timeout: 60) {
-        if allow { HealthSheet.allowAll(in: app) } else { HealthSheet.denyAll(in: app) }
+        switch access {
+        case .all: HealthSheet.allowAll(in: app)
+        case .none: HealthSheet.denyAll(in: app)
+        case .withoutDistance: HealthSheet.allow(["Weight", "Workouts"], in: app)
+        }
         return
       }
       _ = element(app, "health-failed").waitForExistence(timeout: 30)
@@ -53,7 +59,9 @@ final class SyncFlowTests: XCTestCase {
   }
 
   /// Signs in through the synthetic OAuth server and confirms consent.
-  private func connect(_ app: XCUIApplication) {
+  /// Nothing is imported before consent, after a relaunch at the consent
+  /// screen, or after a relaunch at the Health step.
+  private func connect(_ app: XCUIApplication) async throws {
     app.launch()
     let signIn = element(app, "sign-in")
     XCTAssertTrue(signIn.waitForExistence(timeout: 30), app.debugDescription)
@@ -61,9 +69,23 @@ final class SyncFlowTests: XCTestCase {
     let email = element(app, "consent-email")
     XCTAssertTrue(email.waitForExistence(timeout: 120), app.debugDescription)
     XCTAssertTrue(app.staticTexts["fitness-device+clerk_test@example.com"].exists)
+    let beforeConsent = try await serverState()
+    XCTAssertEqual(beforeConsent.imports, 0)
+    // A relaunch while consent is pending comes back to consent.
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(element(app, "consent-email").waitForExistence(timeout: 60), app.debugDescription)
+    let afterRelaunch = try await serverState()
+    XCTAssertEqual(afterRelaunch.imports, 0)
     element(app, "backfill-30d").tap()
     element(app, "consent-confirm").tap()
     XCTAssertTrue(element(app, "health-allow").waitForExistence(timeout: 30))
+    // A relaunch before the Health step returns to it, and nothing syncs.
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(element(app, "health-allow").waitForExistence(timeout: 60), app.debugDescription)
+    let atHealthStep = try await serverState()
+    XCTAssertEqual(atHealthStep.imports, 0)
   }
 
   private struct ServerState: Decodable {
@@ -73,6 +95,8 @@ final class SyncFlowTests: XCTestCase {
     let weights: [Weight]
     let runs: [Run]
     let keys: [Key]
+    let imports: Int
+    let enrollments: Int
   }
 
   private func serverState() async throws -> ServerState {
@@ -80,12 +104,16 @@ final class SyncFlowTests: XCTestCase {
     return try JSONDecoder().decode(ServerState.self, from: data)
   }
 
-  private func waitForSync(_ app: XCUIApplication) {
+  /// Waits for a sync that finished after `previous`, the exact completion
+  /// time the status row carried before.
+  @discardableResult
+  private func waitForSync(_ app: XCUIApplication, after previous: String = "never") -> String {
     let lastSync = element(app, "status-last-sync")
     XCTAssertTrue(lastSync.waitForExistence(timeout: 60), app.debugDescription)
-    let synced = NSPredicate(format: "label != 'Not yet'")
+    let synced = NSPredicate(format: "value != %@ AND value != 'never'", previous)
     let done = XCTWaiter.wait(for: [expectation(for: synced, evaluatedWith: lastSync)], timeout: 120)
     XCTAssertEqual(done, .completed, app.debugDescription)
+    return lastSync.value as? String ?? ""
   }
 
   // MARK: Flows
@@ -94,14 +122,15 @@ final class SyncFlowTests: XCTestCase {
   func testDeniedHealthAccessSendsNothing() async throws {
     seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
-    connect(app)
-    requestHealth(app, allow: false)
+    try await connect(app)
+    requestHealth(app, .none)
     XCTAssertTrue(element(app, "readable-none").waitForExistence(timeout: 30), app.debugDescription)
     element(app, "health-start").tap()
     waitForSync(app)
     let state = try await serverState()
     XCTAssertEqual(state.weights.count, 0)
     XCTAssertEqual(state.runs.count, 0)
+    XCTAssertEqual(state.imports, 0)
 
     // Disconnect revokes the key and returns to sign-in.
     element(app, "disconnect").tap()
@@ -117,13 +146,13 @@ final class SyncFlowTests: XCTestCase {
   func testAllowedHealthAccessSyncsTheSeededHistory() async throws {
     seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
-    connect(app)
-    requestHealth(app, allow: true)
+    try await connect(app)
+    requestHealth(app, .all)
     let weight = element(app, "readable-weight")
     XCTAssertTrue(weight.waitForExistence(timeout: 30), app.debugDescription)
     XCTAssertNotEqual(weight.label, "None readable")
     element(app, "health-start").tap()
-    waitForSync(app)
+    let first = waitForSync(app)
 
     let state = try await serverState()
     XCTAssertEqual(state.weights.count, 3, "\(state.weights)")
@@ -134,11 +163,30 @@ final class SyncFlowTests: XCTestCase {
     // The weigh-in dated two days ahead waits until it is due.
     XCTAssertTrue(element(app, "status-deferred").exists, app.debugDescription)
 
-    // A later Sync now finds nothing new.
+    // A later Sync now, waited for by its own completion time, finds
+    // nothing new.
     element(app, "sync-now").tap()
-    waitForSync(app)
+    waitForSync(app, after: first)
     let again = try await serverState()
     XCTAssertEqual(again.weights.count, 3)
     XCTAssertEqual(again.runs.count, 4)
+  }
+
+  /// With Weight and Workouts allowed but not Walking + Running Distance,
+  /// weigh-ins sync and no run is sent as 0 km: runs without a readable
+  /// distance, including the one whose distance was attached later, wait.
+  func testPartialHealthAccessHoldsRunsWithoutDistance() async throws {
+    seed()
+    let app = XCUIApplication(bundleIdentifier: Self.appId)
+    try await connect(app)
+    requestHealth(app, .withoutDistance)
+    XCTAssertTrue(element(app, "readable-weight").waitForExistence(timeout: 30), app.debugDescription)
+    element(app, "health-start").tap()
+    waitForSync(app)
+    let state = try await serverState()
+    XCTAssertEqual(state.weights.count, 3, "\(state.weights)")
+    XCTAssertTrue(state.runs.allSatisfy { $0.distanceKm > 0 }, "\(state.runs)")
+    XCTAssertLessThan(state.runs.count, 4, "\(state.runs)")
+    XCTAssertTrue(element(app, "status-distance-access").waitForExistence(timeout: 10), app.debugDescription)
   }
 }

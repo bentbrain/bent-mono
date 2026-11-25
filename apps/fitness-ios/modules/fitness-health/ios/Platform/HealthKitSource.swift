@@ -70,6 +70,30 @@ final class HealthKitSource: HealthSource, @unchecked Sendable {
     return try await convert(query(Self.type(kind), HKQuery.predicateForObjects(with: Set(ids))))
   }
 
+  /// Whether any walking and running distance is readable. Health hides
+  /// whether read access was denied, so none readable is ambiguous.
+  func distanceReadable() async throws -> Bool {
+    !(try await query(Self.distance, HKQuery.predicateForSamples(withStart: nil, end: nil), limit: 1)).isEmpty
+  }
+
+  /// The earliest date Health lets the app read, per type, when the user
+  /// shared limited history. Empty where Health reports no such window.
+  func limitedHistoryStarts() async -> [SampleKind: Date] {
+    #if compiler(>=6.4)
+      if #available(iOS 27.0, *) {
+        let types: Set<HKObjectType> = [Self.bodyMass, Self.workouts]
+        let dates: [HKObjectType: Date]? = await withCheckedContinuation { continuation in
+          store.getEarliestAuthorizedSampleDate(for: types) { dates, _ in continuation.resume(returning: dates) }
+        }
+        var result: [SampleKind: Date] = [:]
+        if let weight = dates?[Self.bodyMass] { result[.weight] = weight }
+        if let runs = dates?[Self.workouts] { result[.run] = runs }
+        return result
+      }
+    #endif
+    return [:]
+  }
+
   /// The earliest readable sample of a type since `start`, if any.
   func earliest(_ kind: SampleKind, since start: Date) async throws -> Date? {
     try await query(Self.type(kind), Self.predicate(kind, start: start, end: nil), limit: 1).first?.startDate

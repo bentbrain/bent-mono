@@ -106,6 +106,8 @@ final class FakeDevices: HTTPTransport, @unchecked Sendable {
     var gates: [Int: Gate] = [:]
     /// Requests for these sequences get this reply.
     var replies: [Int: HTTPReply?] = [:]
+    /// Replies to the next revocations, in order; then 204.
+    var revokeReplies: [HTTPReply] = []
   }
   let state = Locked(State())
   var revoked: [String] { state.get.revoked }
@@ -135,8 +137,10 @@ final class FakeDevices: HTTPTransport, @unchecked Sendable {
     }
     if path == "/api/health/devices/current" {
       let host = request.url?.host ?? ""
-      state.with { $0.revoked.append("\(host) \(key)") }
-      return HTTPReply(status: 204)
+      return state.with { state in
+        state.revoked.append("\(host) \(key)")
+        return state.revokeReplies.isEmpty ? HTTPReply(status: 204) : state.revokeReplies.removeFirst()
+      }
     }
     return HTTPReply(status: 404)
   }
@@ -170,7 +174,7 @@ final class LifecycleTests: XCTestCase {
     XCTAssertNil(value3)
     XCTAssertEqual(try credentials.load().active?.state, .consentPending)
     let cutoff = date("2026-11-01T00:00:00Z")
-    _ = try await relaunched.confirm(cutoff: cutoff)
+    _ = try await relaunched.confirmPending(cutoff: cutoff)
     let value4 = await relaunched.session()
     XCTAssertNotNil(value4)
     let value5 = try await relaunched.storage()?.load()?.cutoff
@@ -180,7 +184,7 @@ final class LifecycleTests: XCTestCase {
   func testDecliningRevokesTheKeyWithoutReadingHealth() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    let remaining = try await device.decline()
+    let remaining = try await device.declinePending()
     XCTAssertEqual(remaining, 0)
     XCTAssertEqual(devices.revoked, ["fitness.example.test ak_issued_1"])
     XCTAssertNil(try credentials.load().active)
@@ -204,7 +208,7 @@ final class LifecycleTests: XCTestCase {
   func testOfflineDisconnectThenAccountChangeStillRevokesWithTheOldOrigin() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    _ = try await device.confirm(cutoff: Date())
+    _ = try await device.confirmPending(cutoff: Date())
     devices.state.with { $0.offline = true }
     let remaining = try await device.disconnect()
     XCTAssertEqual(remaining, 1)
@@ -249,7 +253,7 @@ final class LifecycleTests: XCTestCase {
   func testACrashDuringDisconnectFinishesOnLaunch() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    _ = try await device.confirm(cutoff: Date())
+    _ = try await device.confirmPending(cutoff: Date())
     XCTAssertEqual(states.count, 1)
     // The key moves to pending; clearing the state fails, as in a crash.
     states.failClears.with { $0 = 1 }
@@ -272,7 +276,7 @@ final class LifecycleTests: XCTestCase {
   func testKeyInvalidStopsSyncUntilReconnect() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    _ = try await device.confirm(cutoff: Date())
+    _ = try await device.confirmPending(cutoff: Date())
     let current = await device.session()
     let session = try XCTUnwrap(current)
     try await device.markInvalid(session)
@@ -294,7 +298,7 @@ final class LifecycleTests: XCTestCase {
   func testKeyInvalidLeavesANewerStoredKeyAlone() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    _ = try await device.confirm(cutoff: Date())
+    _ = try await device.confirmPending(cutoff: Date())
     let first = await device.session()
     let old = try XCTUnwrap(first)
     _ = try await device.enroll(token: "oat_2", revokeLater: false)
@@ -385,7 +389,7 @@ final class LifecycleTests: XCTestCase {
   func testGenerationsFenceOldSessions() async throws {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
-    _ = try await device.confirm(cutoff: Date())
+    _ = try await device.confirmPending(cutoff: Date())
     let current = await device.session()
     let session = try XCTUnwrap(current)
     let value10 = await device.isCurrent(session)
@@ -399,7 +403,7 @@ final class LifecycleTests: XCTestCase {
     let device = lifecycle()
     _ = try await device.enroll(token: "oat_1", revokeLater: false)
     let first = date("2026-11-01T00:00:00Z")
-    _ = try await device.confirm(cutoff: first)
+    _ = try await device.confirmPending(cutoff: first)
     let found = await device.storage()
     let storage = try XCTUnwrap(found)
     var state = try XCTUnwrap(storage.load())
@@ -452,7 +456,7 @@ final class CoordinatorTests: XCTestCase {
     let results = Locked([RunResult]())
     let coordinator = SyncCoordinator(
       session: { SyncSession(key: "ak_test", generation: 1) }, background: background,
-      makeEngine: { _ in engine }, onResult: { result in results.with { $0.append(result) } })
+      makeEngine: { _ in engine }, onResult: { result, _ in results.with { $0.append(result) } })
     h.fitness.onRequest { count in if count == 2 { background.expireAll() } }
     await coordinator.trigger(mode: .foreground) { completed.with { $0 += 1 } }
     XCTAssertEqual(completed.get, 1)
@@ -489,5 +493,19 @@ final class CoordinatorTests: XCTestCase {
     await coordinator.trigger(mode: .foreground)
     let value13 = await coordinator.retryPending
     XCTAssertFalse(value13)
+  }
+}
+
+extension DeviceLifecycle {
+  /// Confirms the pending enrollment, as the consent screen does with the ID it showed.
+  @discardableResult
+  func confirmPending(cutoff: Date) async throws -> DeviceCredential {
+    let id = try document().active?.enrollmentId ?? ""
+    return try confirm(cutoff: cutoff, enrollmentId: id)
+  }
+
+  func declinePending() async throws -> Int {
+    let id = try document().active?.enrollmentId ?? ""
+    return try await decline(enrollmentId: id)
   }
 }

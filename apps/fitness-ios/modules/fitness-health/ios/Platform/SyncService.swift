@@ -13,6 +13,7 @@ final class SyncService: @unchecked Sendable {
   let lifecycle: DeviceLifecycle
   private(set) var coordinator: SyncCoordinator!
   private let source: HealthKitSource
+  private let marker: SyncMarker
   private let log = Logger(subsystem: "build.bent.fitness", category: "sync")
   private let lock = NSLock()
   private var observers: [HKObserverQuery] = []
@@ -27,6 +28,7 @@ final class SyncService: @unchecked Sendable {
     let pinned = origin
     let states = (try? SyncStateFiles.standard())
       ?? SyncStateFiles(root: FileManager.default.temporaryDirectory.appendingPathComponent("sync"))
+    marker = SyncMarker(directory: states.root.deletingLastPathComponent())
     lifecycle = DeviceLifecycle(
       credentials: KeychainCredentials(service: "\(Bundle.main.bundleIdentifier ?? "build.bent.fitness").sync"),
       states: states, origin: origin,
@@ -40,14 +42,15 @@ final class SyncService: @unchecked Sendable {
     let source = self.source
     let api = try? FitnessAPI(origin: origin, transport: transport)
     coordinator = SyncCoordinator(
-      session: { await lifecycle.session() },
+      // Throws while the Keychain is locked, which marks a retry.
+      session: { try await lifecycle.currentSession() },
       background: UIKitBackgroundTime(),
       makeEngine: { session in
         guard let api, let storage = await lifecycle.storage() else { return nil }
         return SyncEngine(
           source: source, api: api, storage: storage, check: LifecycleCheck(lifecycle: lifecycle), session: session)
       },
-      onResult: { [weak self] result in await self?.finished(result) })
+      onResult: { [weak self] result, session in await self?.finished(result, session: session) })
   }
 
   struct LifecycleCheck: SessionCheck {
@@ -57,11 +60,12 @@ final class SyncService: @unchecked Sendable {
 
   // MARK: Launch and triggers
 
-  /// At launch: observers are registered whatever the state, so a wake from
-  /// HealthKit always reaches the coordinator, which checks for a session.
-  /// Keychain, file and network work waits for protected data.
+  /// At launch: observers are registered when sync is on, as the marker
+  /// file records, so a wake from HealthKit reaches the coordinator even
+  /// before the first unlock. Keychain, file and network work waits for
+  /// protected data. Nothing registers while consent is pending.
   func launched() {
-    registerObservers()
+    if marker.isOn { registerObservers() }
     guard UIApplication.shared.isProtectedDataAvailable else { return }
     Task { await self.resume() }
   }
@@ -70,7 +74,18 @@ final class SyncService: @unchecked Sendable {
   func resume(foreground: Bool = false) async {
     try? await lifecycle.resumeCleanup()
     await lifecycle.revokePending()
-    guard await lifecycle.session() != nil else { return }
+    let session: SyncSession?
+    do {
+      session = try await lifecycle.currentSession()
+    } catch {
+      // Locked: keep everything and try again after the unlock.
+      return
+    }
+    guard session != nil else {
+      marker.turnOff()
+      return
+    }
+    marker.turnOn()
     registerObservers()
     await enableBackgroundDelivery()
     let retry = await coordinator.retryPending
@@ -128,20 +143,22 @@ final class SyncService: @unchecked Sendable {
 
   // MARK: Results
 
-  private func finished(_ result: RunResult) async {
+  /// After a run. A `401 key_invalid` clears the key the run used only if it
+  /// is still the stored key, and only then does delivery stop.
+  private func finished(_ result: RunResult, session: SyncSession?) async {
     switch result {
     case let .finished(summary):
       log.info("sync_finished samples=\(summary.counts.values.reduce(0, +), privacy: .public)")
     case let .stopped(stop):
       log.info("sync_stopped code=\(String(describing: stop), privacy: .public)")
-      if stop == .keyInvalid, let session = await lifecycle.session() {
-        try? await lifecycle.markInvalid(session)
-        await stopObservers()
-      }
     case let .failed(name):
       log.error("sync_failed error=\(name, privacy: .public)")
     case .idle:
       break
+    }
+    if await RunOutcomePolicy.apply(result, session: session, lifecycle: lifecycle) {
+      marker.turnOff()
+      await stopObservers()
     }
     onResult?(await status())
   }
@@ -157,23 +174,38 @@ final class SyncService: @unchecked Sendable {
     await enableBackgroundDelivery()
   }
 
-  func confirm(cutoff: Date) async throws {
-    _ = try await lifecycle.confirm(cutoff: cutoff)
+  func confirm(cutoff: Date, enrollmentId: String) async throws {
+    _ = try await lifecycle.confirm(cutoff: cutoff, enrollmentId: enrollmentId)
+    marker.turnOn()
     registerObservers()
+  }
+
+  func decline(enrollmentId: String) async throws -> Int {
+    try await lifecycle.decline(enrollmentId: enrollmentId)
+  }
+
+  /// The Health step is done: the first sync starts.
+  func startFirstSync() async throws {
+    try await lifecycle.startFirstSync()
+    await coordinator.trigger(mode: .foreground, force: true)
   }
 
   func syncNow() async {
     await coordinator.trigger(mode: .foreground, force: true)
   }
 
+  /// Disconnects: the key stops being used and the sync state is cleared
+  /// first, then the run and observers stop, then the key is revoked.
   func disconnect() async throws -> Int {
+    try await lifecycle.deactivate()
+    marker.turnOff()
     await coordinator.stop()
     await stopObservers()
-    return try await lifecycle.disconnect()
+    return await lifecycle.revokePending()
   }
 
-  /// The earliest readable weigh-in and run since the cutoff, so the app can
-  /// show what history Health shares with it.
+  /// The earliest readable weigh-in and run since the cutoff, and, where
+  /// Health reports a limited history window, the earliest date it allows.
   func readableHistory() async -> [String: Any] {
     guard let storage = await lifecycle.storage(), let state = try? storage.load() else { return [:] }
     var result: [String: Any] = ["cutoff": state.cutoff.timeIntervalSince1970 * 1000]
@@ -186,19 +218,32 @@ final class SyncService: @unchecked Sendable {
         result["error"] = "health_query_failed"
       }
     }
+    let windows = await source.limitedHistoryStarts()
+    for (kind, start) in windows {
+      result["\(kind.rawValue)AllowedFrom"] = start.timeIntervalSince1970 * 1000
+    }
     return result
   }
 
   // MARK: Status
 
   func status() async -> [String: Any] {
-    let document = (try? await lifecycle.document()) ?? CredentialDocument()
     var status: [String: Any] = [
       "healthAvailable": HKHealthStore.isHealthDataAvailable(),
       "origin": origin.absoluteString,
-      "pendingRevocations": document.pending.count,
       "retryPending": await coordinator.retryPending,
     ]
+    let document: CredentialDocument
+    do {
+      document = try await lifecycle.document()
+    } catch {
+      // The Keychain is locked until the first unlock.
+      status["state"] = "locked"
+      status["pendingRevocations"] = 0
+      return status
+    }
+    status["pendingRevocations"] = document.pending.count
+    status["manualRevocations"] = document.manualRevocations
     guard let active = document.active else {
       status["state"] = document.keyInvalid ? "invalid" : "signedOut"
       return status
@@ -206,6 +251,7 @@ final class SyncService: @unchecked Sendable {
     status["state"] = active.state.rawValue
     status["email"] = active.email
     status["accountTimezone"] = active.accountTimezone
+    if active.state == .consentPending { status["enrollmentId"] = active.enrollmentId }
     guard active.state == .active, let state = try? await lifecycle.storage()?.load() else { return status }
     var totals: [String: Int] = [:]
     for run in state.history {
@@ -219,11 +265,33 @@ final class SyncService: @unchecked Sendable {
     status["counts"] = totals
     status["runsWithoutDistance"] = state.runsWithoutDistance
     status["deferred"] = state.deferred.count
+    status["runsAwaitingDistanceAccess"] = state.deferred.values.filter { $0.reason == .distanceAccess }.count
     status["unreadableRetired"] = state.unreadableRetired
     status["paused"] = Dictionary(uniqueKeysWithValues: state.paused.map { ($0.key.rawValue, $0.value) })
+    status["awaitingHealthStep"] = state.awaitingHealthStep
     status["backfilling"] = !state.incrementalEnabled
     status["backfillStarted"] = state.backfill != nil || state.anchors != nil
     status["backfillThrough"] = state.backfill?.through ?? NSNull()
     return status
+  }
+}
+
+/// A file that records whether sync is on, readable before the first
+/// unlock so launch can register observers. It holds no Health data or key.
+final class SyncMarker: @unchecked Sendable {
+  private let file: URL
+
+  init(directory: URL) { file = directory.appendingPathComponent("sync-enabled") }
+
+  var isOn: Bool { FileManager.default.fileExists(atPath: file.path) }
+
+  func turnOn() {
+    guard !isOn else { return }
+    try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? Data().write(to: file, options: [.atomic, .noFileProtection])
+  }
+
+  func turnOff() {
+    try? FileManager.default.removeItem(at: file)
   }
 }

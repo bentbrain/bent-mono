@@ -8,7 +8,9 @@
  * resource.
  *
  * It runs only when FITNESS_IOS_SIM_PORT is set, until `POST /__stop`.
- * `GET /__state` lists the records the account holds. Start it with
+ * `GET /__state` lists the records the account holds and how many
+ * imports and enrollments the harness received. `POST /__reset` starts
+ * the next flow from an empty account and zero counts. Start it with
  * `apps/fitness-ios/scripts/flows.mjs`.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -37,8 +39,8 @@ const { defaultSettings, settingsId } = await import("../src/domain");
 
 const redirectUri = "build.bent.fitness.dev://oauth";
 
-beforeAll(async () => {
-  if (!configured) return;
+/** A fresh schema, Clerk fake and account settings for one flow. */
+async function prepare() {
   await isolated.create();
   await isolated
     .pool()
@@ -53,6 +55,10 @@ beforeAll(async () => {
     revision: 0,
     data: defaultSettings(today, process.env.FITNESS_IOS_SIM_TIMEZONE ?? "UTC"),
   });
+}
+
+beforeAll(async () => {
+  if (configured) await prepare();
 });
 afterAll(async () => {
   if (configured) await isolated.drop();
@@ -64,6 +70,7 @@ test.skipIf(!configured)(
   "serves the Simulator flows until stopped",
   async () => {
     const grants = new Map<string, Grant>();
+    const requests: Record<string, number> = {};
     let tokens = 0;
     let stop = () => undefined as void;
     const stopped = new Promise<void>((resolve) => {
@@ -77,6 +84,10 @@ test.skipIf(!configured)(
       port,
       async fetch(request) {
         const started = performance.now();
+        const path = new URL(request.url).pathname;
+        if (!path.startsWith("/__"))
+          requests[`${request.method} ${path}`] =
+            (requests[`${request.method} ${path}`] ?? 0) + 1;
         const response = await route(request);
         const ms = Math.round(performance.now() - started);
         console.log(
@@ -165,7 +176,16 @@ test.skipIf(!configured)(
               revoked: k.revoked,
               kind: k.claims?.kind ?? null,
             })),
+            imports: requests["POST /api/health/import"] ?? 0,
+            enrollments: requests["POST /api/health/devices"] ?? 0,
           });
+        }
+        if (request.method === "POST" && path === "/__reset") {
+          await isolated.drop();
+          await prepare();
+          grants.clear();
+          for (const key of Object.keys(requests)) delete requests[key];
+          return new Response(null, { status: 204 });
         }
         if (request.method === "POST" && path === "/__stop") {
           stop();

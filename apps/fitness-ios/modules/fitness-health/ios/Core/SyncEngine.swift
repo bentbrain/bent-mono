@@ -61,6 +61,56 @@ public struct SyncLimits: Sendable {
   public init() {}
 }
 
+/// Lets a run's checkpoint writes stop at once. Closing waits for a write
+/// in progress, and no write starts after it, so a run whose background
+/// time expired can never advance its checkpoint.
+public final class WriteFence: @unchecked Sendable {
+  private let lock = NSLock()
+  private var open = true
+
+  public init() {}
+
+  public var isOpen: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return open
+  }
+
+  public func close() {
+    lock.lock()
+    open = false
+    lock.unlock()
+  }
+
+  /// Runs `body` while the fence is open, holding it open until it ends.
+  func write(_ body: () throws -> Void) throws -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard open else { return false }
+    try body()
+    return true
+  }
+}
+
+/// Facts about the run that decide whether a sample can be sent.
+final class RunContext: @unchecked Sendable {
+  private let lock = NSLock()
+  private var distanceSendable = true
+
+  var sendsRunsWithoutDistance: Bool {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return distanceSendable
+    }
+    set {
+      lock.lock()
+      distanceSendable = newValue
+      lock.unlock()
+    }
+  }
+}
+
 /// One sync run over the persisted state. Every HTTP call and every commit
 /// first checks that the run is still current.
 public struct SyncEngine: Sendable {
@@ -72,11 +122,13 @@ public struct SyncEngine: Sendable {
   let deviceTimeZone: TimeZone
   let limits: SyncLimits
   let now: @Sendable () -> Date
+  let writes: WriteFence
+  let context = RunContext()
 
   public init(
     source: HealthSource, api: FitnessAPI, storage: StateStorage, check: SessionCheck,
     session: SyncSession, deviceTimeZone: TimeZone = .current, limits: SyncLimits = SyncLimits(),
-    now: @escaping @Sendable () -> Date = { Date() }
+    writes: WriteFence = WriteFence(), now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.source = source
     self.api = api
@@ -85,7 +137,15 @@ public struct SyncEngine: Sendable {
     self.session = session
     self.deviceTimeZone = deviceTimeZone
     self.limits = limits
+    self.writes = writes
     self.now = now
+  }
+
+  /// The same engine with another write fence, for one coordinated run.
+  public func fenced(by writes: WriteFence) -> SyncEngine {
+    SyncEngine(
+      source: source, api: api, storage: storage, check: check, session: session,
+      deviceTimeZone: deviceTimeZone, limits: limits, writes: writes, now: now)
   }
 
   // MARK: Run
@@ -95,12 +155,15 @@ public struct SyncEngine: Sendable {
   @discardableResult
   public func run(mode: RunMode, force: Bool = false) async throws -> RunSummary {
     guard var state = try storage.load() else { return RunSummary(at: now()) }
+    // Nothing runs until the Health step starts the first sync.
+    if state.awaitingHealthStep { return RunSummary(at: now()) }
     var counts: [String: Int] = [:]
     if force && !state.paused.isEmpty {
       state.paused = [:]
       try await commit(state)
     }
     do {
+      try await decideRunsWithoutDistance(state)
       if !state.incrementalEnabled {
         // Backfill runs in the foreground, and not while a 400 holds it.
         guard mode == .foreground, state.paused.isEmpty else { return RunSummary(at: now()) }
@@ -142,17 +205,28 @@ public struct SyncEngine: Sendable {
   // MARK: Fencing
 
   private func fence() async throws {
-    if Task.isCancelled { throw RunStop.fenced }
+    if Task.isCancelled || !writes.isOpen { throw RunStop.fenced }
     if !(await check.isCurrent(session)) { throw RunStop.fenced }
+    // The run may have expired while the session was being checked.
+    if Task.isCancelled || !writes.isOpen { throw RunStop.fenced }
   }
 
+  /// Writes the checkpoint if the run is still current. The write happens
+  /// inside the fence, so an expiry either waits for it or prevents it.
   private func commit(_ state: SyncState) async throws {
     try await fence()
+    let written: Bool
     do {
-      try storage.save(state)
+      written = try writes.write {
+        if Task.isCancelled { throw RunStop.fenced }
+        try storage.save(state)
+      }
+    } catch RunStop.fenced {
+      throw RunStop.fenced
     } catch {
       throw RunStop.retry(after: nil, reason: "state_write_failed")
     }
+    if !written { throw RunStop.fenced }
   }
 
   private func read<T: Sendable>(_ body: () async throws -> T) async throws -> T {
@@ -176,16 +250,30 @@ public struct SyncEngine: Sendable {
     case unknown
   }
 
+  /// Whether a sample can be sent now. A run without a distance waits 6
+  /// hours for one; after that it is sent without one only when the app can
+  /// read distance at all, or the user chose to send such runs.
   func eligibility(_ sample: HealthSample, at time: Date) -> Eligibility {
     if sample.start > time { return .deferred(.future) }
     if case let .run(_, _, end, _, distance) = sample {
       switch distance {
       case .unknown: return .unknown
       case .none where end > time.addingTimeInterval(-limits.distanceWait): return .deferred(.awaitingDistance)
+      case .none where !context.sendsRunsWithoutDistance: return .deferred(.distanceAccess)
       default: break
       }
     }
     return .send
+  }
+
+  /// Decides once per run whether runs without a readable distance can be
+  /// sent: when Health shows the app some distance, or the user chose to.
+  private func decideRunsWithoutDistance(_ state: SyncState) async throws {
+    if state.sendRunsWithoutDistance {
+      context.sendsRunsWithoutDistance = true
+      return
+    }
+    context.sendsRunsWithoutDistance = try await read { try await source.distanceReadable() }
   }
 
   // MARK: Upload
@@ -298,6 +386,7 @@ public struct SyncEngine: Sendable {
   private func snapshot(_ state: inout SyncState) async throws {
     var anchors: [SampleKind: Data] = [:]
     var deferred: [String: DeferredItem] = [:]
+    var deleted = Set<String>()
     let time = now()
     for kind in SampleKind.allCases {
       var anchor: Data?
@@ -308,13 +397,20 @@ public struct SyncEngine: Sendable {
         for sample in page.samples where sample.start > time {
           deferred[sample.id.uuidString.lowercased()] = DeferredItem(kind: kind, reason: .future)
         }
+        // A sample deleted on a later page is no longer waiting.
+        for id in page.deleted.map({ $0.uuidString.lowercased() }) {
+          deferred[id] = nil
+          deleted.insert(id)
+        }
         anchor = page.anchor
         if !page.more { break }
       }
       if let anchor { anchors[kind] = anchor }
     }
-    state.backfill = Backfill(
+    var backfill = Backfill(
       cutoff: state.cutoff, snapshotAnchors: anchors, snapshotDeferred: deferred, timezone: state.accountTimezone)
+    backfill.resolved = deleted
+    state.backfill = backfill
     try await commit(state)
   }
 
@@ -477,6 +573,11 @@ public struct SyncEngine: Sendable {
       var send: [HealthSample] = []
       for sample in found.sorted(by: { $0.start < $1.start }) {
         let id = sample.id.uuidString.lowercased()
+        // A sample from before the current cutoff is no longer sent.
+        if sample.start < next.cutoff {
+          next.deferred[id] = nil
+          continue
+        }
         next.deferred[id]?.firstEmptyAt = nil
         switch eligibility(sample, at: time) {
         case .send: send.append(sample)

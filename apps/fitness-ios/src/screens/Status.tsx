@@ -22,6 +22,16 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
     }
   }
 
+  async function sendWithoutDistance() {
+    setSyncing(true);
+    try {
+      await FitnessHealth.sendRunsWithoutDistance();
+    } finally {
+      setSyncing(false);
+      onChange();
+    }
+  }
+
   async function changeHistory(cutoff: number) {
     await FitnessHealth.setCutoff(cutoff);
     onChange();
@@ -61,6 +71,7 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
       <Row
         label={copy.status.lastSync}
         value={formatTime(status.lastSyncAt) ?? copy.status.never}
+        exact={status.lastSyncAt ? String(status.lastSyncAt) : "never"}
         testID="status-last-sync"
       />
       {status.backfilling ? <Body testID="status-backfill">{copy.status.backfill(status.backfillThrough)}</Body> : null}
@@ -79,6 +90,21 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
           {copy.status.waiting(status.deferred)}
         </Body>
       ) : null}
+      {status.runsAwaitingDistanceAccess ? (
+        <>
+          <Notice testID="status-distance-access">
+            {copy.status.distanceAccess(status.runsAwaitingDistanceAccess)}
+          </Notice>
+          <Button
+            label={copy.status.sendWithoutDistance}
+            appearance="outline"
+            onPress={sendWithoutDistance}
+            disabled={syncing}
+            testID="send-without-distance"
+          />
+        </>
+      ) : null}
+      {status.manualRevocations ? <Notice>{copy.status.manualRevocations(status.manualRevocations)}</Notice> : null}
       {status.unreadableRetired ? (
         <Body muted>
           {copy.status.unreadable(status.unreadableRetired)} {copy.settings.resyncHint}

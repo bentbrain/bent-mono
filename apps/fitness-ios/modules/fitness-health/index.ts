@@ -1,7 +1,7 @@
 import { requireNativeModule } from "expo";
 import type { EventSubscription } from "expo";
 
-type KeyState = "signedOut" | "consentPending" | "active" | "invalid";
+type KeyState = "signedOut" | "consentPending" | "active" | "invalid" | "locked";
 
 /** What the native sync service reports. Dates are milliseconds since 1970. */
 export type SyncStatus = {
@@ -26,6 +26,14 @@ export type SyncStatus = {
   /** Whether the first sync has recorded its starting point. */
   backfillStarted?: boolean;
   backfillThrough?: string | null;
+  /** The pending enrollment the consent screen shows; consent and decline name it. */
+  enrollmentId?: string;
+  /** Consent is confirmed and the Health step has not started the first sync. */
+  awaitingHealthStep?: boolean;
+  /** Runs waiting because the app cannot tell whether it may read distance. */
+  runsAwaitingDistanceAccess?: number;
+  /** Keys Fitness would not revoke from the iPhone; revoke them in Fitness. */
+  manualRevocations?: number;
 };
 
 export type EnrollOutcome =
@@ -41,6 +49,9 @@ export type ReadableHistory = {
   cutoff?: number;
   weight?: number | null;
   run?: number | null;
+  /** The earliest date Health lets the app read, where the user shared limited history. */
+  weightAllowedFrom?: number;
+  runAllowedFrom?: number;
   error?: string;
 };
 
@@ -48,8 +59,10 @@ type FitnessHealthNative = {
   healthDataAvailable(): boolean;
   getStatus(): Promise<SyncStatus>;
   enroll(token: string, revokeLater: boolean): Promise<EnrollOutcome>;
-  confirmConsent(cutoffMs: number): Promise<void>;
-  declineConsent(): Promise<number>;
+  confirmConsent(cutoffMs: number, enrollmentId: string): Promise<void>;
+  declineConsent(enrollmentId: string): Promise<number>;
+  startFirstSync(): Promise<SyncStatus>;
+  sendRunsWithoutDistance(): Promise<SyncStatus>;
   requestHealthAccess(): Promise<void>;
   readableHistory(): Promise<ReadableHistory>;
   syncNow(): Promise<SyncStatus>;

@@ -18,6 +18,9 @@ public struct DeviceCredential: Codable, Sendable, Equatable {
   public var state: KeyState
   /// The enrollment sequence of the attempt that issued this key.
   public var sequence: Int
+  /// An opaque ID for this enrollment. Consent and decline name it, so they
+  /// act only on the key whose account the consent screen showed.
+  public var enrollmentId: String
 }
 
 /// A key waiting to be revoked, with the origin it was issued by.
@@ -25,6 +28,15 @@ public struct PendingRevocation: Codable, Sendable, Equatable {
   public var key: String
   public var userId: String
   public var apiOrigin: String
+  /// Not before this time, when Fitness asked the app to wait.
+  public var retryAt: Date?
+
+  public init(key: String, userId: String, apiOrigin: String, retryAt: Date? = nil) {
+    self.key = key
+    self.userId = userId
+    self.apiOrigin = apiOrigin
+    self.retryAt = retryAt
+  }
 }
 
 /// The one credentials item: the current key, keys still to revoke, and the
@@ -36,9 +48,15 @@ public struct CredentialDocument: Codable, Sendable, Equatable {
   public var pending: [PendingRevocation] = []
   /// The highest enrollment sequence this installation has sent.
   public var sequence = 0
+  /// The highest sequence whose successful reply was kept. A success from
+  /// this sequence or a lower one is revoked instead of stored.
+  public var acceptedSequence = 0
   /// Fitness reported the stored key invalid and it was cleared: the app
   /// asks to connect again.
   public var keyInvalid = false
+  /// Keys Fitness refused to revoke from the iPhone because they are not
+  /// device keys. The user revokes them under Manage account → API keys.
+  public var manualRevocations = 0
 
   public init(
     active: DeviceCredential? = nil, pending: [PendingRevocation] = [], sequence: Int = 0, keyInvalid: Bool = false
@@ -52,26 +70,32 @@ public struct CredentialDocument: Codable, Sendable, Equatable {
   /// Moves the current key to the revocation list.
   mutating func retireActive() {
     guard let active else { return }
-    pending.append(PendingRevocation(key: active.key, userId: active.userId, apiOrigin: active.apiOrigin))
+    revokeLater(active)
     self.active = nil
   }
 
-  private enum CodingKeys: String, CodingKey { case active, pending, sequence, keyInvalid }
+  mutating func revokeLater(_ credential: DeviceCredential) {
+    pending.append(PendingRevocation(key: credential.key, userId: credential.userId, apiOrigin: credential.apiOrigin))
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case active, pending, sequence, acceptedSequence, keyInvalid, manualRevocations
+  }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     active = try container.decodeIfPresent(DeviceCredential.self, forKey: .active)
     pending = try container.decodeIfPresent([PendingRevocation].self, forKey: .pending) ?? []
     sequence = try container.decodeIfPresent(Int.self, forKey: .sequence) ?? 0
+    acceptedSequence = try container.decodeIfPresent(Int.self, forKey: .acceptedSequence) ?? 0
     keyInvalid = try container.decodeIfPresent(Bool.self, forKey: .keyInvalid) ?? false
-  }
-
-  mutating func revokeLater(_ credential: DeviceCredential) {
-    pending.append(PendingRevocation(key: credential.key, userId: credential.userId, apiOrigin: credential.apiOrigin))
+    manualRevocations = try container.decodeIfPresent(Int.self, forKey: .manualRevocations) ?? 0
   }
 }
 
-/// The Keychain in the app, memory in tests.
+/// The Keychain in the app, memory in tests. Reads and writes throw
+/// `HealthAccessError.protectedDataUnavailable` while the device is locked
+/// before its first unlock, which is not the same as having no credential.
 public protocol CredentialStore: Sendable {
   func installationId() throws -> UUID
   func load() throws -> CredentialDocument
@@ -96,42 +120,59 @@ public enum EnrollOutcome: Sendable, Equatable {
   case failed(EnrollAction)
 }
 
-/// Connects, confirms, disconnects and revokes. Disconnecting, declining and
-/// changing account bump the generation, and every step that waited
-/// rechecks it before it writes. Enrollment attempts are ordered by their
-/// sequence instead: of the successful replies, the one with the highest
-/// sequence is kept, and a lower one never replaces it.
+public enum LifecycleError: Error, Equatable {
+  /// Consent or decline named an enrollment that is no longer pending.
+  case enrollmentChanged
+}
+
+/// Connects, confirms, disconnects and revokes.
+///
+/// Two counters order the work. `cancellation` changes only when the user
+/// disconnects or declines; an enrollment that was running then is revoked.
+/// Enrollment attempts are ordered by their sequence instead: of the
+/// successful replies, the one with the highest sequence is kept, and a
+/// lower one never replaces it. `generation` changes whenever the key or the
+/// sync state changes, and fences sync runs that started before.
 public actor DeviceLifecycle {
   private let credentials: CredentialStore
   private let states: StateDirectory
   private let origin: URL
   private let makeAPI: @Sendable (URL) -> FitnessAPI?
   private let deviceName: @Sendable () async -> String
+  private let now: @Sendable () -> Date
   private var generation = 0
+  private var cancellation = 0
 
   public init(
     credentials: CredentialStore, states: StateDirectory, origin: URL,
     deviceName: @escaping @Sendable () async -> String,
-    makeAPI: @escaping @Sendable (URL) -> FitnessAPI?
+    makeAPI: @escaping @Sendable (URL) -> FitnessAPI?,
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.credentials = credentials
     self.states = states
     self.origin = origin
     self.deviceName = deviceName
     self.makeAPI = makeAPI
+    self.now = now
   }
 
   // MARK: Reading
 
   public func document() throws -> CredentialDocument { try credentials.load() }
 
-  /// The session sync runs with: an active key for this build's origin.
-  public func session() -> SyncSession? {
-    guard let active = try? credentials.load().active, active.state == .active,
+  /// The session sync runs with: an active key for this build's origin, or
+  /// nil without one. Throws while the Keychain is locked, so the caller
+  /// keeps its state and retries after the unlock.
+  public func currentSession() throws -> SyncSession? {
+    guard let active = try credentials.load().active, active.state == .active,
       active.apiOrigin == origin.absoluteString
     else { return nil }
     return SyncSession(key: active.key, generation: generation)
   }
+
+  /// The session, or nil when there is none or the Keychain is locked.
+  public func session() -> SyncSession? { try? currentSession() }
 
   public func isCurrent(_ session: SyncSession) -> Bool {
     session.generation == generation && self.session()?.key == session.key
@@ -150,7 +191,7 @@ public actor DeviceLifecycle {
   public func enroll(token: String, revokeLater: Bool) async throws -> EnrollOutcome {
     let remaining = await revokePending()
     if remaining > 0 && !revokeLater { return .pendingRevocations(remaining) }
-    let attempt = generation
+    let started = cancellation
     guard let api = makeAPI(origin) else { return .failed(.bug("The Fitness origin is not valid.")) }
     let name = DeviceName.clean(await deviceName())
     let sequence = try nextSequence()
@@ -162,12 +203,10 @@ public actor DeviceLifecycle {
     let credential = DeviceCredential(
       key: response.secret, userId: response.userId, email: response.email,
       apiOrigin: origin.absoluteString, accountTimezone: response.accountTimezone, state: .consentPending,
-      sequence: sequence)
-    // A disconnect, a declined consent or an account change while this
-    // attempt ran, or a stored key from a higher sequence, wins: this key
-    // is revoked, never stored.
-    let outranked = document.active.map { $0.sequence > sequence } ?? false
-    guard attempt == generation, !outranked else {
+      sequence: sequence, enrollmentId: UUID().uuidString.lowercased())
+    // A disconnect or a declined consent while this attempt ran, or a kept
+    // success from a higher sequence, wins: this key is revoked, never stored.
+    guard started == cancellation, sequence > document.acceptedSequence else {
       document.revokeLater(credential)
       try credentials.save(document)
       _ = await revokePending()
@@ -175,6 +214,7 @@ public actor DeviceLifecycle {
     }
     document.retireActive()
     document.active = credential
+    document.acceptedSequence = sequence
     document.keyInvalid = false
     try credentials.save(document)
     generation += 1
@@ -190,15 +230,17 @@ public actor DeviceLifecycle {
     return document.sequence
   }
 
-  /// Confirms consent: the key becomes active with the chosen cutoff.
-  public func confirm(cutoff: Date) throws -> DeviceCredential? {
+  /// Confirms consent for the enrollment the consent screen showed: its key
+  /// becomes active with the chosen cutoff. The first sync waits for the
+  /// Health step (`startFirstSync`).
+  public func confirm(cutoff: Date, enrollmentId: String) throws -> DeviceCredential {
     var document = try credentials.load()
-    guard var active = document.active, active.state == .consentPending else { return nil }
+    guard var active = document.active, active.state == .consentPending, active.enrollmentId == enrollmentId
+    else { throw LifecycleError.enrollmentChanged }
     active.state = .active
     let storage = states.storage(for: active)
-    var state = (try? storage.load()) ?? SyncState(cutoff: cutoff, accountTimezone: active.accountTimezone)
-    state.cutoff = cutoff
-    state.earliestCutoff = min(state.earliestCutoff, cutoff)
+    var state = SyncState(cutoff: cutoff, accountTimezone: active.accountTimezone)
+    state.awaitingHealthStep = true
     try storage.save(state)
     document.active = active
     try credentials.save(document)
@@ -206,20 +248,35 @@ public actor DeviceLifecycle {
     return active
   }
 
-  /// Declines consent: the key is revoked without reading any Health data.
-  public func decline() async throws -> Int {
-    try retire()
+  /// Lets the first sync start, after the Health step asked for access.
+  public func startFirstSync() throws {
+    guard let storage = storage(), var state = try storage.load(), state.awaitingHealthStep else { return }
+    state.awaitingHealthStep = false
+    try storage.save(state)
+  }
+
+  /// Declines consent for the enrollment the consent screen showed: its key
+  /// is revoked without reading any Health data.
+  public func decline(enrollmentId: String) async throws -> Int {
+    let document = try credentials.load()
+    guard let active = document.active, active.state == .consentPending, active.enrollmentId == enrollmentId
+    else { throw LifecycleError.enrollmentChanged }
+    try deactivate()
     return await revokePending()
   }
 
   /// Disconnects. The key is moved to the revocation list and the sync
   /// state cleared before this returns; revocation is then attempted.
   public func disconnect() async throws -> Int {
-    try retire()
+    try deactivate()
     return await revokePending()
   }
 
-  private func retire() throws {
+  /// Stops using the current key: it moves to the revocation list and the
+  /// sync state is cleared, in that order, before anything else stops.
+  /// Enrollments running now are revoked when they reply.
+  public func deactivate() throws {
+    cancellation += 1
     generation += 1
     var document = try credentials.load()
     document.retireActive()
@@ -230,14 +287,17 @@ public actor DeviceLifecycle {
   /// Fitness reported this key invalid during an upload. If it is still the
   /// stored key, it is cleared, and the app asks to connect again, which
   /// sends a higher sequence. This also recovers when a higher sequence's
-  /// key replaced it on the server and that reply was lost.
-  public func markInvalid(_ session: SyncSession) throws {
+  /// key replaced it on the server and that reply was lost. Returns whether
+  /// the stored key was cleared.
+  @discardableResult
+  public func markInvalid(_ session: SyncSession) throws -> Bool {
     var document = try credentials.load()
-    guard document.active?.key == session.key else { return }
+    guard document.active?.key == session.key else { return false }
     document.active = nil
     document.keyInvalid = true
     try credentials.save(document)
     generation += 1
+    return true
   }
 
   /// Finishes a disconnect interrupted by a crash: sync state for anything
@@ -247,52 +307,67 @@ public actor DeviceLifecycle {
     try states.clear(keeping: document.active?.state == .active ? document.active : nil)
   }
 
-  /// Tries to revoke each pending key with its own origin. Returns how many
-  /// remain.
+  /// Tries to revoke each pending key with its own origin, skipping keys
+  /// Fitness asked to wait for. Returns how many remain.
   @discardableResult
   public func revokePending() async -> Int {
     guard let document = try? credentials.load() else { return 0 }
+    let time = now()
     var done = Set<String>()
+    var refused = Set<String>()
+    var waits: [String: Date] = [:]
     for pending in document.pending {
+      if let retryAt = pending.retryAt, retryAt > time { continue }
       guard let url = URL(string: pending.apiOrigin), let api = makeAPI(url) else {
         done.insert(pending.key)
         continue
       }
       switch await api.revoke(key: pending.key) {
-      case .done, .alreadyInvalid, .notDeviceKey: done.insert(pending.key)
-      case .retry: break
+      case .done, .alreadyInvalid: done.insert(pending.key)
+      case .notDeviceKey: refused.insert(pending.key)
+      case let .retry(after): if let after { waits[pending.key] = time.addingTimeInterval(after) }
       }
     }
-    guard !done.isEmpty, var latest = try? credentials.load() else { return document.pending.count }
-    latest.pending.removeAll { done.contains($0.key) }
+    guard !done.isEmpty || !refused.isEmpty || !waits.isEmpty, var latest = try? credentials.load() else {
+      return document.pending.count
+    }
+    latest.pending.removeAll { done.contains($0.key) || refused.contains($0.key) }
+    latest.manualRevocations += refused.count
+    for index in latest.pending.indices {
+      if let retryAt = waits[latest.pending[index].key] { latest.pending[index].retryAt = retryAt }
+    }
     try? credentials.save(latest)
     return latest.pending.count
   }
 
   /// Resync from the earliest cutoff: a fresh backfill with a new snapshot.
   public func resyncFromEarliest() throws {
-    guard let storage = storage(), var state = try storage.load() else { return }
-    let accountTimezone = state.accountTimezone
-    let earliest = state.earliestCutoff
-    let history = state.history
-    state = SyncState(cutoff: earliest, accountTimezone: accountTimezone)
-    state.history = history
+    guard let storage = storage(), let state = try storage.load() else { return }
+    try rebuild(storage, from: state, cutoff: state.earliestCutoff)
+  }
+
+  /// Moves the cutoff. The snapshot and anchors are rebuilt from it, which
+  /// stops a backfill in progress, so a later cutoff leaves out history the
+  /// earlier snapshot covered.
+  public func setCutoff(_ cutoff: Date) throws {
+    guard let storage = storage(), let state = try storage.load() else { return }
+    try rebuild(storage, from: state, cutoff: cutoff)
+  }
+
+  private func rebuild(_ storage: StateStorage, from old: SyncState, cutoff: Date) throws {
+    var state = SyncState(cutoff: cutoff, accountTimezone: old.accountTimezone)
+    state.earliestCutoff = min(old.earliestCutoff, cutoff)
+    state.history = old.history
+    state.lastSyncAt = old.lastSyncAt
+    state.sendRunsWithoutDistance = old.sendRunsWithoutDistance
     try storage.save(state)
     generation += 1
   }
 
-  /// Moves the cutoff. An earlier cutoff reruns backfill from it.
-  public func setCutoff(_ cutoff: Date) throws {
+  /// Lets runs that waited for distance access be sent without a distance.
+  public func sendRunsWithoutDistance() throws {
     guard let storage = storage(), var state = try storage.load() else { return }
-    if cutoff < state.cutoff {
-      let history = state.history
-      let earliest = min(state.earliestCutoff, cutoff)
-      state = SyncState(cutoff: cutoff, accountTimezone: state.accountTimezone)
-      state.earliestCutoff = earliest
-      state.history = history
-    } else {
-      state.cutoff = cutoff
-    }
+    state.sendRunsWithoutDistance = true
     try storage.save(state)
     generation += 1
   }

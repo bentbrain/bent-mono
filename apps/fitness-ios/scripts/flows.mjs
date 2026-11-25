@@ -54,6 +54,19 @@ async function waitForHarness() {
   throw new Error("The harness did not start.");
 }
 
+// The harness closes idle connections while a flow runs, so a request can
+// meet a closed socket; it is sent again on a new connection.
+async function post(path) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fetch(`${origin}${path}`, { method: "POST" });
+    } catch (error) {
+      if (i === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+}
+
 function newSimulator() {
   const runtime = JSON.parse(output("xcrun", ["simctl", "list", "runtimes", "available", "-j"]))
     .runtimes.filter((r) => r.platform === "iOS")
@@ -93,6 +106,7 @@ try {
   const flows = (process.argv[2] ? [process.argv[2]] : null) ?? [
     "testDeniedHealthAccessSendsNothing",
     "testAllowedHealthAccessSyncsTheSeededHistory",
+    "testPartialHealthAccessHoldsRunsWithoutDistance",
   ];
   // A flow that fails runs once more on a new Simulator: a newly booted
   // Simulator can time out launching an app. Both attempts are logged.
@@ -147,13 +161,20 @@ try {
       removeSimulator(udid);
     }
   };
+  // Each attempt starts from an empty account and zero request counts.
+  const reset = async () => {
+    const response = await post("/__reset");
+    if (!response.ok) throw new Error(`The harness reset answered ${response.status}.`);
+  };
   for (const flow of flows) {
+    await reset();
     if (attempt(flow, 1)) continue;
     console.error(`${flow} failed; running it again on a new Simulator.`);
+    await reset();
     if (!attempt(flow, 2)) failed = true;
   }
 } finally {
-  await fetch(`${origin}/__stop`, { method: "POST" }).catch(() => undefined);
+  await post("/__stop").catch(() => harness.kill());
   await new Promise((resolve) => harness.on("exit", resolve));
 }
 if (failed) process.exit(1);

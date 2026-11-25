@@ -283,7 +283,7 @@ jobs:
   fitness-ios-native:
     name: fitness-ios-native
     runs-on: macos-26
-    timeout-minutes: 75
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: apps/fitness-ios

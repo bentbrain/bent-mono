@@ -77,8 +77,9 @@ final class KeychainCredentials: CredentialStore, @unchecked Sendable {
 }
 
 /// Sync state files under Application Support/sync/<namespace>/, one
-/// namespace per account and origin, excluded from backups and readable
-/// after the first unlock.
+/// namespace per account and origin. The directories are excluded from
+/// backups before the first write, and each file is written with protection
+/// until the first unlock already applied.
 final class SyncStateFiles: StateDirectory, @unchecked Sendable {
   let root: URL
 
@@ -97,28 +98,45 @@ final class SyncStateFiles: StateDirectory, @unchecked Sendable {
 
   func storage(for credential: DeviceCredential) -> StateStorage {
     let directory = root.appendingPathComponent(Self.namespace(credential), isDirectory: true)
-    return FileStateStorage(directory: directory) { file in try Self.protect(file) }
+    let root = self.root
+    return FileStateStorage(
+      directory: directory,
+      protection: FileProtection(
+        writeOptions: [.atomic, .completeFileProtectionUntilFirstUserAuthentication],
+        prepareDirectory: { directory in
+          try Self.excludeFromBackup(root)
+          try Self.excludeFromBackup(directory)
+        },
+        verify: { file in
+          let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+          let protection = attributes[.protectionKey] as? FileProtectionType
+          guard protection == nil || protection == .completeUntilFirstUserAuthentication else {
+            throw CocoaError(.fileWriteNoPermission)
+          }
+          try Self.excludeFromBackup(file.deletingLastPathComponent())
+        }))
   }
 
-  /// Applies file protection after each atomic replace, and checks that the
-  /// directories are excluded from backups.
-  static func protect(_ file: URL) throws {
-    try FileManager.default.setAttributes(
-      [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: file.path)
-    var directory = file.deletingLastPathComponent()
-    for _ in 0..<2 {
-      var values = URLResourceValues()
-      values.isExcludedFromBackup = true
-      try directory.setResourceValues(values)
-      let check = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
-      guard check.isExcludedFromBackup == true else { throw CocoaError(.fileWriteUnknown) }
-      directory = directory.deletingLastPathComponent()
-    }
+  /// Excludes a directory from backups and checks that it is.
+  static func excludeFromBackup(_ directory: URL) throws {
+    var url = directory
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try url.setResourceValues(values)
+    let check = try url.resourceValues(forKeys: [.isExcludedFromBackupKey])
+    guard check.isExcludedFromBackup == true else { throw CocoaError(.fileWriteUnknown) }
   }
 
+  /// Removes every account's state but `credential`'s. A missing directory
+  /// is fine; any other failure throws.
   func clear(keeping credential: DeviceCredential?) throws {
     let keep = credential.map(Self.namespace)
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return }
+    let names: [String]
+    do {
+      names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+    } catch CocoaError.fileReadNoSuchFile {
+      return
+    }
     for name in names where name != keep {
       try FileManager.default.removeItem(at: root.appendingPathComponent(name))
     }

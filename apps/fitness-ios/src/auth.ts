@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { getRandomBytes } from "expo-crypto";
 import { AuthRequest, CodeChallengeMethod, ResponseType, exchangeCodeAsync } from "expo-auth-session";
 import { SignInCancelled } from "./logic/connect";
+import type { SignedIn } from "./logic/connect";
 
 type OAuthSettings = {
   issuer: string;
@@ -23,10 +24,10 @@ function randomState() {
 
 /**
  * Signs in with Clerk in a private browser session using PKCE (S256), and
- * returns the access token for the Fitness resource. The token stays in
- * memory and is used once to connect this iPhone.
+ * returns the access token for the Fitness resource and when it expires.
+ * The token stays in memory and is used once to connect this iPhone.
  */
-export async function authorize(settings: OAuthSettings): Promise<string> {
+export async function authorize(settings: OAuthSettings): Promise<SignedIn> {
   const discovery = {
     authorizationEndpoint: `${settings.issuer}/oauth/authorize`,
     tokenEndpoint: `${settings.issuer}/oauth/token`,
@@ -55,5 +56,6 @@ export async function authorize(settings: OAuthSettings): Promise<string> {
     },
     discovery,
   );
-  return tokens.accessToken;
+  const expiresAt = tokens.expiresIn ? (tokens.issuedAt + tokens.expiresIn) * 1000 : null;
+  return { token: tokens.accessToken, expiresAt };
 }
