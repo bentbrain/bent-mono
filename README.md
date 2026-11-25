@@ -7,7 +7,7 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 | Website | bent.build, www.bent.build | apps/www |
 | Blog | jp.bent.build | apps/jp |
 | Stay guide | stay.bent.build | apps/stay |
-| Feedback toolbar | toolbar.bent.build | apps/toolbar |
+| Feedback toolbar | toolbar.bent.build | [apps/toolbar](apps/toolbar/README.md) |
 | Collage | maya-collage.bent.build, maya-collages.bent.build | apps/collage |
 | Drive | drive.bent.build, tesla.bent.build | products/drive/apps/web |
 | Home | home.bent.build | apps/home |

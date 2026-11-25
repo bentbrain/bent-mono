@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { projectSchema } from '../src/shared/models.js';
 import { test, expect } from './fixtures.js';
 
+const sourceUrl = 'https://github.com/bentbrain/bent-mono/tree/main/apps/toolbar';
+
 test.use({ hasTouch: true });
 
 test('element selection leaves the mobile page exposed and restores the composer', async ({
@@ -39,6 +41,7 @@ test('element selection leaves the mobile page exposed and restores the composer
   const frame = page.frames().find((frame) => frame.url().includes('/toolbar?'));
   if (!frame) throw new Error('Toolbar missing');
   await frame.getByRole('button', { name: 'Feedback', exact: false }).click();
+  await expect(frame.getByRole('link', { name: 'Source on GitHub' })).toHaveCount(0);
   await page.evaluate(() => {
     const target = document.createElement('button');
     target.id = 'mobile-selection-target';
@@ -112,6 +115,7 @@ test('project setup and navigation stay reachable on short touch screens', async
   ).toBe(200);
   await page.goto('/');
   await page.getByRole('button', { name: 'Create your first project' }).click();
+  await expect(page.getByRole('link', { name: 'Source on GitHub' })).toHaveCount(0);
   const dialog = page.getByRole('dialog', { name: 'New project' });
   await expect(dialog).toBeVisible();
   await expect
@@ -155,7 +159,9 @@ test('project setup and navigation stay reachable on short touch screens', async
   await expect(page.getByRole('heading', { name: 'Account security', exact: true })).toBeVisible();
 });
 
-test('GitHub sign-in fits a small phone in both appearances', async ({ page }) => {
+test('GitHub sign-in and the source link fit a small phone in both appearances', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.route('**/api/config', (route) =>
     route.fulfill({
@@ -167,12 +173,38 @@ test('GitHub sign-in fits a small phone in both appearances', async ({ page }) =
       },
     }),
   );
-  await page.goto('/');
+  const source = page.getByRole('link', { name: 'Source on GitHub', exact: true });
   const colorSchemes: ('light' | 'dark')[] = ['light', 'dark'];
-  for (const colorScheme of colorSchemes) {
-    await page.emulateMedia({ colorScheme });
-    await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toBeInViewport();
-    expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBe(0);
+  for (const path of ['/', '/auth', '/install']) {
+    await page.goto(path);
+    await expect(source).toHaveAttribute('href', sourceUrl);
+    await expect(source.locator('svg')).toBeVisible();
+    for (const colorScheme of colorSchemes) {
+      await page.emulateMedia({ colorScheme });
+      await expect(page.getByRole('button', { name: 'Continue with GitHub' })).toBeInViewport();
+      await expect(source).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBe(
+        0,
+      );
+    }
+  }
+});
+
+test('the public example keeps its source link visible without a session', async ({
+  page,
+  baseURL,
+}) => {
+  if (!baseURL) throw new Error('Missing fixture origin');
+  const example = new URL(baseURL);
+  example.port = String(Number(example.port) + 1);
+  await page.goto(example.href);
+  const source = page.getByRole('link', { name: 'Source on GitHub', exact: true });
+  await expect(source).toHaveAttribute('href', sourceUrl);
+  await expect(source.locator('svg')).toBeVisible();
+  for (const width of [320, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(source).toBeInViewport({ ratio: 1 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   }
 });
 

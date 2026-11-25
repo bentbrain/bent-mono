@@ -1,10 +1,15 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
-
 # feedback-toolbar
 
-An open-source website feedback toolbar for people and their coding agents. Select an element, start a thread, reply or react, and send an explicit work request to a local agent. Results return to the thread for human review.
+Feedback Toolbar lets you start a thread on a website element and send it to a coding agent.
 
-The embed works with any framework. A small JavaScript loader mounts a separate-origin iframe inside a closed shadow root. Tailwind, shadcn components, and Base UI render inside that iframe, independently of the website's styles and authentication.
+[Open the hosted example website](https://toolbar.bent.build/example). To try the toolbar there, sign in to the feedback service, add the example's origin to your project, and open it from Installation.
+
+<a href="assets/toolbar-demo.gif"><img src="assets/toolbar-demo.gif" width="720" alt="37-second demo showing element selection, a feedback thread and reply, and a result from a local test runner."></a>
+
+- A JavaScript loader mounts a cross-origin iframe inside a closed shadow root, keeping the toolbar's styles separate from the host page.
+- The feedback service handles sign-in and project membership independently of the host website. Toolbar tokens stay on the service origin.
+- Element capture skips form values and editable text, blocks private regions, and lets marked regions remain selectable with their text and labels redacted.
+- When a project owner sends a thread to an agent, the service freezes a copy. A local runner can claim the request through MCP and post a result to the thread for review.
 
 ## Install on a website
 
@@ -18,7 +23,7 @@ The toolbar stays hidden until an authenticated project member is detected. On w
 
 The project ID is public. No service credentials or model API keys belong in this script. The website and feedback service must have different origins. Public website origins require HTTPS; localhost HTTP works for development.
 
-For a JavaScript application, install this repository as a package and mount the module after the page loads:
+For an application in this monorepo, build `apps/toolbar`, add `feedback-toolbar` as a workspace dependency, and mount the module after the page loads:
 
 ```ts
 import { mountFeedback } from 'feedback-toolbar';
@@ -33,7 +38,7 @@ const toolbar = mountFeedback({
 toolbar.destroy();
 ```
 
-Build the package from this repository or install a reviewed GitHub commit. HTML integration needs only the hosted script.
+HTML integration needs only the hosted script.
 
 Add `data-feedback-id="hero-cta"` to important elements to keep anchors stable across deployments. The selector, bounded element text, viewport, URL, and deployment reference accompany the comment. The loader excludes form values, editable content including inherited editing contexts, and elements marked `data-feedback-private`; the service strips URL queries and fragments. Use `data-feedback-redact` on regions whose elements should remain selectable while their text and accessible labels are withheld. Descendants inherit that redaction, and selecting an ancestor excludes the region's text. Form fields and editable children within these regions also support feedback pins and reopening their anchors without capturing their contents. Keep `data-feedback-private` alongside `data-feedback-redact` when supporting older embeds: new embeds allow redacted selection, while older embeds continue to block the region entirely. Nested elements marked only `data-feedback-private` remain blocked.
 
@@ -43,10 +48,13 @@ Toggle pins to show up to 256 loaded, open threads on the current page. Feedback
 
 ## Agent-assisted setup
 
-Requires Node 24 or newer and Bun 1.3.14. Use WSL on Windows for the CLI's secure file operations.
+Use Node 24 and Bun 1.4.4. Use WSL on Windows for the CLI's secure file operations.
+
+From the repository root:
 
 ```sh
 bun install --frozen-lockfile
+cd apps/toolbar
 bun run build
 node dist/cli.js login --server https://YOUR-FEEDBACK-SERVICE
 node dist/cli.js init --name "My website" --origin https://example.com --json
