@@ -9,13 +9,13 @@
 //   node scripts/native.mjs artifact            check the app's entitlements and Info.plist
 //   node scripts/native.mjs lint                run SwiftLint
 //   node scripts/native.mjs flows [filter]      run the Simulator flows on a new Simulator
-//   node scripts/native.mjs touch-sources       mark first-party Swift as changed, so the
-//                                               next build compiles it again
+//   node scripts/native.mjs replay-swift        compile the first-party Swift again from
+//                                               the build logs, for CodeQL
 //
 // Build output goes to NATIVE_BUILD_DIR, or a directory under the system
 // temporary directory, never into the repository.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,41 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 const output = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", cwd: app, ...options });
+
+/** Runs xcodebuild, printing its output and keeping a copy in `log`. */
+function xcodebuild(args, log, options = {}) {
+  console.log(`$ xcodebuild ${args.join(" ")}`);
+  const result = spawnSync("xcodebuild", args, {
+    cwd: app,
+    ...options,
+    stdio: ["ignore", "pipe", "inherit"],
+    maxBuffer: 1024 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  process.stdout.write(result.stdout);
+  writeFileSync(log, result.stdout);
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+/**
+ * The Swift compile commands a build log shows for the given targets, for
+ * the arm64 slice: each target's working directory and its swiftc command,
+ * exactly as Xcode ran them.
+ */
+function swiftCommands(log, targets) {
+  const lines = readFileSync(log, "utf8").split("\n");
+  const commands = [];
+  for (const [i, line] of lines.entries()) {
+    const target = /^SwiftDriver (\S+) normal arm64 /.exec(line)?.[1];
+    if (!target || !targets.includes(target)) continue;
+    const cd = lines[i + 1]?.trim();
+    const driver = lines[i + 2]?.trim();
+    if (!cd?.startsWith("cd ") || !driver?.startsWith("builtin-SwiftDriver -- "))
+      throw new Error(`Unexpected compile entry for ${target} in ${log}.`);
+    commands.push({ target, cd: cd.slice(3), command: driver.slice("builtin-SwiftDriver -- ".length) });
+  }
+  return commands;
+}
 
 /** Extra xcodebuild settings, such as CodeQL's, from XCODEBUILD_SETTINGS. */
 const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filter(Boolean);
@@ -71,28 +106,30 @@ const commands = {
 
   build() {
     mkdirSync(buildDir, { recursive: true });
-    run("xcodebuild", [
-      "-workspace",
-      `ios/${project()}.xcworkspace`,
-      "-scheme",
-      project(),
-      "-configuration",
-      "Release",
-      "-sdk",
-      "iphonesimulator",
-      "-destination",
-      "generic/platform=iOS Simulator",
-      "-derivedDataPath",
-      derived,
-      ...extraSettings,
-      "build",
-    ]);
+    xcodebuild(
+      [
+        "-workspace",
+        `ios/${project()}.xcworkspace`,
+        "-scheme",
+        project(),
+        "-configuration",
+        "Release",
+        "-sdk",
+        "iphonesimulator",
+        "-destination",
+        "generic/platform=iOS Simulator",
+        "-derivedDataPath",
+        derived,
+        ...extraSettings,
+        "build",
+      ],
+      join(buildDir, "app-build.log"),
+    );
   },
 
   seeder() {
     mkdirSync(buildDir, { recursive: true });
-    run(
-      "xcodebuild",
+    xcodebuild(
       [
         "-project",
         "HealthSeed.xcodeproj",
@@ -109,33 +146,29 @@ const commands = {
         ...extraSettings,
         "build-for-testing",
       ],
+      join(buildDir, "seeder-build.log"),
       { cwd: seeder },
     );
   },
 
   /**
-   * Updates the modification time of every tracked Swift file and of each
-   * Swift file the app target compiles, including generated ones, so the
-   * next build recompiles them while reusing third-party build products.
+   * Runs again, for the arm64 slice, the Swift compile commands of the
+   * first-party targets from the last app and seeder builds: the app target
+   * with the Swift prebuild generates, the fitness-health module, the seeder
+   * and its UI tests. CodeQL traces this instead of a whole Xcode build.
    */
-  "touch-sources"() {
-    const tracked = output("git", ["ls-files", "*.swift"])
-      .split("\n")
-      .filter(Boolean)
-      .map((f) => join(app, f));
-    const lists = output("find", [join(derived, "Build/Intermediates.noindex"), "-name", "*.SwiftFileList"])
-      .split("\n")
-      .filter((list) => /\/(FitnessSync(?:Dev)?)\.build\/.*\/\1\.SwiftFileList$/.test(list));
-    const generated = lists.flatMap((list) =>
-      output("cat", [list])
-        .split("\n")
-        .map((line) => line.trim().replace(/\\(.)/g, "$1"))
-        .filter(Boolean),
-    );
-    const files = [...new Set([...tracked, ...generated])];
-    const now = new Date();
-    for (const file of files) utimesSync(file, now, now);
-    console.log(`Marked ${files.length} Swift files as changed.`);
+  "replay-swift"() {
+    const app = swiftCommands(join(buildDir, "app-build.log"), ["FitnessHealth", project()]);
+    const tools = swiftCommands(join(buildDir, "seeder-build.log"), ["HealthSeed", "SimulatorFlows"]);
+    const targets = [...app, ...tools];
+    const expected = ["FitnessHealth", project(), "HealthSeed", "SimulatorFlows"];
+    const missing = expected.filter((target) => !targets.some((entry) => entry.target === target));
+    if (missing.length) throw new Error(`No compile commands for ${missing.join(", ")}. Build from clean first.`);
+    for (const entry of targets) {
+      console.log(`Compiling ${entry.target} again for extraction.`);
+      const result = spawnSync("/bin/sh", ["-c", `cd ${entry.cd} && ${entry.command}`], { stdio: "inherit" });
+      if (result.status !== 0) process.exit(result.status ?? 1);
+    }
   },
 
   "core-build"() {

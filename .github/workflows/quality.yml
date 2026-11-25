@@ -376,14 +376,15 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           node scripts/native.mjs xcode 26.6
       - uses: ./.github/actions/setup
-      - name: Generate the production native project and build its dependencies
+      - name: Build the production app and the seeder
         working-directory: apps/fitness-ios
+        env:
+          XCODEBUILD_SETTINGS: CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
         run: |
           node scripts/native.mjs prebuild
-          # Third-party pods build before tracing starts. The traced build
-          # below compiles every first-party Swift file again.
-          XCODEBUILD_SETTINGS="CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO" node scripts/native.mjs build
-          node scripts/native.mjs touch-sources
+          node scripts/native.mjs build
+          node scripts/native.mjs seeder
+          node scripts/native.mjs artifact
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
         env:
@@ -403,15 +404,16 @@ jobs:
           languages: swift
           build-mode: manual
           queries: security-extended,security-and-quality
-      - name: Build the app, the seeder and the XCTest targets
+      # Traced, every process runs under Rosetta, and an Xcode build of the
+      # app takes over an hour. The trace covers Xcode's own logged compile
+      # commands for each first-party target, and the module's Swift package
+      # with its XCTest targets. The extraction check below confirms that
+      # every first-party Swift file was extracted.
+      - name: Compile the first-party Swift for extraction
         working-directory: apps/fitness-ios
-        env:
-          XCODEBUILD_SETTINGS: CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
         run: |
-          time node scripts/native.mjs build
-          time node scripts/native.mjs seeder
+          time node scripts/native.mjs replay-swift
           time node scripts/native.mjs core-build
-          node scripts/native.mjs artifact
       - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:
           category: fitness-codeql-swift
