@@ -68,8 +68,6 @@ const deviceLimits = {
   bytes: 4096,
   /** Seconds a client waits before retrying while another enrollment runs. */
   busySeconds: 10,
-  /** Seconds an issuance lease lasts, well past the deadline. */
-  leaseSeconds: 90,
   /** Milliseconds a ready result is reused for. */
   readyMs: 30_000,
   /** Milliseconds a not-ready result is reused for, so a migration shows soon. */
@@ -83,6 +81,8 @@ const deviceLimits = {
  * creating the key.
  */
 const timing = {
+  /** Seconds an issuance lease lasts, well past the deadline. */
+  leaseSeconds: 90,
   clerkMs: 10_000,
   deadlineMs: 45_000,
   cleanupMs: 10_000,
@@ -429,7 +429,14 @@ export async function handleDeviceEnroll(request: Request) {
   }
   const { bearer } = check;
   const userId = bearer.userId;
-  if (bearer.tokenType !== "oauth_token" || !userId?.startsWith("user_"))
+  // Clerk's verified ID for the token, its jti for a JWT, identifies it
+  // however its string is encoded, so it is what an enrollment uses up.
+  const tokenId = bearer.id;
+  if (
+    bearer.tokenType !== "oauth_token" ||
+    !userId?.startsWith("user_") ||
+    !tokenId
+  )
     return signIn();
   if (!bearer.scopes.includes(fitnessScopes.healthEnroll))
     return failure(
@@ -489,9 +496,10 @@ export async function handleDeviceEnroll(request: Request) {
   try {
     issued = await withDeviceLease(
       userId,
-      deviceLimits.leaseSeconds,
+      timing.leaseSeconds,
       async (sql, lease): Promise<Issued> => {
-        if (await enrollmentTokenUsed(sql, digest)) return refuse(tokenUsed());
+        if (await enrollmentTokenUsed(sql, { id: tokenId, digest }))
+          return refuse(tokenUsed());
         await settlePendingEnrollments(sql, lease);
 
         // Each active key on its own, so a changing list cannot hide one.
@@ -561,6 +569,7 @@ export async function handleDeviceEnroll(request: Request) {
         // The token is used from here on, whatever happens next.
         if (
           !(await recordEnrollment(sql, lease, {
+            tokenId,
             digest,
             attemptId,
             installationId,
@@ -639,6 +648,7 @@ export async function handleDeviceEnroll(request: Request) {
           accountTimezone: timezone,
         };
       },
+      deadline,
     );
   } catch (error) {
     if (error instanceof DeviceLeaseBusy) return busy();
@@ -703,8 +713,9 @@ export async function handleDeviceRevoke(request: Request) {
   try {
     current = await withDeviceLease(
       key.owner,
-      deviceLimits.leaseSeconds,
+      timing.leaseSeconds,
       (sql, lease) => deactivateDeviceKey(sql, lease, key),
+      deadlineIn(timing.clerkMs),
     );
   } catch (error) {
     if (error instanceof DeviceLeaseBusy || error instanceof DeviceLeaseLost)

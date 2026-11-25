@@ -92,6 +92,7 @@ function oauthToken(
     scopes: string[];
     aud: string | string[] | undefined;
     expired: boolean;
+    id: string;
   }> = {},
 ) {
   const token = "oat_" + crypto.randomUUID();
@@ -302,6 +303,29 @@ describe("device enrollment", () => {
     expect(activeFor(installation)).toHaveLength(1);
     expect(activeFor(otherInstallation(1))).toHaveLength(0);
   });
+
+  test.skipIf(!configured)(
+    "uses up a token by the ID Clerk verified, however it is written",
+    async () => {
+      // Two strings Clerk verifies as the same token.
+      const first = oauthToken({ id: "oat_synthetic_same" });
+      const second = oauthToken({ id: "oat_synthetic_same" });
+      expect((await enroll(first)).status).toBe(201);
+      const again = await enroll(second, {
+        installationId: otherInstallation(1),
+        deviceName: "Another iPhone",
+      });
+      expect(again.status).toBe(409);
+      expect(await again.json()).toMatchObject({
+        code: "enrollment_token_used",
+      });
+      expect(activeFor(otherInstallation(1))).toHaveLength(0);
+      // A token Clerk verifies without an ID cannot be used up, so it is refused.
+      const unnamed = await enroll(oauthToken({ id: "" }));
+      expect(unnamed.status).toBe(401);
+      expect(await unnamed.json()).toMatchObject({ code: "unauthorized" });
+    },
+  );
 
   test.skipIf(!configured)(
     "replaces the installation's key after a lost reply",
@@ -631,6 +655,58 @@ describe("device enrollment", () => {
   );
 
   test.skipIf(!configured)(
+    "uses no token when recording waits on an import past the lease or deadline",
+    async () => {
+      let previous = await enrolled();
+      const importer = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        for (const timing of [
+          // The lease runs out while the insert waits.
+          { leaseSeconds: 1 },
+          // The deadline runs out while the insert waits.
+          { deadlineMs: 1200, createReserveMs: 100 },
+        ]) {
+          devices.setEnrollmentTiming(timing);
+          const token = oauthToken();
+          const before = await rows();
+          let response: Response | undefined;
+          await importer.begin(async (tx) => {
+            // An import holds the account row, which recording the attempt
+            // waits on through its foreign key.
+            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+            const pending = enroll(token);
+            await Bun.sleep(1500);
+            await tx`SELECT 1`;
+            void pending.then((r) => {
+              response = r;
+            });
+          });
+          for (let n = 0; n < 50 && !response; n++) await Bun.sleep(50);
+          if (!response) throw new Error("Expected the enrollment to finish.");
+          expect(response.status).toBe(503);
+          expect(await response.json()).toMatchObject({
+            code: "issuance_pending",
+          });
+          expect(await rows()).toEqual(before);
+          expect((await importWith(previous)).status).toBe(200);
+          // The token was not used, so it enrolls once nothing waits.
+          devices.setEnrollmentTiming();
+          const enrolledNow = await enroll(token);
+          expect(enrolledNow.status).toBe(201);
+          previous = (await enrolledNow.json()).secret;
+        }
+      } finally {
+        devices.setEnrollmentTiming();
+        await importer.end();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
     "reads every page of keys before cleaning up",
     async () => {
       fake.pageSize = 2;
@@ -884,6 +960,52 @@ describe("device issuance lease and attempt windows", () => {
         expect(fake.requests).toHaveLength(0);
       } finally {
         await Promise.all([a.end(), b.end()]);
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "answers busy at once while the lease holder waits behind an import",
+    async () => {
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      const current = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"f".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      const importer = client();
+      const other = client();
+      try {
+        // A live lease, then one that expires while its holder still waits.
+        for (const seconds of [90, 0.3]) {
+          const holder = crypto.randomUUID();
+          expect(
+            await store.acquireDeviceLease(database(), owner, holder, seconds),
+          ).toBe(true);
+          let waiting: Promise<void> | undefined;
+          await importer.begin(async (tx) => {
+            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
+            waiting = store.deactivateInstallation(
+              database(),
+              { owner, holder },
+              installation,
+            );
+            waiting.catch(() => undefined);
+            await Bun.sleep(500);
+            const begun = performance.now();
+            expect(
+              await store.acquireDeviceLease(
+                other,
+                owner,
+                crypto.randomUUID(),
+                90,
+              ),
+            ).toBe(false);
+            expect(performance.now() - begun).toBeLessThan(400);
+          });
+          await waiting?.catch(() => undefined);
+          await store.releaseDeviceLease(database(), owner, holder);
+          await database()`UPDATE fitness_device_enrollments SET active=true WHERE attempt_id=${current}`;
+        }
+      } finally {
+        await Promise.all([importer.end(), other.end()]);
       }
     },
   );

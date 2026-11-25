@@ -267,3 +267,46 @@ test("calls an API key invalid only on Clerk's own not-found answer", async () =
     expect(await response.json()).toMatchObject({ code: "auth_unavailable" });
   }
 });
+
+/** Other ways to write the same token: padding, the standard alphabet, unused bits. */
+function encodings(token: string) {
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const [header, payload, signature = ""] = token.split(".");
+  const last = alphabet.indexOf(signature.at(-1) ?? "A");
+  const lowBits = signature.slice(0, -1) + alphabet[last ^ 1];
+  expect(Buffer.from(lowBits, "base64url")).toEqual(
+    Buffer.from(signature, "base64url"),
+  );
+  return [
+    `${signature}=`,
+    `${signature}==`,
+    signature.replaceAll("-", "+").replaceAll("_", "/"),
+    Buffer.from(signature, "base64url").toString("base64"),
+    lowBits,
+  ].map((s) => `${header}.${payload}.${s}`);
+}
+
+test("gives one ID to every encoding of a token Clerk accepts", async () => {
+  const token = await accessToken(served, { jti: "oat_synthetic_identity" });
+  expect(await auth.verifyBearer(bearer(token), ["oauth_token"])).toMatchObject(
+    { ok: true, bearer: { id: "oat_synthetic_identity" } },
+  );
+  // Whichever other encodings Clerk accepts carry the token's own ID, which
+  // is what enrollment uses up, so none can enroll a second time.
+  for (const other of encodings(token)) {
+    expect(other).not.toBe(token);
+    const result = await auth.verifyBearer(bearer(other), ["oauth_token"]);
+    if (result.ok) expect(result.bearer.id).toBe("oat_synthetic_identity");
+  }
+});
+
+test("refuses a token Clerk verifies without an ID", async () => {
+  const token = await accessToken(served, { jti: undefined });
+  expect(await auth.verifyBearer(bearer(token), ["oauth_token"])).toMatchObject(
+    { ok: true, bearer: { id: "" } },
+  );
+  const response = await enroll(token);
+  expect(response.status).toBe(401);
+  expect(await response.json()).toMatchObject({ code: "unauthorized" });
+});

@@ -47,9 +47,9 @@ CREATE INDEX IF NOT EXISTS fitness_health_sample_record ON fitness_health_sample
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_weight_date ON fitness_records(owner_id, (data->>'date')) WHERE deleted=false AND data->>'kind'='weight';
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_active_workout ON fitness_records(owner_id) WHERE deleted=false AND data->>'kind'='workout' AND data->>'finishedAt' IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_workout_correction ON fitness_records(owner_id, (data->>'workoutId')) WHERE deleted=false AND data->>'kind'='workoutCorrection';
--- Each enrollment attempt for an iPhone sync device, keyed by the SHA-256
--- digest of its one-time OAuth token, so a token issues at most one device
--- key. The attempt ID is also a claim on the key it creates. key_state is
+-- Each enrollment attempt for an iPhone sync device, keyed by the ID Clerk
+-- verified for its one-time OAuth token and by the SHA-256 digest of the
+-- token, so a token issues at most one device key. The attempt ID is also a claim on the key it creates. key_state is
 -- pending while its request runs, then issued (Clerk returned the key,
 -- recorded in key_id), ambiguous (the creation had no confirmed result) or
 -- failed (no creation was attempted). charged_at is when the key Clerk
@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS fitness_device_enrollments (
   installation_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+-- The ID Clerk verified for the token, which identifies it however it is
+-- encoded. Rows recorded before it existed keep only the digest.
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS token_id text;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS attempt_id uuid;
 UPDATE fitness_device_enrollments SET attempt_id = gen_random_uuid() WHERE attempt_id IS NULL;
 ALTER TABLE fitness_device_enrollments ALTER COLUMN attempt_id SET NOT NULL;
@@ -83,6 +86,9 @@ ALTER TABLE fitness_device_enrollments DROP CONSTRAINT IF EXISTS fitness_device_
 ALTER TABLE fitness_device_enrollments DROP CONSTRAINT IF EXISTS fitness_device_enrollments_check;
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'fitness_device_enrollments'::regclass AND conname = 'fitness_device_enrollments_token_id_key') THEN
+    ALTER TABLE fitness_device_enrollments ADD CONSTRAINT fitness_device_enrollments_token_id_key UNIQUE (token_id);
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'fitness_device_enrollments'::regclass AND conname = 'fitness_device_enrollments_attempt_id_key') THEN
     ALTER TABLE fitness_device_enrollments ADD CONSTRAINT fitness_device_enrollments_attempt_id_key UNIQUE (attempt_id);
   END IF;

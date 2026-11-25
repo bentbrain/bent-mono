@@ -24,6 +24,8 @@ type OAuthToken = {
   scopes: string[];
   aud?: string | string[];
   expired?: boolean;
+  /** The ID Clerk verifies for the token; by default one per token string. */
+  id?: string;
 };
 type Failure = "network" | "secret-key";
 
@@ -212,7 +214,7 @@ function createFake() {
       return signedOut("token-verification-failed", "oauth_token");
     return signedIn({
       tokenType: "oauth_token",
-      id: `oat_id_${token}`,
+      id: oauth.id ?? `oat_id_${token}`,
       subject: oauth.userId,
       userId: oauth.userId,
       clientId: oauth.clientId,

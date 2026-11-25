@@ -220,7 +220,17 @@ export class DeviceLeaseBusy extends Error {}
 /** The request no longer holds its lease; another may have taken it over. */
 export class DeviceLeaseLost extends Error {}
 /** A held device issuance lease. */
-export type DeviceLease = { owner: string; holder: string };
+export type DeviceLease = {
+  owner: string;
+  holder: string;
+  /** The request's deadline on the monotonic clock, for database waits. */
+  deadline?: number;
+};
+/** Postgres canceled a statement on its timeout, or found a lock taken. */
+function lockWaitEnded(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "57014" || code === "55P03";
+}
 /**
  * Takes the owner's device issuance lease for `holder`, unless another
  * holder has one that has not expired. A lease row works through a
@@ -232,9 +242,24 @@ export async function acquireDeviceLease(
   holder: string,
   seconds: number,
 ) {
-  const rows =
-    await sql`INSERT INTO fitness_device_issuance_leases(owner_id, holder, expires_at) VALUES(${owner}, ${holder}, now() + make_interval(secs => ${seconds})) ON CONFLICT (owner_id) DO UPDATE SET holder=EXCLUDED.holder, expires_at=EXCLUDED.expires_at WHERE fitness_device_issuance_leases.expires_at < now() RETURNING holder`;
-  return rows.length === 1;
+  // A live lease is found without a lock, so a request never waits behind
+  // the holder's own writes to learn the lease is busy.
+  const [live] =
+    await sql`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${owner} AND expires_at > clock_timestamp()`;
+  if (live) return false;
+  try {
+    return await sql.begin(async (tx) => {
+      // Taking over an expired lease that a write still holds would wait;
+      // that counts as busy instead.
+      await tx`SELECT set_config('lock_timeout', '100ms', true)`;
+      const rows =
+        await tx`INSERT INTO fitness_device_issuance_leases(owner_id, holder, expires_at) VALUES(${owner}, ${holder}, clock_timestamp() + make_interval(secs => ${seconds})) ON CONFLICT (owner_id) DO UPDATE SET holder=EXCLUDED.holder, expires_at=EXCLUDED.expires_at WHERE fitness_device_issuance_leases.expires_at < clock_timestamp() RETURNING holder`;
+      return rows.length === 1;
+    });
+  } catch (error) {
+    if (lockWaitEnded(error)) return false;
+    throw error;
+  }
 }
 export async function releaseDeviceLease(
   sql: Sql,
@@ -255,9 +280,10 @@ export async function withDeviceLease<T>(
   owner: string,
   seconds: number,
   work: (sql: Sql, lease: DeviceLease) => Promise<T>,
+  deadline?: number,
 ): Promise<T> {
   const sql = database();
-  const lease = { owner, holder: crypto.randomUUID() };
+  const lease = { owner, holder: crypto.randomUUID(), deadline };
   if (!(await acquireDeviceLease(sql, owner, lease.holder, seconds)))
     throw new DeviceLeaseBusy();
   try {
@@ -284,17 +310,35 @@ async function fenced(
   target: Target,
   write: (tx: TransactionSql) => Promise<readonly unknown[]>,
 ) {
-  return sql.begin(async (tx) => {
-    const [held] =
-      await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
-    if (!held) throw new DeviceLeaseLost();
-    if (target)
-      await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${target(tx)} FOR UPDATE`;
+  const stillHeld = async (tx: TransactionSql) => {
     const [valid] =
       await tx`SELECT expires_at > clock_timestamp() AS valid FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder}`;
     if (valid?.valid !== true) throw new DeviceLeaseLost();
-    return (await write(tx)).length;
-  });
+  };
+  try {
+    return await sql.begin(async (tx) => {
+      // No statement waits past the request's deadline.
+      if (lease.deadline !== undefined) {
+        const ms = Math.floor(lease.deadline - performance.now());
+        if (ms <= 0) throw new DeviceLeaseLost();
+        await tx`SELECT set_config('statement_timeout', ${String(ms)}, true)`;
+      }
+      const [held] =
+        await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
+      if (!held) throw new DeviceLeaseLost();
+      if (target)
+        await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${target(tx)} FOR UPDATE`;
+      await stillHeld(tx);
+      const changed = (await write(tx)).length;
+      // A write can still wait, for example on a foreign key's row, so the
+      // lease is checked again last; an expired one rolls everything back.
+      await stillHeld(tx);
+      return changed;
+    });
+  } catch (error) {
+    if (lockWaitEnded(error)) throw new DeviceLeaseLost();
+    throw error;
+  }
 }
 /** The minute this server last found the shared attempt window full. */
 let fullMinute: number | null = null;
@@ -337,9 +381,16 @@ export async function countEnrollmentAttempt(
     await sql`DELETE FROM fitness_device_attempt_windows WHERE window_start < now() - interval '1 hour'`;
   return { allowed: true, wait };
 }
-export async function enrollmentTokenUsed(sql: Sql, digest: string) {
+/**
+ * Whether a token was already used: by the ID Clerk verified for it, or by
+ * the digest of its raw string, which earlier enrollments recorded alone.
+ */
+export async function enrollmentTokenUsed(
+  sql: Sql,
+  token: { id: string; digest: string },
+) {
   const rows =
-    await sql`SELECT 1 FROM fitness_device_enrollments WHERE token_digest=${digest}`;
+    await sql`SELECT 1 FROM fitness_device_enrollments WHERE token_id=${token.id} OR token_digest=${token.digest}`;
   return rows.length > 0;
 }
 /**
@@ -351,7 +402,12 @@ export async function enrollmentTokenUsed(sql: Sql, digest: string) {
 export async function recordEnrollment(
   sql: Sql,
   lease: DeviceLease,
-  attempt: { digest: string; attemptId: string; installationId: string },
+  attempt: {
+    tokenId: string;
+    digest: string;
+    attemptId: string;
+    installationId: string;
+  },
 ) {
   const owner = lease.owner;
   const stale = (tx: TransactionSql) =>
@@ -359,7 +415,8 @@ export async function recordEnrollment(
   const inserted = await fenced(sql, lease, stale, async (tx) => {
     await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
     await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
-    return tx`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT (token_digest) DO NOTHING RETURNING 1`;
+    // Either identity already recorded means the token was used.
+    return tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
   });
   return inserted === 1;
 }
@@ -541,6 +598,7 @@ export async function deactivateDeviceKey(
 }
 const enrollmentColumns = [
   "owner_id",
+  "token_id",
   "token_digest",
   "attempt_id",
   "installation_id",
