@@ -2,7 +2,7 @@
 
 The Next.js landing website for [bent.build](https://bent.build) and `www.bent.build`.
 
-- Showcases every application on the bent.build subdomains with desktop and phone previews, access notes and links to each live site and public source folder.
+- Showcases every application on the bent.build subdomains with desktop and phone previews, access notes, links to each live site and, for apps in this repository, their GitHub folder.
 - Stores each app's metadata, screenshots and source URL in [`lib/apps.ts`](lib/apps.ts), rendered by `components/showcase`.
 - Bundles fonts locally with `next/font/local` and imports shared design tokens from `@bent/design-tokens`.
 

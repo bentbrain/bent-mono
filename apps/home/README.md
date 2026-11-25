@@ -13,16 +13,17 @@ Open [home.bent.build](https://home.bent.build). The public viewer is open to ev
 
 ## Development
 
-Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, then run commands from `apps/home`:
+Use Node 24 and Bun 1.4.4. Install dependencies once from the monorepo root, copy [`.env.example`](.env.example) to `.env`, and fill in numeric synthetic values for the four required location variables (`PUBLIC_HOME_LATITUDE`, `PUBLIC_HOME_LONGITUDE`, `PUBLIC_HOME_BALCONY_BEARING` and `PUBLIC_HOME_ALTITUDE_METRES` — for example `0`, `0`, `90` and `1`; blank values fail startup):
 
 ```sh
 bun install --frozen-lockfile
 cd apps/home
 cp .env.example .env
+# Set PUBLIC_HOME_LATITUDE, PUBLIC_HOME_LONGITUDE, PUBLIC_HOME_BALCONY_BEARING and PUBLIC_HOME_ALTITUDE_METRES in .env
 bun run dev
 ```
 
-[`.env.example`](.env.example) documents the required build coordinates and private release settings.
+[`.env.example`](.env.example) also documents the private card bindings and release settings.
 
 ## Checks
 

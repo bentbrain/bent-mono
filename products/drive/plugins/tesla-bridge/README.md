@@ -33,15 +33,9 @@ The plugin declares the MCP resource as `https://drive.bent.build/mcp`. Codex di
 
 The public MCP scope is `tesla.read`. The upstream Tesla scopes are `openid offline_access vehicle_device_data`. For vehicle-action requests, explain that this connection supports reading vehicle data only.
 
-## Repository marketplace
+## Installing in Codex
 
-This monorepo's marketplace entry is:
-
-```text
-.agents/plugins/marketplace.json
-```
-
-It points to `./plugins/tesla-bridge`, relative to the repository root. Add the repository marketplace in Codex, install `tesla-bridge`, and open a new task so the updated MCP and skill configuration are loaded.
+In this monorepo, the plugin package lives at `products/drive/plugins/tesla-bridge`. No root Codex marketplace manifest is bundled here; connect Codex directly to the hosted MCP endpoint (`https://drive.bent.build/mcp`) using `.mcp.json` and `skills/tesla-copilot/`, or point a local Codex plugin marketplace entry at `./products/drive/plugins/tesla-bridge`, install `tesla-bridge`, and open a new task so the MCP and skill configuration load.
 
 Try:
 
@@ -58,9 +52,9 @@ From the repository root on the current Codex development machine:
 ```bash
 uv run --with pyyaml \
   python "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" \
-  plugins/tesla-bridge
+  products/drive/plugins/tesla-bridge
 ```
 
 On another machine, use the validator shipped with that installation's plugin-creator skill.
 
-The web service is developed and deployed from `apps/web` in this product directory. See the [Drive README](../../README.md) and [`apps/web/README.md`](../../apps/web/README.md). Production deployments use the repository's Vercel release workflow.
+The web service is developed and deployed from `apps/web` in this product directory. See the [Drive README](../../README.md) and [`apps/web/README.md`](../../apps/web/README.md). Code deployments must use the GitHub-connected Vercel project through the repository's Vercel release workflow.
