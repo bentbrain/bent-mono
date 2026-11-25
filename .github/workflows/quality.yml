@@ -288,9 +288,11 @@ jobs:
       run:
         working-directory: apps/fitness-ios
     env:
-      NATIVE_BUILD_DIR: ${{ runner.temp }}/fitness-ios
       APP_VARIANT: production
     steps:
+      - name: Keep native build output outside the checkout
+        working-directory: .
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
@@ -328,12 +330,13 @@ jobs:
       # The raw-flow gate requires both complete suites on PRs and main.
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
       CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
-      NATIVE_BUILD_DIR: ${{ runner.temp }}/fitness-ios
       APP_VARIANT: production
     permissions:
       contents: read
       security-events: write
     steps:
+      - name: Keep native build output outside the checkout
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
