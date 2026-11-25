@@ -54,28 +54,40 @@ bun run build
 `test:storage-schema` creates and alters `public.media`, so it requires a fresh disposable local PostgreSQL database named `payload_migration_test` on `localhost` or `127.0.0.1` alongside synthetic Payload and R2 fixture values (matching `.github/workflows/quality.yml` and `scripts/ci-check.mjs`):
 
 ```sh
-docker run --rm -d --name maya-collage-test-db \
-  -e POSTGRES_USER=test \
-  -e POSTGRES_PASSWORD=test \
-  -e POSTGRES_DB=payload_migration_test \
-  -p 127.0.0.1:5433:5432 postgres:16
+(
+  set -eu
+  CID=$(docker run --rm -d \
+    -e POSTGRES_USER=test \
+    -e POSTGRES_PASSWORD=test \
+    -e POSTGRES_DB=payload_migration_test \
+    -p 127.0.0.1:5433:5432 postgres:16)
+  trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
 
-until docker exec maya-collage-test-db pg_isready -h 127.0.0.1 -U test -d payload_migration_test >/dev/null 2>&1; do
-  sleep 1
-done
+  ready=0
+  for _ in $(seq 1 30); do
+    if docker exec "$CID" pg_isready -h 127.0.0.1 -U test -d payload_migration_test >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$ready" -ne 1 ]; then
+    docker logs "$CID" >&2
+    echo "Timed out waiting for test PostgreSQL container $CID" >&2
+    exit 1
+  fi
 
-SKIP_ENV_VALIDATION=1 \
-PAYLOAD_SECRET=synthetic-build-fixture \
-PAYLOAD_MIGRATION_TEST_DATABASE_URI=postgresql://test:test@127.0.0.1:5433/payload_migration_test \
-PAYLOAD_STORAGE_SOURCE=r2 \
-R2_BUCKET=fixture-bucket \
-R2_ENDPOINT=https://storage.example.invalid \
-R2_PUBLIC_URL=https://media.example.invalid \
-R2_ACCESS_KEY_ID=fixture-access \
-R2_SECRET_ACCESS_KEY=fixture-secret \
-bun run test
-
-docker rm -f maya-collage-test-db
+  SKIP_ENV_VALIDATION=1 \
+  PAYLOAD_SECRET=synthetic-build-fixture \
+  PAYLOAD_MIGRATION_TEST_DATABASE_URI=postgresql://test:test@127.0.0.1:5433/payload_migration_test \
+  PAYLOAD_STORAGE_SOURCE=r2 \
+  R2_BUCKET=fixture-bucket \
+  R2_ENDPOINT=https://storage.example.invalid \
+  R2_PUBLIC_URL=https://media.example.invalid \
+  R2_ACCESS_KEY_ID=fixture-access \
+  R2_SECRET_ACCESS_KEY=fixture-secret \
+  bun run test
+)
 ```
 
 ## Deployment
