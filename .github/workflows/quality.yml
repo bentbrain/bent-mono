@@ -66,9 +66,30 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: node scripts/ci-check.mjs '${{ matrix.check }}'
-  browser:
-    name: browser
+  browser-scope:
+    name: Select browser suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.scope.outputs.matrix }}
+      has_work: ${{ steps.scope.outputs.has_work }}
+      tier: ${{ steps.scope.outputs.tier }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - id: scope
+        run: node scripts/ci-scope.mjs
+  browser-suite:
+    name: Browser ${{ matrix.app }} (${{ matrix.part }}/${{ matrix.total }})
+    needs: browser-scope
+    if: needs.browser-scope.outputs.has_work == 'true'
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.browser-scope.outputs.matrix) }}
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0
       options: --ipc=host --init
@@ -86,31 +107,55 @@ jobs:
         working-directory: .
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - id: scope
-        run: node scripts/ci-scope.mjs
-      - run: node scripts/install-browsers.mjs browser
-      - run: node scripts/ci-check.mjs browser
+      - name: Run browser suite
         env:
-          E2E_TIER: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'full' || 'critical' }}
+          BROWSER_APP: ${{ matrix.app }}
+          SHARD_PART: ${{ matrix.part }}
+          SHARD_TOTAL: ${{ matrix.total }}
+          E2E_TIER: ${{ needs.browser-scope.outputs.tier }}
+        run: |
+          node scripts/install-browsers.mjs browser "$BROWSER_APP"
+          node scripts/ci-check.mjs browser "$BROWSER_APP" "$SHARD_PART" "$SHARD_TOTAL"
       - name: Upload synthetic Trackmap browser results
-        if: always() && steps.scope.outputs.trackmap == 'true'
+        if: always() && matrix.app == 'trackmap'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: trackmap-browser-results
           path: apps/trackmap/test-results/
           if-no-files-found: warn
           retention-days: 14
-      - name: Upload synthetic browser coverage
-        if: always() && steps.scope.outputs.jp == 'true'
+      - name: Upload synthetic browser coverage and timing
+        if: always() && matrix.app == 'jp'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: blog-browser-coverage-and-timing
+          name: blog-browser-coverage-and-timing-${{ matrix.part }}-of-${{ matrix.total }}
           path: apps/jp/artifacts/browser/
           if-no-files-found: error
           retention-days: 14
+  browser:
+    # Branch protection and release qualification require this stable context.
+    name: browser
+    if: always()
+    needs: [browser-scope, browser-suite]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all selected browser suites
+        env:
+          SCOPE_RESULT: ${{ needs.browser-scope.result }}
+          HAS_WORK: ${{ needs.browser-scope.outputs.has_work }}
+          SUITE_RESULT: ${{ needs.browser-suite.result }}
+        run: |
+          if [[ "$SCOPE_RESULT" == success && "$HAS_WORK" == false && "$SUITE_RESULT" == skipped ]]; then
+            echo 'No browser suites selected.'
+          elif [[ "$SCOPE_RESULT" == success && "$HAS_WORK" == true && "$SUITE_RESULT" == success ]]; then
+            echo 'All selected browser suites passed.'
+          else
+            echo "::error::Browser validation incomplete (scope=$SCOPE_RESULT, work=$HAS_WORK, suites=$SUITE_RESULT)"
+            exit 1
+          fi
   public-source:
     name: public-source
     runs-on: ubuntu-latest

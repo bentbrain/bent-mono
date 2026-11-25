@@ -1,13 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { includesPath, workspaceScope } from "./ci-scope.mjs";
+import { browserMatrix, includesPath, workspaceScope } from "./ci-scope.mjs";
 
-const scope = workspaceScope();
-const affected = (directory) => includesPath(scope, directory);
-console.log(
-  `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`,
-);
-const task = process.argv[2];
+const [task, app, part, total] = process.argv.slice(2);
 const allowed = [
   "lint",
   "typecheck",
@@ -18,6 +13,17 @@ const allowed = [
   "browser",
 ];
 if (!allowed.includes(task)) throw new Error("Select a known workspace check.");
+
+const selectedBrowser = task === "browser" && app ? `apps/${app}` : null;
+if (selectedBrowser && !browserMatrix({ packages: [{ path: selectedBrowser }] })
+  .some((entry) => String(entry.part) === part && String(entry.total) === total)) {
+  throw new Error("Select a planned browser suite and shard.");
+}
+const scope = selectedBrowser ? null : workspaceScope(process.env, undefined, { browser: task === "browser" });
+const affected = (directory) => scope ? includesPath(scope, directory) : directory === selectedBrowser;
+console.log(scope
+  ? `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`
+  : `CI: ${selectedBrowser} (${part}/${total})`);
 
 // Disposable CI fixtures only. This runner never reads a production environment.
 const env = {
@@ -54,19 +60,20 @@ function run(command, args, cwd = process.cwd(), overrides = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-function application(directory, script, overrides) {
+function application(directory, script, overrides, args = []) {
   if (affected(directory))
-    run("bun", ["run", script], resolve(directory), overrides);
+    run("bun", ["run", script, ...args], resolve(directory), overrides);
 }
 
 if (task === "browser") {
+  const shard = selectedBrowser && total !== "1" ? [`--shard=${part}/${total}`] : [];
   application("apps/fitness", "test:browser", { VITE_CLERK_PUBLISHABLE_KEY: "", CLERK_SECRET_KEY: "", DATABASE_URL: "", FITNESS_ALLOWED_EMAILS: "" });
   application("apps/trackmap", "build");
   application("apps/trackmap", "test:browser");
-  application("apps/jp", "test:e2e:coverage");
-  application("apps/jp", "test:e2e");
+  if (!selectedBrowser || part === "1") application("apps/jp", "test:e2e:coverage");
+  application("apps/jp", "test:e2e", undefined, shard);
   application("apps/toolbar", "build");
-  application("apps/toolbar", "test:e2e");
+  application("apps/toolbar", "test:e2e", undefined, shard);
   application("apps/home", "build");
   application("apps/home", "test:worker");
 } else {

@@ -3,6 +3,43 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const browserShardCounts = {
+  fitness: 1,
+  trackmap: 1,
+  jp: 4,
+  toolbar: 3,
+  home: 1,
+};
+
+// These app-root files are repository and package documentation. JP excludes
+// them from Tailwind's scan and Toolbar scans its browser source directory.
+// Keep served content, fixtures and other Markdown in the normal scope.
+const browserDocumentation = new Set([
+  "apps/jp/README.md",
+  "apps/jp/LICENSE",
+  "apps/toolbar/README.md",
+  "apps/toolbar/LICENSE",
+]);
+
+function documentationOnly(files, readDiff) {
+  if (!files.length || !files.every((path) => browserDocumentation.has(path)))
+    return false;
+
+  // A documentation path can also be a symlink or a submodule. Only ordinary
+  // files and their additions/deletions qualify for this exemption.
+  const records = readDiff("--raw").split("\0");
+  return (
+    records.length === files.length * 2 + 1 &&
+    files.every((path, index) => {
+      const [modes, recordPath] = records.slice(index * 2, index * 2 + 2);
+      return (
+        recordPath === path &&
+        /^:(?:100644|000000) (?:100644|000000) /.test(modes)
+      );
+    })
+  );
+}
+
 export function comparison(eventName, event, head) {
   const base =
     eventName === "pull_request"
@@ -24,10 +61,14 @@ export function comparison(eventName, event, head) {
 export function workspaceScope(
   environment = process.env,
   execute = execFileSync,
+  { browser = false } = {},
 ) {
   const full =
     environment.GITHUB_EVENT_NAME === "schedule" ||
-    environment.GITHUB_EVENT_NAME === "workflow_dispatch";
+    environment.GITHUB_EVENT_NAME === "workflow_dispatch" ||
+    (browser &&
+      environment.GITHUB_EVENT_NAME === "push" &&
+      environment.GITHUB_REF === "refs/heads/main");
   const turbo = resolve("node_modules/.bin/turbo");
   function inventory(args, extraEnvironment = {}) {
     const result = JSON.parse(
@@ -64,13 +105,20 @@ export function workspaceScope(
       environment.GITHUB_SHA,
     );
     if (!full && range) {
-      const files = execute(
-        "git",
-        ["diff", "--name-only", "-z", "--no-renames", range.base, range.head],
-        { encoding: "utf8" },
-      )
-        .split("\0")
-        .filter(Boolean);
+      const readDiff = (format) =>
+        execute(
+          "git",
+          ["diff", format, "-z", "--no-renames", range.base, range.head],
+          { encoding: "utf8" },
+        );
+      const files = readDiff("--name-only").split("\0").filter(Boolean);
+      if (
+        browser &&
+        environment.GITHUB_EVENT_NAME === "pull_request" &&
+        documentationOnly(files, readDiff)
+      ) {
+        return { full, packages: [], reason: "app documentation only" };
+      }
       // Root automation/configuration affects every product.
       const rootChanged = files.some(
         (file) =>
@@ -110,21 +158,29 @@ export function includesPath(scope, directory) {
   );
 }
 
+export function browserMatrix(scope) {
+  return Object.entries(browserShardCounts).flatMap(([app, total]) =>
+    includesPath(scope, `apps/${app}`)
+      ? Array.from({ length: total }, (_, index) => ({
+          app,
+          part: index + 1,
+          total,
+        }))
+      : [],
+  );
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  const scope = workspaceScope();
+  const scope = workspaceScope(process.env, execFileSync, { browser: true });
+  const include = browserMatrix(scope);
   console.log(JSON.stringify(scope));
-  if (process.env.GITHUB_OUTPUT)
+  if (process.env.GITHUB_OUTPUT) {
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      ["apps/jp", "apps/trackmap"]
-        .map(
-          (directory) =>
-            `${directory.split("/").at(-1)}=${includesPath(scope, directory)}`,
-        )
-        .concat(`full=${scope.full}`)
-        .join("\n") + "\n",
+      `matrix=${JSON.stringify({ include })}\nhas_work=${include.length > 0}\ntier=${scope.full ? "full" : "critical"}\n`,
     );
+  }
 }

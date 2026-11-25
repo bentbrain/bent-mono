@@ -88,7 +88,7 @@ test("local browser setup retains dependency installation and propagates CLI fai
 });
 
 test("every active browser job pins the official image to its installed Playwright version", () => {
-  const browser = job(".github/workflows/quality.yml", "browser");
+  const browser = job(".github/workflows/quality.yml", "browser-suite");
   const digest = "ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0";
   assert(browser.includes("    runs-on: ubuntu-24.04\n"));
   assert(browser.includes(`    container:\n      image: ${imageName(version)}@sha256:${digest}\n      options: --ipc=host --init\n`));

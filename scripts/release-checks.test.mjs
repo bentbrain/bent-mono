@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
@@ -13,16 +14,44 @@ const run = { id: 23, head_sha: sha, head_branch: "main", event: "push", path: w
   status: "completed", conclusion: "success", run_attempt: 2 };
 const names = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser", "public-source",
   "secret-scan", "dependencies", "CodeQL", "Release qualification"];
-test("the production aggregate depends on every root Quality job and runs after failures", async () => {
-  const source = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
-  const jobs = source.split("\njobs:\n")[1];
-  assert.ok(jobs);
-  const declared = [...jobs.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  const aggregate = source.split("  release-qualification:\n")[1]?.split(/^  [a-z][a-z0-9-]*:$/m)[0];
+const qualitySource = () => readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
+const qualityJob = (source, name) => source.split(`\n  ${name}:\n`)[1]?.split(/^  [a-z][a-z0-9-]*:$/m)[0];
+const jobDependencies = job => job.match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(",").map(value => value.trim());
+
+test("the production aggregate depends on every Quality job and runs after failures", async () => {
+  const source = await qualitySource();
+  const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
+  const aggregate = qualityJob(source, "release-qualification");
   assert.ok(aggregate?.includes("    if: always()"));
-  const dependencies = aggregate.match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(",").map(value => value.trim());
-  assert.deepEqual(dependencies?.sort(), declared.filter(name => name !== "release-qualification").sort());
+  const dependencies = jobDependencies(aggregate);
+  assert.ok(dependencies?.includes("browser"));
+  const browserDependencies = jobDependencies(qualityJob(source, "browser"));
+  assert.deepEqual(browserDependencies, ["browser-scope", "browser-suite"]);
+  assert.deepEqual([...dependencies, ...browserDependencies].sort(), declared.filter(name => name !== "release-qualification").sort());
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
+});
+
+test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {
+  const job = qualityJob(await qualitySource(), "browser");
+  assert.match(job, /^    name: browser$\n    if: always\(\)$/m);
+  const script = job.split("\n        run: |\n")[1];
+  assert.ok(script);
+  for (const [scope, work, suites, expected] of [
+    ["success", "true", "success", 0],
+    ["success", "false", "skipped", 0],
+    ["success", "true", "skipped", 1],
+    ["success", "true", "failure", 1],
+    ["success", "true", "cancelled", 1],
+    ["success", "false", "failure", 1],
+    ["failure", "false", "skipped", 1],
+    ["skipped", "false", "skipped", 1],
+    ["success", "", "skipped", 1],
+  ]) {
+    const result = spawnSync("bash", ["-c", script], {
+      env: { ...process.env, SCOPE_RESULT: scope, HAS_WORK: work, SUITE_RESULT: suites },
+    });
+    assert.equal(result.status, expected, `${scope}/${work}/${suites}`);
+  }
 });
 test("only the pinned Wrangler no-pending result permits the migration-free release route", () => {
   assert.equal(hasNoPendingMigrations("Resource location: remote\n\n✅ No migrations to apply!\n"), true);
