@@ -423,8 +423,14 @@ export async function chargeAmbiguousEnrollment(
       tx`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state IN ('ambiguous','failed') AND charged_at IS NULL`,
   );
 }
-/** Hours an ambiguous attempt without a found key counts toward the hourly limit. */
-const ambiguousChargeHours = 2;
+/**
+ * Hours an attempt whose key Clerk never confirmed, pending or ambiguous,
+ * counts toward the hourly limit while no key for it is found. A key
+ * created that late is far past any provider delay, so the hourly limit
+ * stays strict; once its key is found, the attempt counts for an hour from
+ * the key's creation instead.
+ */
+const ambiguousChargeHours = 24;
 /**
  * Seconds until each of the owner's attempts stops counting toward the
  * hourly limit, soonest first. A created key counts for an hour from its
@@ -528,7 +534,7 @@ export async function deactivateKeys(owner: string, keyIds: string[]) {
 }
 /** The swap would not activate this attempt; nothing changes. */
 class NotActivated extends Error {
-  constructor(readonly reason: "not_pending" | "device_limit") {
+  constructor(readonly reason: "not_pending" | "device_limit" | "expired") {
     super(reason);
   }
 }
@@ -542,7 +548,10 @@ class NotActivated extends Error {
  * always has at most one active key and never goes without one before its
  * replacement exists. Nothing changes, and `reason` says why, if this
  * attempt is no longer pending, or if activating it would give more
- * installations active keys than the limit. Returns whether this attempt
+ * installations active keys than the limit. An attempt older than
+ * `pendingGraceMinutes` by the database clock, once its rows are locked,
+ * was abandoned: it becomes ambiguous, keeping its charge, with reason
+ * `expired`. Returns whether this attempt
  * became active, and the keys it replaced, which the caller revokes after
  * the commit. An error after the COMMIT was sent throws
  * CommitOutcomeUnknown.
@@ -561,6 +570,21 @@ export async function swapEnrollment(
   try {
     return await underAccount(owner, async (tx) => {
       await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND ((installation_id=${attempt.installationId} AND active) OR attempt_id=${attempt.attemptId}) FOR UPDATE`;
+      // With the rows locked, the attempt must still be pending and within
+      // the grace on the database clock. One that has aged out was
+      // abandoned: it becomes ambiguous, keeps its charge, and the current
+      // key stays.
+      const [own] =
+        await tx`SELECT key_state, created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}) AS fresh FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
+      if (own?.key_state !== "pending") throw new NotActivated("not_pending");
+      if (own.fresh !== true) {
+        await tx`UPDATE fitness_device_enrollments SET key_state='ambiguous', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
+        return {
+          activated: false,
+          replaced: [] as string[],
+          reason: "expired" as const,
+        };
+      }
       const old =
         await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
       const activated =

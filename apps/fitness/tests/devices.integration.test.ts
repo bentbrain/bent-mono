@@ -720,7 +720,7 @@ describe("device enrollment", () => {
           await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='pending'`;
         // Its reservation passes the hourly window, and five other
         // enrollments fill the hour meanwhile.
-        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '3 hours' WHERE attempt_id=${lapsed}`;
+        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '25 hours' WHERE attempt_id=${lapsed}`;
         for (let n = 0; n < 5; n++) await enrolled();
         resume();
         const response = await stalled;
@@ -791,6 +791,90 @@ describe("device enrollment", () => {
         await database()`SELECT key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE attempt_id=${failed}`;
       expect({ ...row }).toEqual({ key_state: "failed", charged: true });
       expect(key.revoked).toBe(true);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "never swaps in an attempt that aged past the grace, even without a cleanup",
+    async () => {
+      const previous = await enrolled();
+      // The key is created; the attempt then ages past the grace before
+      // its swap, and no other enrollment cleans up meanwhile.
+      const original = store.swapEnrollment;
+      const aged = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '11 minutes' WHERE attempt_id=${args[1].attemptId}`;
+          return original(...args);
+        },
+      );
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        aged.mockRestore();
+      }
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      expect((await importWith(previous)).status).toBe(200);
+      const newest = fake.keys.reduce((a, b) =>
+        a.createdAt >= b.createdAt ? a : b,
+      );
+      expect(newest.secret).not.toBe(previous);
+      expect(newest.revoked).toBe(true);
+      expect((await importWith(newest.secret)).status).toBe(401);
+      const [row] =
+        await database()`SELECT key_state, active, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY created_at LIMIT 1`;
+      expect({ ...row }).toEqual({
+        key_state: "ambiguous",
+        active: false,
+        charged: true,
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "fails a request whose key a later enrollment replaced before its reply",
+    async () => {
+      const previous = await enrolled();
+      const previousKey = fake.keys.find((k) => k.secret === previous);
+      if (!previousKey) throw new Error("Expected the key.");
+      // A swaps in its key, then waits while Clerk revokes the key it
+      // replaced. B's cleanup gives up on that key quickly.
+      devices.setEnrollmentTiming({ cleanupMs: 300 });
+      let releaseA = () => undefined as void;
+      let reachedA = () => undefined as void;
+      const atRevoke = new Promise<void>((resolve) => {
+        reachedA = resolve;
+      });
+      fake.revokeHold = {
+        id: previousKey.id,
+        gate: new Promise<void>((resolve) => {
+          releaseA = resolve;
+        }),
+        reached: () => reachedA(),
+      };
+      let a: Promise<Response> | undefined;
+      try {
+        a = enroll(oauthToken());
+        await atRevoke;
+        // B replaces A's key for the same installation and finishes.
+        const b = await enroll(oauthToken());
+        expect(b.status).toBe(201);
+        const bSecret = (await b.json()).secret;
+        releaseA();
+        const response = await a;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+        expect((await importWith(bSecret)).status).toBe(200);
+        expect(activeFor(installation).map((k) => k.secret)).toEqual([bSecret]);
+        expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      } finally {
+        releaseA();
+        await a;
+        fake.revokeHold = null;
+      }
     },
   );
 
@@ -963,8 +1047,11 @@ describe("device enrollment", () => {
       // The soonest to leave is a key charged 50 minutes ago.
       expect(wait).toBeGreaterThan(9 * 60);
       expect(wait).toBeLessThanOrEqual(10 * 60 + 1);
-      // Past its two-hour bound, the ambiguous attempt stops counting.
-      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '121 minutes' WHERE owner_id=${owner} AND key_state='ambiguous'`;
+      // Until its 24-hour bound, the ambiguous attempt still counts; past
+      // it, it stops counting.
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '23 hours' WHERE owner_id=${owner} AND key_state='ambiguous'`;
+      expect((await enroll(oauthToken())).status).toBe(429);
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '24 hours 1 minute' WHERE owner_id=${owner} AND key_state='ambiguous'`;
       expect((await enroll(oauthToken())).status).toBe(201);
     },
   );

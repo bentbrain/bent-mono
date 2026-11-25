@@ -118,6 +118,12 @@ function createFake() {
     } | null,
     /** Key IDs whose revocation fails. */
     revokeFails: new Set<string>(),
+    /** Holds revoking this key until `gate` settles; `reached` runs first. */
+    revokeHold: null as {
+      id: string;
+      gate: Promise<void>;
+      reached: () => void;
+    } | null,
     /** Key IDs whose lookup fails without an answer. */
     getFails: new Set<string>(),
     /** Key IDs whose lookup gets a gateway 404 without Clerk's error. */
@@ -139,6 +145,7 @@ function createFake() {
       fake.usersDown = false;
       fake.create = "ok";
       fake.revokeFails.clear();
+      fake.revokeHold = null;
       fake.getFails.clear();
       fake.gatewayMissing.clear();
       fake.listStall = null;
@@ -323,6 +330,11 @@ function createFake() {
         return { ...key };
       },
       async revoke(params: { apiKeyId: string }) {
+        const hold = fake.revokeHold;
+        if (hold?.id === params.apiKeyId) {
+          hold.reached();
+          await hold.gate;
+        }
         if (fake.revokeFails.has(params.apiKeyId)) throw apiError(500);
         const key = fake.keys.find((k) => k.id === params.apiKeyId);
         if (!key) throw apiError(404, "resource_not_found");

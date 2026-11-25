@@ -50,6 +50,7 @@ import {
   countEnrollmentAttempt,
   deactivateDeviceKey,
   deactivateKeys,
+  deviceKeyActive,
   enrollmentTableReady,
   recordEnrollment,
   settleEnrollment,
@@ -414,23 +415,30 @@ function logged(event: string, error: unknown) {
  *    claims. From then
  *    on, every change to the attempt charges it from the key's creation,
  *    so it keeps counting toward the hourly limit whatever becomes of it.
- *    A create that Clerk's Backend API rejects with one of its own error
- *    codes marks the attempt failed; any other failure, a gateway's 4xx
- *    included, marks it ambiguous, still counting toward the hourly limit,
+ *    A create that Clerk's Backend API rejects as an invalid request, with
+ *    a documented code for its status (see `clerkRejected`), marks the
+ *    attempt failed; any other failure, a gateway's 4xx included, marks it
+ *    ambiguous, still counting toward the hourly limit for up to 24 hours,
  *    since Clerk may have made the key. The reply is `503
  *    issuance_failed`, and a key Clerk made for the attempt cannot import.
  * 6. One transaction locks the installation's rows, stops its current key
- *    and makes the new one active, charged from now, if the attempt is
- *    still pending and activating it keeps the installations with active
- *    keys within the limit. After it commits, Clerk revokes the replaced key within
- *    `replacedRevokeMs`; a revoke that fails is logged, and a later
- *    enrollment's cleanup revokes the key, which can no longer import. If
- *    the swap does not happen, the current key keeps importing, the new
- *    key is revoked, and the reply is `503 issuance_failed`. If the swap's
- *    commit reply is lost, its rows are read again on another connection,
- *    waiting for a commit still in progress. A committed swap's replaced
- *    keys are the ones its own commit deactivated, and when that read
- *    cannot tell, both keys are left for a later enrollment.
+ *    and makes the new one active, charged from the key's creation, if the
+ *    attempt is still pending from within the grace by the database clock
+ *    and activating it keeps the installations with active keys within the
+ *    limit. An attempt that aged past the grace is never activated; it
+ *    becomes ambiguous and keeps its charge. After the swap commits, Clerk
+ *    revokes the replaced key within `replacedRevokeMs`; a revoke that
+ *    fails is logged, and a later enrollment's cleanup revokes the key,
+ *    which can no longer import. If the swap does not happen, the current
+ *    key keeps importing, the new key is revoked, and the reply is `503
+ *    issuance_failed`. If the swap's commit reply is lost, its rows are
+ *    read again on another connection, waiting for a commit still in
+ *    progress. A committed swap's replaced keys are the ones it recorded on
+ *    the attempt's row, and when that read cannot tell, both keys are left
+ *    for a later enrollment.
+ * 7. Before replying `201`, the attempt must still be the installation's
+ *    active one. A later enrollment that replaced it meanwhile makes this
+ *    request reply `503 issuance_failed`.
  */
 export async function handleDeviceEnroll(request: Request) {
   const wait = takeAttempt();
@@ -699,6 +707,27 @@ export async function handleDeviceEnroll(request: Request) {
       "Replaced by a new connection from this iPhone.",
       revokeBy,
     );
+  // A later enrollment for this installation may have replaced this key
+  // meanwhile, so the key is returned only while it is still current. A
+  // read that fails returns it, since the swap committed.
+  let current = true;
+  try {
+    current = await deviceKeyActive({
+      owner: userId,
+      keyId: created.id,
+      enrollment: attemptId,
+      installationId,
+    });
+  } catch (error) {
+    logged("fitness.devices.recheck_failed", error);
+  }
+  if (!current) {
+    await revokeQuietly(
+      created.id,
+      "Replaced by a new connection from this iPhone.",
+    );
+    return issuanceFailed();
+  }
   const reply: DeviceEnrollResponse = {
     secret: created.secret,
     accountTimezone: timezone,
