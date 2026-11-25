@@ -3,6 +3,7 @@
  * HTTP transport stubbed. OAuth access tokens here are real signed JWTs.
  */
 import { afterAll, afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { ClerkAPIResponseError } from "@clerk/shared/error";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -347,4 +348,57 @@ test("accepts a bare API key in the Authorization header, as Clerk does", async 
     owner: syntheticOwner.id,
     access: { read: true, write: true },
   });
+});
+
+test("calls a create rejected only on Clerk's own validation errors", () => {
+  const reply = (status: number, data: unknown[]) =>
+    new ClerkAPIResponseError(`Clerk responded ${status}`, {
+      // Malformed replies on purpose, such as an error without a code,
+      // which the SDK's types do not allow.
+      data: data as never,
+      status,
+    });
+  const entry = (code?: string) =>
+    code === undefined
+      ? { message: "invalid", long_message: "invalid" }
+      : { code, message: "invalid", long_message: "invalid" };
+  for (const [status, code] of [
+    [422, "form_param_missing"],
+    [422, "form_param_format_invalid"],
+    [422, "form_param_value_invalid"],
+    [422, "form_param_type_invalid"],
+    [422, "form_param_unknown"],
+    [422, "form_param_nil"],
+    [422, "form_param_exceeds_allowed_size"],
+    [400, "request_body_invalid"],
+    [400, "malformed_request_parameters"],
+  ] as const)
+    expect({
+      status,
+      code,
+      rejected: auth.clerkRejected(reply(status, [entry(code)])),
+    }).toEqual({ status, code, rejected: true });
+  for (const [name, error] of [
+    ["no errors", reply(422, [])],
+    ["an error without a code", reply(422, [entry()])],
+    [
+      "a listed code with another status",
+      reply(400, [entry("form_param_missing")]),
+    ],
+    ["an unlisted code", reply(422, [entry("form_identifier_exists")])],
+    ["a gateway's codeless 403", reply(403, [])],
+    [
+      "a listed code mixed with another",
+      reply(422, [entry("form_param_missing"), entry("rate_limit_exceeded")]),
+    ],
+    [
+      "a listed code mixed with one without a code",
+      reply(422, [entry("form_param_missing"), entry()]),
+    ],
+    ["a plain error", new Error("Request timed out")],
+  ] as const)
+    expect({ name, rejected: auth.clerkRejected(error) }).toEqual({
+      name,
+      rejected: false,
+    });
 });

@@ -169,23 +169,59 @@ describe("Replies", () => {
 });
 
 describe("Enrollment", () => {
-  test("checks the installation ID and device name", () => {
+  test("checks the installation ID, device name and enrollment sequence", () => {
     expect(
       DeviceEnrollRequest.parse({
         installationId: uuid,
         deviceName: "  Synthetic iPhone ",
+        enrollmentSequence: 7,
       }),
-    ).toEqual({ installationId: uuid, deviceName: "Synthetic iPhone" });
-    for (const deviceName of ["", "x".repeat(61), "iPhone\u0000", "iPhone‮"])
+    ).toEqual({
+      installationId: uuid,
+      deviceName: "Synthetic iPhone",
+      enrollmentSequence: 7,
+    });
+    for (const deviceName of [
+      "",
+      "x".repeat(61),
+      "iPhone\u0000",
+      "iPhone\u202e",
+    ])
       expect(
-        DeviceEnrollRequest.safeParse({ installationId: uuid, deviceName })
-          .success,
+        DeviceEnrollRequest.safeParse({
+          installationId: uuid,
+          deviceName,
+          enrollmentSequence: 1,
+        }).success,
       ).toBe(false);
     expect(
       DeviceEnrollRequest.safeParse({
         installationId: "phone",
         deviceName: "iPhone",
+        enrollmentSequence: 1,
       }).success,
     ).toBe(false);
+    expect(
+      DeviceEnrollRequest.parse({
+        installationId: uuid,
+        deviceName: "iPhone",
+        enrollmentSequence: Number.MAX_SAFE_INTEGER,
+      }).enrollmentSequence,
+    ).toBe(Number.MAX_SAFE_INTEGER);
+    for (const enrollmentSequence of [
+      undefined,
+      0,
+      -1,
+      1.5,
+      "1",
+      Number.MAX_SAFE_INTEGER + 1,
+    ])
+      expect(
+        DeviceEnrollRequest.safeParse({
+          installationId: uuid,
+          deviceName: "iPhone",
+          enrollmentSequence,
+        }).success,
+      ).toBe(false);
   });
 });

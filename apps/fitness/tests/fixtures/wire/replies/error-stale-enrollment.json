@@ -1,0 +1,7 @@
+{
+  "status": 409,
+  "body": {
+    "error": "This iPhone has connected again since. Start a new connection.",
+    "code": "stale_enrollment"
+  }
+}

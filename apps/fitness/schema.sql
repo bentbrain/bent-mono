@@ -78,6 +78,13 @@ ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_state text N
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS key_id text;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT false;
 ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS charged_at timestamptz;
+-- The keys an attempt's swap replaced, so a read after a lost commit reply
+-- knows which to revoke.
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS replaced_key_ids text[];
+-- The app's own count of enrollment attempts for the installation, so an
+-- earlier attempt never replaces a later one's key. Rows recorded before
+-- it existed have none and count lowest.
+ALTER TABLE fitness_device_enrollments ADD COLUMN IF NOT EXISTS enrollment_sequence bigint;
 -- Keys issued before charged_at existed count from when they were recorded.
 UPDATE fitness_device_enrollments SET charged_at = created_at WHERE key_state = 'issued' AND charged_at IS NULL;
 -- Earlier versions checked key_state without ambiguous, and the active key
@@ -103,8 +110,9 @@ DROP INDEX IF EXISTS fitness_device_enrollment_pending;
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_created ON fitness_device_enrollments(created_at);
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_owner ON fitness_device_enrollments(owner_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_device_enrollment_active ON fitness_device_enrollments(owner_id, installation_id) WHERE active;
--- One device key issuance at a time per owner. A lease that expires_at has
--- passed belongs to a request that ended, and the next one takes it over.
+-- Unused. Earlier versions issued device keys one at a time per owner under
+-- a lease row here. Enrollment now serializes on the account row, and the
+-- table is kept so existing databases need no destructive change.
 CREATE TABLE IF NOT EXISTS fitness_device_issuance_leases (
   owner_id text PRIMARY KEY,
   holder uuid NOT NULL,
@@ -115,4 +123,14 @@ CREATE TABLE IF NOT EXISTS fitness_device_issuance_leases (
 CREATE TABLE IF NOT EXISTS fitness_device_attempt_windows (
   window_start timestamptz PRIMARY KEY,
   attempts integer NOT NULL
+);
+-- The highest enrollment sequence each installation's app has sent, kept
+-- whatever became of that attempt, so an earlier attempt never takes over
+-- from a later one, even a later one that failed.
+CREATE TABLE IF NOT EXISTS fitness_device_sequences (
+  owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
+  installation_id uuid NOT NULL,
+  max_seen bigint NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (owner_id, installation_id)
 );

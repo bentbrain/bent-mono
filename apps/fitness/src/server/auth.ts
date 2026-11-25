@@ -291,6 +291,46 @@ export function clerkNotFound(error: unknown) {
 }
 
 /**
+ * Clerk Backend API replies that reject a request's parameters or body
+ * before Clerk acts on it, as "status code" pairs. They come from the
+ * error index at https://clerk.com/docs/errors/backend-api, which gives
+ * each code's status.
+ */
+const clerkRejections = new Set([
+  "422 form_param_missing",
+  "422 form_param_format_invalid",
+  "422 form_param_value_invalid",
+  "422 form_param_type_invalid",
+  "422 form_param_unknown",
+  "422 form_param_nil",
+  "422 form_param_exceeds_allowed_size",
+  "400 request_body_invalid",
+  "400 malformed_request_parameters",
+]);
+/**
+ * Whether Clerk's Backend API refused a request before acting on it: every
+ * error in its reply is one of `clerkRejections` for the reply's status.
+ * A reply with no errors, an error without a string code, or any other
+ * code, alone or mixed in, proves nothing.
+ */
+export function clerkRejected(error: unknown) {
+  if (!isClerkAPIResponseError(error)) return false;
+  const errors: unknown = error.errors;
+  return (
+    Array.isArray(errors) &&
+    errors.length > 0 &&
+    errors.every(
+      (e: unknown) =>
+        typeof e === "object" &&
+        e !== null &&
+        "code" in e &&
+        typeof e.code === "string" &&
+        clerkRejections.has(`${error.status} ${e.code}`),
+    )
+  );
+}
+
+/**
  * Asks Clerk directly, with `apiKeys.verify`, whether an API key is
  * invalid: only Clerk's own not-found answer confirms it. A key Clerk now
  * accepts, any other error, or no answer in time does not.

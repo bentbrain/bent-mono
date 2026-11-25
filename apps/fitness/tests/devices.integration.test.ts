@@ -26,7 +26,7 @@ const isolated = isolatedSchema("fitness_devices");
 if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
 const { default: postgres } = await import("postgres");
-const { createServer, connect } = await import("node:net");
+const { commitCutProxy } = await import("./commit-cut-proxy");
 const { setDatabaseForTests } = await import("../src/server/db");
 const { database } = await import("../src/server/db");
 const devices = await import("../src/server/devices");
@@ -51,7 +51,7 @@ const otherInstallation = (n: number) =>
 async function clean() {
   const sql = database();
   await sql`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
-  await sql`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
+  await sql`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
@@ -81,9 +81,10 @@ beforeEach(async () => {
   devices.setSharedEnrollmentLimit(100_000);
   store.forgetFullAttemptWindow();
   devices.setEnrollmentTiming();
+  store.setEnrollmentWait();
   if (configured) {
     await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
-    await database()`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
+    await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
   }
 });
 
@@ -107,6 +108,12 @@ function oauthToken(
   });
   return token;
 }
+/** The app's count of enrollment attempts, one higher for each. */
+let sequence = 0;
+/**
+ * Sends an enrollment. A body without an `enrollmentSequence` gets the next
+ * one, as the app counts its attempts.
+ */
 function enroll(
   token: string | null,
   body: unknown = {
@@ -115,9 +122,13 @@ function enroll(
   },
   headers: Record<string, string> = {},
 ) {
+  const counted =
+    typeof body === "object" && body !== null && !("enrollmentSequence" in body)
+      ? { ...body, enrollmentSequence: ++sequence }
+      : body;
   const init = {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(counted),
     headers: { "content-type": "application/json", ...headers },
   };
   return devices.handleDeviceEnroll(
@@ -174,15 +185,18 @@ async function lockWaiters(count = 1) {
   }
   throw new Error(`Expected ${count} backend(s) waiting on a lock.`);
 }
-/** Waits until the owner's issuance lease has expired. */
-async function leaseExpired() {
-  for (let n = 0; n < 500; n++) {
+/**
+ * Waits for a backend that `pid` blocks, connected as `application` and
+ * running `statement`, and returns its PID.
+ */
+async function blockedBy(pid: number, application: string, statement: string) {
+  for (let n = 0; n < 300; n++) {
     const [row] =
-      await database()`SELECT expires_at < clock_timestamp() AS expired FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
-    if (row?.expired === true) return;
+      await database()`SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND application_name = ${application} AND ${pid} = ANY(pg_blocking_pids(pid)) AND query ILIKE ${"%" + statement + "%"}`;
+    if (row) return Number(row.pid);
     await Bun.sleep(10);
   }
-  throw new Error("Expected the lease to expire.");
+  throw new Error(`Expected a backend running ${statement} behind ${pid}.`);
 }
 /** Holds the owner's account row from another connection until released. */
 function holdAccount(sql: ReturnType<typeof postgres>) {
@@ -340,6 +354,22 @@ describe("device enrollment", () => {
     }
     expect(activeFor(installation)).toHaveLength(1);
     expect(activeFor(otherInstallation(1))).toHaveLength(0);
+    // Two requests with one token at once: recording takes turns on the
+    // account row, so only one uses it.
+    const shared = oauthToken();
+    const together = await Promise.all(
+      [2, 3].map((n) =>
+        enroll(shared, {
+          installationId: otherInstallation(n),
+          deviceName: "Another iPhone",
+        }),
+      ),
+    );
+    expect(together.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(
+      activeFor(otherInstallation(2)).length +
+        activeFor(otherInstallation(3)).length,
+    ).toBe(1);
   });
 
   test.skipIf(!configured)(
@@ -384,41 +414,950 @@ describe("device enrollment", () => {
   );
 
   test.skipIf(!configured)(
-    "refuses a second enrollment while one is issuing, without holding a connection",
+    "keeps one active key when two enrollments for an installation overlap",
     async () => {
+      const previous = await enrolled();
+      // The app starts two attempts at once; the second has the higher
+      // sequence.
+      const lower = ++sequence;
+      const higher = ++sequence;
+      const body = (enrollmentSequence: number) => ({
+        installationId: installation,
+        deviceName: "Synthetic iPhone",
+        enrollmentSequence,
+      });
+      const [first, second] = await Promise.all([
+        enroll(oauthToken(), body(lower)),
+        enroll(oauthToken(), body(higher)),
+      ]);
+      // Whichever order they run in, the higher sequence keeps its key. The
+      // other is refused when it is recorded, or at its swap.
+      expect(second.status).toBe(201);
+      const secret = (await second.json()).secret;
+      expect([409, 503]).toContain(first.status);
+      expect(await first.json()).toMatchObject({
+        code: first.status === 409 ? "stale_enrollment" : "issuance_failed",
+      });
+      expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      expect(activeFor(installation).map((k) => k.secret)).toEqual([secret]);
+      expect((await importWith(secret)).status).toBe(200);
+      expect((await importWith(previous)).status).toBe(401);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "leaves a key another enrollment is still swapping in, and revokes an abandoned one",
+    async () => {
+      // The first enrollment has its key from Clerk and waits to swap it in.
+      const original = store.swapEnrollment;
+      let releaseSwap = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        releaseSwap = resolve;
+      });
+      let reached = () => undefined as void;
+      const atSwap = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          if (args[1].installationId === installation) {
+            reached();
+            await gate;
+          }
+          return original(...args);
+        },
+      );
+      let first: Promise<Response> | undefined;
+      try {
+        first = enroll(oauthToken());
+        await atSwap;
+        // Another enrollment cleans up meanwhile, and keeps the first key.
+        const second = await enroll(oauthToken(), {
+          installationId: otherInstallation(1),
+          deviceName: "Second iPhone",
+        });
+        expect(second.status).toBe(201);
+        releaseSwap();
+        const response = await first;
+        expect(response.status).toBe(201);
+        const secret = (await response.json()).secret;
+        expect(fake.keys.find((k) => k.secret === secret)?.revoked).toBe(false);
+        expect((await importWith(secret)).status).toBe(200);
+      } finally {
+        releaseSwap();
+        await first;
+        spy.mockRestore();
+      }
+      // An attempt still pending after the grace was abandoned, so the
+      // next enrollment revokes its key.
+      const abandoned = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,created_at) VALUES(${owner},${"f".repeat(64)},${abandoned},${otherInstallation(2)},now() - interval '11 minutes')`;
+      const left = fake.addKey({
+        secret: "ak_abandoned",
+        scopes: ["fitness:health:import"],
+        claims: {
+          kind: "fitness-ios",
+          installationId: otherInstallation(2),
+          enrollment: abandoned,
+        },
+      });
+      expect((await enroll(oauthToken())).status).toBe(201);
+      expect(left.revoked).toBe(true);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "lets only one of two new installations overlapping at the limit through",
+    async () => {
+      for (const n of [1, 2]) await enrolled(otherInstallation(n));
+      // The first enrollment for a new installation waits in Clerk's create
+      // while the second records its attempt.
       let release = () => undefined as void;
       fake.stall = new Promise<void>((resolve) => {
         release = resolve;
       });
-      let started = () => undefined as void;
       const creating = new Promise<void>((resolve) => {
-        started = resolve;
+        fake.onCreate = resolve;
       });
-      fake.onCreate = () => started();
-      const first = enroll(oauthToken());
-      await creating;
-      // Ordinary Fitness queries still get a connection.
-      expect((await loadRecords(owner)).length).toBeGreaterThan(0);
-      const begun = Date.now();
-      const second = await enroll(oauthToken(), {
-        installationId: otherInstallation(1),
-        deviceName: "Second iPhone",
-      });
-      expect(Date.now() - begun).toBeLessThan(2000);
-      expect(second.status).toBe(503);
-      expect(second.headers.get("retry-after")).toBe("10");
-      expect(await second.json()).toMatchObject({ code: "issuance_pending" });
-      release();
+      const firstToken = oauthToken();
+      const secondToken = oauthToken();
+      let first: Promise<Response> | undefined;
+      let second: Response;
+      try {
+        first = enroll(firstToken, {
+          installationId: otherInstallation(3),
+          deviceName: "Third iPhone",
+        });
+        await creating;
+        second = await enroll(secondToken, {
+          installationId: otherInstallation(4),
+          deviceName: "Fourth iPhone",
+        });
+      } finally {
+        release();
+        fake.stall = null;
+        fake.onCreate = null;
+      }
       expect((await first).status).toBe(201);
+      expect(second.status).toBe(409);
+      expect(await second.json()).toMatchObject({ code: "device_limit" });
       expect(
         (
-          await enroll(oauthToken(), {
-            installationId: otherInstallation(1),
-            deviceName: "Second iPhone",
+          await database()`SELECT count(DISTINCT installation_id)::int AS n FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
+        )[0]?.n,
+      ).toBe(3);
+      // The refusal left its token unused: once a place frees, it enrolls.
+      const [freed] = activeFor(otherInstallation(1));
+      if (!freed) throw new Error("Expected the key.");
+      freed.revoked = true;
+      expect(
+        (
+          await enroll(secondToken, {
+            installationId: otherInstallation(4),
+            deviceName: "Fourth iPhone",
           })
         ).status,
       ).toBe(201);
     },
+  );
+
+  test.skipIf(!configured)(
+    "fails a request that resumes after its abandoned attempt was cleaned up",
+    async () => {
+      const previous = await enrolled();
+      // This enrollment has its key from Clerk, then pauses before the swap.
+      const original = store.swapEnrollment;
+      let resume = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let reached = () => undefined as void;
+      const atSwap = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          if (args[1].installationId === installation) {
+            reached();
+            await gate;
+          }
+          return original(...args);
+        },
+      );
+      let stalled: Promise<Response> | undefined;
+      try {
+        stalled = enroll(oauthToken());
+        await atSwap;
+        // Its attempt passes the grace, and another enrollment cleans up.
+        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '11 minutes' WHERE owner_id=${owner} AND key_state='pending'`;
+        expect(
+          (
+            await enroll(oauthToken(), {
+              installationId: otherInstallation(1),
+              deviceName: "Second iPhone",
+            })
+          ).status,
+        ).toBe(201);
+        resume();
+        const response = await stalled;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+      } finally {
+        resume();
+        await stalled;
+        spy.mockRestore();
+      }
+      // The abandoned key was revoked, and the installation's key works.
+      expect((await importWith(previous)).status).toBe(200);
+      expect(activeFor(installation).map((k) => k.secret)).toEqual([previous]);
+      const [abandoned] =
+        await database()`SELECT key_state, active, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${installation} AND NOT active`;
+      expect({ ...abandoned }).toEqual({
+        key_state: "ambiguous",
+        active: false,
+        charged: true,
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "asks for a new sign-in when recording's commit reply is lost",
+    async () => {
+      const proxy = await commitCutProxy(new URL(isolated.url));
+      const pool = postgres(proxy.url, {
+        max: 3,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      const original = store.recordEnrollment;
+      const arming = spyOn(store, "recordEnrollment").mockImplementation(
+        async (...args) => {
+          proxy.arm();
+          return original(...args);
+        },
+      );
+      let creates = 0;
+      fake.onCreate = () => {
+        creates += 1;
+      };
+      const token = oauthToken();
+      setDatabaseForTests(pool);
+      let response: Response;
+      let committed: { key_state: string; active: boolean }[] = [];
+      try {
+        response = await enroll(token);
+        // The commit is seen through a pool of its own before the proxy
+        // closes, so closing it cannot race the commit.
+        for (let n = 0; n < 300 && committed.length === 0; n++) {
+          committed = (
+            await isolated.pool()`SELECT key_state, active FROM fitness_device_enrollments WHERE owner_id=${owner}`
+          ).map((r) => ({
+            key_state: String(r.key_state),
+            active: r.active === true,
+          }));
+          if (committed.length === 0) await Bun.sleep(10);
+        }
+      } finally {
+        arming.mockRestore();
+        fake.onCreate = null;
+        setDatabaseForTests(isolated.pool());
+        await pool.end({ timeout: 1 }).catch(() => undefined);
+        await proxy.close();
+      }
+      expect(committed).toEqual([{ key_state: "pending", active: false }]);
+      expect(proxy.cuts).toBe(1);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      // Clerk was never asked for a key, yet Postgres has the commit, so the
+      // token is used.
+      expect(creates).toBe(0);
+      const again = await enroll(token);
+      expect(again.status).toBe(409);
+      expect(await again.json()).toMatchObject({
+        code: "enrollment_token_used",
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "creates no key for an attempt whose place in the hourly limit has lapsed",
+    async () => {
+      // The first enrollment pauses after cleanup, before its create.
+      const original = store.unneededKeys;
+      let resume = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let reached = () => undefined as void;
+      const paused = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      let calls = 0;
+      const spy = spyOn(store, "unneededKeys").mockImplementation(
+        async (...args) => {
+          const keys = await original(...args);
+          if (++calls === 1) {
+            reached();
+            await gate;
+          }
+          return keys;
+        },
+      );
+      let stalled: Promise<Response> | undefined;
+      try {
+        stalled = enroll(oauthToken());
+        await paused;
+        const [{ attempt_id: lapsed } = { attempt_id: "" }] =
+          await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='pending'`;
+        // Its reservation passes the hourly window, and five other
+        // enrollments fill the hour meanwhile.
+        await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '25 hours' WHERE attempt_id=${lapsed}`;
+        for (let n = 0; n < 5; n++) await enrolled();
+        resume();
+        const response = await stalled;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+        // No sixth key was created, and the hour stays full.
+        expect(
+          fake.keys.filter((k) => k.claims?.enrollment === String(lapsed)),
+        ).toEqual([]);
+        expect(
+          fake.keys.filter((k) => k.claims?.kind === "fitness-ios"),
+        ).toHaveLength(5);
+        expect((await enroll(oauthToken())).status).toBe(429);
+      } finally {
+        resume();
+        await stalled;
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps a failed create's place in the hourly limit unless Clerk's own error rejected it",
+    async () => {
+      for (const [mode, state, next] of [
+        ["rejected", "failed", 201],
+        ["gateway", "ambiguous", 429],
+      ] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        for (let n = 0; n < 4; n++) await enrolled();
+        fake.create = mode;
+        const failed = await enroll(oauthToken());
+        fake.create = "ok";
+        expect(failed.status).toBe(503);
+        expect(await failed.json()).toMatchObject({ code: "issuance_failed" });
+        const [newest] =
+          await database()`SELECT key_state FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY created_at DESC LIMIT 1`;
+        expect({ mode, state: newest?.key_state }).toEqual({ mode, state });
+        // A rejection frees the attempt's place; any other failure keeps it.
+        expect({ mode, next: (await enroll(oauthToken())).status }).toEqual({
+          mode,
+          next,
+        });
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "charges a failed attempt whose key turns up in Clerk's list",
+    async () => {
+      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
+      const failed = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state) VALUES(${owner},${"b".repeat(64)},${failed},${otherInstallation(1)},'failed')`;
+      const key = fake.addKey({
+        secret: "ak_failed_attempt",
+        scopes: ["fitness:health:import"],
+        claims: {
+          kind: "fitness-ios",
+          installationId: otherInstallation(1),
+          enrollment: failed,
+        },
+      });
+      expect((await enroll(oauthToken())).status).toBe(201);
+      const [row] =
+        await database()`SELECT key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE attempt_id=${failed}`;
+      expect({ ...row }).toEqual({ key_state: "failed", charged: true });
+      expect(key.revoked).toBe(true);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "never swaps in an attempt that aged past the grace, even without a cleanup",
+    async () => {
+      const previous = await enrolled();
+      // The key is created; the attempt then ages past the grace before
+      // its swap, and no other enrollment cleans up meanwhile.
+      const original = store.swapEnrollment;
+      const aged = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '11 minutes' WHERE attempt_id=${args[1].attemptId}`;
+          return original(...args);
+        },
+      );
+      let response: Response;
+      try {
+        response = await enroll(oauthToken());
+      } finally {
+        aged.mockRestore();
+      }
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: "issuance_failed" });
+      expect((await importWith(previous)).status).toBe(200);
+      const newest = fake.keys.reduce((a, b) =>
+        a.createdAt >= b.createdAt ? a : b,
+      );
+      expect(newest.secret).not.toBe(previous);
+      expect(newest.revoked).toBe(true);
+      expect((await importWith(newest.secret)).status).toBe(401);
+      const [row] =
+        await database()`SELECT key_state, active, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY created_at LIMIT 1`;
+      expect({ ...row }).toEqual({
+        key_state: "ambiguous",
+        active: false,
+        charged: true,
+      });
+    },
+  );
+
+  test.skipIf(!configured)(
+    "fails a request whose key a later enrollment replaced before its reply",
+    async () => {
+      for (const read of ["works", "fails"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const previous = await enrolled();
+        const previousKey = fake.keys.find((k) => k.secret === previous);
+        if (!previousKey) throw new Error("Expected the key.");
+        // A swaps in its key, then waits while Clerk revokes the key it
+        // replaced. B's cleanup gives up on that key quickly.
+        devices.setEnrollmentTiming({ cleanupMs: 300 });
+        let releaseA = () => undefined as void;
+        let reachedA = () => undefined as void;
+        const atRevoke = new Promise<void>((resolve) => {
+          reachedA = resolve;
+        });
+        fake.revokeHold = {
+          id: previousKey.id,
+          gate: new Promise<void>((resolve) => {
+            releaseA = resolve;
+          }),
+          reached: () => reachedA(),
+        };
+        let a: Promise<Response> | undefined;
+        const recheck = spyOn(store, "deviceKeyActive");
+        try {
+          a = enroll(oauthToken());
+          await atRevoke;
+          // B replaces A's key for the same installation and finishes.
+          const b = await enroll(oauthToken());
+          expect(b.status).toBe(201);
+          const bSecret = (await b.json()).secret;
+          // A's final read fails this round, so A returns its stale key.
+          if (read === "fails")
+            recheck.mockImplementationOnce(() =>
+              Promise.reject(new Error("Connection closed")),
+            );
+          releaseA();
+          const response = await a;
+          if (read === "works") {
+            expect(response.status).toBe(503);
+            expect(await response.json()).toMatchObject({
+              code: "issuance_failed",
+            });
+          } else {
+            expect(response.status).toBe(201);
+            const stale = (await response.json()).secret;
+            expect(stale).not.toBe(bSecret);
+            expect((await importWith(stale)).status).toBe(401);
+          }
+          // Either way, B's key is the one that keeps working.
+          expect((await importWith(bSecret)).status).toBe(200);
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            bSecret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+        } finally {
+          releaseA();
+          await a;
+          recheck.mockRestore();
+          fake.revokeHold = null;
+          devices.setEnrollmentTiming();
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "never lets an older enrollment replace the key of a newer one",
+    async () => {
+      const previous = await enrolled();
+      // A records its attempt and gets its key, then waits before its swap.
+      const original = store.swapEnrollment;
+      let releaseA = () => undefined as void;
+      const gate = new Promise<void>((resolve) => {
+        releaseA = resolve;
+      });
+      let reached = () => undefined as void;
+      const atSwap = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      let calls = 0;
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          if (++calls === 1) {
+            reached();
+            await gate;
+          }
+          return original(...args);
+        },
+      );
+      let a: Promise<Response> | undefined;
+      try {
+        a = enroll(oauthToken());
+        await atSwap;
+        // The newer B finishes, and the phone saves and uses its key.
+        const b = await enroll(oauthToken());
+        expect(b.status).toBe(201);
+        const bSecret = (await b.json()).secret;
+        expect((await importWith(bSecret)).status).toBe(200);
+        releaseA();
+        const response = await a;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({
+          code: "issuance_failed",
+        });
+        expect((await importWith(bSecret)).status).toBe(200);
+        const [, older] =
+          await database()`SELECT attempt_id, key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY enrollment_sequence`;
+        expect({ state: older?.key_state, charged: older?.charged }).toEqual({
+          state: "failed",
+          charged: true,
+        });
+        const aKey = fake.keys.find(
+          (k) => k.claims?.enrollment === String(older?.attempt_id),
+        );
+        expect(aKey?.revoked).toBe(true);
+        expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+        expect((await importWith(previous)).status).toBe(401);
+      } finally {
+        releaseA();
+        await a;
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps the key of the app's later attempt whichever attempt is recorded or swapped first",
+    async () => {
+      for (const order of [
+        "later swaps first",
+        "earlier swaps first",
+      ] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const previous = await enrolled();
+        // The app starts A, then B, so B has the higher sequence. A pauses
+        // before it is recorded, so B is recorded first.
+        const aSequence = ++sequence;
+        const bSequence = ++sequence;
+        const originalRecord = store.recordEnrollment;
+        let releaseA = () => undefined as void;
+        const aGate = new Promise<void>((resolve) => {
+          releaseA = resolve;
+        });
+        let aReached = () => undefined as void;
+        const aAtRecord = new Promise<void>((resolve) => {
+          aReached = resolve;
+        });
+        const recording = spyOn(store, "recordEnrollment").mockImplementation(
+          async (...args) => {
+            if (args[1].enrollmentSequence === aSequence) {
+              aReached();
+              await aGate;
+            }
+            return originalRecord(...args);
+          },
+        );
+        // For the second order, B waits before its swap until A is done.
+        const originalSwap = store.swapEnrollment;
+        let releaseB = () => undefined as void;
+        const bGate = new Promise<void>((resolve) => {
+          releaseB = resolve;
+        });
+        let bReached = () => undefined as void;
+        const bAtSwap = new Promise<void>((resolve) => {
+          bReached = resolve;
+        });
+        const swapping = spyOn(store, "swapEnrollment").mockImplementation(
+          async (...args) => {
+            const [row] =
+              await database()`SELECT enrollment_sequence FROM fitness_device_enrollments WHERE attempt_id=${args[1].attemptId}`;
+            if (
+              order === "earlier swaps first" &&
+              Number(row?.enrollment_sequence) === bSequence
+            ) {
+              bReached();
+              await bGate;
+            }
+            return originalSwap(...args);
+          },
+        );
+        const body = (enrollmentSequence: number) => ({
+          installationId: installation,
+          deviceName: "Synthetic iPhone",
+          enrollmentSequence,
+        });
+        let a: Promise<Response> | undefined;
+        let b: Promise<Response> | undefined;
+        try {
+          a = enroll(oauthToken(), body(aSequence));
+          await aAtRecord;
+          b = enroll(oauthToken(), body(bSequence));
+          let aResponse: Response;
+          let bResponse: Response;
+          if (order === "later swaps first") {
+            bResponse = await b;
+            releaseA();
+            aResponse = await a;
+            // A is recorded after B's key is current, so it is refused
+            // before anything changes, and its token stays unused.
+            expect(aResponse.status).toBe(409);
+            expect(await aResponse.json()).toMatchObject({
+              code: "stale_enrollment",
+            });
+          } else {
+            await bAtSwap;
+            releaseA();
+            aResponse = await a;
+            releaseB();
+            bResponse = await b;
+            // B is still being issued, but its higher sequence was claimed,
+            // so A is refused when it is recorded and never gets a key.
+            expect(aResponse.status).toBe(409);
+            expect(await aResponse.json()).toMatchObject({
+              code: "stale_enrollment",
+            });
+          }
+          // A never got as far as a key.
+          expect(
+            await database()`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${aSequence}`,
+          ).toHaveLength(0);
+          expect(bResponse.status).toBe(201);
+          const bSecret = (await bResponse.json()).secret;
+          expect((await importWith(bSecret)).status).toBe(200);
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            bSecret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+          expect((await importWith(previous)).status).toBe(401);
+        } finally {
+          releaseA();
+          releaseB();
+          await Promise.allSettled([a, b]);
+          recording.mockRestore();
+          swapping.mockRestore();
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "keeps the saved key when a later attempt fails and an earlier one resumes",
+    async () => {
+      for (const failure of ["create rejected", "hourly limit"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
+        fake.keys = [];
+        // The phone saved this key.
+        const saved = await enrolled();
+        // The next attempt gets its key, then waits before its swap.
+        const original = store.swapEnrollment;
+        let resume = () => undefined as void;
+        const gate = new Promise<void>((resolve) => {
+          resume = resolve;
+        });
+        let reached = () => undefined as void;
+        const atSwap = new Promise<void>((resolve) => {
+          reached = resolve;
+        });
+        let calls = 0;
+        const spy = spyOn(store, "swapEnrollment").mockImplementation(
+          async (...args) => {
+            if (++calls === 1) {
+              reached();
+              await gate;
+            }
+            return original(...args);
+          },
+        );
+        const earlierSequence = ++sequence;
+        const laterSequence = ++sequence;
+        const body = (enrollmentSequence: number) => ({
+          installationId: installation,
+          deviceName: "Synthetic iPhone",
+          enrollmentSequence,
+        });
+        let earlier: Promise<Response> | undefined;
+        try {
+          earlier = enroll(oauthToken(), body(earlierSequence));
+          await atSwap;
+          // The app starts a later attempt, which fails.
+          if (failure === "create rejected") {
+            fake.create = "rejected";
+            const later = await enroll(oauthToken(), body(laterSequence));
+            fake.create = "ok";
+            expect({ failure, status: later.status }).toEqual({
+              failure,
+              status: 503,
+            });
+          } else {
+            // The hour fills up first, so the later attempt is refused
+            // before it is recorded.
+            await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,charged_at) SELECT ${owner}, md5(random()::text) || md5(random()::text), gen_random_uuid(), ${otherInstallation(9)}, 'issued', now() FROM generate_series(1, 3)`;
+            const later = await enroll(oauthToken(), body(laterSequence));
+            expect({ failure, status: later.status }).toEqual({
+              failure,
+              status: 429,
+            });
+          }
+          resume();
+          const response = await earlier;
+          // The later sequence was sent before the earlier attempt's swap,
+          // so the earlier attempt never replaces the saved key.
+          expect({ failure, status: response.status }).toEqual({
+            failure,
+            status: 503,
+          });
+          expect({ failure, saved: (await importWith(saved)).status }).toEqual({
+            failure,
+            saved: 200,
+          });
+          const [row] =
+            await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND enrollment_sequence=${earlierSequence}`;
+          const earlierKey = fake.keys.find(
+            (k) => k.claims?.enrollment === String(row?.attempt_id),
+          );
+          expect({ failure, revoked: earlierKey?.revoked }).toEqual({
+            failure,
+            revoked: true,
+          });
+          // The later sequence was claimed even though its attempt failed:
+          // a retry with it is refused without using its fresh token, and
+          // a higher one goes ahead with that token.
+          const token = oauthToken();
+          const retry = await enroll(token, body(laterSequence));
+          expect({ failure, status: retry.status }).toEqual({
+            failure,
+            status: 409,
+          });
+          expect(await retry.json()).toMatchObject({
+            code: "stale_enrollment",
+          });
+          if (failure === "hourly limit")
+            await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${otherInstallation(9)}`;
+          const higher = await enroll(token);
+          expect({ failure, status: higher.status }).toEqual({
+            failure,
+            status: 201,
+          });
+          expect((await importWith(saved)).status).toBe(401);
+        } finally {
+          resume();
+          await earlier;
+          spy.mockRestore();
+          fake.create = "ok";
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "leaves an earlier attempt's key working when a later one fails after its swap",
+    async () => {
+      for (const failure of ["hourly limit", "create rejected"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
+        fake.keys = [];
+        // The phone saved this key.
+        const saved = await enrolled();
+        const savedKey = fake.keys.find((k) => k.secret === saved);
+        if (!savedKey) throw new Error("Expected the key.");
+        // A swaps in its key and commits, then waits while Clerk revokes
+        // the saved key, before its reply goes out. B's cleanup gives up
+        // on that key quickly.
+        devices.setEnrollmentTiming({ cleanupMs: 300 });
+        let releaseA = () => undefined as void;
+        let reachedA = () => undefined as void;
+        const afterSwap = new Promise<void>((resolve) => {
+          reachedA = resolve;
+        });
+        fake.revokeHold = {
+          id: savedKey.id,
+          gate: new Promise<void>((resolve) => {
+            releaseA = resolve;
+          }),
+          reached: () => reachedA(),
+        };
+        let a: Promise<Response> | undefined;
+        try {
+          a = enroll(oauthToken());
+          await afterSwap;
+          // The phone starts B with a higher sequence, and B fails.
+          if (failure === "hourly limit")
+            await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,charged_at) SELECT ${owner}, md5(random()::text) || md5(random()::text), gen_random_uuid(), ${otherInstallation(9)}, 'issued', now() FROM generate_series(1, 3)`;
+          else fake.create = "rejected";
+          const b = await enroll(oauthToken());
+          fake.create = "ok";
+          expect({ failure, status: b.status }).toEqual({
+            failure,
+            status: failure === "hourly limit" ? 429 : 503,
+          });
+          releaseA();
+          const response = await a;
+          // A's reply is the highest-sequence success the phone receives,
+          // and its key is the one that works; the saved key does not.
+          expect({ failure, status: response.status }).toEqual({
+            failure,
+            status: 201,
+          });
+          const secret = (await response.json()).secret;
+          expect({ failure, a: (await importWith(secret)).status }).toEqual({
+            failure,
+            a: 200,
+          });
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            secret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+          expect({
+            failure,
+            saved: (await importWith(saved)).status,
+          }).toEqual({ failure, saved: 401 });
+        } finally {
+          releaseA();
+          await a;
+          fake.revokeHold = null;
+          fake.create = "ok";
+          devices.setEnrollmentTiming();
+        }
+      }
+    },
+    20_000,
+  );
+
+  test.skipIf(!configured)(
+    "refuses a stale attempt and leaves its token unused",
+    async () => {
+      const current = await enrolled();
+      const [active] =
+        await database()`SELECT enrollment_sequence FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`;
+      const token = oauthToken();
+      const stale = await enroll(token, {
+        installationId: installation,
+        deviceName: "Synthetic iPhone",
+        enrollmentSequence: Number(active?.enrollment_sequence),
+      });
+      expect(stale.status).toBe(409);
+      expect(await stale.json()).toMatchObject({ code: "stale_enrollment" });
+      expect((await importWith(current)).status).toBe(200);
+      // The app re-links with a later count, and the same token works.
+      expect((await enroll(token)).status).toBe(201);
+      expect((await importWith(current)).status).toBe(401);
+    },
+  );
+
+  test.skipIf(!configured)(
+    "the commit-cut proxy refuses a client's SSL request and reaches the database as the driver does",
+    async () => {
+      const proxy = await commitCutProxy(new URL(isolated.url));
+      const client = postgres(proxy.url, {
+        max: 1,
+        prepare: false,
+        ssl: "prefer",
+        onnotice: () => undefined,
+      });
+      const direct = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        const [proxied] =
+          await client`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        expect(proxy.refusedEncryption).toBe(1);
+        const [straight] =
+          await direct`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        expect(proxied?.ssl).toBe(straight?.ssl);
+      } finally {
+        await client.end();
+        await direct.end();
+        await proxy.close();
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "the commit-cut proxy reaches a database without TLS in plaintext under allow and prefer, as the driver does",
+    async () => {
+      const direct = postgres(isolated.url, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
+      });
+      try {
+        const [row] =
+          await direct`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`;
+        // Only a database that declines TLS shows the fallback.
+        if (row?.ssl !== false) return;
+        for (const mode of ["allow", "prefer", "require"] as const) {
+          const target = new URL(isolated.url);
+          target.searchParams.set("sslmode", mode);
+          const proxy = await commitCutProxy(target, { negotiationMs: 2000 });
+          const client = postgres(proxy.url, {
+            max: 1,
+            prepare: false,
+            onnotice: () => undefined,
+            connect_timeout: 3,
+          });
+          const driver = postgres(target.href, {
+            max: 1,
+            prepare: false,
+            onnotice: () => undefined,
+            connect_timeout: 3,
+          });
+          const outcome = (sql: typeof client) =>
+            sql`SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`.then(
+              ([r]) => (r?.ssl === false ? "plaintext" : "tls"),
+              () => "refused",
+            );
+          try {
+            const expected = mode === "require" ? "refused" : "plaintext";
+            expect({ mode, proxy: await outcome(client) }).toEqual({
+              mode,
+              proxy: expected,
+            });
+            expect({ mode, driver: await outcome(driver) }).toEqual({
+              mode,
+              driver: expected,
+            });
+          } finally {
+            await client.end({ timeout: 1 }).catch(() => undefined);
+            await driver.end({ timeout: 1 }).catch(() => undefined);
+            await proxy.close();
+          }
+        }
+      } finally {
+        await direct.end();
+      }
+    },
+    20_000,
   );
 
   test.skipIf(!configured)(
@@ -448,15 +1387,19 @@ describe("device enrollment", () => {
       // A third installation fits.
       await enrolled();
       const before = fake.keys.map((k) => ({ ...k }));
-      const fourth = await enroll(oauthToken(), {
+      const recorded = await rows();
+      const token = oauthToken();
+      const fourth = await enroll(token, {
         installationId: otherInstallation(3),
         deviceName: "Fourth iPhone",
       });
       expect(fourth.status).toBe(409);
       expect(await fourth.json()).toMatchObject({ code: "device_limit" });
       expect(fake.keys).toEqual(before);
-      // Replacing an enrolled installation still fits.
-      await enrolled();
+      expect(await rows()).toEqual(recorded);
+      // The refusal left the token unused: replacing an enrolled
+      // installation still fits, with the same token.
+      expect((await enroll(token)).status).toBe(201);
     },
   );
 
@@ -521,7 +1464,8 @@ describe("device enrollment", () => {
       expect((await enroll(oauthToken())).status).toBe(503);
       fake.create = "ok";
       const before = fake.keys.map((k) => ({ ...k }));
-      const sixth = await enroll(oauthToken());
+      const token = oauthToken();
+      const sixth = await enroll(token);
       expect(sixth.status).toBe(429);
       expect(Number(sixth.headers.get("retry-after"))).toBeGreaterThan(3000);
       expect(await sixth.json()).toMatchObject({ code: "rate_limited" });
@@ -530,7 +1474,8 @@ describe("device enrollment", () => {
       // oldest attempt leaves the hour.
       fake.appear();
       await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '2 hours', charged_at = now() - interval '2 hours' WHERE owner_id=${owner} AND created_at = (SELECT min(created_at) FROM fitness_device_enrollments WHERE owner_id=${owner})`;
-      expect((await enroll(oauthToken())).status).toBe(201);
+      // The refusal left the token unused.
+      expect((await enroll(token)).status).toBe(201);
     },
   );
 
@@ -584,8 +1529,11 @@ describe("device enrollment", () => {
       // The soonest to leave is a key charged 50 minutes ago.
       expect(wait).toBeGreaterThan(9 * 60);
       expect(wait).toBeLessThanOrEqual(10 * 60 + 1);
-      // Past its two-hour bound, the ambiguous attempt stops counting.
-      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '121 minutes' WHERE owner_id=${owner} AND key_state='ambiguous'`;
+      // Until its 24-hour bound, the ambiguous attempt still counts; past
+      // it, it stops counting.
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '23 hours' WHERE owner_id=${owner} AND key_state='ambiguous'`;
+      expect((await enroll(oauthToken())).status).toBe(429);
+      await database()`UPDATE fitness_device_enrollments SET created_at = now() - interval '24 hours 1 minute' WHERE owner_id=${owner} AND key_state='ambiguous'`;
       expect((await enroll(oauthToken())).status).toBe(201);
     },
   );
@@ -661,113 +1609,55 @@ describe("device enrollment", () => {
   );
 
   test.skipIf(!configured)(
-    "skips a stalled key list without using the time kept for the create",
+    "skips a stalled key list and goes on with the enrollment",
     async () => {
       const current = await enrolled();
       fake.listStall = new Promise<void>(() => undefined);
-      // Cleanup may run until the deadline less the create's reserve, and
-      // stalls that long, so too little time is left to create a key.
-      devices.setEnrollmentTiming({
-        deadlineMs: 1000,
-        cleanupMs: 5000,
-        createReserveMs: 600,
-      });
-      const token = oauthToken();
-      const before = await rows();
-      const refused = await enroll(token);
-      expect(refused.status).toBe(503);
-      expect(await refused.json()).toMatchObject({ code: "issuance_pending" });
-      expect(await rows()).toEqual(before);
-      expect((await importWith(current)).status).toBe(200);
-      // With its own budget, a stalled list is skipped and the enrollment
-      // goes on with the same token.
-      devices.setEnrollmentTiming({
-        deadlineMs: 5000,
-        cleanupMs: 300,
-        createReserveMs: 600,
-      });
-      const replaced = await enroll(token);
+      devices.setEnrollmentTiming({ cleanupMs: 300 });
+      const calls = fake.listCalls;
+      const begun = performance.now();
+      const replaced = await enroll(oauthToken());
+      expect(fake.listCalls).toBe(calls + 1);
+      expect(performance.now() - begun).toBeLessThan(3000);
       expect(replaced.status).toBe(201);
       expect((await importWith(current)).status).toBe(401);
     },
   );
 
   test.skipIf(!configured)(
-    "uses no token when recording waits on an import past the lease or deadline",
+    "uses no token when recording waits on an import longer than its lock wait",
     async () => {
-      let previous = await enrolled();
+      const previous = await enrolled();
       const importer = postgres(isolated.url, {
         max: 1,
         prepare: false,
         onnotice: () => undefined,
       });
-      const original = store.recordEnrollment;
-      const spy = spyOn(store, "recordEnrollment");
+      store.setEnrollmentWait(300);
       try {
-        for (const [timing, release] of [
-          // The lease runs out while recording waits; the import then lets go.
-          [{ leaseSeconds: 1 }, "after the lease"],
-          // The deadline runs out while recording waits.
-          [{ deadlineMs: 1200, createReserveMs: 100 }, "after the reply"],
-          // The time kept for the create starts while recording waits.
-          [{ deadlineMs: 3000, createReserveMs: 2000 }, "after the reply"],
-        ] as const) {
-          devices.setEnrollmentTiming(timing);
-          const token = oauthToken();
-          const before = await rows();
-          // The import takes the account row just as the enrollment starts
-          // to record its attempt, so recording is the write that waits.
-          let held: ReturnType<typeof holdAccount> | undefined;
-          let recordingFailed: unknown;
-          let reached = () => undefined as void;
-          const recording = new Promise<void>((resolve) => {
-            reached = resolve;
-          });
-          spy.mockImplementation(async (...args) => {
-            held = holdAccount(importer);
-            await held.taken;
-            reached();
-            try {
-              return await original(...args);
-            } catch (error) {
-              recordingFailed = error;
-              throw error;
-            }
-          });
-          const pending = enroll(token);
-          await recording;
-          await lockWaiters();
-          let response: Response;
-          if (release === "after the lease") {
-            await leaseExpired();
-            held?.release();
-            response = await pending;
-          } else {
-            response = await pending;
-            held?.release();
-          }
-          await held?.done;
-          expect(recordingFailed).toBeInstanceOf(store.DeviceLeaseLost);
-          expect(response.status).toBe(503);
-          expect(await response.json()).toMatchObject({
-            code: "issuance_pending",
-          });
-          expect(await rows()).toEqual(before);
-          expect((await importWith(previous)).status).toBe(200);
-          // The token was not used, so it enrolls once nothing waits.
-          spy.mockImplementation(original);
-          devices.setEnrollmentTiming();
-          const enrolledNow = await enroll(token);
-          expect(enrolledNow.status).toBe(201);
-          previous = (await enrolledNow.json()).secret;
-        }
+        const token = oauthToken();
+        const before = await rows();
+        // An import holds the account row, so recording waits on it.
+        const held = holdAccount(importer);
+        await held.taken;
+        const response = await enroll(token);
+        held.release();
+        await held.done;
+        expect(response.status).toBe(503);
+        expect(response.headers.get("retry-after")).toBe("10");
+        expect(await response.json()).toMatchObject({
+          code: "issuance_pending",
+        });
+        expect(await rows()).toEqual(before);
+        expect((await importWith(previous)).status).toBe(200);
+        // The token was not used, so it enrolls once nothing waits.
+        store.setEnrollmentWait();
+        expect((await enroll(token)).status).toBe(201);
       } finally {
-        spy.mockRestore();
-        devices.setEnrollmentTiming();
+        store.setEnrollmentWait();
         await importer.end();
       }
     },
-    30_000,
   );
 
   test.skipIf(!configured)(
@@ -855,7 +1745,7 @@ describe("device enrollment", () => {
       const counted = spyOn(store, "swapOutcome").mockImplementation(
         async (...args) => {
           const outcome = await original(...args);
-          outcomes.push(outcome);
+          outcomes.push(outcome.outcome);
           return outcome;
         },
       );
@@ -875,6 +1765,14 @@ describe("device enrollment", () => {
       expect(outcomes).toEqual(["undone"]);
       expect((await importWith(previous)).status).toBe(200);
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+      // Clerk made the key, so the failed attempt still counts toward the
+      // hourly limit.
+      const [failedAttempt] =
+        await database()`SELECT key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} AND NOT active ORDER BY created_at DESC LIMIT 1`;
+      expect({ ...failedAttempt }).toEqual({
+        key_state: "failed",
+        charged: true,
+      });
       const newest = fake.keys.reduce((a, b) =>
         a.createdAt >= b.createdAt ? a : b,
       );
@@ -887,52 +1785,41 @@ describe("device enrollment", () => {
     async () => {
       const previous = await enrolled();
       const sql = database();
-      // COMMIT sleeps for a second in a deferred trigger, holding the row.
+      // The lock key and the connections' application name belong to this
+      // run, so runs sharing a database never wait on or watch each other.
+      const lockKey = crypto.getRandomValues(new Uint32Array(1))[0] ?? 1;
+      const application = `fitness_commit_cut_${crypto.randomUUID()}`;
+      // The name goes in the URL, where it wins over any the test URL has.
+      const runUrl = new URL(isolated.url);
+      runUrl.searchParams.set("application_name", application);
+      // COMMIT runs a deferred trigger that waits for an advisory lock the
+      // test holds, so the swap keeps its rows locked until the test lets
+      // the commit finish.
       await sql.unsafe(`
-        CREATE TABLE fitness_test_slow_commits (on_commit boolean);
-        INSERT INTO fitness_test_slow_commits VALUES (true);
-        CREATE FUNCTION fitness_test_slow_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+        CREATE FUNCTION fitness_test_held_commit() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
-          IF NEW.active AND EXISTS (SELECT 1 FROM fitness_test_slow_commits) THEN
-            PERFORM pg_sleep(1);
+          IF NEW.active THEN
+            PERFORM pg_advisory_xact_lock(${lockKey});
           END IF;
           RETURN NEW;
         END $$;
-        CREATE CONSTRAINT TRIGGER fitness_test_slow_commit AFTER UPDATE ON fitness_device_enrollments
-          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fitness_test_slow_commit();`);
-      // A proxy that forwards the swap's COMMIT, then drops the app's side
-      // of the connection while Postgres goes on committing.
-      const target = new URL(isolated.url);
-      let armed = false;
-      const proxy = createServer((client) => {
-        const upstream = connect(Number(target.port), target.hostname);
-        client.on("data", (chunk) => {
-          upstream.write(chunk);
-          if (
-            armed &&
-            chunk.toString("latin1").toLowerCase().includes("commit")
-          ) {
-            armed = false;
-            client.destroy();
-          }
-        });
-        upstream.on("data", (chunk) => {
-          if (!client.destroyed) client.write(chunk);
-        });
-        client.on("error", () => undefined);
-        upstream.on("error", () => undefined);
-        upstream.on("close", () => client.destroy());
-        client.on("close", () => setTimeout(() => upstream.end(), 5000));
+        CREATE CONSTRAINT TRIGGER fitness_test_held_commit AFTER UPDATE ON fitness_device_enrollments
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fitness_test_held_commit();`);
+      const locker = postgres(runUrl.href, {
+        max: 1,
+        prepare: false,
+        onnotice: () => undefined,
       });
-      await new Promise<void>((resolve) =>
-        proxy.listen(0, "127.0.0.1", () => resolve()),
-      );
-      const address = proxy.address();
-      const proxied = new URL(isolated.url);
-      proxied.port = String(
-        typeof address === "object" && address ? address.port : 0,
-      );
-      const pool = postgres(proxied.href, {
+      const [held] =
+        await locker`SELECT pg_backend_pid() AS pid, pg_advisory_lock(${lockKey})`;
+      let locked = true;
+      const unlock = async () => {
+        if (!locked) return;
+        locked = false;
+        await locker`SELECT pg_advisory_unlock(${lockKey})`;
+      };
+      const proxy = await commitCutProxy(runUrl);
+      const pool = postgres(proxy.url, {
         max: 3,
         prepare: false,
         onnotice: () => undefined,
@@ -940,7 +1827,7 @@ describe("device enrollment", () => {
       const originalSwap = store.swapEnrollment;
       const arming = spyOn(store, "swapEnrollment").mockImplementation(
         async (...args) => {
-          armed = true;
+          proxy.arm();
           return originalSwap(...args);
         },
       );
@@ -949,24 +1836,42 @@ describe("device enrollment", () => {
       const counted = spyOn(store, "swapOutcome").mockImplementation(
         async (...args) => {
           const outcome = await originalOutcome(...args);
-          outcomes.push(outcome);
+          outcomes.push(outcome.outcome);
           return outcome;
         },
       );
       setDatabaseForTests(pool);
+      let pending: Promise<Response> | undefined;
       let response: Response;
       try {
-        response = await enroll(oauthToken());
+        pending = enroll(oauthToken());
+        // The swap's COMMIT waits for the test's lock, and the recovery
+        // read waits for the committing swap.
+        const committing = await blockedBy(
+          Number(held?.pid),
+          application,
+          "commit",
+        );
+        await blockedBy(
+          committing,
+          application,
+          "SELECT key_state, active, key_id",
+        );
+        expect(proxy.cuts).toBe(1);
+        await unlock();
+        response = await pending;
       } finally {
+        await unlock();
+        await pending?.catch(() => undefined);
         arming.mockRestore();
         counted.mockRestore();
         setDatabaseForTests(isolated.pool());
         await pool.end({ timeout: 1 }).catch(() => undefined);
-        proxy.close();
+        await proxy.close();
+        await locker.end();
         await sql.unsafe(`
-          DROP TRIGGER fitness_test_slow_commit ON fitness_device_enrollments;
-          DROP FUNCTION fitness_test_slow_commit();
-          DROP TABLE fitness_test_slow_commits;`);
+          DROP TRIGGER fitness_test_held_commit ON fitness_device_enrollments;
+          DROP FUNCTION fitness_test_held_commit();`);
       }
       // The recovery read waited for the commit and found it.
       expect(outcomes).toEqual(["committed"]);
@@ -975,49 +1880,15 @@ describe("device enrollment", () => {
       expect(fake.keys.find((k) => k.secret === secret)?.revoked).toBe(false);
       expect(fake.keys.find((k) => k.secret === previous)?.revoked).toBe(true);
       expect((await importWith(secret)).status).toBe(200);
-      expect((await importWith(previous)).status).toBe(401);
+      const refused = await importWith(previous);
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).toMatchObject({ code: "key_invalid" });
     },
     20_000,
   );
 
   test.skipIf(!configured)(
-    "returns the new key even when the lease cannot be released",
-    async () => {
-      await enrolled();
-      const sql = database();
-      await sql.unsafe(`
-        CREATE TABLE fitness_test_release_failures (on_release boolean);
-        INSERT INTO fitness_test_release_failures VALUES (true);
-        CREATE FUNCTION fitness_test_fail_release() RETURNS trigger LANGUAGE plpgsql AS $$
-        BEGIN
-          IF EXISTS (SELECT 1 FROM fitness_test_release_failures) THEN
-            RAISE EXCEPTION 'synthetic release failure';
-          END IF;
-          RETURN OLD;
-        END $$;
-        CREATE TRIGGER fitness_test_fail_release BEFORE DELETE ON fitness_device_issuance_leases
-          FOR EACH ROW EXECUTE FUNCTION fitness_test_fail_release();`);
-      let response: Response;
-      try {
-        response = await enroll(oauthToken());
-      } finally {
-        await sql.unsafe(`
-          DROP TRIGGER fitness_test_fail_release ON fitness_device_issuance_leases;
-          DROP FUNCTION fitness_test_fail_release();
-          DROP TABLE fitness_test_release_failures;`);
-      }
-      expect(response.status).toBe(201);
-      const secret = (await response.json()).secret;
-      expect((await importWith(secret)).status).toBe(200);
-      // The lease stayed behind, to expire on its own.
-      const [lease] =
-        await sql`SELECT expires_at > now() AS live FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
-      expect(lease?.live).toBe(true);
-    },
-  );
-
-  test.skipIf(!configured)(
-    "keeps the current key when the create fails, or comes after the deadline",
+    "keeps the current key when the create fails",
     async () => {
       const previous = await enrolled();
       fake.create = "fail";
@@ -1025,106 +1896,8 @@ describe("device enrollment", () => {
       expect(failed.status).toBe(503);
       expect(await failed.json()).toMatchObject({ code: "issuance_failed" });
       expect((await importWith(previous)).status).toBe(200);
-      fake.create = "ok";
-      // Recording commits only after the deadline, so the create cannot start.
-      devices.setEnrollmentTiming({ deadlineMs: 1000, createReserveMs: 200 });
-      const original = store.recordEnrollment;
-      const late: typeof original = async (...args) => {
-        const recorded = await original(...args);
-        await Bun.sleep(1100);
-        return recorded;
-      };
-      const spy = spyOn(store, "recordEnrollment").mockImplementation(late);
-      const token = oauthToken();
-      try {
-        const response = await enroll(token);
-        expect(response.status).toBe(503);
-        expect(await response.json()).toMatchObject({
-          code: "issuance_failed",
-        });
-      } finally {
-        spy.mockRestore();
-        devices.setEnrollmentTiming();
-      }
-      expect((await importWith(previous)).status).toBe(200);
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
-      // The token was used, so a fresh sign-in is needed.
-      expect((await enroll(token)).status).toBe(409);
-      expect(fake.keys.filter((k) => !k.revoked)).toHaveLength(1);
     },
-    30_000,
-  );
-
-  test.skipIf(!configured)(
-    "activates within the grace after the deadline, and not after it",
-    async () => {
-      const locker = postgres(isolated.url, {
-        max: 1,
-        prepare: false,
-        onnotice: () => undefined,
-      });
-      try {
-        for (const release of ["within the grace", "after the grace"]) {
-          const previous = await enrolled();
-          devices.setEnrollmentTiming({
-            deadlineMs: 1500,
-            createReserveMs: 200,
-            cleanupMs: 200,
-            activationSlackMs: 1500,
-          });
-          // Hold the create until the account is held, so the swap waits.
-          let releaseCreate = () => undefined as void;
-          fake.stall = new Promise<void>((resolve) => {
-            releaseCreate = resolve;
-          });
-          const creating = new Promise<void>((resolve) => {
-            fake.onCreate = resolve;
-          });
-          const begun = performance.now();
-          const pending = enroll(oauthToken());
-          await creating;
-          const held = holdAccount(locker);
-          await held.taken;
-          releaseCreate();
-          await lockWaiters();
-          let response: Response;
-          if (release === "within the grace") {
-            // Past the deadline, inside the grace.
-            await Bun.sleep(
-              Math.max(0, begun + 1500 + 400 - performance.now()),
-            );
-            held.release();
-            response = await pending;
-          } else {
-            // The swap's statement times out at the end of the grace.
-            response = await pending;
-            held.release();
-          }
-          await held.done;
-          fake.stall = null;
-          fake.onCreate = null;
-          devices.setEnrollmentTiming();
-          if (release === "within the grace") {
-            expect(response.status).toBe(201);
-            const secret = (await response.json()).secret;
-            expect((await importWith(secret)).status).toBe(200);
-            expect((await importWith(previous)).status).toBe(401);
-          } else {
-            expect(response.status).toBe(503);
-            expect(await response.json()).toMatchObject({
-              code: "issuance_failed",
-            });
-            expect((await importWith(previous)).status).toBe(200);
-            expect((await rows()).filter((r) => r.active)).toHaveLength(1);
-          }
-        }
-      } finally {
-        fake.stall = null;
-        devices.setEnrollmentTiming();
-        await locker.end();
-      }
-    },
-    30_000,
   );
 
   test.skipIf(!configured)(
@@ -1259,7 +2032,7 @@ describe("device enrollment", () => {
         );
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
         await admin.unsafe(
-          `GRANT INSERT, UPDATE, DELETE ON ${schema}.fitness_device_enrollments, ${schema}.fitness_device_issuance_leases TO ${role}; GRANT INSERT, UPDATE ON ${schema}.fitness_device_attempt_windows TO ${role}; GRANT INSERT ON ${schema}.fitness_accounts TO ${role}`,
+          `GRANT INSERT, UPDATE, DELETE ON ${schema}.fitness_device_enrollments TO ${role}; GRANT INSERT, UPDATE ON ${schema}.fitness_device_attempt_windows, ${schema}.fitness_device_sequences TO ${role}; GRANT INSERT ON ${schema}.fitness_accounts TO ${role}`,
         );
         // Pruning old attempt windows needs DELETE too.
         expect(await devices.deviceEnrollmentReady(limited)).toBe(false);
@@ -1272,29 +2045,37 @@ describe("device enrollment", () => {
           `GRANT UPDATE ON ${schema}.fitness_accounts TO ${role}`,
         );
         expect(await devices.deviceEnrollmentReady(limited)).toBe(true);
-        // A role readiness accepts can run the guarded writes.
-        const holder = crypto.randomUUID();
+        // A role readiness accepts can record and swap in a key.
         const attemptId = crypto.randomUUID();
-        expect(await store.acquireDeviceLease(limited, owner, holder, 90)).toBe(
-          true,
-        );
-        const lease = { owner, holder };
-        expect(
-          await store.recordEnrollment(limited, lease, {
-            tokenId: "oat_id_limited_role",
-            digest: "7".repeat(64),
-            attemptId,
-            installationId: installation,
-          }),
-        ).toBe(true);
-        expect(
-          await store.swapEnrollment(limited, lease, {
-            attemptId,
-            installationId: installation,
-            keyId: "ak_id_limited_role",
-          }),
-        ).toEqual({ activated: true, replaced: [] });
-        await store.releaseDeviceLease(limited, owner, holder);
+        setDatabaseForTests(limited);
+        try {
+          expect(
+            await store.recordEnrollment(
+              owner,
+              {
+                tokenId: "oat_id_limited_role",
+                digest: "7".repeat(64),
+                attemptId,
+                installationId: installation,
+                enrollmentSequence: 1,
+              },
+              { installations: 3, perHour: 5 },
+            ),
+          ).toBeNull();
+          expect(
+            await store.swapEnrollment(
+              owner,
+              {
+                attemptId,
+                installationId: installation,
+                keyId: "ak_id_limited_role",
+              },
+              { installations: 3 },
+            ),
+          ).toEqual({ activated: true, replaced: [], reason: null });
+        } finally {
+          setDatabaseForTests(isolated.pool());
+        }
         await admin`DROP TABLE fitness_device_enrollments CASCADE`;
         expect(await devices.deviceEnrollmentReady(admin)).toBe(false);
       } finally {
@@ -1309,70 +2090,10 @@ describe("device enrollment", () => {
   );
 });
 
-describe("device issuance lease and attempt windows", () => {
+describe("device attempt windows and contention", () => {
   const url = isolated.url;
   const client = () =>
     postgres(url, { max: 2, prepare: false, onnotice: () => undefined });
-
-  test.skipIf(!configured)(
-    "lets one of two independent clients hold an owner's lease",
-    async () => {
-      const [a, b] = [client(), client()];
-      const holders = [crypto.randomUUID(), crypto.randomUUID()] as const;
-      try {
-        const results = await Promise.all([
-          store.acquireDeviceLease(a, owner, holders[0], 90),
-          store.acquireDeviceLease(b, owner, holders[1], 90),
-        ]);
-        expect(results.filter(Boolean)).toHaveLength(1);
-        const winner = results[0] ? 0 : 1;
-        const loserClient = winner === 0 ? b : a;
-        const loser = holders[winner === 0 ? 1 : 0];
-        expect(
-          await store.acquireDeviceLease(loserClient, owner, loser, 90),
-        ).toBe(false);
-        // The loser cannot release the winner's lease.
-        await store.releaseDeviceLease(loserClient, owner, loser);
-        expect(
-          await store.acquireDeviceLease(loserClient, owner, loser, 90),
-        ).toBe(false);
-        await store.releaseDeviceLease(
-          winner === 0 ? a : b,
-          owner,
-          holders[winner],
-        );
-        expect(
-          await store.acquireDeviceLease(loserClient, owner, loser, 90),
-        ).toBe(true);
-        await store.releaseDeviceLease(loserClient, owner, loser);
-      } finally {
-        await Promise.all([a.end(), b.end()]);
-      }
-    },
-  );
-
-  test.skipIf(!configured)(
-    "releases the lease when the work fails",
-    async () => {
-      await expect(
-        store.withDeviceLease(owner, 90, async () => {
-          throw new Error("Synthetic failure");
-        }),
-      ).rejects.toThrow("Synthetic failure");
-      expect(await store.withDeviceLease(owner, 90, async () => "free")).toBe(
-        "free",
-      );
-    },
-  );
-
-  test.skipIf(!configured)("takes over an expired lease", async () => {
-    await database()`INSERT INTO fitness_device_issuance_leases(owner_id, holder, expires_at) VALUES(${owner}, ${crypto.randomUUID()}, now() - interval '1 second')`;
-    expect((await enroll(oauthToken())).status).toBe(201);
-    await database()`INSERT INTO fitness_device_issuance_leases(owner_id, holder, expires_at) VALUES(${owner}, ${crypto.randomUUID()}, now() + interval '90 seconds')`;
-    const busy = await enroll(oauthToken());
-    expect(busy.status).toBe(503);
-    expect(await busy.json()).toMatchObject({ code: "issuance_pending" });
-  });
 
   test.skipIf(!configured)(
     "counts attempts across independent clients and stops at the cap",
@@ -1414,258 +2135,77 @@ describe("device issuance lease and attempt windows", () => {
   );
 
   test.skipIf(!configured)(
-    "answers busy at once while the lease holder waits behind an import",
+    "never leaves two active keys while a swap waits behind an import",
     async () => {
       await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
       const current = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"f".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
-      const importer = client();
-      const other = client();
-      try {
-        // A live lease, then one that expires while its holder still waits.
-        for (const seconds of [90, 0.3]) {
-          const holder = crypto.randomUUID();
-          expect(
-            await store.acquireDeviceLease(database(), owner, holder, seconds),
-          ).toBe(true);
-          let waiting: Promise<void> | undefined;
-          await importer.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
-            waiting = store.deactivateInstallation(
-              database(),
-              { owner, holder },
-              installation,
-            );
-            waiting.catch(() => undefined);
-            await Bun.sleep(500);
-            const begun = performance.now();
-            expect(
-              await store.acquireDeviceLease(
-                other,
-                owner,
-                crypto.randomUUID(),
-                90,
-              ),
-            ).toBe(false);
-            expect(performance.now() - begun).toBeLessThan(400);
-          });
-          await waiting?.catch(() => undefined);
-          await store.releaseDeviceLease(database(), owner, holder);
-          await database()`UPDATE fitness_device_enrollments SET active=true WHERE attempt_id=${current}`;
-        }
-      } finally {
-        await Promise.all([importer.end(), other.end()]);
-      }
-    },
-  );
-
-  test.skipIf(!configured)(
-    "fails a write that waited on the lease past its expiry",
-    async () => {
-      const holder = crypto.randomUUID();
-      const attemptId = crypto.randomUUID();
-      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-      expect(
-        await store.acquireDeviceLease(database(), owner, holder, 90),
-      ).toBe(true);
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"b".repeat(64)},${attemptId},${installation})`;
-      const locker = client();
-      try {
-        let activation: Promise<boolean> | undefined;
-        await locker.begin(async (tx) => {
-          await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${owner} FOR UPDATE`;
-          // The activation starts while the lease is valid, then waits.
-          activation = store
-            .swapEnrollment(
-              database(),
-              { owner, holder },
-              {
-                attemptId: attemptId,
-                installationId: installation,
-                keyId: "ak_id_waited",
-              },
-            )
-            .then((r) => r.activated);
-          activation.catch(() => undefined);
-          await Bun.sleep(200);
-          await tx`UPDATE fitness_device_issuance_leases SET expires_at = clock_timestamp() + interval '300 milliseconds' WHERE owner_id=${owner}`;
-          await Bun.sleep(600);
-        });
-        await expect(activation).rejects.toBeInstanceOf(store.DeviceLeaseLost);
-        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
-      } finally {
-        await locker.end();
-        await store.releaseDeviceLease(database(), owner, holder);
-      }
-    },
-  );
-
-  test.skipIf(!configured)(
-    "rolls back when two waits together pass the deadline",
-    async () => {
-      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-      const current = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"9".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
-      // An old, inactive row that recording prunes, so it locks it.
-      const old = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,created_at) VALUES(${owner},${"6".repeat(64)},${old},${otherInstallation(7)},'failed',now() - interval '3 days')`;
-      const holder = crypto.randomUUID();
-      expect(
-        await store.acquireDeviceLease(database(), owner, holder, 90),
-      ).toBe(true);
-      const [first, second] = [client(), client()];
-      try {
-        let releaseFirst = () => undefined as void;
-        let releaseSecond = () => undefined as void;
-        const held = [
-          // One transaction holds the account row for 600 ms...
-          first.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
-            await new Promise<void>((resolve) => {
-              releaseFirst = resolve;
-              setTimeout(resolve, 600);
-            });
-          }),
-          // ...and another the old row for 1300 ms.
-          second.begin(async (tx) => {
-            await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${old} FOR SHARE`;
-            await new Promise<void>((resolve) => {
-              releaseSecond = resolve;
-              setTimeout(resolve, 1300);
-            });
-          }),
-        ];
-        await Bun.sleep(50);
-        const digest = "8".repeat(64);
-        // Each wait alone fits in one second; together they do not.
-        const begun = performance.now();
-        await expect(
-          store.recordEnrollment(
-            database(),
-            { owner, holder, deadline: performance.now() + 1000 },
-            {
-              tokenId: "oat_id_two_waits",
-              digest,
-              attemptId: crypto.randomUUID(),
-              installationId: installation,
-            },
-          ),
-        ).rejects.toBeInstanceOf(store.DeviceLeaseLost);
-        expect(performance.now() - begun).toBeLessThan(1200);
-        releaseFirst();
-        releaseSecond();
-        await Promise.all(held);
-        const used =
-          await database()`SELECT 1 FROM fitness_device_enrollments WHERE token_digest=${digest}`;
-        expect(used).toHaveLength(0);
-        const [row] =
-          await database()`SELECT active FROM fitness_device_enrollments WHERE attempt_id=${current}`;
-        expect(row?.active).toBe(true);
-      } finally {
-        await Promise.all([first.end(), second.end()]);
-        await store.releaseDeviceLease(database(), owner, holder);
-      }
-    },
-  );
-
-  test.skipIf(!configured)(
-    "fails an activation that waited on its enrollment row past the lease's expiry",
-    async () => {
-      const holder = crypto.randomUUID();
-      const attemptId = crypto.randomUUID();
-      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-      // A lease that expires while the activation waits.
-      expect(
-        await store.acquireDeviceLease(database(), owner, holder, 0.4),
-      ).toBe(true);
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"c".repeat(64)},${attemptId},${installation})`;
-      const locker = client();
-      try {
-        let activation: Promise<boolean> | undefined;
-        await locker.begin(async (tx) => {
-          // Another transaction, such as an import, holds the row.
-          await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${attemptId} FOR UPDATE`;
-          activation = store
-            .swapEnrollment(
-              database(),
-              { owner, holder },
-              {
-                attemptId: attemptId,
-                installationId: installation,
-                keyId: "ak_id_waited_row",
-              },
-            )
-            .then((r) => r.activated);
-          activation.catch(() => undefined);
-          await Bun.sleep(800);
-        });
-        await expect(activation).rejects.toBeInstanceOf(store.DeviceLeaseLost);
-        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
-      } finally {
-        await locker.end();
-        await store.releaseDeviceLease(database(), owner, holder);
-      }
-    },
-  );
-
-  test.skipIf(!configured)(
-    "never leaves two active keys or a wrongly active one under contention",
-    async () => {
-      await database()`INSERT INTO fitness_accounts(owner_id) VALUES(${owner}) ON CONFLICT DO NOTHING`;
-      const current = crypto.randomUUID();
-      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at) VALUES(${owner},${"d".repeat(64)},${current},${installation},'issued','ak_id_current',true,now())`;
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,key_id,active,charged_at,enrollment_sequence) VALUES(${owner},${"d".repeat(64)},${current},${installation},'issued','ak_id_current',true,now(),1)`;
+      const next = crypto.randomUUID();
+      await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,enrollment_sequence) VALUES(${owner},${"e".repeat(64)},${next},${installation},2)`;
       const active = async () =>
         (
           await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`
         ).map((r) => r.attempt_id);
-      // A replacement whose deactivation waits behind an import's hold on the
-      // current row, while its lease runs out, changes nothing.
-      const slow = crypto.randomUUID();
-      expect(await store.acquireDeviceLease(database(), owner, slow, 0.4)).toBe(
-        true,
-      );
+      // An import holds the account and reads the current key, as it does
+      // before it saves; the swap waits behind it.
       const importer = client();
+      let swapping: ReturnType<typeof store.swapEnrollment> | undefined;
       try {
-        let replacing: Promise<void> | undefined;
         await importer.begin(async (tx) => {
+          await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
           await tx`SELECT 1 FROM fitness_device_enrollments WHERE attempt_id=${current} FOR SHARE`;
-          replacing = store.deactivateInstallation(
-            database(),
-            { owner, holder: slow },
-            installation,
-          );
-          replacing.catch(() => undefined);
-          await Bun.sleep(800);
-        });
-        await expect(replacing).rejects.toBeInstanceOf(store.DeviceLeaseLost);
-        expect(await active()).toEqual([current]);
-      } finally {
-        await importer.end();
-        await store.releaseDeviceLease(database(), owner, slow);
-      }
-      // A swap stops the current key and activates the next one together,
-      // so the installation never has two active keys.
-      const holder = crypto.randomUUID();
-      expect(
-        await store.acquireDeviceLease(database(), owner, holder, 90),
-      ).toBe(true);
-      try {
-        const next = crypto.randomUUID();
-        await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"e".repeat(64)},${next},${installation})`;
-        expect(
-          await store.swapEnrollment(
-            database(),
-            { owner, holder },
+          swapping = store.swapEnrollment(
+            owner,
             {
               attemptId: next,
               installationId: installation,
               keyId: "ak_id_second",
             },
+            { installations: 3 },
+          );
+          await lockWaiters();
+          expect(await active()).toEqual([current]);
+        });
+        // Once the import commits, the swap stops the current key and
+        // activates the next one together.
+        expect(await swapping).toEqual({
+          activated: true,
+          replaced: ["ak_id_current"],
+          reason: null,
+        });
+        expect(await active()).toEqual([next]);
+        // An attempt that is no longer pending is never activated.
+        await database()`UPDATE fitness_device_enrollments SET key_state='failed' WHERE attempt_id=${current}`;
+        expect(
+          await store.swapEnrollment(
+            owner,
+            {
+              attemptId: current,
+              installationId: installation,
+              keyId: "ak_id_current",
+            },
+            { installations: 3 },
           ),
-        ).toEqual({ activated: true, replaced: ["ak_id_current"] });
+        ).toEqual({ activated: false, replaced: [], reason: "not_pending" });
+        expect(await active()).toEqual([next]);
+        // Nor is one that would put more installations than the limit on
+        // active keys.
+        const extra = crypto.randomUUID();
+        await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id) VALUES(${owner},${"c".repeat(64)},${extra},${otherInstallation(1)})`;
+        expect(
+          await store.swapEnrollment(
+            owner,
+            {
+              attemptId: extra,
+              installationId: otherInstallation(1),
+              keyId: "ak_id_extra",
+            },
+            { installations: 1 },
+          ),
+        ).toEqual({ activated: false, replaced: [], reason: "device_limit" });
         expect(await active()).toEqual([next]);
       } finally {
-        await store.releaseDeviceLease(database(), owner, holder);
+        await importer.end();
       }
     },
   );
@@ -1721,57 +2261,6 @@ describe("device issuance lease and attempt windows", () => {
       await counted.end();
     }
   });
-
-  test.skipIf(!configured)(
-    "stops writing once another request takes over the lease",
-    async () => {
-      let release = () => undefined as void;
-      fake.stall = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const creating = new Promise<void>((resolve) => {
-        fake.onCreate = resolve;
-      });
-      const first = enroll(oauthToken());
-      await creating;
-      // The first request's lease expires and a second client takes it.
-      const other = client();
-      const holder = crypto.randomUUID();
-      try {
-        await other`UPDATE fitness_device_issuance_leases SET expires_at = now() - interval '1 second' WHERE owner_id=${owner}`;
-        expect(await store.acquireDeviceLease(other, owner, holder, 90)).toBe(
-          true,
-        );
-        release();
-        const response = await first;
-        expect(response.status).not.toBe(201);
-        expect(await response.json()).toMatchObject({
-          code: "issuance_failed",
-        });
-        // Its key was created, then revoked, and never became active.
-        const [created] = fake.keys.filter(
-          (k) => k.claims?.installationId === installation,
-        );
-        expect(created?.revoked).toBe(true);
-        expect(await rows()).toEqual([{ key_state: "pending", active: false }]);
-        // The second holder's lease is intact.
-        const [lease] =
-          await other`SELECT holder FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
-        expect(lease?.holder).toBe(holder);
-        // Without the lease, a fenced write changes nothing.
-        await expect(
-          store.deactivateInstallation(
-            database(),
-            { owner, holder: crypto.randomUUID() },
-            installation,
-          ),
-        ).rejects.toBeInstanceOf(store.DeviceLeaseLost);
-      } finally {
-        await store.releaseDeviceLease(other, owner, holder);
-        await other.end();
-      }
-    },
-  );
 });
 
 describe("device import against a reconnect", () => {

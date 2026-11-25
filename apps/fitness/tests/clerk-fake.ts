@@ -95,10 +95,11 @@ function createFake() {
     throws: false,
     usersDown: false,
     /**
-     * Key creation: fails; saves the key and then fails; or fails while
-     * Clerk is still creating it, so the key appears on `appear()`.
+     * Key creation: fails with a 500, with Clerk's own validation 422, or
+     * with a gateway's codeless 403; saves the key and then fails; or fails
+     * while Clerk is still creating it, so the key appears on `appear()`.
      */
-    create: "ok" as "ok" | "fail" | "lost" | "late",
+    create: "ok" as "ok" | "fail" | "rejected" | "gateway" | "lost" | "late",
     /** Holds each key creation until it settles. */
     stall: null as Promise<void> | null,
     /** Runs when a key creation starts. */
@@ -117,6 +118,12 @@ function createFake() {
     } | null,
     /** Key IDs whose revocation fails. */
     revokeFails: new Set<string>(),
+    /** Holds revoking this key until `gate` settles; `reached` runs first. */
+    revokeHold: null as {
+      id: string;
+      gate: Promise<void>;
+      reached: () => void;
+    } | null,
     /** Key IDs whose lookup fails without an answer. */
     getFails: new Set<string>(),
     /** Key IDs whose lookup gets a gateway 404 without Clerk's error. */
@@ -138,6 +145,7 @@ function createFake() {
       fake.usersDown = false;
       fake.create = "ok";
       fake.revokeFails.clear();
+      fake.revokeHold = null;
       fake.getFails.clear();
       fake.gatewayMissing.clear();
       fake.listStall = null;
@@ -287,6 +295,10 @@ function createFake() {
         fake.onCreate?.();
         if (fake.stall) await fake.stall;
         if (fake.create === "fail") throw apiError(500);
+        // Clerk's own validation error, or a gateway's 4xx without one.
+        if (fake.create === "rejected")
+          throw apiError(422, "form_param_value_invalid");
+        if (fake.create === "gateway") throw apiError(403);
         const key = fake.addKey({
           secret: `ak_secret_${fake.sequence + 1}`,
           subject: params.subject,
@@ -318,6 +330,11 @@ function createFake() {
         return { ...key };
       },
       async revoke(params: { apiKeyId: string }) {
+        const hold = fake.revokeHold;
+        if (hold?.id === params.apiKeyId) {
+          hold.reached();
+          await hold.gate;
+        }
         if (fake.revokeFails.has(params.apiKeyId)) throw apiError(500);
         const key = fake.keys.find((k) => k.id === params.apiKeyId);
         if (!key) throw apiError(404, "resource_not_found");
