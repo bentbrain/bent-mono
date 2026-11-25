@@ -1129,8 +1129,8 @@ describe("device enrollment", () => {
           }
           resume();
           const response = await earlier;
-          // The app keeps only its latest attempt's reply, so the earlier
-          // attempt never replaces the saved key.
+          // The later sequence was sent before the earlier attempt's swap,
+          // so the earlier attempt never replaces the saved key.
           expect({ failure, status: response.status }).toEqual({
             failure,
             status: 503,
@@ -1176,6 +1176,80 @@ describe("device enrollment", () => {
         }
       }
     },
+  );
+
+  test.skipIf(!configured)(
+    "leaves an earlier attempt's key working when a later one fails after its swap",
+    async () => {
+      for (const failure of ["hourly limit", "create rejected"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        await database()`DELETE FROM fitness_device_sequences WHERE owner_id=${owner}`;
+        fake.keys = [];
+        // The phone saved this key.
+        const saved = await enrolled();
+        const savedKey = fake.keys.find((k) => k.secret === saved);
+        if (!savedKey) throw new Error("Expected the key.");
+        // A swaps in its key and commits, then waits while Clerk revokes
+        // the saved key, before its reply goes out. B's cleanup gives up
+        // on that key quickly.
+        devices.setEnrollmentTiming({ cleanupMs: 300 });
+        let releaseA = () => undefined as void;
+        let reachedA = () => undefined as void;
+        const afterSwap = new Promise<void>((resolve) => {
+          reachedA = resolve;
+        });
+        fake.revokeHold = {
+          id: savedKey.id,
+          gate: new Promise<void>((resolve) => {
+            releaseA = resolve;
+          }),
+          reached: () => reachedA(),
+        };
+        let a: Promise<Response> | undefined;
+        try {
+          a = enroll(oauthToken());
+          await afterSwap;
+          // The phone starts B with a higher sequence, and B fails.
+          if (failure === "hourly limit")
+            await database()`INSERT INTO fitness_device_enrollments(owner_id,token_digest,attempt_id,installation_id,key_state,charged_at) SELECT ${owner}, md5(random()::text) || md5(random()::text), gen_random_uuid(), ${otherInstallation(9)}, 'issued', now() FROM generate_series(1, 3)`;
+          else fake.create = "rejected";
+          const b = await enroll(oauthToken());
+          fake.create = "ok";
+          expect({ failure, status: b.status }).toEqual({
+            failure,
+            status: failure === "hourly limit" ? 429 : 503,
+          });
+          releaseA();
+          const response = await a;
+          // A's reply is the highest-sequence success the phone receives,
+          // and its key is the one that works; the saved key does not.
+          expect({ failure, status: response.status }).toEqual({
+            failure,
+            status: 201,
+          });
+          const secret = (await response.json()).secret;
+          expect({ failure, a: (await importWith(secret)).status }).toEqual({
+            failure,
+            a: 200,
+          });
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            secret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+          expect({
+            failure,
+            saved: (await importWith(saved)).status,
+          }).toEqual({ failure, saved: 401 });
+        } finally {
+          releaseA();
+          await a;
+          fake.revokeHold = null;
+          fake.create = "ok";
+          devices.setEnrollmentTiming();
+        }
+      }
+    },
+    20_000,
   );
 
   test.skipIf(!configured)(

@@ -628,16 +628,18 @@ export async function swapEnrollment(
           reason: "expired" as const,
         };
       }
-      // The app keeps the key from its latest attempt, the one with the
-      // highest sequence. Another attempt for this installation with the
-      // same or a higher sequence that has its key, or is still being
-      // issued within the grace, wins: this one never replaces it. Those
+      // A later attempt, by the app's sequence, always wins. Another attempt
+      // for this installation with the same or a higher sequence that has
+      // its key, or is still being issued within the grace, keeps it: this
+      // one never replaces it. Those
       // rows are locked too, so none changes while this decides.
       const newer =
         await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND attempt_id<>${attempt.attemptId} AND coalesce(enrollment_sequence, 0) >= ${own.sequence} AND (active OR key_state='issued' OR (key_state='pending' AND created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}))) FOR UPDATE`;
       // Nor does it once the app has sent a higher sequence at all, even
-      // for an attempt that then failed or was refused: the app keeps only
-      // the reply to its latest attempt.
+      // for an attempt that then failed or was refused. So a success only
+      // ever comes from an attempt that swapped before every higher
+      // sequence was sent, and a later success replaces it; the app keeps
+      // the successful reply with the highest sequence it has received.
       const [mark] =
         await tx`SELECT max_seen FROM fitness_device_sequences WHERE owner_id=${owner} AND installation_id=${attempt.installationId}`;
       if (newer.length || Number(mark?.max_seen ?? 0) > Number(own.sequence)) {

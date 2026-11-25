@@ -458,8 +458,9 @@ function logged(event: string, error: unknown) {
  * 8. Before replying `201`, the attempt must still be the installation's
  *    active one. A later enrollment that replaced it meanwhile makes this
  *    request reply `503 issuance_failed`. This check is best effort: when
- *    its read fails, the key is returned, and the app's own check that a
- *    reply belongs to its current attempt drops a stale one.
+ *    its read fails, the key is returned. The app keeps the successful
+ *    reply with the highest sequence it has received, so a later attempt's
+ *    success takes this key's place.
  */
 export async function handleDeviceEnroll(request: Request) {
   const wait = takeAttempt();
@@ -748,9 +749,9 @@ export async function handleDeviceEnroll(request: Request) {
   // A later enrollment for this installation may have replaced this key
   // meanwhile, so the key is returned only while it is still current. The
   // check is best effort: a read that fails returns the key, since the swap
-  // committed, and the app drops a reply that is not for its current
-  // attempt, so a stale key it gets this way is never saved over a newer
-  // one.
+  // committed. The app never replaces a stored key with one from a lower
+  // sequence, so a stale key it gets this way never takes the place of a
+  // later attempt's.
   let current = true;
   try {
     current = await deviceKeyActive({

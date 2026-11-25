@@ -66,8 +66,9 @@ export const DeviceEnrollRequest = z.object({
     .regex(/^[^\p{Cc}\p{Cf}]+$/u, "Use letters, numbers and punctuation."),
   /**
    * The app's own count of enrollment attempts for this installation,
-   * higher for each new attempt. The attempt with the highest count is the
-   * one that keeps its key.
+   * higher for each new attempt. An attempt never replaces the key of one
+   * with a higher count; the app keeps the successful reply with the
+   * highest count it has received.
    */
   enrollmentSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
 });
