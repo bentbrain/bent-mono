@@ -10,6 +10,10 @@ if (posthogKey) {
     api_host: "/ingest",
     ui_host: "https://us.posthog.com",
     defaults: "2026-08-30",
-    person_profiles: "identified_only",
+    // Keep analytics state in memory: no cookies or browser storage on the
+    // visitor's device. Each page load counts as a new anonymous visit.
+    persistence: "memory",
+    person_profiles: "never",
+    disable_session_recording: true,
   });
 }
