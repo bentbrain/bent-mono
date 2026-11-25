@@ -24,10 +24,12 @@ export function comparison(eventName, event, head) {
 export function workspaceScope(
   environment = process.env,
   execute = execFileSync,
+  { regression = false } = {},
 ) {
   const full =
     environment.GITHUB_EVENT_NAME === "schedule" ||
-    environment.GITHUB_EVENT_NAME === "workflow_dispatch";
+    environment.GITHUB_EVENT_NAME === "workflow_dispatch" ||
+    (regression && ["push", "merge_group"].includes(environment.GITHUB_EVENT_NAME));
   const turbo = resolve("node_modules/.bin/turbo");
   function inventory(args, extraEnvironment = {}) {
     const result = JSON.parse(
@@ -71,10 +73,11 @@ export function workspaceScope(
       )
         .split("\0")
         .filter(Boolean);
-      // Root automation/configuration affects every product.
+      // Regression suites also widen on any lockfile change. Other checks let
+      // Turbo pick the workspaces whose dependency resolution changed.
       const rootChanged = files.some(
         (file) =>
-          file !== "bun.lock" &&
+          (file !== "bun.lock" || regression) &&
           !all.some((item) => file.startsWith(`${item.path}/`)),
       );
       if (!rootChanged) {
@@ -114,7 +117,9 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  const scope = workspaceScope();
+  const scope = workspaceScope(undefined, undefined, {
+    regression: process.argv[2] === "browser",
+  });
   console.log(JSON.stringify(scope));
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(

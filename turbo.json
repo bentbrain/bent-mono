@@ -35,6 +35,12 @@
       ],
       "cache": false
     },
+    "test:files": {
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false
+    },
     "dev": {
       "cache": false,
       "persistent": true

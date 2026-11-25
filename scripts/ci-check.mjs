@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { includesPath, workspaceScope } from "./ci-scope.mjs";
+import {
+  playwrightFileFilters,
+  reportTestSelection,
+  selectTestFiles,
+  testSelectionContext,
+} from "./ci-test-selection.mjs";
 
-const scope = workspaceScope();
-const affected = (directory) => includesPath(scope, directory);
-console.log(
-  `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`,
-);
 const task = process.argv[2];
 const allowed = [
   "lint",
@@ -18,6 +20,19 @@ const allowed = [
   "browser",
 ];
 if (!allowed.includes(task)) throw new Error("Select a known workspace check.");
+
+const regression = ["browser", "test", "test:integration"].includes(task);
+const scope = workspaceScope(undefined, undefined, { regression });
+const affected = (directory) => includesPath(scope, directory);
+console.log(
+  `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`,
+);
+const selection = regression ? testSelectionContext() : null;
+function testPlan(directory) {
+  const plan = selectTestFiles(directory, task, selection);
+  reportTestSelection(directory, task, plan);
+  return plan;
+}
 
 // Disposable CI fixtures only. This runner never reads a production environment.
 const env = {
@@ -59,15 +74,30 @@ function application(directory, script, overrides) {
     run("bun", ["run", script], resolve(directory), overrides);
 }
 
+function browser(directory, script, overrides) {
+  if (!affected(directory)) return;
+  const plan = testPlan(directory);
+  const metrics = directory === "apps/jp" && plan.files
+    ? { BROWSER_METRICS_DIR: "artifacts/browser/selected" }
+    : {};
+  run(
+    "bun",
+    ["run", script, ...playwrightFileFilters(plan.files ?? [])],
+    resolve(directory),
+    { ...overrides, ...metrics },
+  );
+}
+
 if (task === "browser") {
-  application("apps/fitness", "test:browser", { VITE_CLERK_PUBLISHABLE_KEY: "", CLERK_SECRET_KEY: "", DATABASE_URL: "", FITNESS_ALLOWED_EMAILS: "" });
+  browser("apps/fitness", "test:browser", { VITE_CLERK_PUBLISHABLE_KEY: "", CLERK_SECRET_KEY: "", DATABASE_URL: "", FITNESS_ALLOWED_EMAILS: "" });
   application("apps/trackmap", "build");
-  application("apps/trackmap", "test:browser");
+  browser("apps/trackmap", "test:browser");
   application("apps/jp", "test:e2e:coverage");
-  application("apps/jp", "test:e2e");
+  browser("apps/jp", "test:e2e", { E2E_TIER: "full" });
   application("apps/toolbar", "build");
-  application("apps/toolbar", "test:e2e");
+  browser("apps/toolbar", "test:e2e");
   application("apps/home", "build");
+  if (affected("apps/home")) testPlan("apps/home");
   application("apps/home", "test:worker");
 } else {
   if (task === "lint") {
@@ -80,10 +110,22 @@ if (task === "browser") {
       "scripts/public-source.test.mjs",
       "scripts/workspace.test.mjs",
       "scripts/ci-scope.test.mjs",
+      "scripts/ci-test-selection.test.mjs",
     ]);
-  const packages = scope.packages;
+  const turbo = resolve("node_modules/.bin/turbo");
+  const packages = scope.packages.filter((item) => {
+    if (!regression) return true;
+    const { scripts } = JSON.parse(
+      readFileSync(resolve(item.path, "package.json"), "utf8"),
+    );
+    if (typeof scripts?.[task] !== "string") return true;
+    const plan = testPlan(item.path);
+    if (!plan.files) return true;
+    run(turbo, ["run", "test:files", `--filter=${item.name}`, "--", ...plan.files]);
+    return false;
+  });
   if (packages.length)
-    run(resolve("node_modules/.bin/turbo"), [
+    run(turbo, [
       "run",
       task,
       ...(task === "typecheck" ? ["check-types", "types:check"] : []),

@@ -33,7 +33,11 @@ Run app commands from their directories or use Bun workspace filters. Each app's
 
 The root `bun.lock` manages workspace dependencies.
 
-CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Weekly and manually dispatched Quality runs execute the full regression suite. Root automation changes and incomplete comparison history trigger validation of every workspace.
+CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Main pushes, merge-queue checks, weekly runs and manual dispatches run the full regression suites. Root automation changes and incomplete comparison history trigger validation of every workspace.
+
+On pull requests, Quality uses the base revision's [test dependency map](scripts/ci-test-map.json) to select browser and unit test files for mapped changes. The job summary lists the selected files and their inputs. Changed tests run in their suite. A missing or stale map, shared inputs, or changes without a mapping trigger the full affected suite. A lockfile edit runs regressions across the workspace. Integration tests run at workspace scope.
+
+When updating a mapping, review the affected routes, source consumers, fixtures and test files. Run `node scripts/ci-test-selection.mjs --fingerprint apps/jp` or use `apps/toolbar` to record the reviewed inputs from the committed tree. A pull request that updates the map runs the full affected suites.
 
 Quality runs full CodeQL analysis with both security suites, requires zero raw findings across the repository and retains the original SARIF report. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
 

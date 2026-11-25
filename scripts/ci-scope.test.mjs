@@ -77,6 +77,13 @@ test("an app-only dependency and lockfile update retains its affected scope", ()
     assert.deepEqual(scope.packages, [packages[0]]);
     assert.equal(includesPath(scope, "products/drive"), false);
   }));
+test("regression checks widen even when a lockfile edit changes no resolution", () =>
+  fixture((env) => {
+    const scope = workspaceScope(
+      env, execute(["bun.lock"], []), { regression: true },
+    );
+    assert.deepEqual(scope.packages, packages);
+  }));
 test("shared consumers supplied by Turbo are retained", () =>
   fixture((env) => {
     const scope = workspaceScope(
@@ -85,6 +92,18 @@ test("shared consumers supplied by Turbo are retained", () =>
     );
     assert.equal(includesPath(scope, "products/drive"), true);
     assert.equal(includesPath(scope, "products/drive/apps/web"), true);
+  }));
+test("protected regression runs use the full workspace inventory", () =>
+  fixture((env) => {
+    for (const event of ["push", "merge_group", "schedule", "workflow_dispatch"]) {
+      const scope = workspaceScope(
+        { ...env, GITHUB_EVENT_NAME: event },
+        execute([], []),
+        { regression: true },
+      );
+      assert.equal(scope.full, true);
+      assert.deepEqual(scope.packages, packages);
+    }
   }));
 test("root changes, deleted workspace paths and missing history select every workspace", () =>
   fixture((env) => {

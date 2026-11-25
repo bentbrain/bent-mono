@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "applications": {
+    "apps/jp": {
+      "fingerprint": "80bf5c552a793e3c17137fd4d209ffdb9e77f8bdd513a8077e4ee767ef74322b",
+      "sources": {
+        "src/components/ShopAd.astro": {
+          "trackingValuesOnly": true,
+          "browser": [
+            "blog.spec.ts",
+            "footer-geometry.spec.ts",
+            "gallery-masonry.spec.ts",
+            "home-loading-layout.spec.ts",
+            "newsletter.spec.ts",
+            "public-media-layout.spec.ts"
+          ]
+        },
+        "src/lib/instagram-profile.ts": {
+          "browser": [
+            "blog.spec.ts",
+            "editor-paste.spec.ts",
+            "instagram-profile.spec.ts",
+            "rich-text.spec.ts"
+          ],
+          "test": [
+            "tests/editor-paste.test.ts",
+            "tests/editor.test.ts",
+            "tests/instagram-profile.test.ts"
+          ]
+        }
+      }
+    },
+    "apps/toolbar": {
+      "fingerprint": "01b067f132be036e78c7d64054ae0af74a4c7d96e13915499bf501584561115c",
+      "sources": {
+        "src/server/emoji-data.ts": {
+          "browser": [
+            "feedback.spec.ts",
+            "reactions.spec.ts"
+          ],
+          "test": [
+            "tests/emoji.test.ts",
+            "tests/mcp.test.ts",
+            "tests/service.test.ts",
+            "tests/worker.test.ts"
+          ]
+        }
+      }
+    }
+  }
+}
