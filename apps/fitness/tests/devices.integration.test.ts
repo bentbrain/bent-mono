@@ -517,9 +517,7 @@ describe("device enrollment", () => {
       const [orphan] = activeFor(installation);
       if (!orphan) throw new Error("Expected the orphaned key.");
       expect((await importWith(orphan.secret)).status).toBe(401);
-      fake.create = "ok";
       // A fresh orphan, since the import above revoked the first.
-      fake.create = "lost";
       expect((await enroll(oauthToken())).status).toBe(503);
       const [second] = activeFor(installation);
       fake.create = "ok";
