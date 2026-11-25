@@ -120,6 +120,13 @@ public enum EnrollOutcome: Sendable, Equatable {
   case failed(EnrollAction)
 }
 
+/// A sign-in's enrollment attempt: the cancellation count when it began.
+public struct EnrollmentAttempt: Sendable, Equatable {
+  public let cancellation: Int
+
+  public init(cancellation: Int) { self.cancellation = cancellation }
+}
+
 public enum LifecycleError: Error, Equatable {
   /// Consent or decline named an enrollment that is no longer pending.
   case enrollmentChanged
@@ -194,15 +201,28 @@ public actor DeviceLifecycle {
 
   // MARK: Enrollment
 
-  /// Exchanges a one-time OAuth token for a device key. Each attempt sends
+  /// Starts a sign-in's enrollment attempt. Every request of that sign-in,
+  /// retries included, passes it to `enroll`; a disconnect or a declined
+  /// consent after it began cancels them all.
+  public func beginEnrollment() -> EnrollmentAttempt { EnrollmentAttempt(cancellation: cancellation) }
+
+  /// One enrollment request in a sign-in of its own.
+  public func enroll(token: String, revokeLater: Bool) async throws -> EnrollOutcome {
+    try await enroll(token: token, revokeLater: revokeLater, attempt: beginEnrollment())
+  }
+
+  /// Exchanges a one-time OAuth token for a device key. Each request sends
   /// the next enrollment sequence, stored before the request goes out. The
   /// key starts in `consentPending`: nothing is read or sent until `confirm`.
   ///
-  /// A disconnect or a declined consent at any point cancels the attempt.
-  /// It is checked after each wait, and once more just before the sequence
-  /// is taken, so a cancelled attempt never sends a request.
-  public func enroll(token: String, revokeLater: Bool) async throws -> EnrollOutcome {
-    let started = cancellation
+  /// A disconnect or a declined consent since `attempt` began cancels the
+  /// request. It is checked on entry, after each wait, and once more just
+  /// before the sequence is taken, so a cancelled attempt never sends a
+  /// request. A failure that arrives after a cancellation is `superseded`,
+  /// so the sign-in does not retry; a success is revoked.
+  public func enroll(token: String, revokeLater: Bool, attempt: EnrollmentAttempt) async throws -> EnrollOutcome {
+    let started = attempt.cancellation
+    guard started == cancellation else { return .superseded }
     let remaining = await revokePending()
     guard started == cancellation else { return .superseded }
     if remaining > 0 && !revokeLater { return .pendingRevocations(remaining) }
@@ -213,7 +233,7 @@ public actor DeviceLifecycle {
     let action = await api.enroll(
       token: token, installationId: try credentials.installationId(), deviceName: name, sequence: sequence)
     // A failed attempt leaves the stored key as it is.
-    guard case let .enrolled(response) = action else { return .failed(action) }
+    guard case let .enrolled(response) = action else { return started == cancellation ? .failed(action) : .superseded }
     var document = try credentials.load()
     let credential = DeviceCredential(
       key: response.secret, userId: response.userId, email: response.email,
@@ -375,16 +395,20 @@ public actor DeviceLifecycle {
     state.earliestCutoff = min(old.earliestCutoff, cutoff)
     state.history = old.history
     state.lastSyncAt = old.lastSyncAt
-    state.sendRunsWithoutDistance = old.sendRunsWithoutDistance
     try storage.save(state)
     generation += 1
   }
 
-  /// Lets runs that waited for distance access be sent without a distance.
-  public func sendRunsWithoutDistance() throws {
-    guard let storage = storage(), var state = try storage.load() else { return }
-    state.sendRunsWithoutDistance = true
+  /// Lets the runs waiting for distance access now be sent without a
+  /// distance. Runs that start waiting later are not included. Returns how
+  /// many runs were approved.
+  @discardableResult
+  public func sendRunsWithoutDistance() throws -> Int {
+    guard let storage = storage(), var state = try storage.load() else { return 0 }
+    let waiting = state.deferred.filter { $0.value.reason == .distanceAccess }.keys
+    state.approvedWithoutDistance.formUnion(waiting)
     try storage.save(state)
     generation += 1
+    return waiting.count
   }
 }

@@ -390,7 +390,7 @@ final class ReviewRegressionTests: XCTestCase {
 
   func testRunsWaitForDistanceAccessUntilTheUserChooses() async throws {
     let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00+10:00"))
-    h.health.distanceReadable(false)
+    h.health.distanceStart(.answered(nil))
     h.health.add(Sample.run(1, date("2026-11-12T06:00:00+10:00"), km: RunDistance.none))
     try await h.engine().run(mode: .foreground)
     XCTAssertTrue(h.fitness.received.isEmpty)
@@ -398,22 +398,23 @@ final class ReviewRegressionTests: XCTestCase {
     try await h.engine().run(mode: .background)
     XCTAssertTrue(h.fitness.received.isEmpty)
     var state = h.state
-    state.sendRunsWithoutDistance = true
+    state.approvedWithoutDistance = [Sample.id(1).uuidString.lowercased()]
     try h.storage.save(state)
     try await h.engine().run(mode: .background)
     XCTAssertEqual(h.fitness.sentRefs, [Sample.run(1, Date()).ref])
+    XCTAssertTrue(h.state.approvedWithoutDistance.isEmpty)
   }
 
   func testALateDistanceIsSentWhenAccessIsPartial() async throws {
     // Weight and workouts allowed, distance not readable yet: the run waits.
     let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00+10:00"))
-    h.health.distanceReadable(false)
+    h.health.distanceStart(.answered(nil))
     let start = date("2026-11-12T06:00:00+10:00")
     h.health.add(Sample.run(1, start, km: RunDistance.none))
     try await h.engine().run(mode: .foreground)
     XCTAssertTrue(h.fitness.received.isEmpty)
     // Distance access is turned on and the late distance sample is found.
-    h.health.distanceReadable(true)
+    h.health.distanceStart(.answered(.distantPast))
     h.health.delete(Sample.id(1))
     h.health.add(Sample.run(1, start, km: .km(3.1)))
     try await h.engine().run(mode: .background)

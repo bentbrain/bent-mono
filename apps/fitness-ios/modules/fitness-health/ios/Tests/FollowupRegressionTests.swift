@@ -31,8 +31,9 @@ final class FollowupRegressionTests: XCTestCase {
   }
 
   /// The reviewer's reproduction: the checkpoint write itself is in
-  /// progress when the cutoff narrows. The cutoff change waits for the write
-  /// and then rebuilds from the new cutoff.
+  /// progress when the cutoff is changed. The cutoff change waits for the
+  /// write, then rebuilds from the new cutoff, so the writes complete in
+  /// that order.
   func testACutoffChangeWaitsForACheckpointWriteInProgress() async throws {
     let old = date("2026-11-10T00:00:00Z")
     let new = date("2026-11-15T00:00:00Z")
@@ -44,13 +45,18 @@ final class FollowupRegressionTests: XCTestCase {
     directory.isHolding.with { $0 = true }
     let run = Task { try await engine.run(mode: .foreground) }
     await directory.started.reached()
-    let narrowing = Task { try await device.setCutoff(new) }
-    // The cutoff change has time to reach the lifecycle before the write ends.
-    try await Task.sleep(for: .milliseconds(200))
+    let requested = Gate()
+    let narrowing = Task {
+      await requested.pass()
+      try await device.setCutoff(new)
+    }
+    await requested.reached()
+    requested.open()
     directory.started.open()
     directory.release.signal()
     _ = try? await run.value
     try await narrowing.value
+    XCTAssertEqual(directory.writes.get, [old, new])
     XCTAssertEqual(try store.load()?.cutoff, new)
     try await assertExcludedSampleStaysUnsent(h, device: device, store: store)
   }
@@ -128,40 +134,67 @@ final class FollowupRegressionTests: XCTestCase {
 
   // MARK: 3. Limited history never turns a real distance into 0 km
 
-  /// Recent distance is readable, but Health shares distance only from a
-  /// date after an older workout started: that workout's empty distance
-  /// lookup is ambiguous, so it waits.
+  /// Health shares distance only from a date after an older workout
+  /// started: that workout's empty distance lookup is ambiguous, so it waits.
+  /// A run inside the shared history has no distance to read, so it is sent.
   func testAnOlderRunBeforeTheDistanceHistoryLimitWaits() async throws {
-    let now = date("2026-11-20T02:00:00Z")
-    let h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
-    h.health.distanceReadable(true)
-    h.health.distanceReadable(from: date("2026-11-15T00:00:00Z"))
+    let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00Z"))
+    h.health.distanceStart(.answered(date("2026-11-15T00:00:00Z")))
     let older = Sample.run(1, date("2026-11-12T02:00:00Z"), km: RunDistance.none)
     let recent = Sample.run(2, date("2026-11-17T02:00:00Z"), km: RunDistance.none)
     h.health.add(older, recent)
     try await h.engine().run(mode: .foreground)
     XCTAssertFalse(h.fitness.sentRefs.contains(older.ref))
     XCTAssertEqual(h.state.deferred[older.id.uuidString.lowercased()]?.reason, .distanceAccess)
-    // A run inside the shared history has no distance to read.
     XCTAssertTrue(h.fitness.sentRefs.contains(recent.ref))
-    // The older run waits until the user chooses to send it without distance.
-    var state = h.state
-    state.sendRunsWithoutDistance = true
-    try h.storage.save(state)
-    try await h.engine().run(mode: .background)
-    XCTAssertTrue(h.fitness.sentRefs.contains(older.ref))
+  }
+
+  /// A boundary at the workout's start covers it.
+  func testABoundaryAtTheWorkoutStartCoversIt() async throws {
+    let start = date("2026-11-12T02:00:00Z")
+    let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00Z"))
+    h.health.distanceStart(.answered(start))
+    h.health.add(Sample.run(1, start, km: RunDistance.none))
+    try await h.engine().run(mode: .foreground)
+    XCTAssertEqual(h.fitness.sentRefs, [Sample.run(1, start).ref])
+  }
+
+  /// Without a reported start date, no run with an empty distance lookup is
+  /// sent: the lookup is unavailable (built with an SDK without it, or
+  /// before iOS 27), failed, or Health left distance out of its answer.
+  func testUnknownCoverageHoldsEveryRunWithoutDistance() async throws {
+    for answer in [DistanceStartAnswer.unavailable, .failed, .answered(nil)] {
+      let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00Z"))
+      h.health.distanceStart(answer)
+      let run = Sample.run(1, date("2026-11-19T00:00:00Z"), minutes: 30, km: RunDistance.none)
+      let measured = Sample.run(2, date("2026-11-18T00:00:00Z"), km: .km(5))
+      h.health.add(run, measured)
+      try await h.engine().run(mode: .foreground)
+      XCTAssertEqual(h.fitness.sentRefs, [measured.ref], "\(answer)")
+      XCTAssertEqual(h.state.deferred[run.id.uuidString.lowercased()]?.reason, .distanceAccess, "\(answer)")
+    }
+  }
+
+  func testCoverageComesOnlyFromAReportedDate() {
+    let start = date("2026-11-15T00:00:00Z")
+    XCTAssertFalse(DistanceAccess(.unavailable).covers(start))
+    XCTAssertFalse(DistanceAccess(.failed).covers(start))
+    XCTAssertFalse(DistanceAccess(.answered(nil)).covers(start))
+    XCTAssertTrue(DistanceAccess(.answered(start)).covers(start))
+    XCTAssertTrue(DistanceAccess(.answered(start)).covers(start.addingTimeInterval(1)))
+    XCTAssertFalse(DistanceAccess(.answered(start)).covers(start.addingTimeInterval(-1)))
   }
 
   /// Once Health shares distance for the older workout's time, its late
   /// distance is found and sent.
   func testAnOlderRunIsSentWithItsDistanceOnceAccessCoversIt() async throws {
     let h = Harness(now: date("2026-11-20T02:00:00Z"), cutoff: date("2026-11-10T00:00:00Z"))
-    h.health.distanceReadable(from: date("2026-11-15T00:00:00Z"))
+    h.health.distanceStart(.answered(date("2026-11-15T00:00:00Z")))
     let start = date("2026-11-12T02:00:00Z")
     h.health.add(Sample.run(1, start, km: RunDistance.none))
     try await h.engine().run(mode: .foreground)
     XCTAssertTrue(h.fitness.received.isEmpty)
-    h.health.distanceReadable(from: nil)
+    h.health.distanceStart(.answered(.distantPast))
     h.health.delete(Sample.id(1))
     h.health.add(Sample.run(1, start, km: .km(4.2)))
     try await h.engine().run(mode: .background)
@@ -169,14 +202,28 @@ final class FollowupRegressionTests: XCTestCase {
     XCTAssertEqual((workouts?.first?["distance"] as? [String: Any])?["qty"] as? Double, 4.2)
   }
 
-  func testDistanceAccessCoversOnlyReadableTimes() {
-    let limit = date("2026-11-15T00:00:00Z")
-    XCTAssertFalse(DistanceAccess(anyReadable: false).covers(limit))
-    XCTAssertTrue(DistanceAccess(anyReadable: true).covers(.distantPast))
-    XCTAssertFalse(DistanceAccess(anyReadable: true, readableFrom: limit).covers(limit.addingTimeInterval(-1)))
-    XCTAssertTrue(DistanceAccess(anyReadable: true, readableFrom: limit).covers(limit))
-    // A failed lookup of the limit is recorded as the distant future.
-    XCTAssertFalse(DistanceAccess(anyReadable: true, readableFrom: .distantFuture).covers(Date()))
+  /// The user's choice sends the runs waiting now. A run that starts waiting
+  /// later needs its own choice.
+  func testSendingWithoutDistanceCoversOnlyTheRunsWaitingNow() async throws {
+    let now = date("2026-11-20T02:00:00Z")
+    let states = MemoryStates()
+    let (device, store) = try await activeLifecycle(cutoff: date("2026-11-10T00:00:00Z"), states: states)
+    let h = Harness(now: now, cutoff: date("2026-11-10T00:00:00Z"))
+    h.health.distanceStart(.unavailable)
+    let first = Sample.run(1, date("2026-11-12T02:00:00Z"), km: RunDistance.none)
+    h.health.add(first)
+    try await engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device))
+      .run(mode: .foreground)
+    XCTAssertTrue(h.fitness.sentRefs.isEmpty)
+    let approved = try await device.sendRunsWithoutDistance()
+    XCTAssertEqual(approved, 1)
+    let later = Sample.run(2, date("2026-11-14T02:00:00Z"), km: RunDistance.none)
+    h.health.add(later)
+    try await engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device))
+      .run(mode: .foreground)
+    XCTAssertEqual(h.fitness.sentRefs, [first.ref])
+    XCTAssertEqual(try store.load()?.deferred[later.id.uuidString.lowercased()]?.reason, .distanceAccess)
+    XCTAssertEqual(try store.load()?.approvedWithoutDistance, [])
   }
 
   // MARK: 4. Retry-After counts from the reply
@@ -305,6 +352,9 @@ private final class WriteRaceDirectory: StateDirectory, @unchecked Sendable {
   let release = DispatchSemaphore(value: 0)
   let started = Gate()
   let isHolding = Locked(false)
+  /// The cutoff of each completed write, in order, from the first held one.
+  let writes = Locked<[Date]>([])
+  private let recording = Locked(false)
 
   func storage(for credential: DeviceCredential) -> StateStorage { Storage(directory: self) }
   func clear(keeping credential: DeviceCredential?) throws { if credential == nil { data.with { $0 = nil } } }
@@ -318,12 +368,14 @@ private final class WriteRaceDirectory: StateDirectory, @unchecked Sendable {
         return holding
       }
       if hold {
+        directory.recording.with { $0 = true }
         Task { await directory.started.pass() }
         guard directory.release.wait(timeout: .now() + 10) == .success else {
           throw CocoaError(.fileWriteUnknown)
         }
       }
       directory.data.with { $0 = state }
+      if directory.recording.get { directory.writes.with { $0.append(state.cutoff) } }
     }
     func clear() throws { directory.data.with { $0 = nil } }
   }

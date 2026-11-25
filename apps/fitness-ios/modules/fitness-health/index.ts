@@ -58,7 +58,9 @@ export type ReadableHistory = {
 type FitnessHealthNative = {
   healthDataAvailable(): boolean;
   getStatus(): Promise<SyncStatus>;
-  enroll(token: string, revokeLater: boolean): Promise<EnrollOutcome>;
+  /** Starts a sign-in's enrollment attempt; each of its requests passes it to `enroll`. */
+  beginEnrollment(): Promise<number>;
+  enroll(token: string, revokeLater: boolean, attempt: number): Promise<EnrollOutcome>;
   confirmConsent(cutoffMs: number, enrollmentId: string): Promise<void>;
   declineConsent(enrollmentId: string): Promise<number>;
   startFirstSync(): Promise<SyncStatus>;

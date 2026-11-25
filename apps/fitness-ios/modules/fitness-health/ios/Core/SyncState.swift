@@ -99,8 +99,10 @@ public struct SyncState: Codable, Sendable, Equatable {
   /// Consent is confirmed but the Health step has not started the first
   /// sync yet, so nothing runs.
   public var awaitingHealthStep = false
-  /// The user chose to send runs that have no readable distance.
-  public var sendRunsWithoutDistance = false
+  /// Runs waiting for distance access that the user chose to send without
+  /// a distance, by sample UUID. Each is removed once Fitness has it; runs
+  /// that wait later need their own choice.
+  public var approvedWithoutDistance: Set<String> = []
 
   public init(cutoff: Date, accountTimezone: String) {
     self.cutoff = cutoff

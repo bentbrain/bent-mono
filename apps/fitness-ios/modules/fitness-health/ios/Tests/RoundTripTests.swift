@@ -104,6 +104,9 @@ final class RoundTripTests: XCTestCase {
     let requests = directory.appendingPathComponent("requests")
     try FileManager.default.createDirectory(at: requests, withIntermediateDirectories: true)
     let engine = try Harness(now: Self.now, cutoff: date("2026-10-01T00:00:00Z")).engine()
+    // Health reports distance readable for every date, so a run with no
+    // distance is sent as 0 km, as the fixtures expect.
+    engine.context.decide(approved: [], access: DistanceAccess(readableFrom: .distantPast))
     for wire in Self.cases {
       let eligible = wire.samples.filter { engine.eligibility($0, at: Self.now) == .send }
       let request = try ImportRequest(

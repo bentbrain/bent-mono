@@ -142,7 +142,9 @@ final class SyncFlowTests: XCTestCase {
 
   /// With Health access allowed, the first sync sends the seeded history:
   /// the earliest weigh-in per day, and runs with their distances, including
-  /// one attached after the workout was saved.
+  /// one attached after the workout was saved. Health does not report that
+  /// distance is shared for every date, so the run with no distance waits
+  /// until the user sends it without one.
   func testAllowedHealthAccessSyncsTheSeededHistory() async throws {
     seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
@@ -157,20 +159,31 @@ final class SyncFlowTests: XCTestCase {
     let state = try await serverState()
     XCTAssertEqual(state.weights.count, 3, "\(state.weights)")
     XCTAssertEqual(state.weights.map(\.kg).sorted(), [79.9, 80.1, 80.4])
-    let distances = state.runs.map(\.distanceKm).sorted()
-    XCTAssertEqual(distances, [0, 3.1, 4.2, 5], "\(state.runs)")
+    XCTAssertEqual(state.runs.map(\.distanceKm).sorted(), [3.1, 4.2, 5], "\(state.runs)")
     XCTAssertTrue(state.runs.allSatisfy { $0.notes == "Apple Health" })
     // The weigh-in dated two days ahead waits until it is due.
     XCTAssertTrue(element(app, "status-deferred").exists, app.debugDescription)
+    XCTAssertTrue(element(app, "status-distance-access").exists, app.debugDescription)
 
     // A later Sync now, waited for by its own completion time, finds
     // nothing new and sends no import request.
     element(app, "sync-now").tap()
-    waitForSync(app, after: first)
+    let second = waitForSync(app, after: first)
     let again = try await serverState()
     XCTAssertEqual(again.weights.count, 3)
-    XCTAssertEqual(again.runs.count, 4)
+    XCTAssertEqual(again.runs.count, 3)
     XCTAssertEqual(again.imports, state.imports, "The second sync sent samples again")
+
+    // Sending the waiting run without a distance records it as 0 km.
+    let send = element(app, "send-without-distance")
+    XCTAssertEqual(send.label, "Send 1 run without distance")
+    send.tap()
+    waitForSync(app, after: second)
+    let sent = try await serverState()
+    XCTAssertEqual(sent.runs.map(\.distanceKm).sorted(), [0, 3.1, 4.2, 5], "\(sent.runs)")
+    let notice = element(app, "status-distance-access")
+    await fulfillment(
+      of: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notice)], timeout: 30)
   }
 
   /// With Weight and Workouts allowed but not Walking + Running Distance,

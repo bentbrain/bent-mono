@@ -106,23 +106,24 @@ public final class WriteFence: @unchecked Sendable {
 /// Facts about the run that decide whether a sample can be sent.
 final class RunContext: @unchecked Sendable {
   private let lock = NSLock()
-  private var userChoice = false
-  private var access = DistanceAccess(anyReadable: true)
+  private var approved: Set<String> = []
+  private var access = DistanceAccess(readableFrom: nil)
 
-  /// Sets the run's distance facts: the user's choice to send runs without
-  /// distance, and what Health shows the app.
-  func decide(userChoice: Bool, access: DistanceAccess) {
+  /// Sets the run's distance facts: the runs the user chose to send without
+  /// distance, and the dates Health lets the app read distance for.
+  func decide(approved: Set<String>, access: DistanceAccess) {
     lock.lock()
-    self.userChoice = userChoice
+    self.approved = approved
     self.access = access
     lock.unlock()
   }
 
-  /// Whether a run that started at `start` can be sent without a distance.
-  func sendsWithoutDistance(_ start: Date) -> Bool {
+  /// Whether a run can be sent without a distance: the user chose to send
+  /// it, or Health is known to let the app read distance for its start.
+  func sendsWithoutDistance(_ id: UUID, start: Date) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    return userChoice || access.covers(start)
+    return approved.contains(id.uuidString.lowercased()) || access.covers(start)
   }
 }
 
@@ -276,11 +277,11 @@ public struct SyncEngine: Sendable {
   /// read distance for the run's start, or the user chose to send such runs.
   func eligibility(_ sample: HealthSample, at time: Date) -> Eligibility {
     if sample.start > time { return .deferred(.future) }
-    if case let .run(_, start, end, _, distance) = sample {
+    if case let .run(id, start, end, _, distance) = sample {
       switch distance {
       case .unknown: return .unknown
       case .none where end > time.addingTimeInterval(-limits.distanceWait): return .deferred(.awaitingDistance)
-      case .none where !context.sendsWithoutDistance(start): return .deferred(.distanceAccess)
+      case .none where !context.sendsWithoutDistance(id, start: start): return .deferred(.distanceAccess)
       default: break
       }
     }
@@ -288,15 +289,11 @@ public struct SyncEngine: Sendable {
   }
 
   /// Reads once per run what decides whether runs without a readable
-  /// distance can be sent: the user's choice, or Health showing the app
-  /// distance for the run's time.
+  /// distance can be sent: the user's choice for each waiting run, or Health
+  /// reporting that the app can read distance for the run's start.
   private func decideRunsWithoutDistance(_ state: SyncState) async throws {
-    if state.sendRunsWithoutDistance {
-      context.decide(userChoice: true, access: DistanceAccess(anyReadable: false))
-      return
-    }
     let access = try await read { try await source.distanceAccess() }
-    context.decide(userChoice: false, access: access)
+    context.decide(approved: state.approvedWithoutDistance, access: access)
   }
 
   // MARK: Upload
@@ -358,6 +355,7 @@ public struct SyncEngine: Sendable {
         state.deferred[id] = DeferredItem(kind: sample.kind, reason: .serverFuture)
       } else {
         state.deferred[id] = nil
+        state.approvedWithoutDistance.remove(id)
         state.backfill?.resolved.insert(id)
         if case .run(_, _, _, _, .none) = sample { state.runsWithoutDistance += 1 }
       }
@@ -557,7 +555,10 @@ public struct SyncEngine: Sendable {
         try await commit(state)
         return
       }
-      for id in page.deleted { next.deferred[id.uuidString.lowercased()] = nil }
+      for id in page.deleted.map({ $0.uuidString.lowercased() }) {
+        next.deferred[id] = nil
+        next.approvedWithoutDistance.remove(id)
+      }
       next.deferred.merge(deferred) { _, new in new }
       next.anchors?[kind] = page.anchor
       try await commit(next)

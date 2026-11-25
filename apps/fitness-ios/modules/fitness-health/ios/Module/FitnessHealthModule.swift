@@ -28,8 +28,15 @@ public final class FitnessHealthModule: Module {
       await self.service.status()
     }
 
-    AsyncFunction("enroll") { (token: String, revokeLater: Bool) async throws -> [String: Any] in
-      let outcome = try await self.service.lifecycle.enroll(token: token, revokeLater: revokeLater)
+    // A sign-in begins one attempt and passes it to each of its requests,
+    // so a disconnect cancels the requests and the waits between them.
+    AsyncFunction("beginEnrollment") { () async -> Int in
+      await self.service.lifecycle.beginEnrollment().cancellation
+    }
+
+    AsyncFunction("enroll") { (token: String, revokeLater: Bool, attempt: Int) async throws -> [String: Any] in
+      let outcome = try await self.service.lifecycle.enroll(
+        token: token, revokeLater: revokeLater, attempt: EnrollmentAttempt(cancellation: attempt))
       let encoded = EnrollOutcomeJSON.encode(outcome)
       self.service.logEnrollment(encoded)
       return encoded

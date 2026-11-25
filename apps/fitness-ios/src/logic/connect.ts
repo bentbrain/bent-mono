@@ -12,7 +12,9 @@ export type SignedIn = { token: string; expiresAt: number | null };
 export type ConnectDeps = {
   /** Runs the OAuth sign-in and returns the access token. */
   authorize(): Promise<SignedIn>;
-  enroll(token: string, revokeLater: boolean): Promise<EnrollOutcome>;
+  /** Starts the attempt that every request of this sign-in belongs to. */
+  begin(): Promise<number>;
+  enroll(token: string, revokeLater: boolean, attempt: number): Promise<EnrollOutcome>;
   sleep(ms: number): Promise<void>;
   now(): number;
 };
@@ -31,8 +33,13 @@ const tokenMarginMs = 30_000;
  * one. If the token would expire before the retry, the attempt ends and the
  * user signs in again later. Every other result ends the attempt, and the
  * token goes out of scope.
+ *
+ * The attempt begins before sign-in, and every request passes it, so a
+ * disconnect at any point, including a wait between requests, cancels the
+ * rest: the next request is `superseded` without being sent.
  */
 export async function connect(deps: ConnectDeps, revokeLater = false): Promise<ConnectResult> {
+  const enrollment = await deps.begin();
   let signedIn: SignedIn;
   try {
     signedIn = await deps.authorize();
@@ -41,7 +48,7 @@ export async function connect(deps: ConnectDeps, revokeLater = false): Promise<C
     return { kind: "signInFailed", message: error instanceof Error ? error.message : "Sign-in failed." };
   }
   for (let attempt = 0; ; attempt++) {
-    const outcome = await deps.enroll(signedIn.token, revokeLater);
+    const outcome = await deps.enroll(signedIn.token, revokeLater, enrollment);
     if (outcome.kind !== "failed" || outcome.action !== "retrySameToken" || attempt >= backoffMs.length) return outcome;
     const wait = outcome.retryAfter === null ? (backoffMs[attempt] ?? 10_000) : outcome.retryAfter * 1000;
     if (signedIn.expiresAt !== null && deps.now() + wait > signedIn.expiresAt - tokenMarginMs)

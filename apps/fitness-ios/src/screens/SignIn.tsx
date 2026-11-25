@@ -28,7 +28,8 @@ export function SignIn({
     const result = await connect(
       {
         authorize: () => authorize(settings),
-        enroll: (token, later) => FitnessHealth.enroll(token, later),
+        begin: () => FitnessHealth.beginEnrollment(),
+        enroll: (token, later, attempt) => FitnessHealth.enroll(token, later, attempt),
         sleep,
         now: () => Date.now(),
       },

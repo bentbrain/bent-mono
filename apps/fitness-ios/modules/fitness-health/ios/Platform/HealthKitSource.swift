@@ -70,19 +70,23 @@ final class HealthKitSource: HealthSource, @unchecked Sendable {
     return try await convert(query(Self.type(kind), HKQuery.predicateForObjects(with: Set(ids))))
   }
 
-  /// What distance the app can read: whether any is readable, and, where
-  /// Health reports limited history for distance, the earliest date it
-  /// allows. A failed lookup of that date counts as no date readable, so a
-  /// run's missing distance stays ambiguous rather than becoming 0 km.
+  /// The dates Health is known to let the app read distance for. Only a
+  /// start date Health reports counts. Health reports one for limited
+  /// history from iOS 27; with full access, before iOS 27, in a build whose
+  /// SDK lacks the lookup, or when the lookup fails, coverage is unknown and
+  /// runs with no distance wait for the user's choice.
   func distanceAccess() async throws -> DistanceAccess {
-    let readable = !(try await query(Self.distance, HKQuery.predicateForSamples(withStart: nil, end: nil), limit: 1))
-      .isEmpty
-    guard readable else { return DistanceAccess(anyReadable: false) }
+    let answer: DistanceStartAnswer
     do {
-      return DistanceAccess(anyReadable: true, readableFrom: try await authorizedStarts([Self.distance])?[Self.distance])
+      if let starts = try await authorizedStarts([Self.distance]) {
+        answer = .answered(starts[Self.distance])
+      } else {
+        answer = .unavailable
+      }
     } catch {
-      return DistanceAccess(anyReadable: true, readableFrom: .distantFuture)
+      answer = .failed
     }
+    return DistanceAccess(answer)
   }
 
   /// The earliest date Health lets the app read, per type, when the user

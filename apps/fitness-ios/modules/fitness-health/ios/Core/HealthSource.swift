@@ -27,33 +27,49 @@ public protocol HealthSource: Sendable {
   func samples(_ kind: SampleKind, start: Date, end: Date) async throws -> [HealthSample]
   /// The readable samples among these UUIDs.
   func samples(_ kind: SampleKind, ids: [UUID]) async throws -> [HealthSample]
-  /// What Health shows the app of walking and running distance. Health does
-  /// not say whether read access was denied, so a run's missing distance is
-  /// ambiguous unless this shows the app could read distance for its time.
+  /// What Health says about the dates the app can read walking and running
+  /// distance for. Health does not say whether read access was denied, so a
+  /// run's missing distance is ambiguous unless this covers its start.
   func distanceAccess() async throws -> DistanceAccess
 }
 
-/// How much walking and running distance the app can read.
+/// What Health answered when asked for the earliest date it lets the app
+/// read walking and running distance from (iOS 27 and later).
+public enum DistanceStartAnswer: Sendable, Equatable {
+  /// The lookup does not exist: before iOS 27, or in a build made with an
+  /// SDK that does not have it.
+  case unavailable
+  /// The lookup failed.
+  case failed
+  /// Health answered with this date, or left distance out of its answer.
+  case answered(Date?)
+}
+
+/// The dates the app is known to be able to read distance for. A run with
+/// no distance is taken to have none only when its start is covered; a
+/// readable sample from another time proves nothing about it.
 public struct DistanceAccess: Sendable, Equatable {
-  /// Health returned at least one distance sample.
-  public var anyReadable: Bool
-  /// The earliest date Health lets the app read distance from, when the
-  /// user shared limited history (iOS 27 and later). Nil when Health reports
-  /// no such limit. Before iOS 27 Health has no limited history, so any
-  /// readable distance means every date is readable.
+  /// The earliest date Health is known to let the app read distance from,
+  /// or nil when that is not known.
   public var readableFrom: Date?
 
-  public init(anyReadable: Bool, readableFrom: Date? = nil) {
-    self.anyReadable = anyReadable
-    self.readableFrom = readableFrom
+  public init(readableFrom: Date?) { self.readableFrom = readableFrom }
+
+  /// Coverage from Health's answer. Only a reported date counts; an
+  /// unavailable or failed lookup, or an answer without distance, leaves
+  /// coverage unknown.
+  public init(_ answer: DistanceStartAnswer) {
+    if case let .answered(date) = answer {
+      readableFrom = date
+    } else {
+      readableFrom = nil
+    }
   }
 
-  /// Whether a run that started at `start` with no distance can be taken to
-  /// have none: the app can read distance, and for that time.
+  /// Whether the app is known to read distance for a run that started at `start`.
   public func covers(_ start: Date) -> Bool {
-    guard anyReadable else { return false }
-    guard let readableFrom else { return true }
-    return start >= readableFrom
+    guard let readableFrom else { return false }
+    return readableFrom <= start
   }
 }
 

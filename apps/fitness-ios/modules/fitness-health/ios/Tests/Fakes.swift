@@ -34,8 +34,7 @@ final class FakeHealth: HealthSource, @unchecked Sendable {
     var failures = 0
     var locked = false
     var lookupsFail = false
-    var distanceReadable = true
-    var distanceFrom: Date?
+    var distanceStart = DistanceStartAnswer.answered(.distantPast)
     var queries = 0
   }
   private let store = Locked(Store())
@@ -63,16 +62,13 @@ final class FakeHealth: HealthSource, @unchecked Sendable {
   func failNext(_ count: Int) { store.with { $0.failures = count } }
   func lock(_ locked: Bool) { store.with { $0.locked = locked } }
   func failLookups(_ fail: Bool) { store.with { $0.lookupsFail = fail } }
-  /// Whether Health shows the app any distance, as when read access is on.
-  func distanceReadable(_ readable: Bool) { store.with { $0.distanceReadable = readable } }
-  /// The earliest date Health lets the app read distance from, as with
-  /// limited history on iOS 27.
-  func distanceReadable(from date: Date?) { store.with { $0.distanceFrom = date } }
+  /// Health's answer for the earliest date the app can read distance from.
+  /// By default every date is covered, so a run with no distance has none.
+  func distanceStart(_ answer: DistanceStartAnswer) { store.with { $0.distanceStart = answer } }
 
   func distanceAccess() async throws -> DistanceAccess {
     try begin()
-    let store = store.get
-    return DistanceAccess(anyReadable: store.distanceReadable, readableFrom: store.distanceFrom)
+    return DistanceAccess(store.get.distanceStart)
   }
   var queries: Int { store.get.queries }
 

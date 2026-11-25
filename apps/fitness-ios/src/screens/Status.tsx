@@ -96,7 +96,7 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
             {copy.status.distanceAccess(status.runsAwaitingDistanceAccess)}
           </Notice>
           <Button
-            label={copy.status.sendWithoutDistance}
+            label={copy.status.sendWithoutDistance(status.runsAwaitingDistanceAccess)}
             appearance="outline"
             onPress={sendWithoutDistance}
             disabled={syncing}

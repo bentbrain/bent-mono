@@ -44,6 +44,7 @@ describe("cutoff", () => {
 
 describe("connect", () => {
   const consent: EnrollOutcome = { kind: "consentPending", email: "a@example.com", accountTimezone: "UTC" };
+  const begin = async () => 1;
   const signedIn =
     (token: string, expiresAt: number | null = null) =>
     async () => ({ token, expiresAt });
@@ -60,6 +61,7 @@ describe("connect", () => {
     let authorized = 0;
     const result = await connect({
       authorize: async () => ({ token: `oat_${++authorized}`, expiresAt: null }),
+      begin,
       enroll: async (token) => {
         tokens.push(token);
         return replies.shift() ?? consent;
@@ -81,6 +83,7 @@ describe("connect", () => {
     ];
     const result = await connect({
       authorize: signedIn("oat_1"),
+      begin,
       enroll: async () => replies.shift() ?? consent,
       sleep: async (ms) => void waits.push(ms),
       now: () => 0,
@@ -93,6 +96,7 @@ describe("connect", () => {
     let calls = 0;
     const result = await connect({
       authorize: signedIn("oat_1", 60_000),
+      begin,
       enroll: async () => {
         calls++;
         return { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 3600 };
@@ -109,6 +113,7 @@ describe("connect", () => {
     let calls = 0;
     const result = await connect({
       authorize: signedIn("oat_1"),
+      begin,
       enroll: async () => {
         calls++;
         return busy;
@@ -124,6 +129,7 @@ describe("connect", () => {
     let calls = 0;
     const result = await connect({
       authorize: signedIn("oat_1"),
+      begin,
       enroll: async () => {
         calls++;
         return { kind: "failed", action: "reauthorize", code: "enrollment_token_used" };
@@ -139,14 +145,61 @@ describe("connect", () => {
     const enroll = async () => consent;
     const sleep = async () => undefined;
     const now = () => 0;
-    expect(await connect({ authorize: async () => Promise.reject(new SignInCancelled()), enroll, sleep, now })).toEqual(
-      {
-        kind: "cancelled",
-      },
-    );
     expect(
-      await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), enroll, sleep, now }),
+      await connect({ authorize: async () => Promise.reject(new SignInCancelled()), begin, enroll, sleep, now }),
+    ).toEqual({
+      kind: "cancelled",
+    });
+    expect(
+      await connect({ authorize: async () => Promise.reject(new Error("state_mismatch")), begin, enroll, sleep, now }),
     ).toEqual({ kind: "signInFailed", message: "state_mismatch" });
+  });
+
+  test("every request of a sign-in passes the attempt that began before it", async () => {
+    const order: string[] = [];
+    const attempts: number[] = [];
+    const replies: EnrollOutcome[] = [
+      { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 1 },
+      { kind: "failed", action: "retrySameToken", code: "auth_unavailable", retryAfter: null },
+      consent,
+    ];
+    const result = await connect({
+      authorize: async () => {
+        order.push("authorize");
+        return { token: "oat_1", expiresAt: null };
+      },
+      begin: async () => {
+        order.push("begin");
+        return 4;
+      },
+      enroll: async (_token, _later, attempt) => {
+        attempts.push(attempt);
+        return replies.shift() ?? consent;
+      },
+      sleep: async () => undefined,
+      now: () => 0,
+    });
+    expect(result).toEqual(consent);
+    expect(order).toEqual(["begin", "authorize"]);
+    expect(attempts).toEqual([4, 4, 4]);
+  });
+
+  test("a disconnect during a retry wait ends the sign-in", async () => {
+    let calls = 0;
+    const result = await connect({
+      authorize: signedIn("oat_1"),
+      begin,
+      enroll: async () => {
+        calls++;
+        return calls === 1
+          ? { kind: "failed", action: "retrySameToken", code: "rate_limited", retryAfter: 1 }
+          : { kind: "superseded" };
+      },
+      sleep: async () => undefined,
+      now: () => 0,
+    });
+    expect(result).toEqual({ kind: "superseded" });
+    expect(calls).toBe(2);
   });
 
   test("passes revoke-later through", async () => {
@@ -154,6 +207,7 @@ describe("connect", () => {
     await connect(
       {
         authorize: signedIn("oat_1"),
+        begin,
         enroll: async (_token, revokeLater) => {
           later = revokeLater;
           return consent;
@@ -202,6 +256,8 @@ describe("copy", () => {
     expect(copy.consent.disconnect).toContain("revokes");
     expect(copy.status.withoutDistance(1)).toContain("1 run was");
     expect(copy.status.distanceAccess(2)).toContain("2 runs are waiting for distance access");
+    expect(copy.status.sendWithoutDistance(1)).toBe("Send 1 run without distance");
+    expect(copy.status.sendWithoutDistance(3)).toBe("Send 3 runs without distance");
     expect(copy.status.manualRevocations(1)).toContain("API keys");
     expect(copy.signIn.tryLater(3600)).toContain("3600 seconds");
   });
