@@ -551,7 +551,9 @@ class NotActivated extends Error {
  * installations active keys than the limit. An attempt older than
  * `pendingGraceMinutes` by the database clock, once its rows are locked,
  * was abandoned: it becomes ambiguous, keeping its charge, with reason
- * `expired`. Returns whether this attempt
+ * `expired`. One recorded before a newer attempt for its installation that
+ * is already active or issued becomes failed, keeping its charge, with
+ * reason `superseded`, and the newer key stays. Returns whether this attempt
  * became active, and the keys it replaced, which the caller revokes after
  * the commit. An error after the COMMIT was sent throws
  * CommitOutcomeUnknown.
@@ -575,7 +577,7 @@ export async function swapEnrollment(
       // abandoned: it becomes ambiguous, keeps its charge, and the current
       // key stays.
       const [own] =
-        await tx`SELECT key_state, created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}) AS fresh FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
+        await tx`SELECT key_state, attempt_order, created_at > clock_timestamp() - make_interval(mins => ${pendingGraceMinutes}) AS fresh FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
       if (own?.key_state !== "pending") throw new NotActivated("not_pending");
       if (own.fresh !== true) {
         await tx`UPDATE fitness_device_enrollments SET key_state='ambiguous', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
@@ -583,6 +585,20 @@ export async function swapEnrollment(
           activated: false,
           replaced: [] as string[],
           reason: "expired" as const,
+        };
+      }
+      // A newer attempt for this installation that already has its key
+      // wins: this older one never replaces it, so the key a phone saved
+      // from the newer reply keeps working. The newer rows are locked too,
+      // so none changes while this decides.
+      const newer =
+        await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND attempt_order > ${own.attempt_order} AND (active OR key_state='issued') FOR UPDATE`;
+      if (newer.length) {
+        await tx`UPDATE fitness_device_enrollments SET key_state='failed', charged_at=coalesce(charged_at, ${attempt.createdAt ?? null}) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId}`;
+        return {
+          activated: false,
+          replaced: [] as string[],
+          reason: "superseded" as const,
         };
       }
       const old =
@@ -706,6 +722,7 @@ const enrollmentColumns = [
   "charged_at",
   "created_at",
   "replaced_key_ids",
+  "attempt_order",
 ];
 const windowColumns = ["window_start", "attempts"];
 /**

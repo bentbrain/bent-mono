@@ -434,21 +434,33 @@ describe("device enrollment", () => {
         fake.stall = null;
         fake.onCreate = null;
       }
-      // The swaps take turns on the account row; the later one replaces the
-      // earlier one's key.
-      expect(replies.map((r) => r.status)).toEqual([201, 201]);
-      const secrets = await Promise.all(
-        replies.map(async (r) => String((await r.json()).secret)),
+      // The swaps take turns on the account row, and the newer attempt wins
+      // whichever runs first: an older swap that comes second is refused,
+      // and one that comes first is replaced.
+      const [newest] =
+        await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY attempt_order DESC LIMIT 1`;
+      const winner = fake.keys.find(
+        (k) => k.claims?.enrollment === String(newest?.attempt_id),
+      );
+      if (!winner) throw new Error("Expected the newer attempt's key.");
+      const bodies = await Promise.all(replies.map((r) => r.json()));
+      const answers = replies.map((r, n) => ({
+        status: r.status,
+        secret: bodies[n]?.secret as string | undefined,
+      }));
+      expect(answers).toContainEqual({ status: 201, secret: winner.secret });
+      expect(answers.map((a) => a.status).sort()).toEqual(
+        answers.some((a) => a.status === 503) ? [201, 503] : [201, 201],
       );
       expect((await rows()).filter((r) => r.active)).toHaveLength(1);
-      const statuses = [];
-      for (const secret of secrets)
-        statuses.push((await importWith(secret)).status);
-      expect([...statuses].sort()).toEqual([200, 401]);
-      const loser = secrets[statuses.indexOf(401)];
-      expect(fake.keys.find((k) => k.secret === loser)?.revoked).toBe(true);
+      expect(activeFor(installation).map((k) => k.secret)).toEqual([
+        winner.secret,
+      ]);
+      expect((await importWith(winner.secret)).status).toBe(200);
+      for (const answer of answers)
+        if (answer.secret && answer.secret !== winner.secret)
+          expect((await importWith(answer.secret)).status).toBe(401);
       expect((await importWith(previous)).status).toBe(401);
-      expect(activeFor(installation)).toHaveLength(1);
     },
   );
 
@@ -835,32 +847,104 @@ describe("device enrollment", () => {
   test.skipIf(!configured)(
     "fails a request whose key a later enrollment replaced before its reply",
     async () => {
+      for (const read of ["works", "fails"] as const) {
+        await database()`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
+        fake.keys = [];
+        const previous = await enrolled();
+        const previousKey = fake.keys.find((k) => k.secret === previous);
+        if (!previousKey) throw new Error("Expected the key.");
+        // A swaps in its key, then waits while Clerk revokes the key it
+        // replaced. B's cleanup gives up on that key quickly.
+        devices.setEnrollmentTiming({ cleanupMs: 300 });
+        let releaseA = () => undefined as void;
+        let reachedA = () => undefined as void;
+        const atRevoke = new Promise<void>((resolve) => {
+          reachedA = resolve;
+        });
+        fake.revokeHold = {
+          id: previousKey.id,
+          gate: new Promise<void>((resolve) => {
+            releaseA = resolve;
+          }),
+          reached: () => reachedA(),
+        };
+        let a: Promise<Response> | undefined;
+        const recheck = spyOn(store, "deviceKeyActive");
+        try {
+          a = enroll(oauthToken());
+          await atRevoke;
+          // B replaces A's key for the same installation and finishes.
+          const b = await enroll(oauthToken());
+          expect(b.status).toBe(201);
+          const bSecret = (await b.json()).secret;
+          // A's final read fails this round, so A returns its stale key.
+          if (read === "fails")
+            recheck.mockImplementationOnce(() =>
+              Promise.reject(new Error("Connection closed")),
+            );
+          releaseA();
+          const response = await a;
+          if (read === "works") {
+            expect(response.status).toBe(503);
+            expect(await response.json()).toMatchObject({
+              code: "issuance_failed",
+            });
+          } else {
+            expect(response.status).toBe(201);
+            const stale = (await response.json()).secret;
+            expect(stale).not.toBe(bSecret);
+            expect((await importWith(stale)).status).toBe(401);
+          }
+          // Either way, B's key is the one that keeps working.
+          expect((await importWith(bSecret)).status).toBe(200);
+          expect(activeFor(installation).map((k) => k.secret)).toEqual([
+            bSecret,
+          ]);
+          expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+        } finally {
+          releaseA();
+          await a;
+          recheck.mockRestore();
+          fake.revokeHold = null;
+          devices.setEnrollmentTiming();
+        }
+      }
+    },
+  );
+
+  test.skipIf(!configured)(
+    "never lets an older enrollment replace the key of a newer one",
+    async () => {
       const previous = await enrolled();
-      const previousKey = fake.keys.find((k) => k.secret === previous);
-      if (!previousKey) throw new Error("Expected the key.");
-      // A swaps in its key, then waits while Clerk revokes the key it
-      // replaced. B's cleanup gives up on that key quickly.
-      devices.setEnrollmentTiming({ cleanupMs: 300 });
+      // A records its attempt and gets its key, then waits before its swap.
+      const original = store.swapEnrollment;
       let releaseA = () => undefined as void;
-      let reachedA = () => undefined as void;
-      const atRevoke = new Promise<void>((resolve) => {
-        reachedA = resolve;
+      const gate = new Promise<void>((resolve) => {
+        releaseA = resolve;
       });
-      fake.revokeHold = {
-        id: previousKey.id,
-        gate: new Promise<void>((resolve) => {
-          releaseA = resolve;
-        }),
-        reached: () => reachedA(),
-      };
+      let reached = () => undefined as void;
+      const atSwap = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      let calls = 0;
+      const spy = spyOn(store, "swapEnrollment").mockImplementation(
+        async (...args) => {
+          if (++calls === 1) {
+            reached();
+            await gate;
+          }
+          return original(...args);
+        },
+      );
       let a: Promise<Response> | undefined;
       try {
         a = enroll(oauthToken());
-        await atRevoke;
-        // B replaces A's key for the same installation and finishes.
+        await atSwap;
+        // The newer B finishes, and the phone saves and uses its key.
         const b = await enroll(oauthToken());
         expect(b.status).toBe(201);
         const bSecret = (await b.json()).secret;
+        expect((await importWith(bSecret)).status).toBe(200);
         releaseA();
         const response = await a;
         expect(response.status).toBe(503);
@@ -868,12 +952,22 @@ describe("device enrollment", () => {
           code: "issuance_failed",
         });
         expect((await importWith(bSecret)).status).toBe(200);
-        expect(activeFor(installation).map((k) => k.secret)).toEqual([bSecret]);
+        const [, older] =
+          await database()`SELECT attempt_id, key_state, charged_at IS NOT NULL AS charged FROM fitness_device_enrollments WHERE owner_id=${owner} ORDER BY attempt_order`;
+        expect({ state: older?.key_state, charged: older?.charged }).toEqual({
+          state: "failed",
+          charged: true,
+        });
+        const aKey = fake.keys.find(
+          (k) => k.claims?.enrollment === String(older?.attempt_id),
+        );
+        expect(aKey?.revoked).toBe(true);
         expect((await rows()).filter((r) => r.active)).toHaveLength(1);
+        expect((await importWith(previous)).status).toBe(401);
       } finally {
         releaseA();
         await a;
-        fake.revokeHold = null;
+        spy.mockRestore();
       }
     },
   );

@@ -426,7 +426,9 @@ function logged(event: string, error: unknown) {
  *    attempt is still pending from within the grace by the database clock
  *    and activating it keeps the installations with active keys within the
  *    limit. An attempt that aged past the grace is never activated; it
- *    becomes ambiguous and keeps its charge. After the swap commits, Clerk
+ *    becomes ambiguous and keeps its charge. Nor is one recorded before a
+ *    newer attempt for the installation that already has its key: the
+ *    newer key stays, and the older attempt fails, keeping its charge. After the swap commits, Clerk
  *    revokes the replaced key within `replacedRevokeMs`; a revoke that
  *    fails is logged, and a later enrollment's cleanup revokes the key,
  *    which can no longer import. If the swap does not happen, the current
@@ -438,7 +440,9 @@ function logged(event: string, error: unknown) {
  *    for a later enrollment.
  * 7. Before replying `201`, the attempt must still be the installation's
  *    active one. A later enrollment that replaced it meanwhile makes this
- *    request reply `503 issuance_failed`.
+ *    request reply `503 issuance_failed`. This check is best effort: when
+ *    its read fails, the key is returned, and the app's own check that a
+ *    reply belongs to its current attempt drops a stale one.
  */
 export async function handleDeviceEnroll(request: Request) {
   const wait = takeAttempt();
@@ -708,8 +712,11 @@ export async function handleDeviceEnroll(request: Request) {
       revokeBy,
     );
   // A later enrollment for this installation may have replaced this key
-  // meanwhile, so the key is returned only while it is still current. A
-  // read that fails returns it, since the swap committed.
+  // meanwhile, so the key is returned only while it is still current. The
+  // check is best effort: a read that fails returns the key, since the swap
+  // committed, and the app drops a reply that is not for its current
+  // attempt, so a stale key it gets this way is never saved over a newer
+  // one.
   let current = true;
   try {
     current = await deviceKeyActive({
