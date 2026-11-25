@@ -1,7 +1,7 @@
 {
   "status": 503,
   "body": {
-    "error": "Another connection is being set up. Try again shortly.",
+    "error": "This account is busy. Try again shortly.",
     "code": "issuance_pending"
   }
 }

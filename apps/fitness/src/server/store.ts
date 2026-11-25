@@ -11,7 +11,7 @@ import {
 } from "../domain";
 import type { Mutation, RecordEntry, SaveResult, Workout } from "../domain";
 import { z } from "zod";
-import type { PendingQuery, Row, Sql, TransactionSql } from "postgres";
+import type { Sql, TransactionSql } from "postgres";
 const rowSchema = z.object({
   id: z.string(),
   revision: z.number(),
@@ -215,10 +215,6 @@ export async function accountTimezone(
     ? settingsSchema.parse(configuration.data).timezone
     : "UTC";
 }
-/** Another request holds the owner's device issuance lease. */
-export class DeviceLeaseBusy extends Error {}
-/** The request no longer holds its lease; another may have taken it over. */
-export class DeviceLeaseLost extends Error {}
 /**
  * COMMIT failed or its reply was lost, so the transaction may or may not
  * have committed. Errors before COMMIT always roll back and are thrown as
@@ -229,163 +225,47 @@ export class CommitOutcomeUnknown extends Error {
     super("The commit's outcome is unknown.");
   }
 }
-/** A held device issuance lease. */
-export type DeviceLease = {
-  owner: string;
-  holder: string;
-  /** The request's deadline on the monotonic clock, for database waits. */
-  deadline?: number;
-};
 /** Postgres canceled a statement on its timeout, or found a lock taken. */
 function lockWaitEnded(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code;
   return code === "57014" || code === "55P03";
 }
 /**
- * Takes the owner's device issuance lease for `holder`, unless another
- * holder has one that has not expired. A lease row works through a
- * transaction-mode connection pooler, unlike a session advisory lock.
+ * How long each statement in an enrollment transaction, and each lock it
+ * waits for, may take. An import holds the account for its whole
+ * transaction, so this leaves room for one to finish.
  */
-export async function acquireDeviceLease(
-  sql: Sql,
-  owner: string,
-  holder: string,
-  seconds: number,
-) {
-  // A live lease is found without a lock, so a request never waits behind
-  // the holder's own writes to learn the lease is busy.
-  const [live] =
-    await sql`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${owner} AND expires_at > clock_timestamp()`;
-  if (live) return false;
-  try {
-    return await sql.begin(async (tx) => {
-      // Taking over an expired lease that a write still holds would wait;
-      // that counts as busy instead.
-      await tx`SELECT set_config('lock_timeout', '100ms', true)`;
-      const rows =
-        await tx`INSERT INTO fitness_device_issuance_leases(owner_id, holder, expires_at) VALUES(${owner}, ${holder}, clock_timestamp() + make_interval(secs => ${seconds})) ON CONFLICT (owner_id) DO UPDATE SET holder=EXCLUDED.holder, expires_at=EXCLUDED.expires_at WHERE fitness_device_issuance_leases.expires_at < clock_timestamp() RETURNING holder`;
-      return rows.length === 1;
-    });
-  } catch (error) {
-    if (lockWaitEnded(error)) return false;
-    throw error;
-  }
-}
-export async function releaseDeviceLease(
-  sql: Sql | TransactionSql,
-  owner: string,
-  holder: string,
-) {
-  await sql`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner} AND holder=${holder}`;
+const defaultEnrollmentWaitMs = 10_000;
+let enrollmentWaitMs = defaultEnrollmentWaitMs;
+/** Sets `enrollmentWaitMs`, or restores the default, for tests. */
+export function setEnrollmentWait(ms = defaultEnrollmentWaitMs) {
+  enrollmentWaitMs = ms;
 }
 /**
- * Runs device key changes for an owner one at a time under its issuance
- * lease. The lease is not waited for: when another request holds it, this
- * throws DeviceLeaseBusy. Each write the work makes is fenced by the lease,
- * so once the lease expires or passes to another request, the next write
- * throws DeviceLeaseLost instead of changing anything. The lease is
- * released when the work ends, whether it succeeds or fails.
+ * Runs one short enrollment transaction for the owner. It locks the
+ * owner's account row first, as an import does before it reads its
+ * enrollment row, so the two always take locks in the same order and an
+ * enrollment waits for an import already running. Each statement and
+ * lock wait stops after `enrollmentWaitMs`. An error after the COMMIT was
+ * sent throws CommitOutcomeUnknown; any other error means nothing changed.
  */
-export async function withDeviceLease<T>(
+async function underAccount<T>(
   owner: string,
-  seconds: number,
-  work: (sql: Sql, lease: DeviceLease) => Promise<T>,
-  deadline?: number,
+  work: (tx: TransactionSql) => Promise<T>,
 ): Promise<T> {
-  const sql = database();
-  const lease = { owner, holder: crypto.randomUUID(), deadline };
-  if (!(await acquireDeviceLease(sql, owner, lease.holder, seconds)))
-    throw new DeviceLeaseBusy();
-  try {
-    return await work(sql, lease);
-  } finally {
-    // A lease that cannot be released expires on its own, so the work's
-    // own result, or error, stands.
-    try {
-      await sql.begin(async (tx) => {
-        await tx`SELECT set_config('statement_timeout', '5s', true)`;
-        await releaseDeviceLease(tx, owner, lease.holder);
-      });
-    } catch (error) {
-      console.error("fitness.devices.lease_release_failed", {
-        name: error instanceof Error ? error.name : typeof error,
-      });
-    }
-  }
-}
-/** Rows a fenced write changes, or none, as a condition on the enrollment table. */
-type Target = ((tx: TransactionSql) => PendingQuery<Row[]>) | null;
-/**
- * Runs one write only while the lease is held, in one short transaction,
- * and returns the rows it changed. Throws DeviceLeaseLost when the lease is
- * not held. The locks come in one order: the lease row, then the account
- * row, then the enrollment rows the write changes. An import takes the
- * account row and then its enrollment row, and never the lease, so the two
- * cannot deadlock. Only once all three are held is the lease's expiry
- * compared with clock_timestamp(), so a write that waited on any of them
- * past the expiry changes nothing. Holding the lease row FOR SHARE until commit keeps
- * another request from taking the lease over in the meantime.
- */
-async function fenced(
-  sql: Sql,
-  lease: DeviceLease,
-  target: Target,
-  write: (
-    tx: TransactionSql,
-    budget: () => Promise<void>,
-  ) => Promise<readonly unknown[]>,
-) {
-  // Set once the work is done, so an error after it comes from COMMIT.
   let committing = false;
   try {
-    return await sql.begin(async (tx) => {
-      // Before each statement that can wait, its timeout is what remains
-      // of the request's deadline, so the waits together never pass it.
-      const budget = async () => {
-        if (lease.deadline === undefined) return;
-        const ms = Math.floor(lease.deadline - performance.now());
-        if (ms <= 0) throw new DeviceLeaseLost();
-        await tx`SELECT set_config('statement_timeout', ${String(ms)}, true)`;
-      };
-      const stillHeld = async () => {
-        const [valid] =
-          await tx`SELECT expires_at > clock_timestamp() AS valid FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder}`;
-        if (valid?.valid !== true) throw new DeviceLeaseLost();
-      };
-      await budget();
-      const [held] =
-        await tx`SELECT 1 FROM fitness_device_issuance_leases WHERE owner_id=${lease.owner} AND holder=${lease.holder} FOR SHARE`;
-      if (!held) throw new DeviceLeaseLost();
-      // The account row next, as an import takes it before its enrollment
-      // row, so the two never take the same rows in opposite orders. Writes
-      // to enrollment rows then find the account already held.
-      await budget();
-      await tx`INSERT INTO fitness_accounts(owner_id) VALUES(${lease.owner}) ON CONFLICT DO NOTHING`;
-      await budget();
-      await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${lease.owner} FOR UPDATE`;
-      if (target) {
-        await budget();
-        await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${target(tx)} FOR UPDATE`;
-      }
-      await stillHeld();
-      await budget();
-      const changed = (await write(tx, budget)).length;
-      // A write can still wait, so the lease and the deadline are checked
-      // again last; either one passed rolls everything back. COMMIT itself
-      // can still stall after this check. That is safe: the lease row stays
-      // locked FOR SHARE until the commit ends, so no other request can take
-      // the lease over meanwhile, and a commit that lands late is the
-      // lost-reply case enrollment already handles. The app may never see
-      // the reply, and its next enrollment replaces that key.
-      await stillHeld();
-      if (lease.deadline !== undefined && performance.now() >= lease.deadline)
-        throw new DeviceLeaseLost();
+    const result = await database().begin(async (tx) => {
+      await tx`SELECT set_config('statement_timeout', ${String(enrollmentWaitMs)}, true)`;
+      await tx`SELECT set_config('lock_timeout', ${String(enrollmentWaitMs)}, true)`;
+      await lockAccount(tx, owner);
+      const value = await work(tx);
       committing = true;
-      return changed;
+      return { value };
     });
+    return result.value;
   } catch (error) {
     if (committing) throw new CommitOutcomeUnknown(error);
-    if (lockWaitEnded(error)) throw new DeviceLeaseLost();
     throw error;
   }
 }
@@ -430,76 +310,90 @@ export async function countEnrollmentAttempt(
     await sql`DELETE FROM fitness_device_attempt_windows WHERE window_start < now() - interval '1 hour'`;
   return { allowed: true, wait };
 }
-/**
- * Whether a token was already used: by the ID Clerk verified for it, or by
- * the digest of its raw string, which earlier enrollments recorded alone.
- */
-export async function enrollmentTokenUsed(
-  sql: Sql,
-  token: { id: string; digest: string },
-) {
-  const rows =
-    await sql`SELECT 1 FROM fitness_device_enrollments WHERE token_id=${token.id} OR token_digest=${token.digest}`;
-  return rows.length > 0;
+/** Why an enrollment attempt was refused before it used the token. */
+export type EnrollmentRefusal =
+  | { reason: "token_used" }
+  | { reason: "device_limit" }
+  | { reason: "rate_limited"; retryAfter: number }
+  | { reason: "busy" };
+/** Rolls back an attempt's transaction with the reason it was refused. */
+class Refused extends Error {
+  constructor(readonly refusal: EnrollmentRefusal) {
+    super(refusal.reason);
+  }
 }
 /**
- * Records an enrollment attempt as pending, in one fenced transaction
- * before any key changes in Clerk. Recording marks the token as used and
- * reserves the attempt's place in the hourly limit; the installation's
- * current key keeps importing until its replacement is swapped in. If the
- * lease or the deadline runs out first, nothing changes and the token stays
- * unused. Returns false, changing nothing, when the token was already used.
- * Inactive records older than two days, past the token lifetime, are
- * removed.
+ * Records an enrollment attempt as pending, in one short transaction
+ * before any key changes in Clerk. Recording uses the token and reserves
+ * the attempt's place in the hourly limit. The installation's current key
+ * keeps importing until its replacement is swapped in.
+ *
+ * Under the account lock, the transaction refuses the attempt, changing
+ * nothing and leaving the token unused, when:
+ *
+ * - the token was already used, by the ID Clerk verified for it or by the
+ *   digest of its raw string, which earlier enrollments recorded alone;
+ * - the hourly limit is full, counting this attempt: keys created in the
+ *   last hour and attempts that may have created one; or
+ * - the owner's other installations with an active key, and this one,
+ *   are more than the installation limit.
+ *
+ * A transaction that waits too long on a lock or statement rolls back too,
+ * with reason `busy`. Inactive records older than two days, past the token
+ * lifetime, are removed. Returns null once the attempt is recorded. An
+ * error after the COMMIT was sent throws CommitOutcomeUnknown, and the
+ * token may be used.
  */
 export async function recordEnrollment(
-  sql: Sql,
-  lease: DeviceLease,
+  owner: string,
   attempt: {
     tokenId: string;
     digest: string;
     attemptId: string;
     installationId: string;
   },
-) {
-  const owner = lease.owner;
-  const stale = (tx: TransactionSql) =>
-    tx`NOT active AND created_at < now() - interval '2 days'`;
-  const inserted = await fenced(sql, lease, stale, async (tx, budget) => {
-    await tx`DELETE FROM fitness_device_enrollments WHERE ${stale(tx)}`;
-    await budget();
-    // Either identity already recorded means the token was used.
-    return tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
-  });
-  return inserted === 1;
+  limits: { installations: number; perHour: number },
+): Promise<EnrollmentRefusal | null> {
+  try {
+    await underAccount(owner, async (tx) => {
+      await tx`DELETE FROM fitness_device_enrollments WHERE NOT active AND created_at < now() - interval '2 days'`;
+      const used =
+        await tx`SELECT 1 FROM fitness_device_enrollments WHERE token_id=${attempt.tokenId} OR token_digest=${attempt.digest}`;
+      if (used.length) throw new Refused({ reason: "token_used" });
+      const charges = await hourlyCharges(tx, owner);
+      if (charges.length + 1 > limits.perHour) {
+        const freed = charges[charges.length - limits.perHour] ?? 1;
+        throw new Refused({
+          reason: "rate_limited",
+          retryAfter: Math.max(1, Math.ceil(freed)),
+        });
+      }
+      const [others] =
+        await tx`SELECT count(DISTINCT installation_id)::int AS installations FROM fitness_device_enrollments WHERE owner_id=${owner} AND active AND installation_id<>${attempt.installationId}`;
+      if (Number(others?.installations ?? 0) + 1 > limits.installations)
+        throw new Refused({ reason: "device_limit" });
+      // Either identity recorded meanwhile means the token was used.
+      const inserted =
+        await tx`INSERT INTO fitness_device_enrollments(owner_id,token_id,token_digest,attempt_id,installation_id) VALUES(${owner},${attempt.tokenId},${attempt.digest},${attempt.attemptId},${attempt.installationId}) ON CONFLICT DO NOTHING RETURNING 1`;
+      if (!inserted.length) throw new Refused({ reason: "token_used" });
+    });
+    return null;
+  } catch (error) {
+    if (error instanceof Refused) return error.refusal;
+    if (lockWaitEnded(error)) return { reason: "busy" };
+    throw error;
+  }
 }
-/**
- * Marks the owner's pending attempts ambiguous. Under the lease no other
- * attempt is running, so a pending one ended without recording whether
- * Clerk created its key. A key it created cannot import.
- */
-export async function settlePendingEnrollments(sql: Sql, lease: DeviceLease) {
-  await fenced(
-    sql,
-    lease,
-    (tx) => tx`owner_id=${lease.owner} AND key_state='pending'`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET key_state='ambiguous' WHERE owner_id=${lease.owner} AND key_state='pending' RETURNING 1`,
-  );
-}
-/** Records what became of this request's attempt when its key was not issued. */
+/** Records what became of an attempt whose key was not issued. */
 export async function settleEnrollment(
-  sql: Sql,
-  lease: DeviceLease,
+  owner: string,
   attemptId: string,
   state: "ambiguous" | "failed",
 ) {
-  await fenced(
-    sql,
-    lease,
-    (tx) => tx`attempt_id=${attemptId} AND key_state='pending'`,
+  await underAccount(
+    owner,
     (tx) =>
-      tx`UPDATE fitness_device_enrollments SET key_state=${state} WHERE attempt_id=${attemptId} AND key_state='pending' RETURNING 1`,
+      tx`UPDATE fitness_device_enrollments SET key_state=${state} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='pending'`,
   );
 }
 /**
@@ -507,18 +401,14 @@ export async function settleEnrollment(
  * its key, once a key with its attempt ID is found.
  */
 export async function chargeAmbiguousEnrollment(
-  sql: Sql,
-  lease: DeviceLease,
+  owner: string,
   attemptId: string,
   createdAt: Date,
 ) {
-  await fenced(
-    sql,
-    lease,
+  await underAccount(
+    owner,
     (tx) =>
-      tx`owner_id=${lease.owner} AND attempt_id=${attemptId} AND key_state='ambiguous' AND charged_at IS NULL`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${lease.owner} AND attempt_id=${attemptId} AND key_state='ambiguous' AND charged_at IS NULL RETURNING 1`,
+      tx`UPDATE fitness_device_enrollments SET charged_at=${createdAt} WHERE owner_id=${owner} AND attempt_id=${attemptId} AND key_state='ambiguous' AND charged_at IS NULL`,
   );
 }
 /** Hours an ambiguous attempt without a found key counts toward the hourly limit. */
@@ -526,10 +416,10 @@ const ambiguousChargeHours = 2;
 /**
  * Seconds until each of the owner's attempts stops counting toward the
  * hourly limit, soonest first. A created key counts for an hour from its
- * creation. An attempt whose creation is unconfirmed counts from when it
- * was recorded, for `ambiguousChargeHours`.
+ * creation. An attempt whose creation is unconfirmed, pending or
+ * ambiguous, counts from when it was recorded, for `ambiguousChargeHours`.
  */
-export async function hourlyCharges(sql: Sql, owner: string) {
+async function hourlyCharges(sql: Sql | TransactionSql, owner: string) {
   const rows =
     await sql`SELECT extract(epoch FROM (CASE WHEN charged_at IS NOT NULL THEN charged_at + interval '1 hour' ELSE created_at + make_interval(hours => ${ambiguousChargeHours}) END) - now())::float8 AS remaining FROM fitness_device_enrollments WHERE owner_id=${owner} AND ((charged_at IS NOT NULL AND charged_at > now() - interval '1 hour') OR (charged_at IS NULL AND key_state IN ('pending','ambiguous') AND created_at > now() - make_interval(hours => ${ambiguousChargeHours}))) ORDER BY remaining`;
   return rows.map((row) => z.number().parse(row.remaining));
@@ -540,9 +430,9 @@ const activeRow = z.object({
   key_id: z.string(),
 });
 /** The owner's active device keys, one per installation. */
-export async function activeDevices(sql: Sql, owner: string) {
+export async function activeDevices(owner: string) {
   const rows =
-    await sql`SELECT attempt_id, installation_id, key_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`;
+    await database()`SELECT attempt_id, installation_id, key_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND active`;
   return rows.map((row) => {
     const r = activeRow.parse(row);
     return {
@@ -553,66 +443,87 @@ export async function activeDevices(sql: Sql, owner: string) {
   });
 }
 /** The owner's ambiguous attempts that have no charge from a found key yet. */
-export async function unchargedAmbiguous(sql: Sql, owner: string) {
+export async function unchargedAmbiguous(owner: string) {
   const rows =
-    await sql`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='ambiguous' AND charged_at IS NULL`;
+    await database()`SELECT attempt_id FROM fitness_device_enrollments WHERE owner_id=${owner} AND key_state='ambiguous' AND charged_at IS NULL`;
   return rows.map((row) => z.string().parse(row.attempt_id));
 }
-/** Stops these keys importing. */
-export async function deactivateKeys(
-  sql: Sql,
-  lease: DeviceLease,
-  keyIds: string[],
-) {
-  if (!keyIds.length) return;
-  await fenced(
-    sql,
-    lease,
-    (tx) => tx`owner_id=${lease.owner} AND active AND key_id IN ${tx(keyIds)}`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND active AND key_id IN ${tx(keyIds)} RETURNING 1`,
-  );
-}
-/** Stops an installation's active key from importing. */
-export async function deactivateInstallation(
-  sql: Sql,
-  lease: DeviceLease,
-  installationId: string,
-) {
-  await fenced(
-    sql,
-    lease,
-    (tx) =>
-      tx`owner_id=${lease.owner} AND installation_id=${installationId} AND active`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND installation_id=${installationId} AND active RETURNING 1`,
-  );
-}
 /**
- * Swaps the created key in as the installation's active key, in one fenced
- * transaction: the installation's current row stops being active and this
- * attempt's row records the key, becomes active and is charged from now,
- * so the installation always has at most one active key and never goes
- * without one before its replacement exists. Returns whether this attempt
- * became active, and the keys it replaced, which the caller revokes after
- * the commit.
+ * Minutes an attempt may stay pending while its request is still working
+ * on it. A request ends long before this, so an older pending attempt was
+ * abandoned.
+ */
+const pendingGraceMinutes = 10;
+/**
+ * Which of these attempts' keys no current enrollment needs: keys whose
+ * attempt is unknown, or is not active and not still pending within
+ * `pendingGraceMinutes`. An active row's key, and a key another request
+ * may still be swapping in, are kept.
+ */
+export async function unneededKeys(
+  owner: string,
+  keys: { id: string; enrollment: string | null }[],
+) {
+  const attempts = [
+    ...new Set(keys.flatMap((k) => (k.enrollment ? [k.enrollment] : []))),
+  ];
+  const rows = attempts.length
+    ? await database()`SELECT attempt_id, active, key_id, key_state = 'pending' AND created_at > now() - make_interval(mins => ${pendingGraceMinutes}) AS working FROM fitness_device_enrollments WHERE owner_id=${owner} AND attempt_id::text IN ${database()(attempts)}`
+    : [];
+  const byAttempt = new Map(rows.map((row) => [String(row.attempt_id), row]));
+  return keys
+    .filter((key) => {
+      const row = key.enrollment ? byAttempt.get(key.enrollment) : undefined;
+      if (!row) return true;
+      if (row.working === true) return false;
+      return !(row.active === true && row.key_id === key.id);
+    })
+    .map((key) => key.id);
+}
+/** Stops these keys importing. */
+export async function deactivateKeys(owner: string, keyIds: string[]) {
+  if (!keyIds.length) return;
+  await underAccount(
+    owner,
+    (tx) =>
+      tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND active AND key_id IN ${tx(keyIds)}`,
+  );
+}
+/** The attempt is no longer pending, so another request settled it. */
+class NotPending extends Error {}
+/**
+ * Swaps the created key in as the installation's active key, in one short
+ * transaction under the account lock: the installation's rows are locked,
+ * its current row stops being active and this attempt's row records the
+ * key, becomes active and is charged from now. The installation therefore
+ * always has at most one active key and never goes without one before its
+ * replacement exists. If this attempt is no longer pending, nothing
+ * changes. Returns whether this attempt became active, and the keys it
+ * replaced, which the caller revokes after the commit. An error after the
+ * COMMIT was sent throws CommitOutcomeUnknown.
  */
 export async function swapEnrollment(
-  sql: Sql,
-  lease: DeviceLease,
+  owner: string,
   attempt: { attemptId: string; installationId: string; keyId: string },
 ) {
-  let replaced: string[] = [];
-  const rows = (tx: TransactionSql) =>
-    tx`owner_id=${lease.owner} AND ((installation_id=${attempt.installationId} AND active) OR attempt_id=${attempt.attemptId})`;
-  const changed = await fenced(sql, lease, rows, async (tx, budget) => {
-    const old =
-      await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${lease.owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
-    replaced = old.map((row) => z.string().parse(row.key_id));
-    await budget();
-    return tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=greatest(created_at, now()) WHERE attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
-  });
-  return { activated: changed === 1, replaced };
+  try {
+    return await underAccount(owner, async (tx) => {
+      await tx`SELECT 1 FROM fitness_device_enrollments WHERE owner_id=${owner} AND ((installation_id=${attempt.installationId} AND active) OR attempt_id=${attempt.attemptId}) FOR UPDATE`;
+      const old =
+        await tx`UPDATE fitness_device_enrollments SET active=false WHERE owner_id=${owner} AND installation_id=${attempt.installationId} AND active AND attempt_id<>${attempt.attemptId} RETURNING key_id`;
+      const activated =
+        await tx`UPDATE fitness_device_enrollments SET key_state='issued', key_id=${attempt.keyId}, active=true, charged_at=greatest(created_at, now()) WHERE owner_id=${owner} AND attempt_id=${attempt.attemptId} AND key_state='pending' RETURNING 1`;
+      if (!activated.length) throw new NotPending();
+      return {
+        activated: true,
+        replaced: old.map((row) => z.string().parse(row.key_id)),
+      };
+    });
+  } catch (error) {
+    if (error instanceof NotPending)
+      return { activated: false, replaced: [] as string[] };
+    throw error;
+  }
 }
 /**
  * What became of a swap whose commit reply was lost, read on a connection
@@ -634,6 +545,7 @@ export async function swapOutcome(attempt: {
 }) {
   return database().begin(async (tx) => {
     await tx`SELECT set_config('lock_timeout', '5s', true)`;
+    await tx`SELECT set_config('statement_timeout', '5s', true)`;
     const [row] =
       await tx`SELECT key_state, active, key_id FROM fitness_device_enrollments WHERE attempt_id=${attempt.attemptId} FOR SHARE`;
     const previous = attempt.previousKeyIds.length
@@ -678,22 +590,18 @@ export async function deviceKeyActive(
   return rows.length === 1;
 }
 /**
- * Deactivates this key's attempt when it is the installation's active key.
- * Returns whether it was.
+ * Deactivates this key's attempt when it is the installation's active key,
+ * in one short transaction under the account lock, so a disconnect waits
+ * for an import already running with this key. Returns whether it was
+ * active.
  */
-export async function deactivateDeviceKey(
-  sql: Sql,
-  lease: DeviceLease,
-  key: DeviceKeyClaims,
-) {
-  const changed = await fenced(
-    sql,
-    lease,
-    (tx) => tx`${activeKeyRow(tx, key)}`,
-    (tx) =>
-      tx`UPDATE fitness_device_enrollments SET active=false WHERE ${activeKeyRow(tx, key)} RETURNING 1`,
-  );
-  return changed === 1;
+export async function deactivateDeviceKey(key: DeviceKeyClaims) {
+  return underAccount(key.owner, async (tx) => {
+    await tx`SELECT 1 FROM fitness_device_enrollments WHERE ${activeKeyRow(tx, key)} FOR UPDATE`;
+    const changed =
+      await tx`UPDATE fitness_device_enrollments SET active=false WHERE ${activeKeyRow(tx, key)} RETURNING 1`;
+    return changed.length === 1;
+  });
 }
 const enrollmentColumns = [
   "owner_id",
@@ -707,7 +615,6 @@ const enrollmentColumns = [
   "charged_at",
   "created_at",
 ];
-const leaseColumns = ["owner_id", "holder", "expires_at"];
 const windowColumns = ["window_start", "attempts"];
 /**
  * Whether enrollment can use its tables, in one query: each table and its
@@ -725,23 +632,19 @@ export async function enrollmentTableReady(sql: Sql = database()) {
       (SELECT count(*)::int FROM information_schema.columns
         WHERE table_schema = current_schema() AND (
           (table_name = 'fitness_device_enrollments' AND column_name IN ${sql(enrollmentColumns)})
-          OR (table_name = 'fitness_device_issuance_leases' AND column_name IN ${sql(leaseColumns)})
           OR (table_name = 'fitness_device_attempt_windows' AND column_name IN ${sql(windowColumns)}))) AS columns,
       CASE
         WHEN to_regclass('fitness_device_enrollments') IS NULL
-          OR to_regclass('fitness_device_issuance_leases') IS NULL
           OR to_regclass('fitness_device_attempt_windows') IS NULL
           OR to_regclass('fitness_accounts') IS NULL THEN false
         ELSE ${grants("fitness_device_enrollments")}
-          AND ${grants("fitness_device_issuance_leases")}
           AND ${grants("fitness_device_attempt_windows")}
           AND has_table_privilege(current_user, 'fitness_accounts', 'SELECT')
           AND has_table_privilege(current_user, 'fitness_accounts', 'INSERT')
           AND has_table_privilege(current_user, 'fitness_accounts', 'UPDATE')
       END AS granted`;
   return (
-    row?.columns ===
-      enrollmentColumns.length + leaseColumns.length + windowColumns.length &&
+    row?.columns === enrollmentColumns.length + windowColumns.length &&
     row.granted === true
   );
 }

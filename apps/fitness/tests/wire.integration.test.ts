@@ -43,7 +43,9 @@ const environment = { ...process.env };
 const { database } = await import("../src/server/db");
 const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
-const { loadRecords, saveRecord } = await import("../src/server/store");
+const { loadRecords, saveRecord, setEnrollmentWait } =
+  await import("../src/server/store");
+const { default: postgres } = await import("postgres");
 const { defaultSettings, settingsId } = await import("../src/domain");
 
 const committed = new URL("./fixtures/wire/replies/", import.meta.url).pathname;
@@ -56,7 +58,6 @@ const installation = "3b0f6a52-8c1d-4e7f-9a2b-5c6d7e8f9a0b";
 async function clean() {
   const sql = database();
   await sql`DELETE FROM fitness_device_enrollments WHERE owner_id=${owner}`;
-  await sql`DELETE FROM fitness_device_issuance_leases WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_health_samples WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_operations WHERE owner_id=${owner}`;
   await sql`DELETE FROM fitness_records WHERE owner_id=${owner}`;
@@ -315,28 +316,41 @@ test.skipIf(!configured)(
     );
     await record("error-key-invalid", await importAs(device, deviceBody([])));
 
-    // A second enrollment while the first is still issuing its key.
-    for (const token of ["oat_wire_first", "oat_wire_second"])
-      fake.oauth.set(token, {
-        userId: owner,
-        clientId: iosClient,
-        scopes: ["openid", "fitness:health:enroll"],
-        aud: resource,
-      });
+    // Recording waits on the account row an import holds, past its lock
+    // wait, so the token stays unused.
+    fake.oauth.set("oat_wire_busy", {
+      userId: owner,
+      clientId: iosClient,
+      scopes: ["openid", "fitness:health:enroll"],
+      aud: resource,
+    });
+    setEnrollmentWait(300);
+    const holder = postgres(isolated.url, {
+      max: 1,
+      prepare: false,
+      onnotice: () => undefined,
+    });
     let release = () => undefined as void;
-    fake.stall = new Promise<void>((resolve) => {
-      release = resolve;
+    let taken = () => undefined as void;
+    const held = new Promise<void>((resolve) => {
+      taken = resolve;
     });
-    const creating = new Promise<void>((resolve) => {
-      fake.onCreate = resolve;
+    const holding = holder.begin(async (tx) => {
+      await tx`SELECT owner_id FROM fitness_accounts WHERE owner_id=${owner} FOR UPDATE`;
+      taken();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
     });
-    const first = enroll("oat_wire_first");
-    await creating;
-    await record("error-issuance-pending", await enroll("oat_wire_second"));
-    release();
-    expect((await first).status).toBe(201);
-    fake.stall = null;
-    fake.onCreate = null;
+    try {
+      await held;
+      await record("error-issuance-pending", await enroll("oat_wire_busy"));
+    } finally {
+      release();
+      await holding;
+      await holder.end();
+      setEnrollmentWait();
+    }
 
     // Enrollment limits: three other installations hold active keys,
     // created more than an hour ago.

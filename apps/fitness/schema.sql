@@ -103,8 +103,9 @@ DROP INDEX IF EXISTS fitness_device_enrollment_pending;
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_created ON fitness_device_enrollments(created_at);
 CREATE INDEX IF NOT EXISTS fitness_device_enrollment_owner ON fitness_device_enrollments(owner_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS fitness_device_enrollment_active ON fitness_device_enrollments(owner_id, installation_id) WHERE active;
--- One device key issuance at a time per owner. A lease that expires_at has
--- passed belongs to a request that ended, and the next one takes it over.
+-- Unused. Earlier versions issued device keys one at a time per owner under
+-- a lease row here. Enrollment now serializes on the account row, and the
+-- table is kept so existing databases need no destructive change.
 CREATE TABLE IF NOT EXISTS fitness_device_issuance_leases (
   owner_id text PRIMARY KEY,
   holder uuid NOT NULL,

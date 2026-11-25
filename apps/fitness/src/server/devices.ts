@@ -39,10 +39,9 @@ import {
   deviceEnrollmentEnabled,
   mcpResource,
 } from "./config";
+import { database } from "./db";
 import {
   CommitOutcomeUnknown,
-  DeviceLeaseBusy,
-  DeviceLeaseLost,
   accountTimezone,
   activeDevices,
   chargeAmbiguousEnrollment,
@@ -50,15 +49,12 @@ import {
   deactivateDeviceKey,
   deactivateKeys,
   enrollmentTableReady,
-  enrollmentTokenUsed,
-  hourlyCharges,
-  swapOutcome,
-  swapEnrollment,
   recordEnrollment,
   settleEnrollment,
-  settlePendingEnrollments,
+  swapEnrollment,
+  swapOutcome,
   unchargedAmbiguous,
-  withDeviceLease,
+  unneededKeys,
 } from "./store";
 
 const deviceLimits = {
@@ -68,7 +64,7 @@ const deviceLimits = {
   perHour: 5,
   /** Enrollment request bodies. */
   bytes: 4096,
-  /** Seconds a client waits before retrying while another enrollment runs. */
+  /** Seconds a client waits before retrying while the account is busy. */
   busySeconds: 10,
   /** Milliseconds a ready result is reused for. */
   readyMs: 30_000,
@@ -77,19 +73,16 @@ const deviceLimits = {
 } as const;
 
 /**
- * Enrollment timing, in milliseconds on the monotonic clock: each Clerk
- * call's limit, the deadline every call in an enrollment starts and ends
- * within, the share of it cleanup may use, and the time kept back for
- * creating the key.
+ * Enrollment timing, in milliseconds on the monotonic clock. The database
+ * transactions set their own short limits; see the store.
  */
 const timing = {
-  /** Seconds an issuance lease lasts, well past the deadline. */
-  leaseSeconds: 90,
+  /** The limit on each Clerk call. */
   clerkMs: 10_000,
-  deadlineMs: 45_000,
+  /** The time listing the owner's keys, or revoking unneeded ones, may take. */
   cleanupMs: 10_000,
-  createReserveMs: 15_000,
-  activationSlackMs: 5_000,
+  /** The time Clerk has to revoke the keys a swap replaced. */
+  replacedRevokeMs: 5_000,
 };
 const defaultTiming = { ...timing };
 /** Sets enrollment timing, or restores the defaults, for tests. */
@@ -102,13 +95,16 @@ function deadlineIn(ms: number) {
   return performance.now() + ms;
 }
 /**
- * Starts a Clerk call only if the deadline has not passed, then waits for it
- * for up to the per-call timeout and no later than the deadline. The pinned
- * SDK takes no AbortSignal for these calls, so a call that runs out of time
- * keeps running upstream; the deadline, the lease, its fencing and the
- * attempt limits bound how much such work there can be.
+ * Starts a Clerk call only if the deadline has not passed, then waits for
+ * it for up to the per-call limit and no later than the deadline. The
+ * pinned SDK takes no AbortSignal for these calls, so a call that runs out
+ * of time keeps running upstream. Postgres decides which key may import,
+ * so such a late result is harmless.
  */
-function bounded<T>(call: () => Promise<T>, deadline: number): Promise<T> {
+function bounded<T>(
+  call: () => Promise<T>,
+  deadline = deadlineIn(timing.clerkMs),
+): Promise<T> {
   const ms = Math.min(timing.clerkMs, deadline - performance.now());
   if (ms <= 0) return Promise.reject(new ClerkTimeout());
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -159,8 +155,6 @@ let sharedPerMinute = 20;
 export function setSharedEnrollmentLimit(perMinute: number) {
   sharedPerMinute = perMinute;
 }
-/** One enrollment issues keys at a time in this process. */
-let issuing = false;
 
 const noStore = { "Cache-Control": "no-store" };
 function json(value: unknown, status = 200, headers: HeadersInit = {}) {
@@ -193,12 +187,9 @@ const authUnavailable = (headers: HeadersInit = {}) =>
     headers,
   );
 const busy = () =>
-  failure(
-    503,
-    "issuance_pending",
-    "Another connection is being set up. Try again shortly.",
-    { "Retry-After": String(deviceLimits.busySeconds) },
-  );
+  failure(503, "issuance_pending", "This account is busy. Try again shortly.", {
+    "Retry-After": String(deviceLimits.busySeconds),
+  });
 const rateLimited = (seconds: number) =>
   failure(
     429,
@@ -325,9 +316,9 @@ class KeyCheckInconclusive extends Error {}
  * a 404 without Clerk's not-found error, is inconclusive and throws
  * KeyCheckInconclusive.
  */
-async function keyGone(keyId: string, deadline: number) {
+async function keyGone(keyId: string) {
   try {
-    const key = await bounded(() => clerkClient().apiKeys.get(keyId), deadline);
+    const key = await bounded(() => clerkClient().apiKeys.get(keyId));
     return key.revoked || key.expired;
   } catch (error) {
     if (clerkNotFound(error)) return true;
@@ -363,8 +354,22 @@ async function readBody(request: Request) {
     : text;
 }
 
-/** Clerk created a key, but this request could not make it active. */
-class ActivationFailed extends Error {}
+/** Clerk answered the create with a client error, so it made no key. */
+function createRefused(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
+function logged(event: string, error: unknown) {
+  console.error(event, {
+    name: error instanceof Error ? error.name : typeof error,
+  });
+}
 
 /**
  * POST /api/health/devices: exchanges a one-time OAuth access token from the
@@ -374,46 +379,48 @@ class ActivationFailed extends Error {}
  * 30 seconds), then the budget all servers share in Postgres, before any
  * Clerk call. The token must then be a Clerk OAuth access token for the MCP
  * resource with fitness:health:enroll, issued to a client in
- * FITNESS_DEVICE_CLIENT_IDS, for an invited account. Every Clerk call
- * starts and finishes within the enrollment's deadline.
+ * FITNESS_DEVICE_CLIENT_IDS, for an invited account. Each Clerk call has up
+ * to `clerkMs`.
  *
- * One enrollment issues keys at a time per server, and per owner under a
- * lease row that is not waited for; a busy one replies `503
- * issuance_pending`. Every write under the lease is fenced by it, so a
- * request whose lease expired or passed to another changes nothing more
- * and replies `503 issuance_pending`. Under the lease:
+ * Postgres decides which key may import, so enrollments for one account
+ * may run at the same time. Each database change is one short transaction
+ * that locks the account row first, as an import does, and each statement
+ * and lock wait in it is limited:
  *
- * 1. Earlier pending attempts become ambiguous. Their requests ended
- *    without recording whether Clerk created a key.
- * 2. Clerk is asked about each active key on its own. One it confirms
- *    revoked, expired or deleted stops being active. Any other answer fails
- *    the enrollment with `503 auth_unavailable` and changes nothing.
- * 3. Clerk's key list finds keys left by ambiguous attempts, which then
- *    count toward the hourly limit from their creation, and keys to clean
- *    up. A key missing from the list is never treated as gone. Listing and
- *    cleanup have their own budget and never use the time kept back for
- *    the create; a list that runs out of time is skipped. With less than
- *    that time left before the token would be used, the enrollment stops
- *    with `503 issuance_pending` and changes neither.
- * 4. The limits are checked in Postgres, counting the new key: keys
- *    created in the last hour and attempts that may have created one, and
- *    installations with an active key.
- * 5. The attempt is recorded, which uses the token and reserves its place
- *    in the hourly limit, in a transaction that must commit before the
- *    time kept for the create; otherwise nothing changes and the reply is
- *    `503 issuance_pending`.
- * 6. Clerk revokes keys without an active row, as cleanup. Active keys,
+ * 1. Clerk is asked about each active key on its own. One it confirms
+ *    revoked, expired or deleted stops being active. Any other answer
+ *    fails the enrollment with `503 auth_unavailable` and changes nothing.
+ * 2. Clerk's key list, within `cleanupMs`, finds keys left by ambiguous
+ *    attempts, which then count toward the hourly limit from their
+ *    creation, and keys to clean up. A key missing from the list is never
+ *    treated as gone, and a list that fails or runs out of time is
+ *    skipped.
+ * 3. The attempt is recorded, which uses the token and reserves its place
+ *    in the hourly limit. Under the account lock, the same transaction
+ *    refuses a used token with `409 enrollment_token_used`, a full hourly
+ *    limit with `429 rate_limited`, and an installation over the limit
+ *    with `409 device_limit`, counting this attempt each time. A refusal,
+ *    or a transaction that times out waiting, changes nothing and leaves
+ *    the token unused; a timeout replies `503 issuance_pending`.
+ * 4. Clerk revokes keys no enrollment needs: keys without an active row,
+ *    except one another request may still be swapping in. Active keys,
  *    this installation's included, keep importing.
- * 7. Clerk creates the key with the attempt ID in its claims. One
- *    transaction then stops the installation's current key and makes the
- *    new one active, charged from now; after it commits, Clerk revokes the
- *    replaced key. If the create or the swap fails, the current key keeps
- *    importing, the new key is revoked, and the reply is `503
- *    issuance_failed`. A creation without a confirmed result makes the
- *    attempt ambiguous; a key it created cannot import.
+ * 5. Clerk creates the key with the attempt ID in its claims. A create
+ *    that fails marks the attempt failed, or ambiguous when Clerk may have
+ *    made the key, and replies `503 issuance_failed`. A key Clerk made for
+ *    it cannot import.
+ * 6. One transaction locks the installation's rows, stops its current key
+ *    and makes the new one active, charged from now, if the attempt is
+ *    still pending. After it commits, Clerk revokes the replaced key within
+ *    `replacedRevokeMs`; a revoke that fails is logged, and a later
+ *    enrollment's cleanup revokes the key, which can no longer import. If
+ *    the swap does not happen, the current key keeps importing, the new
+ *    key is revoked, and the reply is `503 issuance_failed`. If the swap's
+ *    commit reply is lost, its rows are read again on another connection,
+ *    waiting for a commit still in progress; when that read cannot tell,
+ *    both keys are left for a later enrollment.
  */
 export async function handleDeviceEnroll(request: Request) {
-  const deadline = deadlineIn(timing.deadlineMs);
   const wait = takeAttempt();
   if (wait > 0) return rateLimited(wait);
   if (!(await deviceEnrollmentReady())) return unavailable();
@@ -424,10 +431,7 @@ export async function handleDeviceEnroll(request: Request) {
     return unavailable();
   }
   const check = await verifyBearer(request, ["oauth_token"], {
-    timeoutMs: Math.max(
-      0,
-      Math.min(timing.clerkMs, deadline - performance.now()),
-    ),
+    timeoutMs: timing.clerkMs,
   });
   if (!check.ok) {
     if (check.failure === "unavailable") return authUnavailable();
@@ -459,7 +463,7 @@ export async function handleDeviceEnroll(request: Request) {
     );
   let email: string | null;
   try {
-    email = await bounded(() => invitedEmail(userId), deadline);
+    email = await bounded(() => invitedEmail(userId));
   } catch {
     return authUnavailable();
   }
@@ -491,241 +495,172 @@ export async function handleDeviceEnroll(request: Request) {
   const digest = createHash("sha256").update(token).digest("hex");
   const attemptId = crypto.randomUUID();
 
-  if (issuing) return busy();
-  issuing = true;
-  type Issued =
-    | { ok: true; secret: string; accountTimezone: string }
-    | { ok: false; response: Response };
-  const refuse = (response: Response): Issued => ({ ok: false, response });
-  let recorded = false;
-  let issued: Issued;
+  // Until the attempt is recorded, the token is unused and can retry.
+  let timezone: string;
+  let keys: DeviceKey[] = [];
   try {
-    issued = await withDeviceLease(
+    timezone = await accountTimezone(database(), userId);
+    // Each active key on its own, so a changing list cannot hide one.
+    const gone: string[] = [];
+    for (const device of await activeDevices(userId))
+      if (await keyGone(device.keyId)) gone.push(device.keyId);
+    await deactivateKeys(userId, gone);
+    const cleanup = deadlineIn(timing.cleanupMs);
+    try {
+      keys = await deviceKeys(userId, cleanup);
+    } catch (error) {
+      logged("fitness.devices.list_failed", error);
+    }
+    const ambiguous = new Set(await unchargedAmbiguous(userId));
+    for (const key of keys)
+      if (key.enrollment && ambiguous.has(key.enrollment))
+        await chargeAmbiguousEnrollment(
+          userId,
+          key.enrollment,
+          new Date(key.createdAt),
+        );
+  } catch (error) {
+    if (!(error instanceof KeyCheckInconclusive))
+      logged("fitness.devices.issuance_failed", error);
+    return authUnavailable();
+  }
+
+  let refusal: Awaited<ReturnType<typeof recordEnrollment>>;
+  try {
+    refusal = await recordEnrollment(
       userId,
-      timing.leaseSeconds,
-      async (sql, lease): Promise<Issued> => {
-        if (await enrollmentTokenUsed(sql, { id: tokenId, digest }))
-          return refuse(tokenUsed());
-        await settlePendingEnrollments(sql, lease);
-
-        // Each active key on its own, so a changing list cannot hide one.
-        const before = await activeDevices(sql, userId);
-        const gone: string[] = [];
-        for (const device of before)
-          if (await keyGone(device.keyId, deadline)) gone.push(device.keyId);
-        await deactivateKeys(sql, lease, gone);
-        const active = before.filter((d) => !gone.includes(d.keyId));
-
-        // Cleanup has its own budget and never takes the time kept back
-        // for the create. The list only finds keys; a key it leaves out is
-        // not gone. A list that fails or runs out of time is skipped.
-        const cleanup = Math.min(
-          deadlineIn(timing.cleanupMs),
-          deadline - timing.createReserveMs,
-        );
-        let keys: DeviceKey[] = [];
-        try {
-          keys = await deviceKeys(userId, cleanup);
-        } catch (error) {
-          console.error("fitness.devices.list_failed", {
-            name: error instanceof Error ? error.name : typeof error,
-          });
-        }
-        const ambiguous = new Set(await unchargedAmbiguous(sql, userId));
-        for (const key of keys)
-          if (key.enrollment && ambiguous.has(key.enrollment))
-            await chargeAmbiguousEnrollment(
-              sql,
-              lease,
-              key.enrollment,
-              new Date(key.createdAt),
-            );
-
-        const charges = await hourlyCharges(sql, userId);
-        if (charges.length + 1 > deviceLimits.perHour) {
-          const freed = charges[charges.length - deviceLimits.perHour] ?? 1;
-          return refuse(
-            failure(
-              429,
-              "rate_limited",
-              "Too many devices were connected in the last hour. Try again later.",
-              { "Retry-After": String(Math.max(1, Math.ceil(freed))) },
-            ),
-          );
-        }
-        const others = new Set(
-          active
-            .filter((d) => d.installationId !== installationId)
-            .map((d) => d.installationId),
-        );
-        if (others.size + 1 > deviceLimits.installations)
-          return refuse(
-            failure(
-              409,
-              "device_limit",
-              `Up to ${deviceLimits.installations} iPhones can sync. Revoke one under Manage account → API keys, then connect again.`,
-            ),
-          );
-
-        const timezone = await accountTimezone(sql, userId);
-        // Without time left to create the key, stop before the token is
-        // used or the installation's key changes, so the app can retry.
-        if (deadline - performance.now() < timing.createReserveMs)
-          return refuse(busy());
-        // Recording the attempt, which uses the token, commits only before
-        // the time kept for the create; otherwise nothing changes. The
-        // installation's current key keeps importing until its replacement
-        // is swapped in.
-        const cutoff = deadline - timing.createReserveMs;
-        if (
-          !(await recordEnrollment(
-            sql,
-            { ...lease, deadline: cutoff },
-            { tokenId, digest, attemptId, installationId },
-          ))
-        )
-          return refuse(tokenUsed());
-        recorded = true;
-        // Writes after the create may run a little past the deadline, within
-        // the lease, so a key Clerk returns at the deadline can still become
-        // active.
-        const after = {
-          ...lease,
-          deadline: deadline + timing.activationSlackMs,
-        };
-        try {
-          // Clean up in Clerk: keys that have no active row, such as one a
-          // timed-out creation left. Active keys, this installation's
-          // included, stay until they are replaced.
-          const kept = new Set(active.map((d) => d.keyId));
-          for (const key of keys)
-            if (key.active && !kept.has(key.id))
-              await revokeQuietly(
-                key.id,
-                "Not the active key for its iPhone.",
-                Math.min(cleanup, cutoff),
-              );
-        } catch (error) {
-          // No key was created for this attempt.
-          await settleEnrollment(sql, after, attemptId, "failed").catch(
-            () => undefined,
-          );
-          throw error;
-        }
-        let created: Awaited<
-          ReturnType<ReturnType<typeof clerkClient>["apiKeys"]["create"]>
-        >;
-        try {
-          created = await bounded(
-            () =>
-              clerkClient().apiKeys.create({
-                name: `iPhone sync: ${deviceName}`,
-                subject: userId,
-                description:
-                  "Imports Apple Health weigh-ins and runs into Fitness.",
-                scopes: [fitnessScopes.healthImport],
-                claims: {
-                  kind: deviceKeyKind,
-                  installationId,
-                  enrollment: attemptId,
-                },
-                createdBy: userId,
-              }),
-            deadline,
-          );
-          if (!created.secret) throw new Error("Clerk returned no key secret.");
-        } catch (error) {
-          // Clerk may have created the key; it cannot import either way.
-          await settleEnrollment(sql, after, attemptId, "ambiguous").catch(
-            () => undefined,
-          );
-          throw error;
-        }
-        // The swap stops the installation's current key and makes the new
-        // one active together. If it fails, the current key keeps importing
-        // and the new key is revoked.
-        const previous = active
-          .filter((d) => d.installationId === installationId)
-          .map((d) => d.keyId);
-        let swapped = { activated: false, replaced: previous };
-        let revokeNew = true;
-        try {
-          swapped = await swapEnrollment(sql, after, {
-            attemptId,
-            installationId,
-            keyId: created.id,
-          });
-        } catch (error) {
-          if (!(error instanceof CommitOutcomeUnknown)) throw error;
-          // The commit may have landed, or still be landing, in which case
-          // the old key is inactive and the new key is the installation's
-          // only one. Read the rows again, waiting for the commit, before
-          // revoking anything.
-          let outcome: Awaited<ReturnType<typeof swapOutcome>> = "unknown";
-          try {
-            outcome = await swapOutcome({
-              owner: userId,
-              attemptId,
-              installationId,
-              keyId: created.id,
-              previousKeyIds: previous,
-            });
-          } catch (reread) {
-            console.error("fitness.devices.swap_unknown", {
-              name: reread instanceof Error ? reread.name : typeof reread,
-            });
-          }
-          if (outcome === "committed")
-            swapped = { activated: true, replaced: previous };
-          else if (outcome === "unknown") {
-            // With no answer, both keys are left for the next enrollment
-            // to settle and clean up.
-            revokeNew = false;
-            console.error("fitness.devices.swap_unknown", { outcome });
-            throw error;
-          }
-        } finally {
-          if (!swapped.activated && revokeNew)
-            await revokeQuietly(
-              created.id,
-              "This connection could not be completed.",
-            );
-        }
-        if (!swapped.activated) throw new ActivationFailed();
-        for (const keyId of swapped.replaced)
-          await revokeQuietly(
-            keyId,
-            "Replaced by a new connection from this iPhone.",
-            deadline + timing.activationSlackMs,
-          );
-        return {
-          ok: true,
-          secret: created.secret,
-          accountTimezone: timezone,
-        };
-      },
-      deadline,
+      { tokenId, digest, attemptId, installationId },
+      deviceLimits,
     );
   } catch (error) {
-    if (error instanceof DeviceLeaseBusy) return busy();
-    if (error instanceof KeyCheckInconclusive) return authUnavailable();
-    console.error("fitness.devices.issuance_failed", {
-      name: error instanceof Error ? error.name : typeof error,
-    });
-    if (error instanceof ActivationFailed) return issuanceFailed();
-    // A write whose commit reply was lost may have used the token.
-    if (error instanceof CommitOutcomeUnknown) return issuanceFailed();
-    if (error instanceof DeviceLeaseLost)
-      return recorded ? issuanceFailed() : busy();
-    // Before the attempt is recorded, the token is unused and can retry.
-    return recorded ? issuanceFailed() : authUnavailable();
-  } finally {
-    issuing = false;
+    logged("fitness.devices.issuance_failed", error);
+    // A recording whose commit reply was lost may have used the token.
+    return error instanceof CommitOutcomeUnknown
+      ? issuanceFailed()
+      : authUnavailable();
   }
-  if (!issued.ok) return issued.response;
+  if (refusal?.reason === "token_used") return tokenUsed();
+  if (refusal?.reason === "busy") return busy();
+  if (refusal?.reason === "rate_limited")
+    return failure(
+      429,
+      "rate_limited",
+      "Too many devices were connected in the last hour. Try again later.",
+      { "Retry-After": String(refusal.retryAfter) },
+    );
+  if (refusal?.reason === "device_limit")
+    return failure(
+      409,
+      "device_limit",
+      `Up to ${deviceLimits.installations} iPhones can sync. Revoke one under Manage account → API keys, then connect again.`,
+    );
+
+  // Clean up in Clerk: keys no current enrollment needs, such as one a
+  // timed-out creation left. Cleanup never stops the enrollment.
+  try {
+    const cleanup = deadlineIn(timing.cleanupMs);
+    for (const keyId of await unneededKeys(
+      userId,
+      keys.filter((k) => k.active),
+    ))
+      await revokeQuietly(keyId, "Not the active key for its iPhone.", cleanup);
+  } catch (error) {
+    logged("fitness.devices.cleanup_failed", error);
+  }
+
+  let created: Awaited<
+    ReturnType<ReturnType<typeof clerkClient>["apiKeys"]["create"]>
+  >;
+  try {
+    created = await bounded(() =>
+      clerkClient().apiKeys.create({
+        name: `iPhone sync: ${deviceName}`,
+        subject: userId,
+        description: "Imports Apple Health weigh-ins and runs into Fitness.",
+        scopes: [fitnessScopes.healthImport],
+        claims: {
+          kind: deviceKeyKind,
+          installationId,
+          enrollment: attemptId,
+        },
+        createdBy: userId,
+      }),
+    );
+    if (!created.secret) throw new Error("Clerk returned no key secret.");
+  } catch (error) {
+    logged("fitness.devices.issuance_failed", error);
+    // Clerk may have created the key; it cannot import either way.
+    await settleEnrollment(
+      userId,
+      attemptId,
+      createRefused(error) ? "failed" : "ambiguous",
+    ).catch(() => undefined);
+    return issuanceFailed();
+  }
+
+  // The swap stops the installation's current key and makes the new one
+  // active together. If it does not happen, the current key keeps
+  // importing and the new key is revoked.
+  let previous: string[] = [];
+  let swapped = { activated: false, replaced: [] as string[] };
+  let revokeNew = true;
+  try {
+    previous = (await activeDevices(userId))
+      .filter((d) => d.installationId === installationId)
+      .map((d) => d.keyId);
+    swapped = await swapEnrollment(userId, {
+      attemptId,
+      installationId,
+      keyId: created.id,
+    });
+  } catch (error) {
+    logged("fitness.devices.swap_failed", error);
+    if (error instanceof CommitOutcomeUnknown) {
+      // The commit may have landed, or still be landing, in which case the
+      // old key is inactive and the new key is the installation's only
+      // one. Read the rows again, waiting for the commit, before revoking
+      // anything.
+      let outcome: Awaited<ReturnType<typeof swapOutcome>> = "unknown";
+      try {
+        outcome = await swapOutcome({
+          owner: userId,
+          attemptId,
+          installationId,
+          keyId: created.id,
+          previousKeyIds: previous,
+        });
+      } catch (reread) {
+        logged("fitness.devices.swap_unknown", reread);
+      }
+      if (outcome === "committed")
+        swapped = { activated: true, replaced: previous };
+      // With no answer, both keys are left for a later enrollment to
+      // settle and clean up.
+      else if (outcome === "unknown") revokeNew = false;
+    }
+  }
+  if (!swapped.activated) {
+    if (revokeNew) {
+      await revokeQuietly(
+        created.id,
+        "This connection could not be completed.",
+      );
+      await settleEnrollment(userId, attemptId, "failed").catch(
+        () => undefined,
+      );
+    }
+    return issuanceFailed();
+  }
+  const revokeBy = deadlineIn(timing.replacedRevokeMs);
+  for (const keyId of swapped.replaced)
+    await revokeQuietly(
+      keyId,
+      "Replaced by a new connection from this iPhone.",
+      revokeBy,
+    );
   const reply: DeviceEnrollResponse = {
-    secret: issued.secret,
-    accountTimezone: issued.accountTimezone,
+    secret: created.secret,
+    accountTimezone: timezone,
     userId,
     email,
   };
@@ -734,8 +669,9 @@ export async function handleDeviceEnroll(request: Request) {
 
 /**
  * DELETE /api/health/devices/current: disconnects the device key that sends
- * the request. Its row stops it importing first, then Clerk revokes it.
- * A key that is not its installation's current key fails with
+ * the request. One short transaction under the account lock stops it
+ * importing, waiting for an import already running with it; then Clerk
+ * revokes it. A key that is not its installation's current key fails with
  * `401 key_invalid`, which also answers a retry after a lost reply. This
  * route works whether or not enrollment is enabled.
  */
@@ -769,18 +705,11 @@ export async function handleDeviceRevoke(request: Request) {
   }
   let current: boolean;
   try {
-    current = await withDeviceLease(
-      key.owner,
-      timing.leaseSeconds,
-      (sql, lease) => deactivateDeviceKey(sql, lease, key),
-      deadlineIn(timing.clerkMs),
-    );
-  } catch (error) {
-    if (error instanceof DeviceLeaseBusy || error instanceof DeviceLeaseLost)
-      return authUnavailable({
-        "Retry-After": String(deviceLimits.busySeconds),
-      });
-    return authUnavailable();
+    current = await deactivateDeviceKey(key);
+  } catch {
+    return authUnavailable({
+      "Retry-After": String(deviceLimits.busySeconds),
+    });
   }
   await revokeQuietly(
     bearer.id,
