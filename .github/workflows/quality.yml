@@ -381,10 +381,12 @@ jobs:
       - name: Build the production app and the seeder
         working-directory: apps/fitness-ios
         env:
-          # Whole-module compiles, which the Swift extractor reads in full.
+          # Whole-module compiles, and the bridging header read as source: the
+          # extractor stops without recording anything when the app target
+          # imports the header precompiled by Xcode's clang.
           XCODEBUILD_SETTINGS: >-
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
-            SWIFT_COMPILATION_MODE=wholemodule
+            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
         run: |
           node scripts/native.mjs prebuild
           node scripts/native.mjs build
