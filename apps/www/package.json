@@ -11,16 +11,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bent/design-tokens": "workspace:*",
     "@radix-ui/react-slot": "1.5.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "next": "15.5.28",
     "next-themes": "0.4.6",
+    "posthog-js": "1.446.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwind-merge": "2.6.1",
-    "tailwindcss-animate": "1.0.7",
-    "@bent/design-tokens": "workspace:*"
+    "tailwindcss-animate": "1.0.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.0.0-beta.2",
