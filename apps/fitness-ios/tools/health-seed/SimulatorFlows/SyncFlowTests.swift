@@ -1,6 +1,6 @@
 import XCTest
 
-/// End-to-end flows for a development build of Fitness Sync that talks to
+/// End-to-end flows for a development build of bent Fitness that talks to
 /// the local harness from `scripts/flows.mjs`: the real Fitness handlers on
 /// Postgres, with synthetic Clerk sign-in. `FITNESS_SIM_ORIGIN` names the
 /// harness; without it these tests are skipped.

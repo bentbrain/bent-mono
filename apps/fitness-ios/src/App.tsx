@@ -54,9 +54,11 @@ function Root() {
         </Page>
       );
     case "signIn":
-      return <SignIn onChange={refresh} />;
+      return status ? <SignIn status={status} onChange={refresh} /> : null;
     case "reconnect":
-      return <SignIn onChange={refresh} title={copy.reconnect.title} body={copy.reconnect.body} />;
+      return status ? (
+        <SignIn status={status} onChange={refresh} title={copy.reconnect.title} body={copy.reconnect.body} />
+      ) : null;
     case "consent":
       return status ? <Consent status={status} onChange={refresh} /> : null;
     case "health":

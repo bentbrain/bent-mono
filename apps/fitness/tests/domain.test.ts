@@ -27,6 +27,7 @@ import {
   totals,
   workoutSchema,
 } from "../src/domain";
+import { isPublicPage } from "../src/public-pages";
 import {
   dailyWeights,
   strengthSeries,
@@ -1037,5 +1038,15 @@ describe("manual day reorganisation", () => {
         dayPlans: { oops: { type: "rest", routine: null } },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("public pages", () => {
+  test("render /privacy outside account services, with or without trailing slashes", () => {
+    expect(isPublicPage("/privacy")).toBe(true);
+    expect(isPublicPage("/privacy/")).toBe(true);
+    expect(isPublicPage("/")).toBe(false);
+    expect(isPublicPage("/privacy-policy")).toBe(false);
+    expect(isPublicPage("/settings")).toBe(false);
   });
 });

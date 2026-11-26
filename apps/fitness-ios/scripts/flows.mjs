@@ -73,7 +73,7 @@ function newSimulator() {
     .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
   if (!runtime) throw new Error("No iOS Simulator runtime is installed.");
   const type = runtime.supportedDeviceTypes.filter((t) => t.productFamily === "iPhone").at(-1);
-  const udid = output("xcrun", ["simctl", "create", "Fitness Sync flows", type.identifier, runtime.identifier]).trim();
+  const udid = output("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier]).trim();
   run("xcrun", ["simctl", "boot", udid]);
   run("xcrun", ["simctl", "bootstatus", udid, "-b"]);
   return udid;
@@ -159,7 +159,7 @@ try {
           "--style",
           "compact",
           "--predicate",
-          'process BEGINSWITH "FitnessSync"',
+          'process BEGINSWITH "bentFitness"',
         ],
         { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
       );

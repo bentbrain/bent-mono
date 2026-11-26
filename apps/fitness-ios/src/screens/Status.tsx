@@ -7,6 +7,7 @@ import { copy, countLines, guidance } from "../logic/copy";
 import { backfillChoices, cutoffFor } from "../logic/cutoff";
 import { formatDay, formatTime } from "../logic/format";
 import { Body, Button, Choice, Heading, Notice, Page, Row } from "../ui/parts";
+import { ManualRevocations } from "./ManualRevocations";
 
 export function Status({ status, onChange }: { status: SyncStatus; onChange: () => void }) {
   const [syncing, setSyncing] = useState(false);
@@ -107,7 +108,7 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
           />
         </>
       ) : null}
-      {status.manualRevocations ? <Notice>{copy.status.manualRevocations(status.manualRevocations)}</Notice> : null}
+      <ManualRevocations status={status} onChange={onChange} />
       {status.unreadableRetired ? (
         <Body muted>
           {copy.status.unreadable(status.unreadableRetired)} {copy.settings.resyncHint}

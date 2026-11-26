@@ -188,7 +188,7 @@ A device connects and disconnects through these routes. They read only the beare
   | `503 enrollment_unavailable` | Enrollment is not enabled or configured                                                                       | Try again later                                                        |
 
 - `DELETE /api/health/devices/current` disconnects the device key that sends it and replies `204`. The key stops importing first, then Clerk revokes it. A key that is not its installation's current key, including one already disconnected, fails with `401 key_invalid`; the app can treat that as disconnected. Other keys fail with `403 not_device_key`. This route works whether or not enrollment is enabled, so a device can always disconnect.
-- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token.
+- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token. With `?clientId=<OAuth application ID>`, the `200` also means that ID is in `FITNESS_DEVICE_CLIENT_IDS`. Enrollment that is unavailable still gets the `503` first. Then an empty, malformed or repeated `clientId` gets `400` with `"code": "invalid_request"`, and an ID that is not listed gets `403` with `"code": "client_not_allowed"`. Client IDs are public: the app embeds its own.
 
 #### Enrollment limits and lock ordering
 
@@ -209,7 +209,7 @@ Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth 
 Configure each Clerk instance for device enrollment:
 
 - Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone import Apple Health weigh-ins and runs into Fitness. Imports can match or re-pair runs you've entered, and the app sees your account timezone and the results of each import."
-- Create a public OAuth application named Fitness Sync iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
+- Create a public OAuth application named Fitness iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
 - Issue this application's tokens with the MCP endpoint as their audience.
 - Add the application's ID to `FITNESS_DEVICE_CLIENT_IDS`.
 
@@ -224,6 +224,10 @@ Shortcuts can read weigh-ins from Health. It cannot read workouts. Health data i
 5. Add Get Contents of URL. Clear the variable in its URL field and type the import URL. Set Method to POST, add the headers `Authorization: Bearer <key>` and `Content-Type: application/json`, then choose Request Body → File and select the Text from step 4.
 6. Run the shortcut once. The first run asks to send Health data to fitness.bent.build; allow it.
 7. In Automation, tap +, choose Time of Day and Repeat Every Day, choose Run Immediately, then select the shortcut.
+
+## Privacy policy
+
+`/privacy` describes what the bent Fitness iPhone app reads from Apple Health, where it sends it, what Fitness and the iPhone keep, and how to disconnect or delete data. It renders without signing in, including before account services are configured.
 
 ## Equipment photos and exports
 

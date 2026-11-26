@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["tests/**/*.test.ts", "scripts/*.mjs"],
-  "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "scripts/*.mjs", "modules/fitness-health/*.{ts,js}"],
+  "entry": ["tests/**/*.test.{ts,mjs}", "scripts/*.mjs"],
+  "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,mjs}", "scripts/*.mjs", "modules/fitness-health/*.{ts,js}"],
   "ignoreDependencies": ["expo-updates", "expo-web-browser"]
 }

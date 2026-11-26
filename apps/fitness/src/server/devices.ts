@@ -271,13 +271,40 @@ export async function deviceEnrollmentReady(
   return ready;
 }
 
-/** GET /api/health/devices/ready: whether the app can enroll. */
-export async function handleDeviceReady() {
+/** An OAuth client ID as Clerk issues them. */
+const clientIdPattern = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * GET /api/health/devices/ready: whether the app can enroll. With
+ * `?clientId=`, also whether tokens from that OAuth application are
+ * accepted, so a release can check the client its build embeds.
+ */
+export async function handleDeviceReady(
+  request?: Request,
+  ready: () => Promise<boolean> = () => deviceEnrollmentReady(),
+) {
   const wait = takeAttempt();
   if (wait > 0) return rateLimited(wait);
-  return (await deviceEnrollmentReady())
-    ? json({ enrollment: "enabled" })
-    : unavailable();
+  if (!(await ready())) return unavailable();
+  const query = request ? new URL(request.url).searchParams : null;
+  const clientId = query?.get("clientId") ?? null;
+  if (
+    query &&
+    (query.getAll("clientId").length > 1 ||
+      (clientId !== null && !clientIdPattern.test(clientId)))
+  )
+    return failure(
+      400,
+      "invalid_request",
+      "Send at most one clientId, of up to 128 letters, digits, hyphens or underscores.",
+    );
+  if (clientId !== null && !deviceClientIds().has(clientId))
+    return failure(
+      403,
+      "client_not_allowed",
+      "This OAuth client is not listed in FITNESS_DEVICE_CLIENT_IDS.",
+    );
+  return json({ enrollment: "enabled" });
 }
 
 type DeviceKey = {

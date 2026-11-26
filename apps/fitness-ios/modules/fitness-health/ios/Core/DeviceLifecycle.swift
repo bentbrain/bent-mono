@@ -55,8 +55,14 @@ public struct CredentialDocument: Codable, Sendable, Equatable {
   /// asks to connect again.
   public var keyInvalid = false
   /// Keys Fitness refused to revoke from the iPhone because they are not
-  /// device keys. The user revokes them under Manage account → API keys.
+  /// device keys, counted since installation. The user revokes them under
+  /// Manage account → API keys. This count is also the notice's revision.
   public var manualRevocations = 0
+  /// How many of those the user has dismissed the notice for.
+  public var manualRevocationsDismissed = 0
+
+  /// The keys the notice still shows: those recorded after the last dismissal.
+  public var unseenManualRevocations: Int { max(0, manualRevocations - manualRevocationsDismissed) }
 
   public init(
     active: DeviceCredential? = nil, pending: [PendingRevocation] = [], sequence: Int = 0, keyInvalid: Bool = false
@@ -79,7 +85,7 @@ public struct CredentialDocument: Codable, Sendable, Equatable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case active, pending, sequence, acceptedSequence, keyInvalid, manualRevocations
+    case active, pending, sequence, acceptedSequence, keyInvalid, manualRevocations, manualRevocationsDismissed
   }
 
   public init(from decoder: Decoder) throws {
@@ -90,6 +96,7 @@ public struct CredentialDocument: Codable, Sendable, Equatable {
     acceptedSequence = try container.decodeIfPresent(Int.self, forKey: .acceptedSequence) ?? 0
     keyInvalid = try container.decodeIfPresent(Bool.self, forKey: .keyInvalid) ?? false
     manualRevocations = try container.decodeIfPresent(Int.self, forKey: .manualRevocations) ?? 0
+    manualRevocationsDismissed = try container.decodeIfPresent(Int.self, forKey: .manualRevocationsDismissed) ?? 0
   }
 }
 
@@ -378,6 +385,18 @@ public actor DeviceLifecycle {
     }
     try? credentials.save(latest)
     return latest.pending.count
+  }
+
+  /// Records that the user dismissed the notice that showed `revision`, the
+  /// `manualRevocations` count it was built from. Keys recorded after that
+  /// revision stay on the notice. Only the credential document changes: the
+  /// key and sync state stay as they are, so a sync in progress carries on.
+  public func dismissManualRevocations(revision: Int) throws {
+    var document = try credentials.load()
+    let upTo = min(revision, document.manualRevocations)
+    guard upTo > document.manualRevocationsDismissed else { return }
+    document.manualRevocationsDismissed = upTo
+    try credentials.save(document)
   }
 
   /// Resync from the earliest cutoff: a fresh backfill with a new snapshot.

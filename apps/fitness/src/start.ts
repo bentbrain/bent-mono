@@ -5,6 +5,7 @@ import {
   createStart,
 } from "@tanstack/react-start";
 import { setResponseHeader } from "@tanstack/react-start/server";
+import { isPublicPage } from "./public-pages";
 const privateHeaders = createMiddleware().server(async ({ next }) => {
   setResponseHeader("Cache-Control", "private, no-store");
   setResponseHeader("X-Content-Type-Options", "nosniff");
@@ -30,11 +31,14 @@ export function routePath(pathname: string) {
   while (end > 1 && pathname[end - 1] === "/") end--;
   return pathname.slice(0, end);
 }
-/** Signs in browser sessions, except on routes that take bearer tokens only. */
+/**
+ * Signs in browser sessions, except on routes that take bearer tokens only
+ * and on public pages, which never read a session.
+ */
 const sessions = createMiddleware().server((context) => {
   const server = clerk.options.server;
-  return bearerOnlyPath(routePath(new URL(context.request.url).pathname)) ||
-    !server
+  const path = routePath(new URL(context.request.url).pathname);
+  return bearerOnlyPath(path) || isPublicPage(path) || !server
     ? context.next()
     : server(context);
 });

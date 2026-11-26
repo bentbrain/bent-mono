@@ -2627,6 +2627,34 @@ legend {
   max-width: 100%;
 }
 
+/* Public pages */
+.privacy {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px var(--gutter) 64px;
+  display: grid;
+  gap: 14px;
+}
+.privacy h1 {
+  font-size: clamp(2rem, 8vw, 3rem);
+  margin: 8px 0 0;
+}
+.privacy h2 {
+  font-size: 1.25rem;
+  margin: 18px 0 0;
+}
+.privacy p,
+.privacy ul {
+  margin: 0;
+  max-width: 65ch;
+  color: var(--ink-2);
+}
+.privacy ul {
+  display: grid;
+  gap: 8px;
+  padding-left: 1.25em;
+}
+
 /* Landing and onboarding */
 .landing {
   min-height: 100dvh;

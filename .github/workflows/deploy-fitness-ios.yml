@@ -1,0 +1,344 @@
+name: Deploy Fitness iOS
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The full 40-character main commit to release
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  statuses: read
+  pull-requests: read
+concurrency:
+  group: fitness-ios-production
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      github.repository == 'bentbrain/bent-mono' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 240
+    environment:
+      name: fitness-ios-production
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Require the input commit to be this run's main commit
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$INPUT_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Pass the full 40-character main commit SHA." >&2
+            exit 1
+          fi
+          if [[ "$INPUT_SHA" != "$RELEASE_SHA" ]]; then
+            echo "The input commit is not the main commit this run started from." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.18.0
+      - name: Qualify exact main source before installing
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/quality-initial.json"
+      - name: Check the release config and install the pinned EAS CLI
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          checks="$GITHUB_WORKSPACE/apps/fitness-ios/scripts/release-ios.mjs"
+          node "$checks" check-config --out "$RUNNER_TEMP/release-config.json" --static-dir "$RUNNER_TEMP/eas-static"
+          version="$(node -p 'require(process.argv[1]).easCliVersion' "$RUNNER_TEMP/release-config.json")"
+          mkdir -p "$RUNNER_TEMP/eas-cli"
+          cd "$RUNNER_TEMP/eas-cli"
+          npm install --prefix "$RUNNER_TEMP/eas-cli" --no-audit --no-fund --ignore-scripts "eas-cli@$version"
+          installed="$(node -p 'require(process.argv[1]).version' "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/package.json")"
+          test "$installed" = "$version"
+          node "$checks" check-profile --eas-package "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/package.json"
+      # Each EAS CLI step writes the CLI's stdout and stderr to private files, since its messages
+      # can carry signed URLs or account details, and shows only a fixed message and exit code.
+      - name: Read the production EAS environment
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/eas-static
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
+          EXPO_NO_DOTENV: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" env:list --environment production --format short \
+            > "$RUNNER_TEMP/eas-env-pre.txt" 2> "$RUNNER_TEMP/eas-env-pre.err" || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "eas env:list failed (exit $status)." >&2
+            exit 1
+          fi
+      - name: Record the build's OAuth issuer and client
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs oauth-env --env-file "$RUNNER_TEMP/eas-env-pre.txt"
+          --out "$RUNNER_TEMP/oauth.json"
+      - name: Admit the build's OAuth client
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          checks=apps/fitness-ios/scripts/release-ios.mjs
+          oauth="$RUNNER_TEMP/oauth.json"
+          RELEASE_OAUTH_ISSUER="$(node "$checks" oauth-value --oauth-file "$oauth" --name issuer)"
+          RELEASE_OAUTH_CLIENT_ID="$(node "$checks" oauth-value --oauth-file "$oauth" --name clientId)"
+          export RELEASE_OAUTH_ISSUER RELEASE_OAUTH_CLIENT_ID
+          node "$checks" admit
+      - name: List EAS builds of the commit
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/eas-static
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
+          EXPO_NO_DOTENV: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" build:list --platform ios \
+            --git-commit-hash "$RELEASE_SHA" --build-profile production --limit 50 --json --non-interactive \
+            > "$RUNNER_TEMP/eas-existing.json" 2> "$RUNNER_TEMP/eas-existing.err" || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "eas build:list failed (exit $status)." >&2
+            exit 1
+          fi
+      - name: Prepare the submission lookup for the commit's builds
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs submissions-query --build-list "$RUNNER_TEMP/eas-existing.json"
+          --sha "$RELEASE_SHA" --out "$RUNNER_TEMP/eas-existing-query.json"
+      - name: List submissions of the commit's builds
+        timeout-minutes: 5
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ ! -s "$RUNNER_TEMP/eas-existing-query.json" ]]; then
+            echo "EAS lists no earlier build of the commit."
+            exit 0
+          fi
+          # The token goes to curl on stdin as a header line, never on the command line or as curl config;
+          # -q keeps curl from reading any .curlrc.
+          status=0
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
+            --data "@$RUNNER_TEMP/eas-existing-query.json" https://api.expo.dev/graphql \
+            > "$RUNNER_TEMP/eas-existing-submissions.json" 2>/dev/null || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "EAS could not list the builds' submissions (curl exit $status)." >&2
+            exit 1
+          fi
+      - name: Require that no build of the commit was submitted
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs check-no-submissions --build-list "$RUNNER_TEMP/eas-existing.json"
+          --sha "$RELEASE_SHA" --file "$RUNNER_TEMP/eas-existing-submissions.json"
+      # The workspace is installed only for the build, after the EAS steps that hold the token run from the static directory.
+      - uses: ./.github/actions/setup
+      - name: Require a clean checkout of the exact commit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+      - name: Qualify again immediately before the build
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/quality-build.json"
+          node apps/fitness-ios/scripts/release-ios.mjs same-quality --initial "$RUNNER_TEMP/quality-initial.json" --current "$RUNNER_TEMP/quality-build.json"
+      - name: Build on EAS
+        timeout-minutes: 150
+        working-directory: apps/fitness-ios
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_NO_DOTENV: "1"
+          EAS_SKIP_AUTO_FINGERPRINT: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" build --profile production --platform ios \
+            --non-interactive --json --wait > "$RUNNER_TEMP/eas-build.json" 2> "$RUNNER_TEMP/eas-build.err" || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "eas build failed (exit $status)." >&2
+            exit 1
+          fi
+      - name: Verify the build and its signed archive
+        id: verify
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          checks="apps/fitness-ios/scripts/release-ios.mjs"
+          downloads="$RUNNER_TEMP/ipa"
+          node "$checks" check-build --sha "$RELEASE_SHA" --build-file "$RUNNER_TEMP/eas-build.json" \
+            --downloads-dir "$downloads" --out "$RUNNER_TEMP/build.json"
+          # Each signed URL is in a private curl config, never on the command line or in a log.
+          # curl follows at most five HTTPS redirects, and only its exit code is shown.
+          download() {
+            local status=0
+            curl -q --fail --silent --location --max-redirs 5 --proto '=https' --proto-redir '=https' --globoff \
+              --max-time "$2" --config "$1" 2>/dev/null || status=$?
+            return "$status"
+          }
+          status=0
+          download "$downloads/archive.curlrc" 1200 || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "The build archive could not be downloaded (curl exit $status)." >&2
+            exit 1
+          fi
+          for config in "$downloads"/log-*.curlrc; do
+            [[ -e "$config" ]] || continue
+            status=0
+            download "$config" 120 || status=$?
+            if [[ "$status" -ne 0 ]]; then
+              echo "A build log could not be downloaded (curl exit $status)." >&2
+            fi
+          done
+          node "$checks" verify-archive --archive "$downloads/app.ipa" --logs-dir "$downloads/logs" \
+            --build "$RUNNER_TEMP/build.json" --oauth-file "$RUNNER_TEMP/oauth.json" --work-dir "$downloads/work" \
+            --out "$RUNNER_TEMP/verified.json"
+          build_id="$(node "$checks" build-id --file "$RUNNER_TEMP/verified.json")"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+      - name: Read the production EAS environment again
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/eas-static
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
+          EXPO_NO_DOTENV: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" env:list --environment production --format short \
+            > "$RUNNER_TEMP/eas-env-post.txt" 2> "$RUNNER_TEMP/eas-env-post.err" || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "eas env:list failed (exit $status)." >&2
+            exit 1
+          fi
+      - name: Admit again before submitting
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          checks=apps/fitness-ios/scripts/release-ios.mjs
+          oauth="$RUNNER_TEMP/oauth.json"
+          RELEASE_OAUTH_ISSUER="$(node "$checks" oauth-value --oauth-file "$oauth" --name issuer)"
+          RELEASE_OAUTH_CLIENT_ID="$(node "$checks" oauth-value --oauth-file "$oauth" --name clientId)"
+          export RELEASE_OAUTH_ISSUER RELEASE_OAUTH_CLIENT_ID
+          node "$checks" admit --current-env-file "$RUNNER_TEMP/eas-env-post.txt" --check-privacy
+      - name: Prepare the submission lookup for this build
+        env:
+          BUILD_ID: ${{ steps.verify.outputs.build_id }}
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs submissions-query --build-id "$BUILD_ID"
+          --out "$RUNNER_TEMP/eas-build-query.json"
+      - name: List this build's submissions
+        timeout-minutes: 5
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
+            --data "@$RUNNER_TEMP/eas-build-query.json" https://api.expo.dev/graphql \
+            > "$RUNNER_TEMP/eas-build-submissions.json" 2>/dev/null || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "EAS could not list the build's submissions (curl exit $status)." >&2
+            exit 1
+          fi
+      - name: Require no submission of this build
+        env:
+          BUILD_ID: ${{ steps.verify.outputs.build_id }}
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs check-no-submissions --build-id "$BUILD_ID"
+          --file "$RUNNER_TEMP/eas-build-submissions.json"
+      - name: Qualify again immediately before submitting
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/quality-submit.json"
+          node apps/fitness-ios/scripts/release-ios.mjs same-quality --initial "$RUNNER_TEMP/quality-initial.json" --current "$RUNNER_TEMP/quality-submit.json"
+      - name: Submit the build to TestFlight
+        timeout-minutes: 60
+        working-directory: ${{ runner.temp }}/eas-static
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
+          EXPO_NO_DOTENV: "1"
+          NO_COLOR: "1"
+          BUILD_ID: ${{ steps.verify.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" submit --profile production --platform ios \
+            --id "$BUILD_ID" --no-auto-testflight-setup --non-interactive --wait \
+            > "$RUNNER_TEMP/eas-submit.out" 2> "$RUNNER_TEMP/eas-submit.err" || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "eas submit failed (exit $status)." >&2
+            exit 1
+          fi
+      - name: Read the submission's status
+        timeout-minutes: 5
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          status=0
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
+            --data "@$RUNNER_TEMP/eas-build-query.json" https://api.expo.dev/graphql \
+            > "$RUNNER_TEMP/eas-submitted.json" 2>/dev/null || status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "EAS could not list the build's submission (curl exit $status)." >&2
+            exit 1
+          fi
+      - name: Report the submission
+        env:
+          BUILD_ID: ${{ steps.verify.outputs.build_id }}
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs submission-status --build-id "$BUILD_ID"
+          --file "$RUNNER_TEMP/eas-submitted.json"
+      - name: Summarize the release
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs summary --file "$RUNNER_TEMP/verified.json"
+          --sha "$RELEASE_SHA" --status submitted >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove build files
+        if: always()
+        run: >-
+          rm -rf "$RUNNER_TEMP/ipa" "$RUNNER_TEMP/eas-build.json" "$RUNNER_TEMP/eas-build.err"
+          "$RUNNER_TEMP/eas-existing.json" "$RUNNER_TEMP/eas-existing.err" "$RUNNER_TEMP/eas-existing-query.json"
+          "$RUNNER_TEMP/eas-existing-submissions.json" "$RUNNER_TEMP/eas-env-pre.txt" "$RUNNER_TEMP/eas-env-pre.err"
+          "$RUNNER_TEMP/eas-env-post.txt" "$RUNNER_TEMP/eas-env-post.err" "$RUNNER_TEMP/eas-build-query.json"
+          "$RUNNER_TEMP/eas-build-submissions.json" "$RUNNER_TEMP/eas-submit.out" "$RUNNER_TEMP/eas-submit.err"
+          "$RUNNER_TEMP/eas-submitted.json" "$RUNNER_TEMP/oauth.json" "$RUNNER_TEMP/eas-cli" "$RUNNER_TEMP/eas-static"

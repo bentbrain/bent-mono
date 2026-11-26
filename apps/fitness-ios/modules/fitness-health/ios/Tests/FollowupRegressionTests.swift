@@ -89,6 +89,39 @@ final class FollowupRegressionTests: XCTestCase {
     XCTAssertTrue(states.stores.get.isEmpty)
   }
 
+  /// Dismissing the manual-revoke notice while an upload's reply is being
+  /// handled leaves the session current: the run writes its checkpoint, and
+  /// the next run sends nothing again.
+  func testDismissingTheManualRevokeNoticeDuringASyncKeepsTheSession() async throws {
+    let cutoff = date("2026-11-10T00:00:00Z")
+    let now = date("2026-11-20T02:00:00Z")
+    let credentials = MemoryCredentials()
+    let (device, store) = try await activeLifecycle(cutoff: cutoff, states: MemoryStates(), credentials: credentials)
+    var document = try credentials.load()
+    document.manualRevocations = 1
+    try credentials.save(document)
+    let h = Harness(now: now, cutoff: cutoff)
+    h.health.add(Sample.weight(1, date("2026-11-18T00:00:00Z")))
+    let check = PausingCheck(lifecycle: device)
+    // Held after Fitness accepted the upload, before its checkpoint.
+    h.fitness.onRequest { _ in check.arm() }
+    let engine = try await engine(h, device: device, store: store, check: check)
+    let current = try await device.currentSession()
+    let session = try XCTUnwrap(current)
+    let run = Task { try await engine.run(mode: .foreground) }
+    await check.gate.reached()
+    try await device.dismissManualRevocations(revision: 1)
+    let stillCurrent = await device.isCurrent(session)
+    XCTAssertTrue(stillCurrent)
+    check.gate.open()
+    try await run.value
+    XCTAssertEqual(try credentials.load().unseenManualRevocations, 0)
+    XCTAssertEqual(h.fitness.received.count, 1)
+    let next = try await self.engine(h, device: device, store: store, check: RealLifecycleCheck(lifecycle: device))
+    try await next.run(mode: .foreground)
+    XCTAssertEqual(h.fitness.received.count, 1, "The checkpoint was not written, so the sample was sent again.")
+  }
+
   // MARK: 2. A cancelled enrollment never sends or replaces the key
 
   func testADisconnectDuringPendingKeyCleanupCancelsTheEnrollment() async throws {
@@ -320,8 +353,9 @@ final class FollowupRegressionTests: XCTestCase {
   }
 
   /// A lifecycle with a confirmed key whose first sync has started.
-  private func activeLifecycle(cutoff: Date, states: StateDirectory) async throws -> (DeviceLifecycle, StateStorage) {
-    let credentials = MemoryCredentials()
+  private func activeLifecycle(
+    cutoff: Date, states: StateDirectory, credentials: MemoryCredentials = MemoryCredentials()
+  ) async throws -> (DeviceLifecycle, StateStorage) {
     let devices = FakeDevices()
     let device = DeviceLifecycle(
       credentials: credentials, states: states, origin: origin,

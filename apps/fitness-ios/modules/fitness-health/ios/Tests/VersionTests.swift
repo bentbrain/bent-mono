@@ -3,6 +3,6 @@ import XCTest
 
 final class VersionTests: XCTestCase {
   func testUserAgentNamesTheApp() {
-    XCTAssertTrue(FitnessHealthCore.userAgent.hasPrefix("FitnessSync/"))
+    XCTAssertTrue(FitnessHealthCore.userAgent.hasPrefix("bentFitness/"))
   }
 }

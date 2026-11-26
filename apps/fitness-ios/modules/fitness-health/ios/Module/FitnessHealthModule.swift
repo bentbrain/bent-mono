@@ -92,6 +92,10 @@ public final class FitnessHealthModule: Module {
       await self.service.lifecycle.revokePending()
     }
 
+    AsyncFunction("dismissManualRevocations") { (revision: Int) async throws in
+      try await self.service.lifecycle.dismissManualRevocations(revision: revision)
+    }
+
     AsyncFunction("setCutoff") { (cutoffMs: Double) async throws in
       try await self.service.lifecycle.setCutoff(Date(timeIntervalSince1970: cutoffMs / 1000))
     }
