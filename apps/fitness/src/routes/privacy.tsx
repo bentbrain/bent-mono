@@ -102,8 +102,12 @@ function Privacy() {
         <li>
           Disconnect in the app's Settings stops syncing and clears the app's
           sync progress on the iPhone straight away, then asks Fitness to revoke
-          the device key. If the iPhone is offline, the app asks again each time
-          it opens until Fitness confirms the key no longer works.
+          the device key. If that request does not go through, for example while
+          the iPhone is offline, the app asks again when it next opens, comes to
+          the foreground or is unlocked, after any wait Fitness asked for. If
+          Fitness replies that the key is not an iPhone sync key, the app stops
+          asking and shows a notice to revoke it yourself in Fitness under
+          Manage account → API keys.
         </li>
         <li>
           You can also revoke the key in Fitness under Manage account → API
