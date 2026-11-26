@@ -39,7 +39,9 @@ CI checks affected workspaces and their consumers, including dependency changes 
 
 Quality runs full CodeQL analysis of the JavaScript and TypeScript with both security suites. It runs the native iPhone build and tests when a change reaches the iPhone app, its contracts or the Fitness handlers it calls. The required `fitness-ios-native` check passes when that suite passes or when the change leaves it out. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
 
-Fitness iOS Verification (`.github/workflows/fitness-ios-verify.yml`) runs on main pushes that touch the iPhone app or its dependencies, daily at 17:00 UTC, and on dispatch. It runs the native build and tests, CodeQL for the app's Swift and for the test tools' Swift in parallel jobs with both security suites, and each Simulator flow in its own job. Every CodeQL job requires zero raw findings and retains its original SARIF report. TestFlight releases require this workflow to have passed on the exact main commit.
+Every Quality job stops within 20 minutes, and the longest chain of dependent jobs, from CI scope through the native iPhone suite to `Release qualification`, stays under 30 minutes. Browser shards stop at 15 minutes.
+
+Fitness iOS Verification (`.github/workflows/fitness-ios-verify.yml`) runs on main pushes that touch the iPhone app or its dependencies, daily at 17:00 UTC, and on dispatch. It runs the native build and tests, CodeQL for the app's Swift and for the test tools' Swift in parallel jobs with both security suites, and each Simulator flow in its own job. Each job stops within 30 minutes. Each CodeQL job requires zero raw findings through `scripts/check-sarif.mjs` and keeps its original SARIF report as a workflow artifact for 90 days. TestFlight releases require this workflow to have passed on the exact main commit, so a Swift finding blocks the release. The Swift reports stay in these artifacts and the run's log, and the Security tab lists Quality's CodeQL analysis.
 
 ## Trackmap
 

@@ -12,13 +12,16 @@ permissions:
 concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
+# Time budget: every job stops within 20 minutes. The longest chain, CI scope (3)
+# then the native iPhone suite (20), its gate (3) and Release qualification (3),
+# stays under 30 minutes. Browser shards stop at 15 minutes.
 jobs:
   release-qualification:
     name: Release qualification
     if: always()
     needs: [checks, browser, public-source, secrets, dependencies, codeql, fitness-ios, fitness-ios-native]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
       - name: Require every Quality job
         env:
@@ -36,7 +39,7 @@ jobs:
   checks:
     name: ${{ matrix.check }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -66,11 +69,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: node scripts/ci-check.mjs '${{ matrix.check }}'
+      - name: Run ${{ matrix.check }}
+        env:
+          CHECK: ${{ matrix.check }}
+        run: node scripts/ci-check.mjs "$CHECK"
   ci-scope:
     name: Select CI scope
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     outputs:
       matrix: ${{ steps.scope.outputs.matrix }}
       has_work: ${{ steps.scope.outputs.has_work }}
@@ -102,7 +108,7 @@ jobs:
     defaults:
       run:
         shell: bash
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Trust the mounted checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -142,7 +148,7 @@ jobs:
     if: always()
     needs: [ci-scope, browser-suite]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     permissions:
       contents: read
       actions: read
@@ -161,6 +167,7 @@ jobs:
   public-source:
     name: public-source
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -173,6 +180,7 @@ jobs:
   secrets:
     name: secret-scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -195,7 +203,7 @@ jobs:
   dependencies:
     name: dependencies
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -210,7 +218,7 @@ jobs:
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       # The raw-flow gate requires both complete suites on PRs and main.
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
@@ -262,7 +270,7 @@ jobs:
   fitness-ios:
     name: fitness-ios
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/fitness-ios
@@ -286,7 +294,7 @@ jobs:
     needs: ci-scope
     if: needs.ci-scope.outputs.ios_native == 'true'
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/fitness-ios
@@ -347,7 +355,7 @@ jobs:
     if: always()
     needs: [ci-scope, fitness-ios-native-suite]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:

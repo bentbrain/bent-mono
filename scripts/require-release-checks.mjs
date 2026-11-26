@@ -50,25 +50,45 @@ async function pages(api, path, field, label) {
   fail("Release qualification pagination limit exceeded.");
 }
 
-export async function requireQualityChecks({ sha, branch, event }, api) {
+// The newest run of the workflow for the exact commit, branch and allowed events in the canonical repository.
+async function latestRun(api, workflow, { sha, branch, events, path, label }) {
+  const query = `branch=${encodeURIComponent(branch)}${events.length === 1 ? `&event=${events[0]}` : ""}&head_sha=${sha}`;
+  const runs = await pages(api, `/repos/${REPOSITORY}/actions/workflows/${workflow.id}/runs?${query}`, "workflow_runs", `the ${label} runs`);
+  const candidates = runs.filter(run => run.head_sha === sha && run.head_branch === branch &&
+    events.includes(run.event) && run.path === path && run.workflow_id === workflow.id &&
+    run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY);
+  if (candidates.some(run => !isId(run.id))) fail(`GitHub returned a malformed ${label} run ID.`);
+  candidates.sort((a, b) => b.id - a.id);
+  return candidates[0];
+}
+
+const passed = run => run?.status === "completed" && run.conclusion === "success";
+
+// The selected run is still the newest eligible run, on the same attempt, and still passed.
+async function requireStillLatest(api, workflow, selector, selected) {
+  const direct = await api(`/repos/${REPOSITORY}/actions/runs/${selected.id}`, `the ${selector.label} run`);
+  const latest = await latestRun(api, workflow, selector);
+  if (direct.run_attempt !== selected.run_attempt || !passed(direct) || latest?.id !== selected.id ||
+      latest.run_attempt !== selected.run_attempt || !passed(latest)) fail("Release qualification changed during inspection.");
+}
+
+async function qualityWorkflow(api) {
+  const workflow = await api(`/repos/${REPOSITORY}/actions/workflows/quality.yml`, "the Quality workflow");
+  if (workflow.path !== WORKFLOW || workflow.state !== "active") fail("Canonical Quality workflow is unavailable.");
+  if (!isId(workflow.id)) fail("GitHub returned a malformed Quality workflow ID.");
+  return workflow;
+}
+
+const qualitySelector = ({ sha, branch, event }) => ({ sha, branch, events: [event], path: WORKFLOW, label: "Quality" });
+
+export async function requireQualityChecks({ sha, branch, event }, api, workflow) {
   if (!SHA.test(sha) || typeof branch !== "string" || !branch || !["push", "pull_request"].includes(event)) {
     fail("Quality admission requires an exact source, branch and supported event.");
   }
   const prefix = `/repos/${REPOSITORY}`;
-  const workflow = await api(`${prefix}/actions/workflows/quality.yml`, "the Quality workflow");
-  if (workflow.path !== WORKFLOW || workflow.state !== "active") fail("Canonical Quality workflow is unavailable.");
-  if (!isId(workflow.id)) fail("GitHub returned a malformed Quality workflow ID.");
-  const runs = await pages(api, `${prefix}/actions/workflows/${workflow.id}/runs?branch=${encodeURIComponent(branch)}&event=${event}&head_sha=${sha}`,
-    "workflow_runs", "the Quality runs");
-  const candidates = runs.filter(run => run.head_sha === sha && run.head_branch === branch &&
-    run.event === event && run.path === WORKFLOW && run.workflow_id === workflow.id &&
-    run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY);
-  if (candidates.some(run => !isId(run.id))) fail("GitHub returned a malformed Quality run ID.");
-  candidates.sort((a, b) => b.id - a.id);
-  const run = candidates[0];
-  if (!run || run.status !== "completed" || run.conclusion !== "success" || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
-    fail("The latest canonical Quality run has not passed.");
-  }
+  workflow ??= await qualityWorkflow(api);
+  const run = await latestRun(api, workflow, qualitySelector({ sha, branch, event }));
+  if (!passed(run) || !isId(run.run_attempt)) fail("The latest canonical Quality run has not passed.");
   const jobs = await pages(api, `${prefix}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs", "the Quality run's jobs");
   for (const name of JOBS) {
     const matches = jobs.filter(job => job.name === name);
@@ -81,21 +101,21 @@ export async function requireQualityChecks({ sha, branch, event }, api) {
 
 // Fitness iOS Verification runs on main pushes that touch the iPhone app, daily and on dispatch.
 // Its latest run for the exact main commit, from any of those events, must have passed every job.
-export async function requireIosVerificationChecks({ sha }, api) {
-  if (!SHA.test(sha)) fail("Fitness iOS verification requires an exact source commit.");
-  const prefix = `/repos/${REPOSITORY}`;
-  const workflow = await api(`${prefix}/actions/workflows/fitness-ios-verify.yml`, "the Fitness iOS Verification workflow");
+async function iosVerificationWorkflow(api) {
+  const workflow = await api(`/repos/${REPOSITORY}/actions/workflows/fitness-ios-verify.yml`, "the Fitness iOS Verification workflow");
   if (workflow.path !== IOS_VERIFY_WORKFLOW || workflow.state !== "active") fail("Canonical Fitness iOS Verification workflow is unavailable.");
   if (!isId(workflow.id)) fail("GitHub returned a malformed Fitness iOS Verification workflow ID.");
-  const runs = await pages(api, `${prefix}/actions/workflows/${workflow.id}/runs?branch=main&head_sha=${sha}`,
-    "workflow_runs", "the Fitness iOS Verification runs");
-  const candidates = runs.filter(run => run.head_sha === sha && run.head_branch === "main" &&
-    IOS_VERIFY_EVENTS.includes(run.event) && run.path === IOS_VERIFY_WORKFLOW && run.workflow_id === workflow.id &&
-    run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY);
-  if (candidates.some(run => !isId(run.id))) fail("GitHub returned a malformed Fitness iOS Verification run ID.");
-  candidates.sort((a, b) => b.id - a.id);
-  const run = candidates[0];
-  if (!run || run.status !== "completed" || run.conclusion !== "success") {
+  return workflow;
+}
+
+const iosSelector = sha => ({ sha, branch: "main", events: IOS_VERIFY_EVENTS, path: IOS_VERIFY_WORKFLOW, label: "Fitness iOS Verification" });
+
+export async function requireIosVerificationChecks({ sha }, api, workflow) {
+  if (!SHA.test(sha)) fail("Fitness iOS verification requires an exact source commit.");
+  const prefix = `/repos/${REPOSITORY}`;
+  workflow ??= await iosVerificationWorkflow(api);
+  const run = await latestRun(api, workflow, iosSelector(sha));
+  if (!passed(run)) {
     fail("The latest Fitness iOS Verification run for this commit has not passed. Dispatch Fitness iOS Verification on main.");
   }
   if (!isId(run.run_attempt)) fail("GitHub returned a malformed Fitness iOS Verification run attempt.");
@@ -130,7 +150,8 @@ export async function requireReleaseChecks(sha, api, { ios = false } = {}) {
   const prefix = `/repos/${REPOSITORY}`;
   const main = await api(`${prefix}/git/ref/heads/main`, "the main branch");
   if (main.object?.sha !== sha) fail("Release source is no longer current main.");
-  const run = await requireQualityChecks({ sha, branch: "main", event: "push" }, api);
+  const workflow = await qualityWorkflow(api);
+  const run = await requireQualityChecks({ sha, branch: "main", event: "push" }, api, workflow);
   const pulls = await pages(api, `${prefix}/commits/${sha}/pulls`, undefined, "the pull requests");
   const merged = pulls.filter(pr => pr.merged_at && pr.merge_commit_sha === sha && pr.base?.ref === "main" &&
     pr.base.repo?.full_name === REPOSITORY && pr.head?.repo?.full_name === REPOSITORY && SHA.test(pr.head.sha));
@@ -140,18 +161,15 @@ export async function requireReleaseChecks(sha, api, { ios = false } = {}) {
   // squash-main commit. Main must pass the complete raw-SARIF Quality gate;
   // the merged PR must also have passed the native security check.
   await requireReviewedHead({ sha: merged[0].head.sha, pullRequest: merged[0].number }, api);
-  const iosRun = ios ? await requireIosVerificationChecks({ sha }, api) : undefined;
-  // A new merge or rerun during qualification must not release stale source.
+  const iosWorkflow = ios ? await iosVerificationWorkflow(api) : undefined;
+  const iosRun = ios ? await requireIosVerificationChecks({ sha }, api, iosWorkflow) : undefined;
+  // A rerun, a newer run for the commit or a new merge during qualification must not release stale evidence.
+  await requireStillLatest(api, workflow, qualitySelector({ sha, branch: "main", event: "push" }), run);
+  if (iosRun) await requireStillLatest(api, iosWorkflow, iosSelector(sha), iosRun);
   const finalMain = await api(`${prefix}/git/ref/heads/main`, "the main branch");
-  const finalRun = await api(`${prefix}/actions/runs/${run.id}`, "the Quality run");
-  if (finalMain.object?.sha !== sha || finalRun.run_attempt !== run.run_attempt ||
-      finalRun.status !== "completed" || finalRun.conclusion !== "success") fail("Release qualification changed during inspection.");
+  if (finalMain.object?.sha !== sha) fail("Release qualification changed during inspection.");
   const result = { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
-  if (!iosRun) return result;
-  const finalIosRun = await api(`${prefix}/actions/runs/${iosRun.id}`, "the Fitness iOS Verification run");
-  if (finalIosRun.run_attempt !== iosRun.run_attempt || finalIosRun.status !== "completed" ||
-      finalIosRun.conclusion !== "success") fail("Release qualification changed during inspection.");
-  return { ...result, iosVerificationRunId: iosRun.id, iosVerificationAttempt: iosRun.run_attempt };
+  return iosRun ? { ...result, iosVerificationRunId: iosRun.id, iosVerificationAttempt: iosRun.run_attempt } : result;
 }
 
 export async function githubApi(path, label = "a GitHub endpoint") {
