@@ -159,7 +159,7 @@ try {
           "--style",
           "compact",
           "--predicate",
-          'process BEGINSWITH "FitnessSync"',
+          'process BEGINSWITH "bentFitness"',
         ],
         { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
       );
