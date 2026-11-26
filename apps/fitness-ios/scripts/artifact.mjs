@@ -2,6 +2,10 @@
 // build check in native.mjs and the TestFlight release check in
 // release-ios.mjs share these rules.
 
+import { createRequire } from "node:module";
+
+const { shareDescription, updateDescription } = createRequire(import.meta.url)("../modules/fitness-health/purpose.js");
+
 export const bundleIds = { production: "build.bent.fitness", development: "build.bent.fitness.dev" };
 
 /** The HealthKit entitlement keys the app has, each set to true. */
@@ -20,10 +24,16 @@ export function checkHealthEntitlements(entitlements) {
   return health;
 }
 
-/** Throws unless the Info.plist reads Health data only and matches the variant. */
+/**
+ * Throws unless the Info.plist reads Health data only and matches the variant.
+ * Apple requires a write purpose string, so it must be the one that says the
+ * app saves nothing to Apple Health.
+ */
 export function checkInfoPlist(plist, variant) {
-  if (!plist.NSHealthShareUsageDescription) throw new Error("NSHealthShareUsageDescription is missing.");
-  if ("NSHealthUpdateUsageDescription" in plist) throw new Error("The app must not ask to write Health data.");
+  if (plist.NSHealthShareUsageDescription !== shareDescription)
+    throw new Error("NSHealthShareUsageDescription is not the app's Health read purpose string.");
+  if (plist.NSHealthUpdateUsageDescription !== updateDescription)
+    throw new Error("NSHealthUpdateUsageDescription must say the app doesn't write Health data.");
   if (plist.CFBundleIdentifier !== bundleIds[variant])
     throw new Error(`Expected bundle ID ${bundleIds[variant]}, found ${plist.CFBundleIdentifier}.`);
   if (variant === "production" && plist.NSAppTransportSecurity?.NSAllowsLocalNetworking)

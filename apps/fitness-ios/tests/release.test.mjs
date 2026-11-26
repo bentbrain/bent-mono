@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
@@ -63,6 +64,8 @@ import {
   signInPage,
   summary,
 } from "../scripts/release-ios.mjs";
+
+const { shareDescription, updateDescription } = createRequire(import.meta.url)("../modules/fitness-health/purpose.js");
 
 const sha = "a".repeat(40);
 const projectId = "50ba8677-0be0-45a5-ac8c-ceff89d65696";
@@ -660,9 +663,21 @@ describe("the built app", () => {
   });
 
   test("the Info.plist reads Health data only, and the seeder stays out", () => {
-    const plist = { CFBundleIdentifier: "build.bent.fitness", NSHealthShareUsageDescription: "Reads weigh-ins." };
+    const plist = {
+      CFBundleIdentifier: "build.bent.fitness",
+      NSHealthShareUsageDescription: shareDescription,
+      NSHealthUpdateUsageDescription: updateDescription,
+    };
     expect(() => checkInfoPlist(plist, "production")).not.toThrow();
-    expect(() => checkInfoPlist({ ...plist, NSHealthUpdateUsageDescription: "x" }, "production")).toThrow("write");
+    expect(() => checkInfoPlist({ ...plist, NSHealthUpdateUsageDescription: "Saves workouts." }, "production")).toThrow(
+      "doesn't write",
+    );
+    const withoutUpdate = { ...plist };
+    delete withoutUpdate.NSHealthUpdateUsageDescription;
+    expect(() => checkInfoPlist(withoutUpdate, "production")).toThrow("doesn't write");
+    expect(() => checkInfoPlist({ ...plist, NSHealthShareUsageDescription: "Reads." }, "production")).toThrow(
+      "read purpose",
+    );
     expect(() =>
       checkInfoPlist({ ...plist, NSAppTransportSecurity: { NSAllowsLocalNetworking: true } }, "production"),
     ).toThrow("local networking");
