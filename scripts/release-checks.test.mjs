@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile } from "node:fs/promises";
-import { requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { githubApi, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
 import { hasNoPendingMigrations } from "./require-no-pending-migrations.mjs";
 import { requireBrowserSuites } from "./require-browser-suites.mjs";
 
@@ -160,4 +162,23 @@ test("validates actual main release events without accepting fabricated push or 
   assert.throws(() => validateReleaseEvent({ ...env, GITHUB_REF: "refs/heads/topic" }, { ref: "main" }, sha));
   assert.throws(() => validateReleaseEvent({ ...env, GITHUB_EVENT_NAME: "workflow_run" }, { workflow_run: { ...run, head_sha: head } }, sha));
   assert.throws(() => validateReleaseEvent({ GITHUB_REPOSITORY: "fork/repo" }, {}, sha));
+});
+
+test("the gh fallback answers from the GitHub CLI and stops one that hangs", async () => {
+  const saved = { PATH: process.env.PATH, GH_TOKEN: process.env.GH_TOKEN, GITHUB_ACTIONS: process.env.GITHUB_ACTIONS };
+  const bin = await mkdtemp(join(tmpdir(), "release-gh-"));
+  try {
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_ACTIONS;
+    process.env.PATH = `${bin}:${saved.PATH}`;
+    await writeFile(join(bin, "gh"), '#!/bin/sh\nif [ "$2" = "/slow" ]; then exec sleep 30; fi\necho \'{"path":"\'"$2"\'"}\'\n');
+    await chmod(join(bin, "gh"), 0o755);
+    assert.deepEqual(await githubApi("/fast"), { path: "/fast" });
+    const started = Date.now();
+    await assert.rejects(githubApi("/slow", { timeout: 300 }), (error) => error.code === "ETIMEDOUT");
+    assert.ok(Date.now() - started < 10_000);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    await rm(bin, { recursive: true, force: true });
+  }
 });

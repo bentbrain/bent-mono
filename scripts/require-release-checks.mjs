@@ -102,10 +102,12 @@ export async function requireReleaseChecks(sha, api) {
   return { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
 }
 
-export async function githubApi(path) {
+export async function githubApi(path, { timeout = 60_000 } = {}) {
   if (!process.env.GH_TOKEN) {
     if (process.env.GITHUB_ACTIONS === "true") fail("GH_TOKEN is required for CI release qualification.");
-    return JSON.parse(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
+    return JSON.parse(execFileSync("gh", ["api", path], {
+      encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout, killSignal: "SIGKILL",
+    }));
   }
   const response = await fetch(`https://api.github.com${path}`, {
     headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
