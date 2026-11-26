@@ -225,6 +225,10 @@ Shortcuts can read weigh-ins from Health. It cannot read workouts. Health data i
 6. Run the shortcut once. The first run asks to send Health data to fitness.bent.build; allow it.
 7. In Automation, tap +, choose Time of Day and Repeat Every Day, choose Run Immediately, then select the shortcut.
 
+## Privacy policy
+
+`/privacy` describes what the bent Fitness iPhone app reads from Apple Health, where it sends it, what Fitness and the iPhone keep, and how to disconnect or delete data. It renders without signing in, including before account services are configured.
+
 ## Equipment photos and exports
 
 Settings accepts up to 20 private JPEG, PNG or WebP equipment photos, each up to 2 MB. The server checks file signatures and ownership, and serves photos with private, no-store headers. Account export includes settings, entries, workout history, corrections and photo bytes. The download starts only after the complete export has loaded. Store exports privately.

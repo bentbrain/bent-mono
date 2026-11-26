@@ -3,10 +3,12 @@ import {
   HeadContent,
   Scripts,
   Outlet,
+  useRouterState,
 } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { readiness } from "../server/functions";
 import { FeedbackToolbar } from "../components/feedback-toolbar";
+import { isPublicPage } from "../public-pages";
 import css from "../styles.css?url";
 export const Route = createRootRoute({
   loader: () => readiness(),
@@ -47,13 +49,18 @@ export const Route = createRootRoute({
 });
 function Root() {
   const { ready } = Route.useLoaderData();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        {ready ? (
+        {isPublicPage(pathname) ? (
+          <Outlet />
+        ) : ready ? (
           <ClerkProvider>
             <Outlet />
           </ClerkProvider>

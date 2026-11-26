@@ -22,6 +22,23 @@ test("fails closed without provider configuration and serves installation assets
   expect((await manifest.json()).display).toBe("standalone");
 });
 
+test("serves the privacy policy without provider configuration", async ({
+  page,
+}) => {
+  const response = await page.goto("/privacy");
+  expect(response?.status()).toBe(200);
+  await expect(
+    page.getByRole("heading", { name: "bent Fitness privacy" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Disconnect or delete" }),
+  ).toBeVisible();
+  await expect(page).toHaveTitle("Privacy · bent Fitness · bent.build");
+  await expect(
+    page.getByRole("heading", { name: "Account services need setup." }),
+  ).toHaveCount(0);
+});
+
 test("keeps iPhone sync routes closed without provider configuration", async ({
   request,
 }, testInfo) => {
