@@ -281,7 +281,7 @@ if ($pid == 0) {
 setpgid($pid, $pid);
 tcsetpgrp($fd, $pid) if $fd >= 0;
 my $restore = sub { tcsetpgrp($fd, $foreground) if $fd >= 0 && defined $foreground };
-for my $signal (qw(TERM HUP)) {
+for my $signal (qw(TERM HUP INT)) {
   $SIG{$signal} = sub {
     kill "TERM", -$pid;
     select(undef, undef, undef, $grace);
@@ -320,11 +320,74 @@ function signalTree(child, signal, grouped, known = new Set()) {
 
 /** Children still running, so an interrupted release stops them too. */
 const running = new Set();
-function stopChildrenOnInterrupt() {
-  for (const signal of ["SIGINT", "SIGTERM"])
-    process.on(signal, () => {
-      for (const { child, grouped } of running) signalTree(child, "SIGKILL", grouped);
-      process.exit(signal === "SIGINT" ? 130 : 143);
+/** Set once the release is stopping, so the runs it stops do not settle. */
+let interrupting = false;
+
+/** The process group a supervisor's command runs in, once it has started. */
+function supervisedGroup(supervisor) {
+  const command = processTable().find((row) => row.ppid === supervisor);
+  return command ? command.pgid : null;
+}
+
+function killGroup(group, signal) {
+  if (!group) return;
+  try {
+    process.kill(-group, signal);
+  } catch {
+    // The group is gone already.
+  }
+}
+
+/**
+ * Stops a running command and everything it started, within a bound.
+ * An interactive command's supervisor gets SIGTERM, so it stops its group,
+ * gives the terminal back and exits; after the grace period and three
+ * seconds more, the supervisor and the recorded group get SIGKILL. A
+ * non-interactive tree gets SIGTERM, then SIGKILL after the grace period.
+ */
+async function stopTree(entry) {
+  const { child, grouped, interactive, known, grace } = entry;
+  const exited =
+    child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise((resolve) => child.once("exit", resolve));
+  const within = (ms) =>
+    Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))]);
+  if (interactive) {
+    entry.group ??= supervisedGroup(child.pid);
+    for (const pid of descendants(child.pid)) known.add(pid);
+    child.kill("SIGTERM");
+    if (!(await within(grace + 3000))) child.kill("SIGKILL");
+    killGroup(entry.group, "SIGKILL");
+    signalTree(child, "SIGKILL", false, known);
+  } else {
+    signalTree(child, "SIGTERM", grouped, known);
+    await within(grace);
+    signalTree(child, "SIGKILL", grouped, known);
+  }
+}
+
+/** Stops every running command; see `stopTree`. */
+export async function stopRunning() {
+  await Promise.all([...running].map((entry) => stopTree(entry)));
+}
+
+/**
+ * On SIGINT, SIGTERM or SIGHUP, stops every running command, then runs
+ * `beforeExit` and exits with 128 plus the signal number.
+ */
+export function stopChildrenOnInterrupt({ beforeExit } = {}) {
+  for (const [signal, code] of [
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+    ["SIGHUP", 129],
+  ])
+    process.on(signal, async () => {
+      if (interrupting) return;
+      interrupting = true;
+      await stopRunning();
+      await beforeExit?.(signal);
+      process.exit(code);
     });
 }
 
@@ -352,7 +415,7 @@ export function execute(
     interactive = false,
     show = interactive,
     hidden = secrets,
-    output = process.stdout,
+    output = process.stderr,
     errors = process.stderr,
     grace = 2000,
   },
@@ -368,8 +431,17 @@ export function execute(
       detached: grouped,
       stdio: [interactive ? "inherit" : input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
-    const entry = { child, grouped };
+    const known = new Set();
+    const entry = { child, grouped, interactive, known, grace, group: null };
     running.add(entry);
+    // The supervised command's group, recorded while it runs so it can still
+    // be stopped if the supervisor itself has to be killed.
+    const recorder = interactive
+      ? setInterval(() => {
+          entry.group ??= supervisedGroup(child.pid);
+          if (entry.group) clearInterval(recorder);
+        }, 200)
+      : null;
     let stdout = "";
     let stderr = "";
     const out = redactingWriter((text) => output.write(text), hidden);
@@ -377,7 +449,6 @@ export function execute(
     child.stdout.setEncoding("utf8").on("data", (chunk) => (show ? out.push(chunk) : (stdout += chunk)));
     child.stderr.setEncoding("utf8").on("data", (chunk) => (show ? err.push(chunk) : (stderr += chunk)));
     const timers = [];
-    const known = new Set();
     // A command that exits before reading its input closes the pipe; its
     // exit code decides the run.
     child.stdin?.on("error", (error) => {
@@ -395,13 +466,17 @@ export function execute(
       if (settled) return;
       settled = true;
       for (const timer of timers) clearTimeout(timer);
+      if (recorder) clearInterval(recorder);
       running.delete(entry);
       // Descendants still running, or left holding the pipes, stop with the command.
       signalTree(child, "SIGKILL", grouped, known);
+      if (interactive) killGroup(entry.group, "SIGKILL");
       child.stdout.destroy();
       child.stderr.destroy();
       out.end();
       err.end();
+      // A release that is stopping exits from its signal handler instead.
+      if (interrupting) return;
       const reject = (message) => failed(new Error(redact(message, hidden)));
       if (expired) reject(`${label} ran past its ${limit} limit.`);
       else if (error) failed(error);
@@ -414,9 +489,8 @@ export function execute(
     timers.push(
       setTimeout(() => {
         expired = true;
-        signalTree(child, "SIGTERM", grouped, known);
-        // Settles even while a descendant keeps the pipes open.
-        timers.push(setTimeout(() => settle(), grace));
+        // Settles once the tree is stopped, even while a descendant keeps the pipes open.
+        stopTree(entry).then(() => settle());
       }, timeout),
     );
     child.on("error", (error) => settle(error));
@@ -575,6 +649,14 @@ export function carriesParameters(url, expected) {
   );
 }
 
+/** An HTTPS URL on the default port, with no user information or fragment. */
+export function plainHttps(url) {
+  return url.protocol === "https:" && url.port === "" && !url.username && !url.password && !url.hash;
+}
+
+/** The redirect statuses an authorization step may answer with. */
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
 /**
  * Clerk's sign-in page for this instance, from the instance's own
  * environment on the issuer origin: an HTTPS `/sign-in` page. Its origin is
@@ -587,7 +669,7 @@ export function signInPage(environment) {
   } catch {
     fail("The OAuth issuer's environment names no sign-in page.");
   }
-  if (page.protocol !== "https:" || page.pathname !== "/sign-in" || page.search || page.hash || page.username)
+  if (!plainHttps(page) || page.pathname !== "/sign-in" || page.search)
     fail("The OAuth issuer's sign-in page is not an HTTPS /sign-in page.");
   return page;
 }
@@ -642,7 +724,7 @@ export async function checkClientAtIssuer(
   const step = async (url, back) => {
     const response = await get(url);
     const location = response.headers.get("location");
-    if (response.status < 300 || response.status > 399 || !location) {
+    if (!redirectStatuses.has(response.status) || !location) {
       let code;
       try {
         code = (await response.json())?.error;
@@ -656,6 +738,7 @@ export async function checkClientAtIssuer(
       refused(new URL(location).searchParams.get("error") ?? "redirected to the app");
     const page = new URL(location, url);
     if (
+      !plainHttps(page) ||
       page.origin !== signIn.origin ||
       page.pathname !== signIn.pathname ||
       [...page.searchParams.keys()].join() !== "redirect_url"
@@ -667,7 +750,7 @@ export async function checkClientAtIssuer(
     } catch {
       refused("a sign-in redirect without a return address");
     }
-    if (returning.origin !== back.origin || returning.pathname !== back.pathname || returning.hash)
+    if (!plainHttps(returning) || returning.origin !== back.origin || returning.pathname !== back.pathname)
       refused(`a sign-in redirect returning to ${returning.origin}${returning.pathname}`);
     if (!carriesParameters(returning, expected)) refused("a sign-in redirect with changed authorization parameters");
     return returning;
@@ -1120,6 +1203,14 @@ async function build({ sha, config }) {
 /** What the release prints when it finishes; the rest is in the journal. */
 export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
 
+/**
+ * Writes the summary as the only line on stdout. Everything the release
+ * shows while it runs, its own and its commands' output, goes to stderr.
+ */
+export function printSummary(receipt, stdout = process.stdout) {
+  stdout.write(`${JSON.stringify(summary(receipt))}\n`);
+}
+
 async function credentials({ config }) {
   const expoToken = await privateText(config.expoTokenPath);
   secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
@@ -1136,5 +1227,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const config = validateConfig(await protectedJson(configPath));
   stopChildrenOnInterrupt();
   if (action === "credentials") await credentials({ config });
-  else console.log(JSON.stringify(summary(await build({ sha, config }))));
+  else printSummary(await build({ sha, config }));
 }

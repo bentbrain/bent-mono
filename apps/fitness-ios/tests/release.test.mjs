@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
@@ -22,6 +22,7 @@ import {
   checkReadiness,
   checkSignedEntitlements,
   checkXcodeLog,
+  printSummary,
   childEnvironment,
   easEnvironment,
   effectiveIosProfile,
@@ -236,6 +237,153 @@ describe("release arguments and configuration", () => {
     const [pgid, pid] = reply.stdout.trim().split(/\s+/).map(Number);
     expect(pgid).toBe(pid);
     expect(pgid).not.toBe(group(process.pid));
+  });
+
+  /** A release runner: it runs one command that starts a helper, as the release does, until it is stopped. */
+  const runnerSource = `
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const [, , modulePath, mode, dir] = process.argv;
+const { childEnvironment, execute, stopChildrenOnInterrupt } = await import(modulePath);
+const terminal = (pid) => execFileSync("ps", ["-o", "tpgid=,pgid=", "-p", String(pid)], { encoding: "utf8" }).trim().split(/\\s+/).map(Number);
+writeFileSync(dir + "/runner", JSON.stringify({ pid: process.pid, terminal: terminal(process.pid) }));
+stopChildrenOnInterrupt({ beforeExit: () => writeFileSync(dir + "/after", JSON.stringify(terminal(process.pid))) });
+const command = [
+  "const { spawn, execFileSync } = require('node:child_process');",
+  "const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });",
+  "const [tpgid, pgid] = execFileSync('ps', ['-o', 'tpgid=,pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim().split(/\\\\s+/).map(Number);",
+  "require('node:fs').writeFileSync(" + JSON.stringify(dir + "/command") + ", JSON.stringify({ pid: process.pid, helper: helper.pid, tpgid, pgid }));",
+  "setTimeout(() => {}, 60000);",
+].join("\\n");
+await execute(process.execPath, ["-e", command], {
+  env: childEnvironment(process.env),
+  timeout: 60000,
+  grace: 300,
+  interactive: mode === "interactive",
+  show: true,
+  hidden: [],
+});
+`;
+  /** Runs `argv` in a new pseudo-terminal session, as a terminal would, and exits with its exit code. */
+  const ptyDriver = `
+import os, pty, select, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+deadline = time.time() + 60
+while time.time() < deadline:
+    ready, _, _ = select.select([fd], [], [], 0.1)
+    if ready:
+        try:
+            os.read(fd, 65536)
+        except OSError:
+            pass
+    done, status = os.waitpid(pid, os.WNOHANG)
+    if done:
+        sys.exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))
+os.kill(pid, 9)
+sys.exit(99)
+`;
+  const hasPython = spawnSync("python3", ["-c", "import pty"]).status === 0;
+  const waitFor = async (path) => {
+    for (let wait = 0; wait < 300 && !existsSync(path); wait++) await new Promise((wake) => setTimeout(wake, 50));
+    return JSON.parse(readFileSync(path, "utf8"));
+  };
+  const runRelease = (mode, { pty }) => {
+    const dir = mkdtempSync(join(tmpdir(), "release-stop-"));
+    const runner = join(dir, "runner.mjs");
+    writeFileSync(runner, runnerSource);
+    const module = new URL("../scripts/release-ios.mjs", import.meta.url).href;
+    const argv = [process.execPath, runner, module, mode, dir];
+    const child = pty
+      ? spawn("python3", ["-c", ptyDriver, ...argv], { stdio: "ignore" })
+      : spawn(argv[0], argv.slice(1), { stdio: "ignore" });
+    const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+    return { dir, exited, kill: () => child.kill("SIGKILL") };
+  };
+
+  test.skipIf(!hasPython)(
+    "stopping the release in a terminal stops an interactive command's helper and gives the terminal back",
+    async () => {
+      const release = runRelease("interactive", { pty: true });
+      try {
+        const runner = await waitFor(join(release.dir, "runner"));
+        const command = await waitFor(join(release.dir, "command"));
+        // The release starts in the foreground; the command's own group takes it over.
+        expect(runner.terminal[0]).toBe(runner.terminal[1]);
+        expect(command.pgid).toBe(command.pid);
+        expect(command.tpgid).toBe(command.pgid);
+        expect(command.pgid).not.toBe(runner.terminal[1]);
+        process.kill(runner.pid, "SIGTERM");
+        expect(await release.exited).toBe(143);
+        const [foreground, group] = await waitFor(join(release.dir, "after"));
+        expect(foreground).toBe(group);
+        expect(group).toBe(runner.terminal[1]);
+        expect(await exits(command.helper)).toBe(true);
+        expect(await exits(command.pid)).toBe(true);
+      } finally {
+        release.kill();
+        rmSync(release.dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  test("stopping the release stops a non-interactive command's tree", async () => {
+    const release = runRelease("grouped", { pty: false });
+    try {
+      const runner = await waitFor(join(release.dir, "runner"));
+      const command = await waitFor(join(release.dir, "command"));
+      process.kill(runner.pid, "SIGTERM");
+      expect(await release.exited).toBe(143);
+      expect(await exits(command.helper)).toBe(true);
+      expect(await exits(command.pid)).toBe(true);
+    } finally {
+      release.kill();
+      rmSync(release.dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("stdout carries only the final JSON summary, while command output goes to stderr", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-stdout-"));
+    try {
+      // A fake eas that prints progress on both streams, then succeeds.
+      const fakeEas = join(dir, "eas.mjs");
+      writeFileSync(
+        fakeEas,
+        "process.stdout.write('Submitting build...\\n'); console.error('Waiting for App Store Connect'); process.stdout.write('✔ Submitted\\n');",
+      );
+      const script = join(dir, "release.mjs");
+      writeFileSync(
+        script,
+        `const { childEnvironment, execute, printSummary } = await import(${JSON.stringify(new URL("../scripts/release-ios.mjs", import.meta.url).href)});
+await execute(process.execPath, [${JSON.stringify(fakeEas)}, "submit"], { env: childEnvironment(process.env), timeout: 30000, show: true, hidden: [] });
+printSummary({ status: "submitted", buildId: "b1", version: "1.0.0", buildNumber: "7", oauthClientId: "client", quality: {} });`,
+      );
+      const result = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 30_000 });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('{"status":"submitted","buildId":"b1","version":"1.0.0","buildNumber":"7"}\n');
+      expect(JSON.parse(result.stdout)).toEqual({
+        status: "submitted",
+        buildId: "b1",
+        version: "1.0.0",
+        buildNumber: "7",
+      });
+      expect(result.stderr).toContain("Submitting build...");
+      expect(result.stderr).toContain("Waiting for App Store Connect");
+      expect(result.stderr).toContain("✔ Submitted");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("printSummary writes one JSON line", () => {
+    const written = [];
+    printSummary(
+      { status: "submitted", buildId: "b", version: "1", buildNumber: "2", sha },
+      { write: (text) => written.push(text) },
+    );
+    expect(written).toEqual(['{"status":"submitted","buildId":"b","version":"1","buildNumber":"2"}\n']);
   });
 
   test("a command that exits before reading its input settles normally", async () => {
@@ -623,6 +771,62 @@ describe("release admission", () => {
         second: (target) => redirect(signIn(`${accounts}/oauth-consent?${target.searchParams}&client_id=other`)),
       });
       await expect(checkClientAtIssuer(request, extra.fetchImpl)).rejects.toThrow("changed authorization parameters");
+    });
+
+    test("accepts only the five redirect statuses", async () => {
+      for (const status of [301, 302, 303, 307, 308])
+        await checkClientAtIssuer(
+          request,
+          clerk({ second: (target) => redirect(signIn(`${accounts}/oauth-consent?${target.searchParams}`), status) })
+            .fetchImpl,
+        );
+      for (const status of [300, 304, 305, 306, 200])
+        await expect(
+          checkClientAtIssuer(
+            request,
+            clerk({
+              first: (target) =>
+                new Response(null, {
+                  status,
+                  headers: {
+                    location: signIn(`${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`),
+                  },
+                }),
+            }).fetchImpl,
+          ),
+        ).rejects.toThrow(`HTTP ${status}`);
+    });
+
+    test("refuses sign-in and continuation URLs with a fragment, user information or another port", async () => {
+      const continuation = (target) => `${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`;
+      for (const page of [
+        "https://accounts.example.com/sign-in#x",
+        "https://user@accounts.example.com/sign-in",
+        "https://user:secret@accounts.example.com/sign-in",
+        "https://accounts.example.com:8443/sign-in",
+      ]) {
+        const first = clerk({
+          first: (target) =>
+            redirect(
+              `${page.split("#")[0]}?redirect_url=${encodeURIComponent(continuation(target))}${page.includes("#") ? "#x" : ""}`,
+            ),
+        });
+        await expect(checkClientAtIssuer(request, first.fetchImpl)).rejects.toThrow("instance's sign-in");
+      }
+      for (const back of [
+        (target) => `${continuation(target)}#fragment`,
+        (target) => continuation(target).replace("https://", "https://user@"),
+        (target) => continuation(target).replace("https://clerk.example.com", "https://clerk.example.com:8443"),
+      ]) {
+        const first = clerk({ first: (target) => redirect(signIn(back(target))) });
+        await expect(checkClientAtIssuer(request, first.fetchImpl)).rejects.toThrow("returning to");
+      }
+      const consent = clerk({
+        second: (target) => redirect(signIn(`${accounts}/oauth-consent?${target.searchParams}#done`)),
+      });
+      await expect(checkClientAtIssuer(request, consent.fetchImpl)).rejects.toThrow("returning to");
+      for (const url of ["https://user@accounts.example.com/sign-in", "https://accounts.example.com:444/sign-in"])
+        expect(() => signInPage({ display_config: { sign_in_url: url } })).toThrow("sign-in page");
     });
 
     test("takes the accounts host only from the instance's own sign-in URL", async () => {
