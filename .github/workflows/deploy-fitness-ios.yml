@@ -83,11 +83,13 @@ jobs:
         run: >-
           node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" env:list --environment production --format short
           > "$RUNNER_TEMP/eas-env-pre.txt"
+      - name: Hand the build's OAuth issuer and client to later steps
+        run: >-
+          node apps/fitness-ios/scripts/release-ios.mjs oauth-env --env-file "$RUNNER_TEMP/eas-env-pre.txt"
+          >> "$GITHUB_ENV"
       - name: Admit the build's OAuth client
         timeout-minutes: 5
-        run: >-
-          node apps/fitness-ios/scripts/release-ios.mjs admit --env-file "$RUNNER_TEMP/eas-env-pre.txt"
-          --out "$RUNNER_TEMP/oauth.json"
+        run: node apps/fitness-ios/scripts/release-ios.mjs admit
       - name: Qualify again before the build
         timeout-minutes: 5
         env:
@@ -126,9 +128,23 @@ jobs:
         timeout-minutes: 30
         run: |
           set -euo pipefail
-          node apps/fitness-ios/scripts/release-ios.mjs verify-build --sha "$RELEASE_SHA" \
-            --build-file "$RUNNER_TEMP/eas-build.json" --oauth-file "$RUNNER_TEMP/oauth.json" \
-            --work-dir "$RUNNER_TEMP/ipa" --out "$RUNNER_TEMP/verified.json"
+          checks="apps/fitness-ios/scripts/release-ios.mjs"
+          downloads="$RUNNER_TEMP/ipa"
+          node "$checks" check-build --sha "$RELEASE_SHA" --build-file "$RUNNER_TEMP/eas-build.json" \
+            --downloads-dir "$downloads/urls" --out "$RUNNER_TEMP/build.json"
+          # The URLs are signed; curl reads them from private files and never prints them.
+          curl -fsS --proto '=https' --max-time 1200 -o "$downloads/app.ipa" "$(cat "$downloads/urls/archive-url")"
+          mkdir -p "$downloads/logs"
+          n=0
+          while IFS= read -r url; do
+            n=$((n + 1))
+            if ! curl -fsS --proto '=https' --max-time 120 -o "$downloads/logs/$n.txt" "$url"; then
+              echo "Build log $n could not be downloaded." >&2
+              rm -f "$downloads/logs/$n.txt"
+            fi
+          done < "$downloads/urls/log-urls"
+          node "$checks" verify-archive --archive "$downloads/app.ipa" --logs-dir "$downloads/logs" \
+            --build "$RUNNER_TEMP/build.json" --work-dir "$downloads/work" --out "$RUNNER_TEMP/verified.json"
           echo "build_id=$(node -p 'require(process.argv[1]).buildId' "$RUNNER_TEMP/verified.json")" >> "$GITHUB_OUTPUT"
       - name: Read the production EAS environment again
         timeout-minutes: 5
@@ -148,8 +164,8 @@ jobs:
           set -euo pipefail
           node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/quality-submit.json"
           node apps/fitness-ios/scripts/release-ios.mjs same-quality --initial "$RUNNER_TEMP/quality-initial.json" --current "$RUNNER_TEMP/quality-submit.json"
-          node apps/fitness-ios/scripts/release-ios.mjs admit --env-file "$RUNNER_TEMP/eas-env-post.txt" \
-            --expected-oauth "$RUNNER_TEMP/oauth.json" --check-privacy
+          node apps/fitness-ios/scripts/release-ios.mjs admit --current-env-file "$RUNNER_TEMP/eas-env-post.txt" \
+            --check-privacy
       - name: Submit the build to TestFlight
         timeout-minutes: 60
         working-directory: apps/fitness-ios

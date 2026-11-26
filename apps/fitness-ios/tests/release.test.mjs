@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
   admit,
+  buildDownloads,
+  oauthEnvironment,
+  oauthFromEnvironment,
   checkAuthorizationServer,
   checkNoEasIgnore,
   checkSameQuality,
@@ -629,8 +632,9 @@ describe("the Deploy Fitness iOS workflow", () => {
       /\.github\/actions\/setup/,
       /npm install/,
       /check-no-builds/,
-      /verify-build/,
-      /admit --env-file/,
+      /verify-archive/,
+      /oauth-env/,
+      /release-ios\.mjs admit$/m,
     ])
       expect(steps[index(pattern)].env?.EXPO_TOKEN).toBeUndefined();
     expect(source.match(/secrets\./g)).toHaveLength(withToken.length);
@@ -658,23 +662,43 @@ describe("the Deploy Fitness iOS workflow", () => {
       expect(cleanup.run).toContain(`"$RUNNER_TEMP/${path}"`);
     // Only the build ID leaves a step; the summary has no URLs.
     expect(source.match(/GITHUB_OUTPUT/g)).toHaveLength(1);
-    expect(steps[index(/verify-build/)].run).toContain("build_id=");
+    expect(steps[index(/verify-archive/)].run).toContain("build_id=");
+    // Only the checked OAuth settings reach later steps' environment.
+    expect(source.match(/GITHUB_ENV/g)).toHaveLength(1);
+    expect(steps[index(/oauth-env/)].run).toContain('>> "$GITHUB_ENV"');
+  });
+
+  test("downloads the signed archive and logs with curl, never echoing their URLs", () => {
+    const verify = steps[index(/verify-archive/)];
+    expect(verify.run).toContain("check-build");
+    expect(verify.run).toContain('"$(cat "$downloads/urls/archive-url")"');
+    expect(verify.run).toContain('done < "$downloads/urls/log-urls"');
+    expect(verify.run).not.toMatch(/set -x|echo "?\$url|echo "?\$\(cat/);
+    const curls = verify.run.split("\n").filter((line) => /\bcurl -/.test(line));
+    expect(curls).toHaveLength(2);
+    for (const line of curls) {
+      expect(line).toContain("--proto '=https'");
+      expect(line).toContain("--max-time");
+      expect(line).toContain("-fsS");
+    }
   });
 
   test("qualifies, checks and admits in order around the build and the submission", () => {
     const qualify = index(/Qualify exact main source before installing/);
     const setup = index(/\.github\/actions\/setup/);
     const profile = index(/check-profile/);
-    const admitBuild = index(/admit --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
+    const handOff = index(/oauth-env --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
+    const admitBuild = index(/release-ios\.mjs admit$/m);
     const requalify = index(/quality-build\.json/);
     const noBuilds = index(/check-no-builds/);
     const easBuild = index(/ build --profile production/);
-    const verify = index(/verify-build/);
-    const readmit = index(/--expected-oauth/);
+    const verify = index(/verify-archive/);
+    const readmit = index(/--current-env-file/);
     const submit = index(/ submit --profile production/);
     expect(qualify).toBeLessThan(setup);
     expect(setup).toBeLessThan(profile);
-    expect(profile).toBeLessThan(admitBuild);
+    expect(profile).toBeLessThan(handOff);
+    expect(handOff).toBeLessThan(admitBuild);
     expect(admitBuild).toBeLessThan(requalify);
     expect(requalify).toBeLessThan(noBuilds);
     expect(noBuilds).toBeLessThan(easBuild);
@@ -702,7 +726,9 @@ describe("the release subcommands", () => {
     expect(() => options(["--sha", "a", "--sha", "b"], { values: ["--sha"] })).toThrow("Unexpected argument --sha");
     const unknown = run("credentials");
     expect(unknown.status).not.toBe(0);
-    expect(unknown.stderr).toContain("Run one of: check-config, check-profile, admit, same-quality, check-no-builds");
+    expect(unknown.stderr).toContain(
+      "Run one of: check-config, check-profile, oauth-env, admit, same-quality, check-no-builds, check-build",
+    );
   });
 
   test("check-config reads the pinned EAS CLI and the project, and refuses an .easignore", async () => {
@@ -752,16 +778,81 @@ describe("the release subcommands", () => {
       throw new Error("no network in this test");
     };
     try {
-      const env = "FITNESS_OAUTH_ISSUER=https://clerk.example.com\nFITNESS_OAUTH_CLIENT_ID=client123\n";
-      await expect(admit(env, { issuer: "https://clerk.example.com", clientId: "client_old" })).rejects.toThrow(
-        "changed during the release",
-      );
-      await expect(admit("FITNESS_OAUTH_ISSUER=https://clerk.example.com\n")).rejects.toThrow(
+      const oauth = { issuer: "https://clerk.example.com", clientId: "client_old" };
+      const current = "FITNESS_OAUTH_ISSUER=https://clerk.example.com\nFITNESS_OAUTH_CLIENT_ID=client123\n";
+      await expect(admit(oauth, current)).rejects.toThrow("changed during the release");
+      await expect(admit(oauth, "FITNESS_OAUTH_ISSUER=https://clerk.example.com\n")).rejects.toThrow(
         "FITNESS_OAUTH_CLIENT_ID",
       );
       expect(requests).toBe(0);
     } finally {
       globalThis.fetch = original;
+    }
+  });
+
+  test("the OAuth settings handed to later steps are one variable a line, checked strictly", () => {
+    const list = "FITNESS_OAUTH_ISSUER=https://clerk.example.com/\nFITNESS_OAUTH_CLIENT_ID=client_123\n";
+    expect(oauthEnvironment(list)).toBe(
+      "RELEASE_OAUTH_ISSUER=https://clerk.example.com\nRELEASE_OAUTH_CLIENT_ID=client_123\n",
+    );
+    for (const [issuer, clientId] of [
+      ["https://clerk.example.com", "client\rOTHER=1"],
+      ["https://clerk.example.com", "client 1"],
+      ["https://clerk.example.com", "x".repeat(129)],
+      ["https://clerk.example.com\rOTHER=1", "client"],
+      ["https://clerk.example.com/path", "client"],
+      ["https://user@clerk.example.com", "client"],
+    ])
+      expect(() => checkOAuthSettings({ FITNESS_OAUTH_ISSUER: issuer, FITNESS_OAUTH_CLIENT_ID: clientId })).toThrow(
+        "FITNESS_OAUTH_",
+      );
+    expect(
+      oauthFromEnvironment({ RELEASE_OAUTH_ISSUER: "https://clerk.example.com", RELEASE_OAUTH_CLIENT_ID: "c1" }),
+    ).toEqual({ issuer: "https://clerk.example.com", clientId: "c1" });
+    expect(() => oauthFromEnvironment({})).toThrow("FITNESS_OAUTH_ISSUER");
+  });
+
+  test("check-build writes the signed URLs to private files and prints none of them", () => {
+    const signed = "https://storage.example.invalid/app.ipa?X-Signature=secret";
+    const finished = { ...build, artifacts: { applicationArchiveUrl: signed }, logFiles: [`${signed}&log=1`] };
+    expect(buildDownloads([finished], { sha, projectId })).toEqual({
+      archive: signed,
+      logs: [`${signed}&log=1`],
+      build: { buildId: build.id, version: undefined, buildNumber: undefined },
+    });
+    for (const url of ["https://a.example/x y", "https://a.example/$(id)", 'https://a"b', "https://a.example/`id`"])
+      expect(() =>
+        buildDownloads([{ ...finished, artifacts: { applicationArchiveUrl: url } }], { sha, projectId }),
+      ).toThrow("malformed download URL");
+    expect(() => buildDownloads([{ ...finished, logFiles: ["https://a.example/log\nx"] }], { sha, projectId })).toThrow(
+      "malformed download URL",
+    );
+    const directory = mkdtempSync(join(tmpdir(), "release-check-build-"));
+    try {
+      const file = join(directory, "build.json");
+      writeFileSync(file, JSON.stringify([{ ...finished, appVersion: "1.0.0", appBuildVersion: "7" }]));
+      const result = run(
+        "check-build",
+        "--sha",
+        sha,
+        "--build-file",
+        file,
+        "--downloads-dir",
+        join(directory, "urls"),
+        "--out",
+        join(directory, "out.json"),
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout + result.stderr).not.toContain("storage.example.invalid");
+      expect(readFileSync(join(directory, "urls/archive-url"), "utf8")).toBe(`${signed}\n`);
+      expect(readFileSync(join(directory, "urls/log-urls"), "utf8")).toBe(`${signed}&log=1\n`);
+      expect(JSON.parse(readFileSync(join(directory, "out.json"), "utf8"))).toEqual({
+        buildId: build.id,
+        version: "1.0.0",
+        buildNumber: "7",
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

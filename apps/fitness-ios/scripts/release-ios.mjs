@@ -5,20 +5,21 @@
 //
 //   check-config [--out <path>]
 //   check-profile --eas-package <eas-cli package.json>
-//   admit --env-file <eas env:list output> [--expected-oauth <path>] [--check-privacy] [--out <path>]
+//   oauth-env --env-file <eas env:list output>          (lines for $GITHUB_ENV)
+//   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_*)
 //   same-quality --initial <path> --current <path>
 //   check-no-builds --sha <sha> --file <eas build:list JSON>
-//   verify-build --sha <sha> --build-file <eas build JSON> --oauth-file <path> --work-dir <dir> --out <path>
+//   check-build --sha <sha> --build-file <eas build JSON> --downloads-dir <dir> --out <path>
+//   verify-archive --archive <ipa> --logs-dir <dir> --build <path> --work-dir <dir> --out <path>
 //   summary --file <verify-build output> --sha <sha> [--status <status>]
 //
-// Nothing here prints a signed URL: build archives and logs are fetched, never shown.
+// Nothing here prints a signed URL: check-build writes the archive and log URLs
+// to private files, and the workflow downloads them with curl.
 import { execFileSync } from "node:child_process";
-import { createWriteStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { bundleIds, checkAppContents, checkHealthEntitlements, checkInfoPlist } from "./artifact.mjs";
@@ -131,7 +132,10 @@ export function checkOAuthSettings(variables) {
   const clientId = variables.FITNESS_OAUTH_CLIENT_ID;
   if (!issuer || !clientId)
     fail("Set FITNESS_OAUTH_ISSUER and FITNESS_OAUTH_CLIENT_ID in the production EAS environment.");
-  if (!/^https:\/\/[^/]+$/.test(issuer.replace(/\/$/, ""))) fail("FITNESS_OAUTH_ISSUER must be an HTTPS origin.");
+  if (!/^https:\/\/[A-Za-z0-9.-]+$/.test(issuer.replace(/\/$/, "")))
+    fail("FITNESS_OAUTH_ISSUER must be an HTTPS origin.");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(clientId))
+    fail("FITNESS_OAUTH_CLIENT_ID must be letters, digits, hyphens or underscores.");
   return { issuer: issuer.replace(/\/$/, ""), clientId };
 }
 
@@ -421,12 +425,8 @@ async function files(directory) {
   return found;
 }
 
-/** Downloads the signed .ipa and checks what it carries. */
-async function checkArchive(build, directory, oauth) {
-  const archive = join(directory, "app.ipa");
-  const response = await fetch(build.artifacts.applicationArchiveUrl, { signal: AbortSignal.timeout(20 * MINUTE) });
-  if (!response.ok || !response.body) fail(`The build archive download failed with HTTP ${response.status}.`);
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(archive, { flags: "wx", mode: 0o600 }));
+/** Checks what the signed .ipa at `archive` carries. */
+async function checkArchive(archive, directory, oauth) {
   const extracted = join(directory, "extracted");
   tool("ditto", ["-x", "-k", archive, extracted], { timeout: 5 * MINUTE });
   const payload = join(extracted, "Payload");
@@ -453,16 +453,6 @@ export function checkXcodeLog(logs) {
     fail(`The EAS build log does not show the Xcode ${XCODE} check.`);
 }
 
-async function buildLogs(build) {
-  const logs = [];
-  for (const url of build.logFiles ?? []) {
-    if (!url.startsWith("https://")) continue;
-    const response = await fetch(url, { signal: AbortSignal.timeout(2 * MINUTE) });
-    if (response.ok) logs.push(await response.text());
-  }
-  return logs;
-}
-
 /**
  * EAS must have no production iOS build of the commit yet. This covers
  * every run, wherever it started.
@@ -486,14 +476,34 @@ async function getJsonOk(url) {
 export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
 
 /**
- * The build's OAuth issuer and client, from the production EAS environment,
- * accepted by Fitness production and by the issuer. `expected` is what an
- * earlier admission saw, which must not have changed.
+ * The OAuth issuer and client handed to later workflow steps, as
+ * `NAME=value` lines for $GITHUB_ENV. Both are checked to a strict pattern,
+ * so neither can carry a line break or another variable.
  */
-export async function admit(envList, expected) {
-  const oauth = checkOAuthSettings(parseEnvList(envList));
-  if (expected && (oauth.issuer !== expected.issuer || oauth.clientId !== expected.clientId))
-    fail("The production EAS environment's OAuth settings changed during the release.");
+export function oauthEnvironment(envList) {
+  const { issuer, clientId } = checkOAuthSettings(parseEnvList(envList));
+  return `RELEASE_OAUTH_ISSUER=${issuer}\nRELEASE_OAUTH_CLIENT_ID=${clientId}\n`;
+}
+
+/** The OAuth issuer and client from this step's environment, checked again. */
+export function oauthFromEnvironment(environment = process.env) {
+  return checkOAuthSettings({
+    FITNESS_OAUTH_ISSUER: environment.RELEASE_OAUTH_ISSUER,
+    FITNESS_OAUTH_CLIENT_ID: environment.RELEASE_OAUTH_CLIENT_ID,
+  });
+}
+
+/**
+ * The build's OAuth issuer and client, accepted by Fitness production and by
+ * the issuer. `current`, when given, is the production EAS environment read
+ * again, which must still name the same issuer and client.
+ */
+export async function admit(oauth, current) {
+  if (current !== undefined) {
+    const now = checkOAuthSettings(parseEnvList(current));
+    if (now.issuer !== oauth.issuer || now.clientId !== oauth.clientId)
+      fail("The production EAS environment's OAuth settings changed during the release.");
+  }
   checkProtectedResource(await getJsonOk(`${FITNESS_ORIGIN}/.well-known/oauth-protected-resource`), oauth.issuer);
   await readiness(oauth.clientId);
   const metadata = await getJsonOk(`${oauth.issuer}/.well-known/oauth-authorization-server`);
@@ -505,7 +515,6 @@ export async function admit(envList, expected) {
     redirectUri: `${bundleIds.production}://oauth`,
     resource: `${FITNESS_ORIGIN}/api/mcp`,
   });
-  return oauth;
 }
 
 /** The two qualifications of one release must name the same Quality run. */
@@ -525,19 +534,38 @@ export function checkNoEasIgnore(root = repoRoot) {
     if (existsSync(path)) fail("The release checkout must not contain an .easignore file.");
 }
 
+/** A signed download URL from EAS: HTTPS, on one line, with nothing a shell could split. */
+const downloadUrl = (url) =>
+  typeof url === "string" && /^https:\/\/[^\s"'`$\\]+$/.test(url) ? url : fail("EAS gave a malformed download URL.");
+
 /**
- * Checks the finished EAS build and its signed archive, and returns the
- * build's safe summary. The archive and logs are fetched by URL; the URLs are
- * never written anywhere.
+ * Checks the finished EAS build and returns what the workflow downloads,
+ * by curl so these URLs are never printed, and what the archive must match.
  */
-async function verifyBuild({ sha, builds, oauth, workDir, projectId }) {
+export function buildDownloads(builds, { sha, projectId }) {
   const build = checkBuild(builds, { sha, projectId });
-  checkXcodeLog(await buildLogs(build));
+  return {
+    archive: downloadUrl(build.artifacts.applicationArchiveUrl),
+    logs: (build.logFiles ?? []).map(downloadUrl),
+    build: { buildId: build.id, version: build.appVersion, buildNumber: build.appBuildVersion },
+  };
+}
+
+/** Checks the downloaded archive and logs against the build, and returns the build's safe summary. */
+async function verifyArchive({ archive, logsDir, build, oauth, workDir }) {
+  const logs = [];
+  for (const name of (await readdir(logsDir)).sort()) logs.push(await readFile(join(logsDir, name), "utf8"));
+  checkXcodeLog(logs);
   await mkdir(workDir, { recursive: true, mode: 0o700 });
-  const artifact = await checkArchive(build, workDir, oauth);
-  if (artifact.buildNumber !== build.appBuildVersion || artifact.version !== build.appVersion)
+  const artifact = await checkArchive(archive, workDir, oauth);
+  if (artifact.buildNumber !== build.buildNumber || artifact.version !== build.version)
     fail("The archive's version does not match the EAS build.");
-  return summary({ status: "built", buildId: build.id, version: artifact.version, buildNumber: artifact.buildNumber });
+  return summary({
+    status: "built",
+    buildId: build.buildId,
+    version: artifact.version,
+    buildNumber: artifact.buildNumber,
+  });
 }
 
 /** The step summary: status, commit, build, version and build number. */
@@ -591,15 +619,15 @@ const commands = {
     checkIosBuild(await pinnedIosProfile(resolve(required(found, "--eas-package")), app));
     console.log("The production iOS profile is a Release store build of the production variant.");
   },
+  async "oauth-env"(argv) {
+    const found = options(argv, { values: ["--env-file"] });
+    process.stdout.write(oauthEnvironment(await readFile(required(found, "--env-file"), "utf8")));
+  },
   async admit(argv) {
-    const found = options(argv, {
-      values: ["--env-file", "--expected-oauth", "--out"],
-      flags: ["--check-privacy"],
-    });
-    const expected = found["--expected-oauth"] ? await readJson(found["--expected-oauth"]) : undefined;
-    const oauth = await admit(await readFile(required(found, "--env-file"), "utf8"), expected);
+    const found = options(argv, { values: ["--current-env-file"], flags: ["--check-privacy"] });
+    const current = found["--current-env-file"] ? await readFile(found["--current-env-file"], "utf8") : undefined;
+    await admit(oauthFromEnvironment(), current);
     if (found["--check-privacy"]) await privacyPage();
-    if (found["--out"]) await writeJson(found["--out"], oauth);
     console.log("Fitness production and the OAuth issuer accept the build's OAuth client.");
   },
   async "same-quality"(argv) {
@@ -612,14 +640,27 @@ const commands = {
     checkNoEasBuilds(await readJson(required(found, "--file")), requireSha(found["--sha"]));
     console.log("EAS has no production build of this commit.");
   },
-  async "verify-build"(argv) {
-    const found = options(argv, { values: ["--sha", "--build-file", "--oauth-file", "--work-dir", "--out"] });
-    const result = await verifyBuild({
+  async "check-build"(argv) {
+    const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });
+    const downloads = buildDownloads(await readJson(required(found, "--build-file")), {
       sha: requireSha(found["--sha"]),
-      builds: await readJson(required(found, "--build-file")),
-      oauth: await readJson(required(found, "--oauth-file")),
-      workDir: resolve(required(found, "--work-dir")),
       projectId: (await configSummary()).projectId,
+    });
+    const directory = required(found, "--downloads-dir");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(join(directory, "archive-url"), `${downloads.archive}\n`, { mode: 0o600 });
+    await writeFile(join(directory, "log-urls"), downloads.logs.map((url) => `${url}\n`).join(""), { mode: 0o600 });
+    await writeJson(required(found, "--out"), downloads.build);
+    console.log(`EAS build ${downloads.build.buildId} is the finished production build of this commit.`);
+  },
+  async "verify-archive"(argv) {
+    const found = options(argv, { values: ["--archive", "--logs-dir", "--build", "--work-dir", "--out"] });
+    const result = await verifyArchive({
+      archive: resolve(required(found, "--archive")),
+      logsDir: resolve(required(found, "--logs-dir")),
+      build: await readJson(required(found, "--build")),
+      oauth: oauthFromEnvironment(),
+      workDir: resolve(required(found, "--work-dir")),
     });
     await writeJson(required(found, "--out"), result);
     console.log(JSON.stringify(result));
