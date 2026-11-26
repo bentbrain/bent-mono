@@ -296,6 +296,43 @@ describe("release admission", () => {
       expect(first.get("state")).toMatch(/^[A-Za-z0-9_-]{22}$/);
     });
 
+    test("accepts the production flow that continues on the issuer before sign-in", async () => {
+      const direct = clerk({
+        first: (target) => redirect(`${issuer}/oauth/authorize/continue?${target.searchParams}`),
+      });
+      await checkClientAtIssuer(request, direct.fetchImpl);
+      expect(direct.seen.map((call) => call.url.pathname)).toEqual([
+        "/v1/environment",
+        "/oauth/authorize",
+        "/oauth/authorize/continue",
+      ]);
+      const unknown = clerk({
+        first: (target) => redirect(`${issuer}/oauth/authorize/continue?${target.searchParams}`),
+        second: () => Response.json({ error: "invalid_client" }, { status: 401 }),
+      });
+      await expect(checkClientAtIssuer(request, unknown.fetchImpl)).rejects.toThrow("HTTP 401, invalid_client");
+      const changed = clerk({
+        first: (target) => {
+          target.searchParams.set("scope", "openid");
+          return redirect(`${issuer}/oauth/authorize/continue?${target.searchParams}`);
+        },
+      });
+      await expect(checkClientAtIssuer(request, changed.fetchImpl)).rejects.toThrow("changed authorization parameters");
+      const elsewhere = clerk({
+        first: (target) =>
+          redirect(`https://clerk.example.com.evil.example/oauth/authorize/continue?${target.searchParams}`),
+      });
+      await expect(checkClientAtIssuer(request, elsewhere.fetchImpl)).rejects.toThrow(
+        "another page than the instance's sign-in",
+      );
+      const fragment = clerk({
+        first: (target) => redirect(`${issuer}/oauth/authorize/continue?${target.searchParams}#`),
+      });
+      await expect(checkClientAtIssuer(request, fragment.fetchImpl)).rejects.toThrow(
+        "changed authorization parameters",
+      );
+    });
+
     test("refuses the replies Clerk gives a client it does not accept", async () => {
       const unknown = clerk({ second: () => Response.json({ error: "invalid_client" }, { status: 401 }) });
       await expect(checkClientAtIssuer(request, unknown.fetchImpl)).rejects.toThrow("HTTP 401, invalid_client");
