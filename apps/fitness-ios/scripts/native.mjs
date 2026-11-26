@@ -9,8 +9,9 @@
 //   node scripts/native.mjs artifact            check the app's entitlements and Info.plist
 //   node scripts/native.mjs lint                run SwiftLint
 //   node scripts/native.mjs flows [filter]      run the Simulator flows on a new Simulator
-//   node scripts/native.mjs replay-swift        compile the first-party Swift again from
-//                                               the build logs, for CodeQL
+//   node scripts/native.mjs replay-swift [scope] compile the first-party Swift again from
+//                                               the build logs, for CodeQL: all (the
+//                                               default), app or seeder
 //
 // Build output goes to NATIVE_BUILD_DIR, or ~/Library/Caches/fitness-ios-build,
 // never into the repository.
@@ -76,6 +77,14 @@ function swiftCommands(log, targets) {
 
 /** Extra xcodebuild settings, such as CodeQL's, from XCODEBUILD_SETTINGS. */
 const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filter(Boolean);
+
+/** The replay-swift scope: all, app or seeder, with all as the default. */
+export function replayScope(args) {
+  if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app or seeder.");
+  const [scope = "all"] = args;
+  if (!["all", "app", "seeder"].includes(scope)) throw new Error("Choose a replay-swift scope: all, app or seeder.");
+  return scope;
+}
 
 /** The generated project's name: bentFitness, or bentFitnessDev for development. */
 function project() {
@@ -159,12 +168,16 @@ const commands = {
    * first-party targets from the last app and seeder builds: the app target
    * with the Swift prebuild generates, the fitness-health module, the seeder
    * and its UI tests. CodeQL traces this instead of a whole Xcode build.
+   * The app scope reads only the app build, and the seeder scope only the
+   * seeder build.
    */
-  "replay-swift"() {
-    const app = swiftCommands(join(buildDir, "app-build.log"), ["FitnessHealth", project()]);
-    const tools = swiftCommands(join(buildDir, "seeder-build.log"), ["HealthSeed", "SimulatorFlows"]);
-    const targets = [...app, ...tools];
-    const expected = ["FitnessHealth", project(), "HealthSeed", "SimulatorFlows"];
+  "replay-swift"(args) {
+    const scope = replayScope(args);
+    const builds = [];
+    if (scope !== "seeder") builds.push({ log: "app-build.log", targets: ["FitnessHealth", project()] });
+    if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+    const targets = builds.flatMap((build) => swiftCommands(join(buildDir, build.log), build.targets));
+    const expected = builds.flatMap((build) => build.targets);
     const missing = expected.filter((target) => !targets.some((entry) => entry.target === target));
     if (missing.length) throw new Error(`No compile commands for ${missing.join(", ")}. Build from clean first.`);
     for (const entry of targets) {
@@ -247,10 +260,12 @@ const commands = {
   },
 };
 
-const [name, ...rest] = process.argv.slice(2);
-const command = commands[name];
-if (!command) {
-  console.error(`Choose one of: ${Object.keys(commands).join(", ")}`);
-  process.exit(2);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [name, ...rest] = process.argv.slice(2);
+  const command = commands[name];
+  if (!command) {
+    console.error(`Choose one of: ${Object.keys(commands).join(", ")}`);
+    process.exit(2);
+  }
+  command(rest);
 }
-command(rest);

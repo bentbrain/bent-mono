@@ -7,7 +7,11 @@ const REPOSITORY = "bentbrain/bent-mono";
 const WORKFLOW = ".github/workflows/quality.yml";
 const SHA = /^[a-f0-9]{40}$/;
 const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser",
-  "public-source", "secret-scan", "dependencies", "CodeQL", "Release qualification"];
+  "public-source", "secret-scan", "dependencies", "CodeQL", "fitness-ios", "fitness-ios-native", "Release qualification"];
+const IOS_VERIFY_WORKFLOW = ".github/workflows/fitness-ios-verify.yml";
+const IOS_VERIFY_EVENTS = ["push", "workflow_dispatch", "schedule"];
+const IOS_VERIFY_JOBS = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
+  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 class QualificationError extends Error {}
 const fail = message => { throw new QualificationError(message); };
 // Each request has a fixed label; messages name only the label, never a path built from GitHub's data.
@@ -75,6 +79,37 @@ export async function requireQualityChecks({ sha, branch, event }, api) {
   return run;
 }
 
+// Fitness iOS Verification runs on main pushes that touch the iPhone app, daily and on dispatch.
+// Its latest run for the exact main commit, from any of those events, must have passed every job.
+export async function requireIosVerificationChecks({ sha }, api) {
+  if (!SHA.test(sha)) fail("Fitness iOS verification requires an exact source commit.");
+  const prefix = `/repos/${REPOSITORY}`;
+  const workflow = await api(`${prefix}/actions/workflows/fitness-ios-verify.yml`, "the Fitness iOS Verification workflow");
+  if (workflow.path !== IOS_VERIFY_WORKFLOW || workflow.state !== "active") fail("Canonical Fitness iOS Verification workflow is unavailable.");
+  if (!isId(workflow.id)) fail("GitHub returned a malformed Fitness iOS Verification workflow ID.");
+  const runs = await pages(api, `${prefix}/actions/workflows/${workflow.id}/runs?branch=main&head_sha=${sha}`,
+    "workflow_runs", "the Fitness iOS Verification runs");
+  const candidates = runs.filter(run => run.head_sha === sha && run.head_branch === "main" &&
+    IOS_VERIFY_EVENTS.includes(run.event) && run.path === IOS_VERIFY_WORKFLOW && run.workflow_id === workflow.id &&
+    run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY);
+  if (candidates.some(run => !isId(run.id))) fail("GitHub returned a malformed Fitness iOS Verification run ID.");
+  candidates.sort((a, b) => b.id - a.id);
+  const run = candidates[0];
+  if (!run || run.status !== "completed" || run.conclusion !== "success") {
+    fail("The latest Fitness iOS Verification run for this commit has not passed. Dispatch Fitness iOS Verification on main.");
+  }
+  if (!isId(run.run_attempt)) fail("GitHub returned a malformed Fitness iOS Verification run attempt.");
+  const jobs = await pages(api, `${prefix}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs",
+    "the Fitness iOS Verification run's jobs");
+  for (const name of IOS_VERIFY_JOBS) {
+    const matches = jobs.filter(job => job.name === name);
+    if (matches.length !== 1 || matches[0].head_sha !== sha || matches[0].status !== "completed" || matches[0].conclusion !== "success") {
+      fail(`Required Fitness iOS Verification job is missing, ambiguous or unsuccessful: ${name}`);
+    }
+  }
+  return run;
+}
+
 export async function requireReviewedHead({ sha, pullRequest }, api) {
   if (!isId(pullRequest)) fail("GitHub returned a malformed pull request number.");
   const prefix = `/repos/${REPOSITORY}`;
@@ -90,7 +125,7 @@ export async function requireReviewedHead({ sha, pullRequest }, api) {
   }
 }
 
-export async function requireReleaseChecks(sha, api) {
+export async function requireReleaseChecks(sha, api, { ios = false } = {}) {
   if (!SHA.test(sha)) fail("Release source must be a full commit SHA.");
   const prefix = `/repos/${REPOSITORY}`;
   const main = await api(`${prefix}/git/ref/heads/main`, "the main branch");
@@ -105,12 +140,18 @@ export async function requireReleaseChecks(sha, api) {
   // squash-main commit. Main must pass the complete raw-SARIF Quality gate;
   // the merged PR must also have passed the native security check.
   await requireReviewedHead({ sha: merged[0].head.sha, pullRequest: merged[0].number }, api);
+  const iosRun = ios ? await requireIosVerificationChecks({ sha }, api) : undefined;
   // A new merge or rerun during qualification must not release stale source.
   const finalMain = await api(`${prefix}/git/ref/heads/main`, "the main branch");
   const finalRun = await api(`${prefix}/actions/runs/${run.id}`, "the Quality run");
   if (finalMain.object?.sha !== sha || finalRun.run_attempt !== run.run_attempt ||
       finalRun.status !== "completed" || finalRun.conclusion !== "success") fail("Release qualification changed during inspection.");
-  return { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
+  const result = { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
+  if (!iosRun) return result;
+  const finalIosRun = await api(`${prefix}/actions/runs/${iosRun.id}`, "the Fitness iOS Verification run");
+  if (finalIosRun.run_attempt !== iosRun.run_attempt || finalIosRun.status !== "completed" ||
+      finalIosRun.conclusion !== "success") fail("Release qualification changed during inspection.");
+  return { ...result, iosVerificationRunId: iosRun.id, iosVerificationAttempt: iosRun.run_attempt };
 }
 
 export async function githubApi(path, label = "a GitHub endpoint") {
@@ -134,16 +175,29 @@ export async function githubApi(path, label = "a GitHub endpoint") {
   return parseReply(await response.text(), label);
 }
 
+/** The commit and the --ios flag from `--sha <full-sha> [--ios]`, each given at most once. */
+export function releaseArguments(args) {
+  const usage = "Usage: node scripts/require-release-checks.mjs --sha <full-sha> [--ios]";
+  let sha;
+  let ios = false;
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--sha" && sha === undefined && index + 1 < args.length) sha = args[++index];
+    else if (args[index] === "--ios" && !ios) ios = true;
+    else fail(usage);
+  }
+  if (sha === undefined) fail(usage);
+  return { sha, ios };
+}
+
 async function main() {
-  if (process.argv.length !== 4 || process.argv[2] !== "--sha") fail("Usage: node scripts/require-release-checks.mjs --sha <full-sha>");
-  const sha = process.argv[3];
+  const { sha, ios } = releaseArguments(process.argv.slice(2));
   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   if (head !== sha || execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { encoding: "utf8" }).trim()) {
     fail("Release checkout must be clean and match the exact source commit.");
   }
   const event = process.env.GITHUB_ACTIONS === "true" ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
   validateReleaseEvent(process.env, event, sha);
-  console.log(JSON.stringify(await requireReleaseChecks(sha, githubApi)));
+  console.log(JSON.stringify(await requireReleaseChecks(sha, githubApi, { ios })));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

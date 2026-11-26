@@ -171,17 +171,36 @@ export function browserMatrix(scope) {
   );
 }
 
+// The native iPhone job builds the app, its Health module and the Fitness
+// handlers its round trip calls. Turbo adds their workspace consumers.
+const iosNativeWorkspaces = [
+  "apps/fitness-ios",
+  "packages/fitness-contracts",
+  "apps/fitness",
+];
+
+export function iosNativeSelected(scope) {
+  return (
+    scope.full ||
+    iosNativeWorkspaces.some((directory) => includesPath(scope, directory))
+  );
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   const scope = workspaceScope(process.env, execFileSync, { browser: true });
   const include = browserMatrix(scope);
-  console.log(JSON.stringify(scope));
+  // Main pushes check every browser suite, and the native iPhone job only
+  // for changes that reach it.
+  const ios = workspaceScope(process.env, execFileSync);
+  const iosNative = iosNativeSelected(ios);
+  console.log(JSON.stringify({ browser: scope, iosNative }));
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `matrix=${JSON.stringify({ include })}\nhas_work=${include.length > 0}\ntier=${scope.full ? "full" : "critical"}\n`,
+      `matrix=${JSON.stringify({ include })}\nhas_work=${include.length > 0}\ntier=${scope.full ? "full" : "critical"}\nios_native=${iosNative}\n`,
     );
   }
 }

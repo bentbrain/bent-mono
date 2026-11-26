@@ -618,13 +618,18 @@ export async function admit(oauth, current) {
   });
 }
 
-/** The two qualifications of one release must name the same Quality run. */
+const isId = (value) => Number.isSafeInteger(value) && value > 0;
+
+/**
+ * The qualifications of one release must name the same Quality run and the
+ * same Fitness iOS Verification run, each at the same attempt.
+ */
 export function checkSameQuality(initial, current) {
+  const ids = ["qualityRunId", "qualityAttempt", "iosVerificationRunId", "iosVerificationAttempt"];
   if (
-    !Number.isSafeInteger(initial?.qualityRunId) ||
+    !ids.every((id) => isId(initial?.[id])) ||
     initial.sha !== current?.sha ||
-    initial.qualityRunId !== current.qualityRunId ||
-    initial.qualityAttempt !== current.qualityAttempt
+    ids.some((id) => initial[id] !== current[id])
   )
     fail("Quality qualification changed during the release.");
 }
@@ -897,7 +902,7 @@ const commands = {
       await readResponse(required(found, "--initial"), "The first release qualification"),
       await readResponse(required(found, "--current"), "The latest release qualification"),
     );
-    console.log("Quality qualification is unchanged.");
+    console.log("The Quality and Fitness iOS Verification runs are unchanged.");
   },
   async "check-build"(argv) {
     const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });

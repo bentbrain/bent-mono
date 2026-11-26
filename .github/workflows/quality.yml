@@ -16,7 +16,7 @@ jobs:
   release-qualification:
     name: Release qualification
     if: always()
-    needs: [checks, browser, public-source, secrets, dependencies, codeql, fitness-ios, fitness-ios-native, codeql-swift]
+    needs: [checks, browser, public-source, secrets, dependencies, codeql, fitness-ios, fitness-ios-native]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,7 +27,7 @@ jobs:
           node --input-type=module -e '
             const jobs = JSON.parse(process.env.QUALITY_RESULTS);
             const expected = ["checks", "browser", "public-source", "secrets", "dependencies", "codeql",
-              "fitness-ios", "fitness-ios-native", "codeql-swift"];
+              "fitness-ios", "fitness-ios-native"];
             if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
                 Object.values(jobs).some(job => job.result !== "success")) {
               throw new Error("Every Quality job must succeed before production release");
@@ -67,14 +67,15 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: node scripts/ci-check.mjs '${{ matrix.check }}'
-  browser-scope:
-    name: Select browser suites
+  ci-scope:
+    name: Select CI scope
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.scope.outputs.matrix }}
       has_work: ${{ steps.scope.outputs.has_work }}
       tier: ${{ steps.scope.outputs.tier }}
+      ios_native: ${{ steps.scope.outputs.ios_native }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -85,12 +86,12 @@ jobs:
         run: node scripts/ci-scope.mjs
   browser-suite:
     name: ${{ matrix.name }}
-    needs: browser-scope
-    if: needs.browser-scope.outputs.has_work == 'true'
+    needs: ci-scope
+    if: needs.ci-scope.outputs.has_work == 'true'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.browser-scope.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.ci-scope.outputs.matrix) }}
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0
       options: --ipc=host --init
@@ -115,7 +116,7 @@ jobs:
           BROWSER_APP: ${{ matrix.app }}
           SHARD_PART: ${{ matrix.part }}
           SHARD_TOTAL: ${{ matrix.total }}
-          E2E_TIER: ${{ needs.browser-scope.outputs.tier }}
+          E2E_TIER: ${{ needs.ci-scope.outputs.tier }}
         run: |
           node scripts/install-browsers.mjs browser "$BROWSER_APP"
           node scripts/ci-check.mjs browser "$BROWSER_APP" "$SHARD_PART" "$SHARD_TOTAL"
@@ -139,7 +140,7 @@ jobs:
     # Branch protection and release qualification require this stable context.
     name: browser
     if: always()
-    needs: [browser-scope, browser-suite]
+    needs: [ci-scope, browser-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -151,9 +152,9 @@ jobs:
           persist-credentials: false
       - name: Require all selected browser suites
         env:
-          SCOPE_RESULT: ${{ needs.browser-scope.result }}
-          HAS_WORK: ${{ needs.browser-scope.outputs.has_work }}
-          BROWSER_MATRIX: ${{ needs.browser-scope.outputs.matrix }}
+          SCOPE_RESULT: ${{ needs.ci-scope.result }}
+          HAS_WORK: ${{ needs.ci-scope.outputs.has_work }}
+          BROWSER_MATRIX: ${{ needs.ci-scope.outputs.matrix }}
           SUITE_RESULT: ${{ needs.browser-suite.result }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/require-browser-suites.mjs
@@ -280,10 +281,12 @@ jobs:
           APP_VARIANT=production bunx expo config --type public --json > /dev/null
       - run: bunx expo-doctor
       - run: node scripts/fingerprint-check.mjs
-  fitness-ios-native:
-    name: fitness-ios-native
+  fitness-ios-native-suite:
+    name: fitness-ios-native suite
+    needs: ci-scope
+    if: needs.ci-scope.outputs.ios_native == 'true'
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/fitness-ios
@@ -334,120 +337,24 @@ jobs:
           echo "POSTGRES_BIN=$pg" >> "$GITHUB_ENV"
           echo "FITNESS_TEST_DATABASE_URL=postgres://test@127.0.0.1:55432/fitness_test" >> "$GITHUB_ENV"
       - run: node scripts/roundtrip.mjs
-      - name: Run the Simulator flows against the local harness
-        run: node scripts/flows.mjs
-      - name: Retain the Simulator flow results
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: fitness-ios-flows
-          path: |
-            ${{ runner.temp }}/fitness-ios/flows-*.xcresult
-            ${{ runner.temp }}/fitness-ios/flows-*-app.log
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Stop Postgres
         if: always()
         run: |
           if [ -n "${POSTGRES_BIN:-}" ]; then "$POSTGRES_BIN/pg_ctl" -D "$RUNNER_TEMP/postgres" -w stop; fi
-  codeql-swift:
-    name: CodeQL Swift
-    runs-on: macos-26
-    timeout-minutes: 90
-    env:
-      # The raw-flow gate requires both complete suites on PRs and main.
-      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
-      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
-      APP_VARIANT: production
-      # The analysis covers Swift, so the JavaScript bundle is not built.
-      SKIP_BUNDLING: '1'
-    permissions:
-      contents: read
-      security-events: write
+  fitness-ios-native:
+    # Branch protection and release qualification require this stable context.
+    name: fitness-ios-native
+    if: always()
+    needs: [ci-scope, fitness-ios-native-suite]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Keep native build output outside the checkout
-        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - name: Install Rosetta for the CodeQL Swift tracer
-        run: sudo softwareupdate --install-rosetta --agree-to-license
-      - name: Select Xcode 26.6
-        working-directory: apps/fitness-ios
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.6.app
-          node scripts/native.mjs xcode 26.6
-      - uses: ./.github/actions/setup
-      - name: Build the production app and the seeder
-        working-directory: apps/fitness-ios
+      - name: Require the selected native iPhone suite
         env:
-          # Whole-module compiles, and the bridging header read as source: the
-          # extractor stops without recording anything when the app target
-          # imports the header precompiled by Xcode's clang.
-          XCODEBUILD_SETTINGS: >-
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
-            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
-        run: |
-          node scripts/native.mjs prebuild
-          node scripts/native.mjs build
-          node scripts/native.mjs seeder
-      - name: Download verified CodeQL bundle
-        timeout-minutes: 10
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # CodeQL v2.27.4, Swift macOS release asset.
-          archive="$RUNNER_TEMP/codeql-bundle-swift-osx64.tar.zst"
-          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-            --retry 3 --retry-max-time 300 --connect-timeout 10 --max-time 300 \
-            --header "Authorization: Bearer ${GH_TOKEN:?GitHub token is required}" \
-            --header 'Accept: application/octet-stream' --output "$archive" \
-            https://api.github.com/repos/github/codeql-action/releases/assets/692239631
-          printf '%s  %s\n' '52e3f0ea756787f0ceb2e5b2553d2560ba1d83573e3f77002f31833b307fbebc' "$archive" | shasum -a 256 --check
-      - uses: github/codeql-action/init@f3c49fd1ef3281abc41069b3dd22807a60c963f6
-        with:
-          tools: ${{ runner.temp }}/codeql-bundle-swift-osx64.tar.zst
-          languages: swift
-          build-mode: manual
-          queries: security-extended,security-and-quality
-      # Traced, every process runs under Rosetta, and an Xcode build of the
-      # app takes over an hour. The trace covers Xcode's own logged compile
-      # commands for each first-party target, and the module's Swift package
-      # with its XCTest targets. The extraction check below confirms that
-      # every first-party Swift file was extracted.
-      - name: Compile the first-party Swift for extraction
-        working-directory: apps/fitness-ios
-        run: |
-          time node scripts/native.mjs replay-swift
-          time node scripts/native.mjs core-build
-      - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
-        with:
-          category: fitness-codeql-swift
-          output: ${{ runner.temp }}/codeql-swift-results
-      - name: Require clean analysis
-        env:
-          SARIF_DIRECTORY: ${{ runner.temp }}/codeql-swift-results
-          CODEQL_LANGUAGES: swift
-        run: node scripts/check-sarif.mjs
-      - name: Require complete extraction
-        working-directory: apps/fitness-ios
-        run: node scripts/codeql-coverage.mjs "$RUNNER_TEMP/codeql_databases/swift" "$NATIVE_BUILD_DIR/app"
-      - name: Retain the CodeQL extractor logs
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: codeql-swift-extractor-logs
-          path: |
-            ${{ runner.temp }}/codeql_databases/swift/log
-            ${{ runner.temp }}/codeql_databases/swift/diagnostic
-            ${{ runner.temp }}/codeql_databases/diagnostic
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Retain original CodeQL report
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: codeql-swift-original-sarif
-          path: ${{ runner.temp }}/codeql-swift-results/*.sarif
-          if-no-files-found: error
-          retention-days: 14
+          SCOPE_RESULT: ${{ needs.ci-scope.result }}
+          IOS_NATIVE: ${{ needs.ci-scope.outputs.ios_native }}
+          SUITE_RESULT: ${{ needs.fitness-ios-native-suite.result }}
+        run: node scripts/require-ios-native.mjs

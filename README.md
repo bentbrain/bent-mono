@@ -37,7 +37,9 @@ The root `bun.lock` manages workspace dependencies.
 
 CI checks affected workspaces and their consumers, including dependency changes in the root lockfile. Required checks cover lint, types, builds and security. Weekly and manually dispatched Quality runs execute the full regression suite. Root automation changes and incomplete comparison history trigger validation of every workspace.
 
-Quality runs full CodeQL analysis of the JavaScript and TypeScript and of the iPhone app's Swift, with both security suites. It requires zero raw findings across the repository and retains each original SARIF report. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
+Quality runs full CodeQL analysis of the JavaScript and TypeScript with both security suites. It runs the native iPhone build and tests when a change reaches the iPhone app, its contracts or the Fitness handlers it calls. The required `fitness-ios-native` check passes when that suite passes or when the change leaves it out. Merge requires independent review of the exact head against the current base. Production releases have their own qualification checks.
+
+Fitness iOS Verification (`.github/workflows/fitness-ios-verify.yml`) runs on main pushes that touch the iPhone app or its dependencies, daily at 17:00 UTC, and on dispatch. It runs the native build and tests, CodeQL for the app's Swift and for the test tools' Swift in parallel jobs with both security suites, and each Simulator flow in its own job. Every CodeQL job requires zero raw findings and retains its original SARIF report. TestFlight releases require this workflow to have passed on the exact main commit.
 
 ## Trackmap
 

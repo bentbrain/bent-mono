@@ -14,6 +14,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
+import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
+import { replayScope } from "../scripts/native.mjs";
 import {
   admit,
   isBundleVersion,
@@ -911,6 +913,19 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(steps.at(-1).run).toContain('"$RUNNER_TEMP/eas-static"');
   });
 
+  test("every qualification also requires Fitness iOS Verification on the exact commit", () => {
+    const calls = steps.filter((step) => /require-release-checks\.mjs/.test(step.run ?? ""));
+    expect(calls).toHaveLength(3);
+    for (const [position, output] of ["quality-initial", "quality-build", "quality-submit"].entries()) {
+      expect(calls[position].run).toContain(
+        `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" --ios > "$RUNNER_TEMP/${output}.json"`,
+      );
+      expect(calls[position].env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+    }
+    expect(source.match(/require-release-checks\.mjs/g)).toHaveLength(3);
+    expect(workflow.permissions.actions).toBe("read");
+  });
+
   test("refuses a commit with a submitted build, and qualifies again immediately before each EAS change", () => {
     const qualify = index(/Qualify exact main source before installing/);
     const profile = index(/check-profile/);
@@ -1417,11 +1432,32 @@ process.stdout.write(JSON.stringify(result));`,
     expect(archive.indexOf("verifySignature(bundle);")).toBeLessThan(archive.indexOf('"--entitlements"'));
   });
 
-  test("both qualifications must name the same Quality run", () => {
-    const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };
+  test("both qualifications must name the same Quality and Fitness iOS Verification runs", () => {
+    const quality = {
+      sha,
+      qualityRunId: 23,
+      qualityAttempt: 2,
+      pullRequest: 2,
+      iosVerificationRunId: 41,
+      iosVerificationAttempt: 1,
+    };
     expect(() => checkSameQuality(quality, { ...quality })).not.toThrow();
-    for (const change of [{ qualityRunId: 24 }, { qualityAttempt: 3 }, { sha: "b".repeat(40) }])
+    for (const change of [
+      { qualityRunId: 24 },
+      { qualityAttempt: 3 },
+      { sha: "b".repeat(40) },
+      { iosVerificationRunId: 42 },
+      { iosVerificationAttempt: 2 },
+      { iosVerificationRunId: undefined },
+      { iosVerificationAttempt: undefined },
+    ])
       expect(() => checkSameQuality(quality, { ...quality, ...change })).toThrow("changed");
+    // A qualification without the iOS verification, or with a malformed ID, never matches.
+    for (const id of ["qualityRunId", "qualityAttempt", "iosVerificationRunId", "iosVerificationAttempt"])
+      for (const value of [undefined, 0, -1, 1.5, "41", null, 2 ** 53]) {
+        const bad = { ...quality, [id]: value };
+        expect(() => checkSameQuality(bad, { ...bad })).toThrow("changed");
+      }
     expect(() => checkSameQuality({}, {})).toThrow("changed");
   });
 
@@ -1673,5 +1709,87 @@ process.stdout.write(JSON.stringify(result));`,
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the CodeQL Swift scopes", () => {
+  const tracked = [
+    "apps/fitness-ios/modules/fitness-health/ios/Package.swift",
+    "apps/fitness-ios/modules/fitness-health/ios/Core/Sync.swift",
+    "apps/fitness-ios/modules/fitness-health/ios/Platform/HealthStore.swift",
+    "apps/fitness-ios/modules/fitness-health/ios/Module/FitnessHealthModule.swift",
+    "apps/fitness-ios/modules/fitness-health/ios/Tests/SyncTests.swift",
+    "apps/fitness-ios/tools/health-seed/HealthSeed/Seeder.swift",
+    "apps/fitness-ios/tools/health-seed/SimulatorFlows/SyncFlowTests.swift",
+    "",
+  ];
+
+  test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
+    expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 4));
+    expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(4, 7)]);
+    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 7));
+  });
+
+  test("fail closed for a tracked Swift file outside both scopes", () => {
+    for (const outside of [
+      "apps/fitness-ios/modules/fitness-health/ios/Extra/New.swift",
+      "apps/fitness-ios/ios/Generated.swift",
+      "apps/other/Tool.swift",
+      "Root.swift",
+    ])
+      for (const scope of ["all", "app", "tools"])
+        expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
+    expect(() => swiftFilesFor("app", tracked.slice(4))).toThrow("No tracked Swift files");
+  });
+
+  test("every tracked Swift file in the repository is in a scope", () => {
+    const listed = spawnSync("git", ["ls-files", "-z", "*.swift"], {
+      cwd: new URL("../../..", import.meta.url).pathname,
+      encoding: "utf8",
+    }).stdout.split("\0");
+    expect(swiftFilesFor("all", listed).length).toBeGreaterThan(20);
+  });
+
+  test("read a scope and require derived data for the app and all scopes only", () => {
+    expect(coverageArguments(["db", "derived"])).toEqual({ scope: "all", database: "db", derived: "derived" });
+    expect(coverageArguments(["--scope", "app", "db", "derived"])).toEqual({
+      scope: "app",
+      database: "db",
+      derived: "derived",
+    });
+    expect(coverageArguments(["--scope", "tools", "db"])).toEqual({
+      scope: "tools",
+      database: "db",
+      derived: undefined,
+    });
+    for (const args of [
+      [],
+      ["db"],
+      ["--scope", "app", "db"],
+      ["--scope", "tools", "db", "derived"],
+      ["--scope", "seeder", "db"],
+      ["--scope"],
+      ["db", "derived", "extra"],
+    ])
+      expect(() => coverageArguments(args)).toThrow("Usage");
+    const script = new URL("../scripts/codeql-coverage.mjs", import.meta.url).pathname;
+    const result = spawnSync(process.execPath, [script, "--scope", "tools"], { encoding: "utf8", timeout: 30_000 });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage");
+  });
+
+  test("replay-swift compiles all targets by default, or the app's or the seeder's", () => {
+    expect(replayScope([])).toBe("all");
+    for (const scope of ["all", "app", "seeder"]) expect(replayScope([scope])).toBe(scope);
+    for (const args of [["tools"], ["App"], ["app", "seeder"], [""]]) expect(() => replayScope(args)).toThrow("scope");
+    const source = readFileSync(new URL("../scripts/native.mjs", import.meta.url), "utf8");
+    const replay = source.slice(source.indexOf('"replay-swift"(args)'), source.indexOf('"core-build"()'));
+    // The seeder scope reads only the seeder build, so it needs no prebuilt app project.
+    expect(replay).toContain(
+      'if (scope !== "seeder") builds.push({ log: "app-build.log", targets: ["FitnessHealth", project()] });',
+    );
+    expect(replay).toContain(
+      'if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });',
+    );
   });
 });
