@@ -5,14 +5,15 @@
 //
 //   check-config [--out <path>] [--static-dir <dir>]
 //   check-profile --eas-package <eas-cli package.json>
-//   oauth-env --env-file <eas env:list output>          (lines for $GITHUB_ENV)
-//   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_*)
+//   oauth-env --env-file <eas env:list output> --out <path>
+//   oauth-value --oauth-file <oauth-env output> --name issuer|clientId
+//   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_* from its step)
 //   same-quality --initial <path> --current <path>
 //   check-build --sha <sha> --build-file <eas build JSON> --downloads-dir <dir> --out <path>
 //   submissions-query (--build-list <eas build:list JSON> --sha <sha> | --build-id <id>) --out <path>
 //   check-no-submissions (--build-list <path> --sha <sha> | --build-id <id>) --file <EAS GraphQL reply>
 //   submission-status --build-id <id> --file <EAS GraphQL reply>
-//   verify-archive --archive <ipa> --logs-dir <dir> --build <path> --work-dir <dir> --out <path>
+//   verify-archive --archive <ipa> --logs-dir <dir> --build <path> --oauth-file <path> --work-dir <dir> --out <path>
 //   summary --file <verify-build output> --sha <sha> [--status <status>]
 //
 // Nothing here prints a signed URL: check-build writes the archive and log URLs
@@ -51,7 +52,11 @@ export const readinessCodes = new Set([
   "rate_limited",
 ]);
 
-/** The OAuth 2.0 authorization error codes (RFC 6749, section 4.1.2.1), as Clerk's authorize steps return them. */
+/**
+ * The OAuth 2.0 error codes Clerk's authorize steps return: the authorization
+ * error codes (RFC 6749, section 4.1.2.1), and `invalid_client` (section 5.2),
+ * which Clerk returns for an unknown client.
+ */
 export const oauthErrorCodes = new Set([
   "invalid_request",
   "invalid_client",
@@ -171,7 +176,7 @@ export function parseEnvList(text) {
 export function checkOAuthSettings(variables) {
   const issuer = variables.FITNESS_OAUTH_ISSUER;
   const clientId = variables.FITNESS_OAUTH_CLIENT_ID;
-  if (!issuer || !clientId)
+  if (typeof issuer !== "string" || typeof clientId !== "string" || !issuer || !clientId)
     fail("Set FITNESS_OAUTH_ISSUER and FITNESS_OAUTH_CLIENT_ID in the production EAS environment.");
   if (!/^https:\/\/[A-Za-z0-9.-]+$/.test(issuer.replace(/\/$/, "")))
     fail("FITNESS_OAUTH_ISSUER must be an HTTPS origin.");
@@ -518,9 +523,10 @@ export function commitBuildIds(builds, sha) {
   return builds.map((build) => build.id);
 }
 
-async function getJsonOk(url) {
+/** A 200 reply's JSON body. A failure names `endpoint`, a fixed label, never the URL. */
+async function getJsonOk(url, endpoint) {
   const reply = await getJson(url);
-  if (reply.status !== 200) fail(`${url} replied HTTP ${reply.status}.`);
+  if (reply.status !== 200) fail(`${endpoint} replied HTTP ${Number(reply.status)}.`);
   return reply.body;
 }
 
@@ -529,7 +535,8 @@ async function getJsonOk(url) {
  * status, a UUID build ID, and the version and build number in Apple's
  * format. It is the only build data a step logs or writes to the summary.
  */
-export function summary({ status, buildId, version, buildNumber }) {
+export function summary(value) {
+  const { status, buildId, version, buildNumber } = value ?? {};
   if (!releaseStatuses.has(status) || !isUuid(buildId) || !isBundleVersion(version) || !isBundleVersion(buildNumber))
     fail("The build summary holds a value that is not a release status, an EAS build ID or an app version.");
   return { status, buildId, version, buildNumber };
@@ -549,16 +556,28 @@ export function verifySignature(bundle, runTool = tool) {
 }
 
 /**
- * The OAuth issuer and client handed to later workflow steps, as
- * `NAME=value` lines for $GITHUB_ENV. Both are checked to a strict pattern,
- * so neither can carry a line break or another variable.
+ * The OAuth issuer and client that later workflow steps read from a private
+ * file, from the production EAS environment, each checked to a strict pattern.
  */
-export function oauthEnvironment(envList) {
-  const { issuer, clientId } = checkOAuthSettings(parseEnvList(envList));
-  return `RELEASE_OAUTH_ISSUER=${issuer}\nRELEASE_OAUTH_CLIENT_ID=${clientId}\n`;
+export const oauthSettings = (envList) => checkOAuthSettings(parseEnvList(envList));
+
+/** The OAuth issuer and client from the settings file, checked again. */
+export function oauthFromFile(settings) {
+  return checkOAuthSettings({
+    FITNESS_OAUTH_ISSUER: settings?.issuer,
+    FITNESS_OAUTH_CLIENT_ID: settings?.clientId,
+  });
 }
 
-/** The OAuth issuer and client from this step's environment, checked again. */
+const readOAuthFile = async (found) =>
+  oauthFromFile(await readResponse(required(found, "--oauth-file"), "The OAuth settings file"));
+
+/**
+ * The OAuth issuer and client from the admitting step's own shell
+ * environment, which reads them from the settings file with `oauth-value`,
+ * checked again. Admission sends them to Fitness and the issuer, so its
+ * requests depend on no file this process reads.
+ */
 export function oauthFromEnvironment(environment = process.env) {
   return checkOAuthSettings({
     FITNESS_OAUTH_ISSUER: environment.RELEASE_OAUTH_ISSUER,
@@ -577,9 +596,18 @@ export async function admit(oauth, current) {
     if (now.issuer !== oauth.issuer || now.clientId !== oauth.clientId)
       fail("The production EAS environment's OAuth settings changed during the release.");
   }
-  checkProtectedResource(await getJsonOk(`${FITNESS_ORIGIN}/.well-known/oauth-protected-resource`), oauth.issuer);
+  checkProtectedResource(
+    await getJsonOk(
+      `${FITNESS_ORIGIN}/.well-known/oauth-protected-resource`,
+      "Fitness production's protected-resource metadata",
+    ),
+    oauth.issuer,
+  );
   await readiness(oauth.clientId);
-  const metadata = await getJsonOk(`${oauth.issuer}/.well-known/oauth-authorization-server`);
+  const metadata = await getJsonOk(
+    `${oauth.issuer}/.well-known/oauth-authorization-server`,
+    "The OAuth issuer's metadata",
+  );
   checkAuthorizationServer(metadata, oauth.issuer);
   await checkClientAtIssuer({
     authorizationEndpoint: metadata.authorization_endpoint,
@@ -845,8 +873,16 @@ const commands = {
     console.log("The production iOS profile is a Release store build of the production variant.");
   },
   async "oauth-env"(argv) {
-    const found = options(argv, { values: ["--env-file"] });
-    process.stdout.write(oauthEnvironment(await readFile(required(found, "--env-file"), "utf8")));
+    const found = options(argv, { values: ["--env-file", "--out"] });
+    await writeJson(required(found, "--out"), oauthSettings(await readFile(required(found, "--env-file"), "utf8")));
+    console.log("The production EAS environment names a well-formed OAuth issuer and client.");
+  },
+  async "oauth-value"(argv) {
+    const found = options(argv, { values: ["--oauth-file", "--name"] });
+    const name = ["issuer", "clientId"].includes(found["--name"])
+      ? found["--name"]
+      : fail("Pass --name issuer or clientId.");
+    process.stdout.write(`${(await readOAuthFile(found))[name]}\n`);
   },
   async admit(argv) {
     const found = options(argv, { values: ["--current-env-file"], flags: ["--check-privacy"] });
@@ -906,12 +942,14 @@ const commands = {
     if (status !== "FINISHED") fail(`The submission is ${status}.`);
   },
   async "verify-archive"(argv) {
-    const found = options(argv, { values: ["--archive", "--logs-dir", "--build", "--work-dir", "--out"] });
+    const found = options(argv, {
+      values: ["--archive", "--logs-dir", "--build", "--oauth-file", "--work-dir", "--out"],
+    });
     const result = await verifyArchive({
       archive: resolve(required(found, "--archive")),
       logsDir: resolve(required(found, "--logs-dir")),
       build: await readResponse(required(found, "--build"), "The build summary"),
-      oauth: oauthFromEnvironment(),
+      oauth: await readOAuthFile(found),
       workDir: resolve(required(found, "--work-dir")),
     });
     await writeJson(required(found, "--out"), result);
@@ -925,9 +963,10 @@ const commands = {
   },
   async summary(argv) {
     const found = options(argv, { values: ["--file", "--sha", "--status"] });
-    const result = await readResponse(required(found, "--file"), "The verified build summary");
-    if (found["--status"]) result.status = found["--status"];
-    process.stdout.write(summaryMarkdown(result, requireSha(found["--sha"])));
+    // The stored summary is checked before the status is replaced, and again after.
+    const stored = summary(await readResponse(required(found, "--file"), "The verified build summary"));
+    const status = found["--status"] ?? stored.status;
+    process.stdout.write(summaryMarkdown({ ...stored, status }, requireSha(found["--sha"])));
   },
 };
 

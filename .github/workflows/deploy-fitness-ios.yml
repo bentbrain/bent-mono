@@ -88,13 +88,20 @@ jobs:
             echo "eas env:list failed (exit $status)." >&2
             exit 1
           fi
-      - name: Hand the build's OAuth issuer and client to later steps
+      - name: Record the build's OAuth issuer and client
         run: >-
           node apps/fitness-ios/scripts/release-ios.mjs oauth-env --env-file "$RUNNER_TEMP/eas-env-pre.txt"
-          >> "$GITHUB_ENV"
+          --out "$RUNNER_TEMP/oauth.json"
       - name: Admit the build's OAuth client
         timeout-minutes: 5
-        run: node apps/fitness-ios/scripts/release-ios.mjs admit
+        run: |
+          set -euo pipefail
+          checks=apps/fitness-ios/scripts/release-ios.mjs
+          oauth="$RUNNER_TEMP/oauth.json"
+          RELEASE_OAUTH_ISSUER="$(node "$checks" oauth-value --oauth-file "$oauth" --name issuer)"
+          RELEASE_OAUTH_CLIENT_ID="$(node "$checks" oauth-value --oauth-file "$oauth" --name clientId)"
+          export RELEASE_OAUTH_ISSUER RELEASE_OAUTH_CLIENT_ID
+          node "$checks" admit
       - name: List EAS builds of the commit
         timeout-minutes: 5
         working-directory: ${{ runner.temp }}/eas-static
@@ -210,7 +217,8 @@ jobs:
             fi
           done
           node "$checks" verify-archive --archive "$downloads/app.ipa" --logs-dir "$downloads/logs" \
-            --build "$RUNNER_TEMP/build.json" --work-dir "$downloads/work" --out "$RUNNER_TEMP/verified.json"
+            --build "$RUNNER_TEMP/build.json" --oauth-file "$RUNNER_TEMP/oauth.json" --work-dir "$downloads/work" \
+            --out "$RUNNER_TEMP/verified.json"
           build_id="$(node "$checks" build-id --file "$RUNNER_TEMP/verified.json")"
           echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
       - name: Read the production EAS environment again
@@ -234,9 +242,14 @@ jobs:
           fi
       - name: Admit again before submitting
         timeout-minutes: 5
-        run: >-
-          node apps/fitness-ios/scripts/release-ios.mjs admit --current-env-file "$RUNNER_TEMP/eas-env-post.txt"
-          --check-privacy
+        run: |
+          set -euo pipefail
+          checks=apps/fitness-ios/scripts/release-ios.mjs
+          oauth="$RUNNER_TEMP/oauth.json"
+          RELEASE_OAUTH_ISSUER="$(node "$checks" oauth-value --oauth-file "$oauth" --name issuer)"
+          RELEASE_OAUTH_CLIENT_ID="$(node "$checks" oauth-value --oauth-file "$oauth" --name clientId)"
+          export RELEASE_OAUTH_ISSUER RELEASE_OAUTH_CLIENT_ID
+          node "$checks" admit --current-env-file "$RUNNER_TEMP/eas-env-post.txt" --check-privacy
       - name: Prepare the submission lookup for this build
         env:
           BUILD_ID: ${{ steps.verify.outputs.build_id }}
@@ -328,4 +341,4 @@ jobs:
           "$RUNNER_TEMP/eas-existing-submissions.json" "$RUNNER_TEMP/eas-env-pre.txt" "$RUNNER_TEMP/eas-env-pre.err"
           "$RUNNER_TEMP/eas-env-post.txt" "$RUNNER_TEMP/eas-env-post.err" "$RUNNER_TEMP/eas-build-query.json"
           "$RUNNER_TEMP/eas-build-submissions.json" "$RUNNER_TEMP/eas-submit.out" "$RUNNER_TEMP/eas-submit.err"
-          "$RUNNER_TEMP/eas-submitted.json" "$RUNNER_TEMP/eas-cli" "$RUNNER_TEMP/eas-static"
+          "$RUNNER_TEMP/eas-submitted.json" "$RUNNER_TEMP/oauth.json" "$RUNNER_TEMP/eas-cli" "$RUNNER_TEMP/eas-static"

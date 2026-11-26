@@ -29,8 +29,9 @@ import {
   checkNoSubmissions,
   curlConfig,
   submissionsQuery,
-  oauthEnvironment,
   oauthFromEnvironment,
+  oauthFromFile,
+  oauthSettings,
   checkAuthorizationServer,
   checkNoEasIgnore,
   checkSameQuality,
@@ -685,7 +686,7 @@ describe("the Deploy Fitness iOS workflow", () => {
       /check-no-submissions --build-id/,
       /verify-archive/,
       /oauth-env/,
-      /release-ios\.mjs admit$/m,
+      /node "\$checks" admit$/m,
       /submission-status/,
     ])
       expect(steps[index(pattern)].env?.EXPO_TOKEN).toBeUndefined();
@@ -820,15 +821,34 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(cleanup.if).toBe("always()");
     for (const path of ["ipa", "eas-build.json", "eas-existing.json", "eas-submitted.json", "eas-cli", "eas-static"])
       expect(cleanup.run).toContain(`"$RUNNER_TEMP/${path}"`);
-    // Only the build ID leaves a step as an output, and only the checked OAuth settings as env.
+    // Only the build ID leaves a step as an output; nothing is written to the job's environment.
     expect(source.match(/GITHUB_OUTPUT/g)).toHaveLength(1);
     // The build ID is checked as a UUID before it is written.
     const verify = steps[index(/verify-archive/)].run;
     expect(verify).toContain('build_id="$(node "$checks" build-id --file "$RUNNER_TEMP/verified.json")"');
     expect(verify).toContain('echo "build_id=$build_id" >> "$GITHUB_OUTPUT"');
     expect(verify).not.toContain("node -p");
-    expect(source.match(/GITHUB_ENV/g)).toHaveLength(1);
-    expect(steps[index(/oauth-env/)].run).toContain('>> "$GITHUB_ENV"');
+    expect(source).not.toContain("GITHUB_ENV");
+    // The OAuth settings reach later steps as a private file, passed by path and removed at the end.
+    expect(steps[index(/oauth-env/)].run).toContain('--out "$RUNNER_TEMP/oauth.json"');
+    expect(steps[index(/verify-archive/)].run).toContain('--oauth-file "$RUNNER_TEMP/oauth.json"');
+    expect(cleanup.run).toContain('"$RUNNER_TEMP/oauth.json"');
+    // Each admission reads them from the file into its own shell, never a step's env block.
+    const admissions = steps.filter((step) => /node "\$checks" admit\b/.test(step.run ?? ""));
+    expect(admissions).toHaveLength(2);
+    for (const step of admissions) {
+      expect(step.run).toContain('oauth="$RUNNER_TEMP/oauth.json"');
+      expect(step.run).toContain(
+        'RELEASE_OAUTH_ISSUER="$(node "$checks" oauth-value --oauth-file "$oauth" --name issuer)"',
+      );
+      expect(step.run).toContain(
+        'RELEASE_OAUTH_CLIENT_ID="$(node "$checks" oauth-value --oauth-file "$oauth" --name clientId)"',
+      );
+      expect(step.run).toContain("export RELEASE_OAUTH_ISSUER RELEASE_OAUTH_CLIENT_ID\n");
+      expect(step.run.indexOf("export RELEASE_OAUTH")).toBeLessThan(step.run.indexOf('node "$checks" admit'));
+    }
+    expect(steps.filter((step) => /RELEASE_OAUTH/.test(step.run ?? ""))).toEqual(admissions);
+    for (const step of steps) expect(JSON.stringify(step.env ?? {})).not.toContain("OAUTH");
   });
 
   test("downloads through curl configs, following HTTPS redirects only, and shows only curl's exit code", () => {
@@ -895,7 +915,7 @@ describe("the Deploy Fitness iOS workflow", () => {
     const qualify = index(/Qualify exact main source before installing/);
     const profile = index(/check-profile/);
     const handOff = index(/oauth-env --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
-    const admitBuild = index(/release-ios\.mjs admit$/m);
+    const admitBuild = index(/node "\$checks" admit$/m);
     const list = index(/ build:list --platform ios/);
     const commitQuery = index(/submissions-query --build-list/);
     const commitLookup = index(/eas-existing-submissions\.json" 2>\/dev\/null/);
@@ -960,7 +980,7 @@ describe("the release subcommands", () => {
     const unknown = run("credentials");
     expect(unknown.status).not.toBe(0);
     expect(unknown.stderr).toContain(
-      "Run one of: check-config, check-profile, oauth-env, admit, same-quality, check-build, submissions-query",
+      "Run one of: check-config, check-profile, oauth-env, oauth-value, admit, same-quality, check-build, submissions-query",
     );
   });
 
@@ -1153,7 +1173,7 @@ process.stdout.write(JSON.stringify(result));`,
           "The EAS submissions response was not valid JSON.",
         ],
         [["submission-status", "--build-id", build.id, "--file", hostileSubmission], "malformed submission"],
-        [["oauth-env", "--env-file", cut], "FITNESS_OAUTH_ISSUER"],
+        [["oauth-env", "--env-file", cut, "--out", out], "FITNESS_OAUTH_ISSUER"],
         [["build-id", "--file", cut], "The verified build summary was not valid JSON."],
         [["build-id", "--file", hostileList], "has no EAS build ID"],
         [
@@ -1350,6 +1370,16 @@ process.stdout.write(JSON.stringify(result));`,
       expect(run("summary", "--file", file, "--sha", sha, "--status", "**hacked**").stderr).toContain(
         "not a release status",
       );
+      // The stored status is checked before --status replaces it.
+      writeFileSync(file, JSON.stringify({ ...good, status: "unexpected" }));
+      const stored = run("summary", "--file", file, "--sha", sha, "--status", "submitted");
+      expect(stored.status).not.toBe(0);
+      expect(stored.stdout).toBe("");
+      expect(stored.stderr).toContain("not a release status");
+      writeFileSync(file, "null");
+      expect(run("summary", "--file", file, "--sha", sha, "--status", "submitted").stderr).toContain(
+        "not a release status",
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1445,11 +1475,9 @@ process.stdout.write(JSON.stringify(result));`,
     }
   });
 
-  test("the OAuth settings handed to later steps are one variable a line, checked strictly", () => {
+  test("the OAuth settings later steps read are written to a private file, and checked strictly on each read", () => {
     const list = "FITNESS_OAUTH_ISSUER=https://clerk.example.com/\nFITNESS_OAUTH_CLIENT_ID=client_123\n";
-    expect(oauthEnvironment(list)).toBe(
-      "RELEASE_OAUTH_ISSUER=https://clerk.example.com\nRELEASE_OAUTH_CLIENT_ID=client_123\n",
-    );
+    expect(oauthSettings(list)).toEqual({ issuer: "https://clerk.example.com", clientId: "client_123" });
     for (const [issuer, clientId] of [
       ["https://clerk.example.com", "client\rOTHER=1"],
       ["https://clerk.example.com", "client 1"],
@@ -1461,10 +1489,56 @@ process.stdout.write(JSON.stringify(result));`,
       expect(() => checkOAuthSettings({ FITNESS_OAUTH_ISSUER: issuer, FITNESS_OAUTH_CLIENT_ID: clientId })).toThrow(
         "FITNESS_OAUTH_",
       );
+    expect(oauthFromFile({ issuer: "https://clerk.example.com", clientId: "c1" })).toEqual({
+      issuer: "https://clerk.example.com",
+      clientId: "c1",
+    });
+    for (const settings of [null, {}, [], { issuer: ["https://clerk.example.com"], clientId: "c1" }])
+      expect(() => oauthFromFile(settings)).toThrow("FITNESS_OAUTH_ISSUER");
+    expect(() => oauthFromFile({ issuer: "https://clerk.example.com/a?b", clientId: "c1" })).toThrow(
+      "FITNESS_OAUTH_ISSUER must be an HTTPS origin.",
+    );
     expect(
       oauthFromEnvironment({ RELEASE_OAUTH_ISSUER: "https://clerk.example.com", RELEASE_OAUTH_CLIENT_ID: "c1" }),
     ).toEqual({ issuer: "https://clerk.example.com", clientId: "c1" });
     expect(() => oauthFromEnvironment({})).toThrow("FITNESS_OAUTH_ISSUER");
+
+    const directory = mkdtempSync(join(tmpdir(), "release-oauth-file-"));
+    try {
+      const envFile = join(directory, "env.txt");
+      const out = join(directory, "oauth.json");
+      writeFileSync(envFile, list);
+      const written = run("oauth-env", "--env-file", envFile, "--out", out);
+      expect(written.status).toBe(0);
+      // The step log names neither value.
+      expect(`${written.stdout}${written.stderr}`).not.toMatch(/clerk\.example\.com|client_123/);
+      expect(JSON.parse(readFileSync(out, "utf8"))).toEqual({
+        issuer: "https://clerk.example.com",
+        clientId: "client_123",
+      });
+      expect(statSync(out).mode & 0o777).toBe(0o600);
+      // Each value is read back on its own, checked again.
+      expect(run("oauth-value", "--oauth-file", out, "--name", "issuer").stdout).toBe("https://clerk.example.com\n");
+      expect(run("oauth-value", "--oauth-file", out, "--name", "clientId").stdout).toBe("client_123\n");
+      expect(run("oauth-value", "--oauth-file", out, "--name", "constructor").stderr).toContain(
+        "Pass --name issuer or clientId.",
+      );
+      // A tampered or unreadable settings file yields no value, and shows none.
+      const tampered = join(directory, "tampered.json");
+      for (const [contents, message] of [
+        ["{not json user@example.com", "The OAuth settings file was not valid JSON."],
+        [JSON.stringify({ issuer: "https://evil.example.com/x?user@example.com", clientId: "c1" }), "HTTPS origin"],
+      ]) {
+        writeFileSync(tampered, contents);
+        const refused = run("oauth-value", "--oauth-file", tampered, "--name", "issuer");
+        expect(refused.status).not.toBe(0);
+        expect(refused.stdout).toBe("");
+        expect(refused.stderr).toContain(message);
+        expect(refused.stderr).not.toMatch(/user@example\.com|evil/);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("check-build writes curl configs holding the signed URLs, and prints none of them", () => {
