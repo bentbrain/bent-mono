@@ -8,7 +8,13 @@ const WORKFLOW = ".github/workflows/quality.yml";
 const SHA = /^[a-f0-9]{40}$/;
 const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser",
   "public-source", "secret-scan", "dependencies", "CodeQL", "Release qualification"];
-const fail = message => { throw new Error(message); };
+class QualificationError extends Error {}
+const fail = message => { throw new QualificationError(message); };
+// A request's endpoint with its commit SHAs and numeric IDs left out, so a message never quotes GitHub's data.
+const endpointName = path => path.split("?")[0].replace(/[a-f0-9]{40}/g, ":sha").replace(/\/\d+(?=\/|$)/g, "/:id");
+const parseReply = (text, path) => {
+  try { return JSON.parse(text); } catch { return fail(`GitHub returned an unreadable response for ${endpointName(path)}.`); }
+};
 
 export function validateReleaseEvent(env, event, sha) {
   if (!SHA.test(sha)) fail("Release source must be a full commit SHA.");
@@ -105,17 +111,17 @@ export async function requireReleaseChecks(sha, api) {
 export async function githubApi(path) {
   if (!process.env.GH_TOKEN) {
     if (process.env.GITHUB_ACTIONS === "true") fail("GH_TOKEN is required for CI release qualification.");
-    return JSON.parse(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
+    return parseReply(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }), path);
   }
   const response = await fetch(`https://api.github.com${path}`, {
     headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
     redirect: "error", signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) fail(`Release qualification API failed with HTTP ${response.status}.`);
-  return response.json();
+  return parseReply(await response.text(), path);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+async function main() {
   if (process.argv.length !== 4 || process.argv[2] !== "--sha") fail("Usage: node scripts/require-release-checks.mjs --sha <full-sha>");
   const sha = process.argv[3];
   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -125,4 +131,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const event = process.env.GITHUB_ACTIONS === "true" ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
   validateReleaseEvent(process.env, event, sha);
   console.log(JSON.stringify(await requireReleaseChecks(sha, githubApi)));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // Only this script's own messages are shown, never a stack or another error's text.
+  await main().catch(error => {
+    console.error(error instanceof QualificationError ? error.message : "Release qualification failed unexpectedly.");
+    process.exitCode = 1;
+  });
 }
