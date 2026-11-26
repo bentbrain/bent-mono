@@ -22,6 +22,7 @@ import {
   checkReadiness,
   checkSignedEntitlements,
   checkXcodeLog,
+  ownedGroup,
   printSummary,
   childEnvironment,
   easEnvironment,
@@ -80,8 +81,8 @@ describe("release arguments and configuration", () => {
     expect(() => parseArgs(["build", "--sha", sha, "--config", "release.json"])).toThrow("Usage");
     expect(() => parseArgs(["build", "--sha", sha, "--sha", sha, "--config", "/x"])).toThrow("Usage");
     expect(() => parseArgs(["update", "--config", "/x"])).toThrow("Usage");
-    expect(parseArgs(["credentials", "--config", "/x"]).action).toBe("credentials");
-    expect(() => parseArgs(["credentials", "--sha", sha, "--config", "/x"])).toThrow("Usage");
+    expect(() => parseArgs(["credentials", "--config", "/x"])).toThrow("Usage");
+    expect(() => parseArgs(["build", "--config", "/x"])).toThrow("Usage");
   });
 
   test("the configuration names the team key, the Apple team and a work directory outside the checkout", () => {
@@ -178,171 +179,112 @@ describe("release arguments and configuration", () => {
     expect(failure.message).not.toMatch(/_token|56789/);
   });
 
-  for (const interactive of [false, true])
-    test(`a command past its limit is stopped with its descendants${interactive ? ", interactive" : ""}`, async () => {
-      // The child starts a grandchild that inherits the pipes, then both wait.
-      const script =
-        "const { spawn } = require('node:child_process');" +
-        "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
-        "console.log(grandchild.pid); setTimeout(() => {}, 60000);";
-      const output = sink();
-      const started = Date.now();
-      const failure = await execute(process.execPath, ["-e", script], {
-        ...quiet,
-        timeout: 400,
-        grace: 200,
-        interactive,
-        show: true,
-        output,
-      }).catch((error) => error);
-      expect(failure.message).toContain("limit");
-      expect(Date.now() - started).toBeLessThan(5_000);
-      const grandchild = Number(output.parts.join("").trim());
-      expect(grandchild).toBeGreaterThan(0);
-      expect(await exits(grandchild)).toBe(true);
-    });
-
-  test("an interactive command's helper is stopped when the command exits", async () => {
-    // The command starts a helper that inherits the pipes, then exits at once.
+  test("a command past its limit is stopped with its descendants", async () => {
+    // The child starts a grandchild that inherits the pipes, then both wait.
     const script =
       "const { spawn } = require('node:child_process');" +
-      "const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
-      "console.log(helper.pid); helper.unref(); process.exit(0);";
+      "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
+      "console.log(grandchild.pid); setTimeout(() => {}, 60000);";
     const output = sink();
     const started = Date.now();
-    await execute(process.execPath, ["-e", script], {
+    const failure = await execute(process.execPath, ["-e", script], {
       ...quiet,
-      timeout: 30_000,
+      timeout: 400,
       grace: 200,
-      interactive: true,
       show: true,
       output,
-    });
+    }).catch((error) => error);
+    expect(failure.message).toContain("limit");
     expect(Date.now() - started).toBeLessThan(5_000);
-    expect(await exits(Number(output.parts.join("").trim()))).toBe(true);
+    const grandchild = Number(output.parts.join("").trim());
+    expect(grandchild).toBeGreaterThan(0);
+    expect(await exits(grandchild)).toBe(true);
   });
 
-  test("an interactive command runs in a process group of its own", async () => {
+  test("a command leads a process group of its own, apart from the release's", async () => {
     const group = (pid) =>
       Number(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
     const script =
       "const { execSync } = require('node:child_process'); console.log(execSync('ps -o pgid= -p ' + process.pid).toString().trim(), process.pid);";
-    const reply = await execute(process.execPath, ["-e", script], {
-      ...quiet,
-      timeout: 30_000,
-      grace: 200,
-      interactive: true,
-      show: false,
-    });
+    const reply = await execute(process.execPath, ["-e", script], { ...quiet, timeout: 30_000 });
     const [pgid, pid] = reply.stdout.trim().split(/\s+/).map(Number);
     expect(pgid).toBe(pid);
     expect(pgid).not.toBe(group(process.pid));
   });
 
+  test("only a group the command leads is ever signalled", () => {
+    const table = [
+      { pid: 60, ppid: 50, pgid: 60, seconds: 9 }, // the release, leading its shell job
+      { pid: 70, ppid: 60, pgid: 70, seconds: 1 }, // a command that made its own group
+      { pid: 71, ppid: 60, pgid: 60, seconds: 1 }, // a command that inherited the release's group
+      { pid: 72, ppid: 60, pgid: 90, seconds: 1 }, // a command in some other group
+    ];
+    expect(ownedGroup(70, table, 60)).toBe(70);
+    expect(ownedGroup(71, table, 60)).toBeNull();
+    expect(ownedGroup(72, table, 60)).toBeNull();
+    // The release's own group, or init's, is never a command's.
+    expect(ownedGroup(60, table, 60)).toBeNull();
+    expect(ownedGroup(1, table, 60)).toBeNull();
+    // A command that already exited made its group when it started.
+    expect(ownedGroup(80, table, 60)).toBe(80);
+  });
+
   /** A release runner: it runs one command that starts a helper, as the release does, until it is stopped. */
   const runnerSource = `
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-const [, , modulePath, mode, dir] = process.argv;
+const [, , modulePath, dir] = process.argv;
 const { childEnvironment, execute, stopChildrenOnInterrupt } = await import(modulePath);
-const terminal = (pid) => execFileSync("ps", ["-o", "tpgid=,pgid=", "-p", String(pid)], { encoding: "utf8" }).trim().split(/\\s+/).map(Number);
-writeFileSync(dir + "/runner", JSON.stringify({ pid: process.pid, terminal: terminal(process.pid) }));
-stopChildrenOnInterrupt({ beforeExit: () => writeFileSync(dir + "/after", JSON.stringify(terminal(process.pid))) });
+writeFileSync(dir + "/runner", JSON.stringify({ pid: process.pid }));
+stopChildrenOnInterrupt({ beforeExit: (signal) => writeFileSync(dir + "/after", JSON.stringify({ signal })) });
 const command = [
-  "const { spawn, execFileSync } = require('node:child_process');",
+  "const { spawn } = require('node:child_process');",
   "const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });",
-  "const [tpgid, pgid] = execFileSync('ps', ['-o', 'tpgid=,pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim().split(/\\\\s+/).map(Number);",
-  "require('node:fs').writeFileSync(" + JSON.stringify(dir + "/command") + ", JSON.stringify({ pid: process.pid, helper: helper.pid, tpgid, pgid }));",
+  "require('node:fs').writeFileSync(" + JSON.stringify(dir + "/command") + ", JSON.stringify({ pid: process.pid, helper: helper.pid }));",
   "setTimeout(() => {}, 60000);",
 ].join("\\n");
 await execute(process.execPath, ["-e", command], {
   env: childEnvironment(process.env),
   timeout: 60000,
   grace: 300,
-  interactive: mode === "interactive",
   show: true,
   hidden: [],
 });
 `;
-  /** Runs `argv` in a new pseudo-terminal session, as a terminal would, and exits with its exit code. */
-  const ptyDriver = `
-import os, pty, select, sys, time
-pid, fd = pty.fork()
-if pid == 0:
-    os.execvp(sys.argv[1], sys.argv[1:])
-deadline = time.time() + 60
-while time.time() < deadline:
-    ready, _, _ = select.select([fd], [], [], 0.1)
-    if ready:
-        try:
-            os.read(fd, 65536)
-        except OSError:
-            pass
-    done, status = os.waitpid(pid, os.WNOHANG)
-    if done:
-        sys.exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))
-os.kill(pid, 9)
-sys.exit(99)
-`;
-  const hasPython = spawnSync("python3", ["-c", "import pty"]).status === 0;
   const waitFor = async (path) => {
     for (let wait = 0; wait < 300 && !existsSync(path); wait++) await new Promise((wake) => setTimeout(wake, 50));
     return JSON.parse(readFileSync(path, "utf8"));
   };
-  const runRelease = (mode, { pty }) => {
+  const runRelease = () => {
     const dir = mkdtempSync(join(tmpdir(), "release-stop-"));
     const runner = join(dir, "runner.mjs");
     writeFileSync(runner, runnerSource);
     const module = new URL("../scripts/release-ios.mjs", import.meta.url).href;
-    const argv = [process.execPath, runner, module, mode, dir];
-    const child = pty
-      ? spawn("python3", ["-c", ptyDriver, ...argv], { stdio: "ignore" })
-      : spawn(argv[0], argv.slice(1), { stdio: "ignore" });
-    const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+    const child = spawn(process.execPath, [runner, module, dir], { stdio: "ignore" });
+    const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve(code ?? signal)));
     return { dir, exited, kill: () => child.kill("SIGKILL") };
   };
 
-  test.skipIf(!hasPython)(
-    "stopping the release in a terminal stops an interactive command's helper and gives the terminal back",
-    async () => {
-      const release = runRelease("interactive", { pty: true });
+  for (const [signal, code] of [
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+    ["SIGHUP", 129],
+  ])
+    test(`${signal} to the release stops each command's tree before it exits`, async () => {
+      const release = runRelease();
       try {
         const runner = await waitFor(join(release.dir, "runner"));
         const command = await waitFor(join(release.dir, "command"));
-        // The release starts in the foreground; the command's own group takes it over.
-        expect(runner.terminal[0]).toBe(runner.terminal[1]);
-        expect(command.pgid).toBe(command.pid);
-        expect(command.tpgid).toBe(command.pgid);
-        expect(command.pgid).not.toBe(runner.terminal[1]);
-        process.kill(runner.pid, "SIGTERM");
-        expect(await release.exited).toBe(143);
-        const [foreground, group] = await waitFor(join(release.dir, "after"));
-        expect(foreground).toBe(group);
-        expect(group).toBe(runner.terminal[1]);
+        process.kill(runner.pid, signal);
+        // The release exits from its own handler, after stopping the tree.
+        expect(await release.exited).toBe(code);
+        expect(await waitFor(join(release.dir, "after"))).toEqual({ signal });
         expect(await exits(command.helper)).toBe(true);
         expect(await exits(command.pid)).toBe(true);
       } finally {
         release.kill();
         rmSync(release.dir, { recursive: true, force: true });
       }
-    },
-    30_000,
-  );
-
-  test("stopping the release stops a non-interactive command's tree", async () => {
-    const release = runRelease("grouped", { pty: false });
-    try {
-      const runner = await waitFor(join(release.dir, "runner"));
-      const command = await waitFor(join(release.dir, "command"));
-      process.kill(runner.pid, "SIGTERM");
-      expect(await release.exited).toBe(143);
-      expect(await exits(command.helper)).toBe(true);
-      expect(await exits(command.pid)).toBe(true);
-    } finally {
-      release.kill();
-      rmSync(release.dir, { recursive: true, force: true });
-    }
-  }, 30_000);
+    }, 30_000);
 
   test("stdout carries only the final JSON summary, while command output goes to stderr", async () => {
     const dir = mkdtempSync(join(tmpdir(), "release-stdout-"));
@@ -827,6 +769,31 @@ describe("release admission", () => {
       await expect(checkClientAtIssuer(request, consent.fetchImpl)).rejects.toThrow("returning to");
       for (const url of ["https://user@accounts.example.com/sign-in", "https://accounts.example.com:444/sign-in"])
         expect(() => signInPage({ display_config: { sign_in_url: url } })).toThrow("sign-in page");
+    });
+
+    test("refuses a bare trailing # anywhere in the flow", async () => {
+      const continuation = (target) => `${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`;
+      const consent = (target) => `${accounts}/oauth-consent?${target.searchParams}`;
+      // The configured sign-in URL.
+      expect(() => signInPage({ display_config: { sign_in_url: "https://accounts.example.com/sign-in#" } })).toThrow(
+        "sign-in page",
+      );
+      const configured = clerk({
+        environment: Response.json({ display_config: { sign_in_url: "https://accounts.example.com/sign-in#" } }),
+      });
+      await expect(checkClientAtIssuer(request, configured.fetchImpl)).rejects.toThrow("sign-in page");
+      // The first and second sign-in redirects.
+      const firstRedirect = clerk({ first: (target) => redirect(`${signIn(continuation(target))}#`) });
+      await expect(checkClientAtIssuer(request, firstRedirect.fetchImpl)).rejects.toThrow("instance's sign-in");
+      const secondRedirect = clerk({ second: (target) => redirect(`${signIn(consent(target))}#`) });
+      await expect(checkClientAtIssuer(request, secondRedirect.fetchImpl)).rejects.toThrow("instance's sign-in");
+      // The first and second return URLs.
+      const firstReturn = clerk({ first: (target) => redirect(signIn(`${continuation(target)}#`)) });
+      await expect(checkClientAtIssuer(request, firstReturn.fetchImpl)).rejects.toThrow("returning to");
+      const secondReturn = clerk({ second: (target) => redirect(signIn(`${consent(target)}#`)) });
+      await expect(checkClientAtIssuer(request, secondReturn.fetchImpl)).rejects.toThrow("returning to");
+      // Without the "#", the same flow passes.
+      await checkClientAtIssuer(request, clerk().fetchImpl);
     });
 
     test("takes the accounts host only from the instance's own sign-in URL", async () => {

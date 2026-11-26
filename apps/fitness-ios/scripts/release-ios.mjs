@@ -1,12 +1,9 @@
 // Releases bent Fitness to TestFlight from an exact, qualified main commit.
 //
 //   bun run release:ios build --sha <full-sha> --config <private-file>
-//   bun run release:ios credentials --config <private-file>
 //
 // `build` qualifies the commit, builds it on EAS from a fresh clone, checks
-// the signed app and submits that exact build to TestFlight. `credentials`
-// opens EAS's interactive credentials manager with the same Apple and Expo
-// access, for the one-time signing and submission key setup.
+// the signed app and submits that exact build to TestFlight.
 import { spawn, spawnSync } from "node:child_process";
 import { constants, createWriteStream, existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
@@ -38,10 +35,8 @@ const fail = (message) => {
 
 export function parseArgs(argv) {
   const [action, ...rest] = argv;
-  const usage =
-    "Usage: bun run release:ios build --sha <full-sha> --config <private-file>\n" +
-    "       bun run release:ios credentials --config <private-file>";
-  if (!["build", "credentials"].includes(action)) fail(usage);
+  const usage = "Usage: bun run release:ios build --sha <full-sha> --config <private-file>";
+  if (action !== "build") fail(usage);
   const options = {};
   for (let index = 0; index < rest.length; index += 2) {
     const name = rest[index];
@@ -50,8 +45,7 @@ export function parseArgs(argv) {
     options[name] = value;
   }
   if (!options["--config"] || !isAbsolute(options["--config"])) fail(usage);
-  if (action === "build" && !SHA.test(options["--sha"] ?? "")) fail(usage);
-  if (action === "credentials" && options["--sha"]) fail(usage);
+  if (!SHA.test(options["--sha"] ?? "")) fail(usage);
   return { action, sha: options["--sha"], configPath: options["--config"] };
 }
 
@@ -252,64 +246,40 @@ function descendants(pid, table = processTable()) {
 }
 
 /**
- * Runs an interactive command in a process group of its own and makes that
- * group the terminal's foreground group, so prompts and Ctrl-C reach it. When
- * the command exits, the terminal goes back to this release's group and the
- * command's group is killed, which stops helpers whose parent has exited. On
- * SIGTERM it stops the group: SIGTERM, then SIGKILL after the grace period
- * in seconds, its first argument. Without a terminal it still supervises the
- * group.
+ * The process group of a child spawned `detached`, which makes it the leader
+ * of a new group whose ID is its own process ID. This checks that with `ps`
+ * before the group is ever signalled, and returns null, so nothing is sent to
+ * the group, if the child shows another group or the group is this release's
+ * own. A child that has already exited is no longer listed; it made its group
+ * when it started, so the group is its process ID.
  */
-const SUPERVISOR = String.raw`
-use strict;
-use POSIX qw(setpgid getpgrp tcgetpgrp tcsetpgrp _exit);
-my $grace = shift @ARGV;
-my ($fd, $foreground) = (-1, undef);
-if (open(my $tty, "+<", "/dev/tty")) { $fd = fileno($tty); $foreground = tcgetpgrp($fd); $main::tty = $tty; }
-$SIG{TTOU} = "IGNORE";
-$SIG{TTIN} = "IGNORE";
-my $pid = fork();
-defined $pid or die "fork: $!";
-if ($pid == 0) {
-  setpgid(0, 0);
-  tcsetpgrp($fd, getpgrp()) if $fd >= 0;
-  $SIG{TTOU} = "DEFAULT";
-  $SIG{TTIN} = "DEFAULT";
-  exec { $ARGV[0] } @ARGV;
-  _exit(127);
+export function ownedGroup(pid, table, self = process.pid) {
+  const own = table.find((row) => row.pid === self)?.pgid;
+  const row = table.find((item) => item.pid === pid);
+  if (row && row.pgid !== pid) return null;
+  if (pid === own || pid <= 1) return null;
+  return pid;
 }
-setpgid($pid, $pid);
-tcsetpgrp($fd, $pid) if $fd >= 0;
-my $restore = sub { tcsetpgrp($fd, $foreground) if $fd >= 0 && defined $foreground };
-for my $signal (qw(TERM HUP INT)) {
-  $SIG{$signal} = sub {
-    kill "TERM", -$pid;
-    select(undef, undef, undef, $grace);
-    kill "KILL", -$pid;
-    $restore->();
-    _exit(143);
-  };
+
+function killGroup(group, signal) {
+  if (!group) return;
+  try {
+    process.kill(-group, signal);
+  } catch {
+    // The group is gone already.
+  }
 }
-waitpid($pid, 0);
-my $status = $?;
-$restore->();
-kill "KILL", -$pid;
-_exit($status & 127 ? 128 + ($status & 127) : $status >> 8);
-`;
 
 /**
- * Signals a child and everything below it: its process group, when it has
- * one, and each descendant. `known` collects the descendants found, so a
- * later signal still reaches one whose parent has already exited.
+ * Signals a command and everything below it: the process group it leads,
+ * when that was verified, and each descendant. `known` collects the
+ * descendants found, so a later signal still reaches one whose parent has
+ * already exited.
  */
-function signalTree(child, signal, grouped, known = new Set()) {
+function signalTree(entry, signal) {
+  const { child, known } = entry;
   for (const pid of descendants(child.pid)) known.add(pid);
-  if (grouped)
-    try {
-      process.kill(-child.pid, signal);
-    } catch {
-      // The group is gone already.
-    }
+  killGroup(entry.group, signal);
   for (const pid of [...known, child.pid])
     try {
       process.kill(pid, signal);
@@ -323,48 +293,19 @@ const running = new Set();
 /** Set once the release is stopping, so the runs it stops do not settle. */
 let interrupting = false;
 
-/** The process group a supervisor's command runs in, once it has started. */
-function supervisedGroup(supervisor) {
-  const command = processTable().find((row) => row.ppid === supervisor);
-  return command ? command.pgid : null;
-}
-
-function killGroup(group, signal) {
-  if (!group) return;
-  try {
-    process.kill(-group, signal);
-  } catch {
-    // The group is gone already.
-  }
-}
-
 /**
- * Stops a running command and everything it started, within a bound.
- * An interactive command's supervisor gets SIGTERM, so it stops its group,
- * gives the terminal back and exits; after the grace period and three
- * seconds more, the supervisor and the recorded group get SIGKILL. A
- * non-interactive tree gets SIGTERM, then SIGKILL after the grace period.
+ * Stops a running command and everything it started, within a bound: the
+ * tree gets SIGTERM, then SIGKILL after the grace period.
  */
 async function stopTree(entry) {
-  const { child, grouped, interactive, known, grace } = entry;
+  const { child, grace } = entry;
   const exited =
     child.exitCode !== null || child.signalCode !== null
       ? Promise.resolve()
       : new Promise((resolve) => child.once("exit", resolve));
-  const within = (ms) =>
-    Promise.race([exited.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))]);
-  if (interactive) {
-    entry.group ??= supervisedGroup(child.pid);
-    for (const pid of descendants(child.pid)) known.add(pid);
-    child.kill("SIGTERM");
-    if (!(await within(grace + 3000))) child.kill("SIGKILL");
-    killGroup(entry.group, "SIGKILL");
-    signalTree(child, "SIGKILL", false, known);
-  } else {
-    signalTree(child, "SIGTERM", grouped, known);
-    await within(grace);
-    signalTree(child, "SIGKILL", grouped, known);
-  }
+  signalTree(entry, "SIGTERM");
+  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, grace))]);
+  signalTree(entry, "SIGKILL");
 }
 
 /** Stops every running command; see `stopTree`. */
@@ -394,15 +335,14 @@ export function stopChildrenOnInterrupt({ beforeExit } = {}) {
 /**
  * Runs a command with a hard time limit and the allowlisted environment.
  *
- * A non-interactive command runs in its own process group. At the limit the
- * whole tree gets SIGTERM, then SIGKILL after `grace`, its pipes are closed
- * and the run fails at once, even if a descendant kept the pipes open. An
- * interactive command runs under SUPERVISOR, in a group of its own that is
- * the terminal's foreground group while it runs, and that group is killed
- * when it exits.
+ * The command runs in a process group of its own. At the limit, and when
+ * the release is interrupted, the whole tree gets SIGTERM, then SIGKILL
+ * after `grace`; its pipes are closed and the run fails at once, even if a
+ * descendant kept the pipes open.
  *
- * With `show`, output is written redacted as it arrives. Otherwise it is
- * returned, and shown redacted only when the command fails.
+ * With `show`, output is written redacted to stderr as it arrives, so stdout
+ * stays for the release's summary. Otherwise it is returned, and shown
+ * redacted only when the command fails.
  */
 export function execute(
   command,
@@ -412,8 +352,7 @@ export function execute(
     env = childEnvironment(process.env),
     timeout,
     input,
-    interactive = false,
-    show = interactive,
+    show = false,
     hidden = secrets,
     output = process.stderr,
     errors = process.stderr,
@@ -421,27 +360,19 @@ export function execute(
   },
 ) {
   return new Promise((done, failed) => {
-    const grouped = !interactive;
-    const [program, programArgs] = interactive
-      ? ["perl", ["-e", SUPERVISOR, String(grace / 1000), command, ...args]]
-      : [command, args];
-    const child = spawn(program, programArgs, {
+    const child = spawn(command, args, {
       cwd,
       env,
-      detached: grouped,
-      stdio: [interactive ? "inherit" : input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      detached: true,
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
-    const known = new Set();
-    const entry = { child, grouped, interactive, known, grace, group: null };
+    const entry = {
+      child,
+      known: new Set(),
+      grace,
+      group: child.pid ? ownedGroup(child.pid, processTable()) : null,
+    };
     running.add(entry);
-    // The supervised command's group, recorded while it runs so it can still
-    // be stopped if the supervisor itself has to be killed.
-    const recorder = interactive
-      ? setInterval(() => {
-          entry.group ??= supervisedGroup(child.pid);
-          if (entry.group) clearInterval(recorder);
-        }, 200)
-      : null;
     let stdout = "";
     let stderr = "";
     const out = redactingWriter((text) => output.write(text), hidden);
@@ -466,11 +397,9 @@ export function execute(
       if (settled) return;
       settled = true;
       for (const timer of timers) clearTimeout(timer);
-      if (recorder) clearInterval(recorder);
       running.delete(entry);
       // Descendants still running, or left holding the pipes, stop with the command.
-      signalTree(child, "SIGKILL", grouped, known);
-      if (interactive) killGroup(entry.group, "SIGKILL");
+      signalTree(entry, "SIGKILL");
       child.stdout.destroy();
       child.stderr.destroy();
       out.end();
@@ -649,9 +578,10 @@ export function carriesParameters(url, expected) {
   );
 }
 
-/** An HTTPS URL on the default port, with no user information or fragment. */
+/** An HTTPS URL on the default port, with no user information or fragment, not even a bare "#". */
 export function plainHttps(url) {
-  return url.protocol === "https:" && url.port === "" && !url.username && !url.password && !url.hash;
+  // `hash` is "" for a bare trailing "#", which the serialized URL keeps.
+  return url.protocol === "https:" && url.port === "" && !url.username && !url.password && !url.href.includes("#");
 }
 
 /** The redirect statuses an authorization step may answer with. */
@@ -1211,21 +1141,11 @@ export function printSummary(receipt, stdout = process.stdout) {
   stdout.write(`${JSON.stringify(summary(receipt))}\n`);
 }
 
-async function credentials({ config }) {
-  const expoToken = await privateText(config.expoTokenPath);
-  secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
-  const env = easEnvironment(process.env, config, expoToken);
-  const version = checkEasJson(JSON.parse(await readFile(join(app, "eas.json"), "utf8")));
-  const eas = await easCli(await privateDirectory(config.workDir), version);
-  await eas.show(["credentials", "--platform", "ios"], { cwd: app, env, timeout: 30 * MINUTE, interactive: true });
-}
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const unsafe = unsafeDebugVariables(process.env);
   if (unsafe.length) fail(`Unset ${unsafe.join(", ")} first: debug output can include the Expo token.`);
-  const { action, sha, configPath } = parseArgs(process.argv.slice(2));
+  const { sha, configPath } = parseArgs(process.argv.slice(2));
   const config = validateConfig(await protectedJson(configPath));
   stopChildrenOnInterrupt();
-  if (action === "credentials") await credentials({ config });
-  else printSummary(await build({ sha, config }));
+  printSummary(await build({ sha, config }));
 }
