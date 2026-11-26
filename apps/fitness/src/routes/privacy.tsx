@@ -85,9 +85,10 @@ function Privacy() {
         each Health sample it has synced, it keeps the sample's time, the entry
         it became or matched, and for runs the distance and duration, so a later
         sync never adds the same sample twice. Entries stay until you change or
-        remove them in Fitness. When the app connects, Fitness keeps a digest of
-        the one-time sign-in token so the token cannot be used again, and
-        removes it two days after the device key it issued stops working.
+        remove them in Fitness. When the app connects, Fitness records a digest
+        of the one-time sign-in token so the token cannot be used again. Once a
+        record is more than two days old and its device key can no longer
+        import, Fitness deletes it the next time any iPhone connects.
       </p>
       <p>
         On the iPhone, the app keeps its device key in the Keychain on that
@@ -99,8 +100,10 @@ function Privacy() {
       <h2>Disconnect or delete</h2>
       <ul>
         <li>
-          Disconnect in the app's Settings revokes its device key and clears its
-          sync progress on the iPhone.
+          Disconnect in the app's Settings stops syncing and clears the app's
+          sync progress on the iPhone straight away, then asks Fitness to revoke
+          the device key. If the iPhone is offline, the app asks again each time
+          it opens until Fitness confirms the key no longer works.
         </li>
         <li>
           You can also revoke the key in Fitness under Manage account → API

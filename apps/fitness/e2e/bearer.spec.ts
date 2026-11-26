@@ -93,3 +93,25 @@ test("keeps the import's legacy 401 for a missing bearer", async ({
     code: "unauthorized",
   });
 });
+
+test("serves public pages without a session handshake, even with an expired session", async ({
+  request,
+}) => {
+  for (const path of ["/privacy", "/privacy/"])
+    for (const headers of [
+      browser,
+      { "Sec-Fetch-Dest": "document", Accept: "text/html" },
+    ]) {
+      const response = await request.get(path, { headers, maxRedirects: 0 });
+      // The router may redirect to the path without its trailing slash; Clerk
+      // never answers with a handshake.
+      const location = response.headers()["location"];
+      if (location !== undefined) {
+        expect(location).toBe("/privacy");
+        continue;
+      }
+      expect(response.status()).toBe(200);
+      expect(response.headers()["x-clerk-auth-status"]).toBeUndefined();
+      expect(await response.text()).toContain("bent Fitness privacy");
+    }
+});
