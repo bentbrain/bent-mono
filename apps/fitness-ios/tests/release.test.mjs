@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,12 @@ import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../sc
 import {
   checkAuthorizationServer,
   checkBuild,
+  carriesParameters,
   checkClientAtIssuer,
+  checkIosBuild,
+  checkNoEasBuilds,
   claimBuild,
+  claimPathFor,
   checkEasJson,
   checkEmbeddedConfig,
   checkOAuthSettings,
@@ -29,6 +34,7 @@ import {
   redactingWriter,
   resolveProfile,
   secretsFrom,
+  signInPage,
   summary,
   unsafeDebugVariables,
   validateConfig,
@@ -195,6 +201,60 @@ describe("release arguments and configuration", () => {
       expect(await exits(grandchild)).toBe(true);
     });
 
+  test("an interactive command's helper is stopped when the command exits", async () => {
+    // The command starts a helper that inherits the pipes, then exits at once.
+    const script =
+      "const { spawn } = require('node:child_process');" +
+      "const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
+      "console.log(helper.pid); helper.unref(); process.exit(0);";
+    const output = sink();
+    const started = Date.now();
+    await execute(process.execPath, ["-e", script], {
+      ...quiet,
+      timeout: 30_000,
+      grace: 200,
+      interactive: true,
+      show: true,
+      output,
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(await exits(Number(output.parts.join("").trim()))).toBe(true);
+  });
+
+  test("an interactive command runs in a process group of its own", async () => {
+    const group = (pid) =>
+      Number(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
+    const script =
+      "const { execSync } = require('node:child_process'); console.log(execSync('ps -o pgid= -p ' + process.pid).toString().trim(), process.pid);";
+    const reply = await execute(process.execPath, ["-e", script], {
+      ...quiet,
+      timeout: 30_000,
+      grace: 200,
+      interactive: true,
+      show: false,
+    });
+    const [pgid, pid] = reply.stdout.trim().split(/\s+/).map(Number);
+    expect(pgid).toBe(pid);
+    expect(pgid).not.toBe(group(process.pid));
+  });
+
+  test("a command that exits before reading its input settles normally", async () => {
+    const input = "x".repeat(4 * 1024 * 1024);
+    await expect(
+      execute(process.execPath, ["-e", "process.exit(0)"], { ...quiet, input, timeout: 30_000 }),
+    ).resolves.toEqual({ stdout: "", stderr: "" });
+    await expect(
+      execute(process.execPath, ["-e", "process.exit(2)"], { ...quiet, input, timeout: 30_000 }),
+    ).rejects.toThrow("exit code 2");
+    // A command that reads its input still gets all of it.
+    const { stdout } = await execute(
+      process.execPath,
+      ["-e", "let n = 0; process.stdin.on('data', (c) => (n += c.length)).on('end', () => console.log(n));"],
+      { ...quiet, input, timeout: 30_000 },
+    );
+    expect(Number(stdout)).toBe(input.length);
+  });
+
   test("a descendant left holding the pipes does not hold a finished command", async () => {
     const script =
       "const { spawn } = require('node:child_process');" +
@@ -275,8 +335,23 @@ describe("committed release settings", () => {
       { scheme: "Other" },
       { prebuildCommand: "echo" },
       { config: "custom.yml" },
+      // eas-json converts these strings to booleans, so they count as set.
+      { simulator: "true" },
+      { developmentClient: "true" },
+      { withoutCredentials: "true" },
+      { simulator: "false" },
+      { autoIncrement: "true" },
+      { autoIncrement: "buildNumber" },
+      { buildConfiguration: "release" },
+      { image: ["macos-tahoe-26.5-xcode-26.6"] },
     ])
       expect(() => checkEasJson(withIos(ios))).toThrow("Release store build");
+    expect(() =>
+      checkEasJson(withIos({ simulator: false, developmentClient: false, withoutCredentials: false })),
+    ).not.toThrow();
+    expect(() => checkIosBuild({ ...effectiveIosProfile(easJson.build, "production"), simulator: true })).toThrow(
+      "simulator must be absent or false",
+    );
     expect(() => checkEasJson(withIos({}, { autoIncrement: undefined }))).toThrow("Release store build");
     expect(() => checkEasJson(withIos({ buildConfiguration: "Release" }))).not.toThrow();
     // ios env merges with the common env, as in EAS.
@@ -325,6 +400,25 @@ describe("committed release settings", () => {
 });
 
 describe("release admission", () => {
+  test("build claims live in one place per user, keyed by EAS project and commit", () => {
+    const projectId = "50ba8677-0be0-45a5-ac8c-ceff89d65696";
+    expect(claimPathFor(projectId, sha, "/home/example")).toBe(
+      `/home/example/.local/state/fitness-ios-release/claims/${projectId}/${sha}.claim`,
+    );
+    // The work directory plays no part, so two configurations share a claim.
+    expect(claimPathFor(projectId, sha, "/home/example")).toBe(claimPathFor(projectId, sha, "/home/example"));
+    expect(() => claimPathFor("../x", sha)).toThrow("EAS project ID");
+    expect(() => claimPathFor(projectId, "abc")).toThrow("full SHA");
+  });
+
+  test("EAS must have no production build of the commit already", () => {
+    expect(() => checkNoEasBuilds([], sha)).not.toThrow();
+    expect(() => checkNoEasBuilds([{ ...build, gitCommitHash: "b".repeat(40) }], sha)).not.toThrow();
+    for (const status of ["FINISHED", "ERRORED", "CANCELED", "IN_PROGRESS"])
+      expect(() => checkNoEasBuilds([{ ...build, status }], sha)).toThrow(`${build.id} ${status}`);
+    expect(() => checkNoEasBuilds({}, sha)).toThrow("did not list");
+  });
+
   test("Fitness production must accept the build's OAuth client, and show that it checks clients", () => {
     const enabled = { status: 200, body: { enrollment: "enabled" } };
     const refused = { status: 403, body: { code: "client_not_allowed" } };
@@ -373,9 +467,9 @@ describe("release admission", () => {
   });
 
   test("of two runs claiming a commit's build at once, one gets it, and the claim stays", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "release-claim-"));
+    const home = mkdtempSync(join(tmpdir(), "release-claim-"));
     try {
-      const path = join(directory, "build.claim");
+      const path = claimPathFor(projectId, sha, home);
       const results = await Promise.allSettled([claimBuild(path, { run: 1 }), claimBuild(path, { run: 2 })]);
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       const refused = results.find((result) => result.status === "rejected");
@@ -388,11 +482,11 @@ describe("release admission", () => {
       expect(JSON.parse(readFileSync(path, "utf8")).run).toBe(4);
       await again.release();
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
-  test("Clerk must know the client with its redirect URI and scope", async () => {
+  describe("Clerk's authorization flow", () => {
     const issuer = "https://clerk.example.com";
     const accounts = "https://accounts.example.com";
     const redirectUri = "build.bent.fitness://oauth";
@@ -403,61 +497,171 @@ describe("release admission", () => {
       redirectUri,
       resource: "https://fitness.bent.build/api/mcp",
     };
-    // Clerk's replies, as its development instance gives them.
-    const clerk = (second) => {
+    const signIn = (back) => `${accounts}/sign-in?redirect_url=${encodeURIComponent(back)}`;
+    const redirect = (location, status = 302) => new Response(null, { status, headers: { location } });
+    /** Clerk's replies as its development instance gives them; each step can be replaced. */
+    const clerk = ({ environment, first, second } = {}) => {
       const seen = [];
       const fetchImpl = async (url, init) => {
-        seen.push({ url: new URL(url), redirect: init.redirect });
-        const path = new URL(url).pathname;
-        if (path === "/oauth/authorize") {
-          const back = `${issuer}/oauth/authorize-with-immediate-redirect?${new URL(url).searchParams}`;
-          return new Response(null, {
-            status: 302,
-            headers: { location: `${accounts}/sign-in?redirect_url=${encodeURIComponent(back)}` },
-          });
-        }
-        return second();
+        const target = new URL(url);
+        seen.push({ url: target, redirect: init.redirect });
+        if (target.pathname === "/v1/environment")
+          return environment ?? Response.json({ display_config: { sign_in_url: `${accounts}/sign-in` } });
+        if (target.pathname === "/oauth/authorize")
+          return first
+            ? first(target)
+            : redirect(signIn(`${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`));
+        return second ? second(target) : redirect(signIn(`${accounts}/oauth-consent?${target.searchParams}`));
       };
       return { seen, fetchImpl };
     };
-    const known = clerk(
-      () =>
-        new Response(null, {
-          status: 302,
-          headers: {
-            location: `${accounts}/sign-in?redirect_url=${encodeURIComponent(`${accounts}/oauth-consent?client_id=client123`)}`,
-          },
-        }),
-    );
-    await checkClientAtIssuer(request, known.fetchImpl);
-    expect(known.seen).toHaveLength(2);
-    expect(known.seen.every((call) => call.redirect === "manual")).toBe(true);
-    const first = known.seen[0].url.searchParams;
-    expect(Object.fromEntries([...first].filter(([key]) => !["state", "code_challenge"].includes(key)))).toEqual({
-      response_type: "code",
-      client_id: "client123",
-      redirect_uri: redirectUri,
-      scope: "fitness:health:enroll openid",
-      resource: "https://fitness.bent.build/api/mcp",
-      code_challenge_method: "S256",
-    });
-    expect(first.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(first.get("state")).toMatch(/^[A-Za-z0-9_-]{22}$/);
 
-    const unknown = clerk(() => Response.json({ error: "invalid_client" }, { status: 401 }));
-    await expect(checkClientAtIssuer(request, unknown.fetchImpl)).rejects.toThrow("HTTP 401, invalid_client");
-    const wrongRedirect = clerk(() => Response.json({ error: "invalid_request" }, { status: 400 }));
-    await expect(checkClientAtIssuer(request, wrongRedirect.fetchImpl)).rejects.toThrow("invalid_request");
-    const scope = clerk(
-      () => new Response(null, { status: 303, headers: { location: `${redirectUri}/?error=invalid_scope` } }),
-    );
-    await expect(checkClientAtIssuer(request, scope.fetchImpl)).rejects.toThrow("invalid_scope");
-    await expect(
-      checkClientAtIssuer(
-        { ...request, authorizationEndpoint: "https://other.example.com/authorize" },
-        known.fetchImpl,
-      ),
-    ).rejects.toThrow("another origin");
+    test("accepts a known client whose request reaches the consent page unchanged", async () => {
+      const known = clerk();
+      await checkClientAtIssuer(request, known.fetchImpl);
+      expect(known.seen.map((call) => call.url.pathname)).toEqual([
+        "/v1/environment",
+        "/oauth/authorize",
+        "/oauth/authorize-with-immediate-redirect",
+      ]);
+      expect(known.seen.every((call) => call.redirect === "manual")).toBe(true);
+      const first = known.seen[1].url.searchParams;
+      expect(Object.fromEntries([...first].filter(([key]) => !["state", "code_challenge"].includes(key)))).toEqual({
+        response_type: "code",
+        client_id: "client123",
+        redirect_uri: redirectUri,
+        scope: "fitness:health:enroll openid",
+        resource: "https://fitness.bent.build/api/mcp",
+        code_challenge_method: "S256",
+      });
+      expect(first.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(first.get("state")).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    });
+
+    test("refuses the replies Clerk gives a client it does not accept", async () => {
+      const unknown = clerk({ second: () => Response.json({ error: "invalid_client" }, { status: 401 }) });
+      await expect(checkClientAtIssuer(request, unknown.fetchImpl)).rejects.toThrow("HTTP 401, invalid_client");
+      const wrongRedirect = clerk({ second: () => Response.json({ error: "invalid_request" }, { status: 400 }) });
+      await expect(checkClientAtIssuer(request, wrongRedirect.fetchImpl)).rejects.toThrow("invalid_request");
+      const scope = clerk({ second: () => redirect(`${redirectUri}/?error=invalid_scope`, 303) });
+      await expect(checkClientAtIssuer(request, scope.fetchImpl)).rejects.toThrow("invalid_scope");
+    });
+
+    test("refuses a first step that goes anywhere but the issuer's own check", async () => {
+      // An HTTPS help page.
+      const help = clerk({ first: () => redirect("https://help.example.com/oauth") });
+      await expect(checkClientAtIssuer(request, help.fetchImpl)).rejects.toThrow("instance's sign-in");
+      // The sign-in page returning to another issuer path or origin.
+      for (const back of [
+        (target) => `${issuer}/oauth/other?${target.searchParams}`,
+        (target) =>
+          `https://clerk.example.com.evil.example/oauth/authorize-with-immediate-redirect?${target.searchParams}`,
+        (target) => `${accounts}/oauth-consent?${target.searchParams}`,
+      ]) {
+        const elsewhere = clerk({ first: (target) => redirect(signIn(back(target))) });
+        await expect(checkClientAtIssuer(request, elsewhere.fetchImpl)).rejects.toThrow("returning to");
+      }
+      // A sign-in page on a look-alike host.
+      const lookalike = clerk({
+        first: (target) =>
+          redirect(
+            `https://accounts.example.com.evil.example/sign-in?redirect_url=${encodeURIComponent(`${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`)}`,
+          ),
+      });
+      await expect(checkClientAtIssuer(request, lookalike.fetchImpl)).rejects.toThrow("instance's sign-in");
+    });
+
+    test("refuses a second step that ends at a generic sign-in page", async () => {
+      for (const back of [`${accounts}/sign-in`, `${accounts}/default-redirect`, `${issuer}/oauth-consent`])
+        await expect(
+          checkClientAtIssuer(
+            request,
+            clerk({ second: (target) => redirect(signIn(`${back}?${target.searchParams}`)) }).fetchImpl,
+          ),
+        ).rejects.toThrow("returning to");
+      // The sign-in page with no return, or with other parameters.
+      await expect(
+        checkClientAtIssuer(request, clerk({ second: () => redirect(`${accounts}/sign-in`) }).fetchImpl),
+      ).rejects.toThrow("instance's sign-in");
+      await expect(
+        checkClientAtIssuer(
+          request,
+          clerk({
+            second: (target) => redirect(`${signIn(`${accounts}/oauth-consent?${target.searchParams}`)}&after=x`),
+          }).fetchImpl,
+        ),
+      ).rejects.toThrow("instance's sign-in");
+    });
+
+    test("refuses a continuation whose authorization parameters changed", async () => {
+      const change = (target, name, value) => {
+        const changed = new URLSearchParams(target.searchParams);
+        if (value === undefined) changed.delete(name);
+        else changed.set(name, value);
+        return changed;
+      };
+      for (const [name, value] of [
+        ["client_id", "other_client"],
+        ["redirect_uri", "build.bent.fitness.dev://oauth"],
+        ["scope", "openid"],
+        ["state", "other"],
+        ["resource", undefined],
+      ]) {
+        const second = clerk({
+          second: (target) => redirect(signIn(`${accounts}/oauth-consent?${change(target, name, value)}`)),
+        });
+        await expect(checkClientAtIssuer(request, second.fetchImpl)).rejects.toThrow(
+          "changed authorization parameters",
+        );
+        const first = clerk({
+          first: (target) =>
+            redirect(signIn(`${issuer}/oauth/authorize-with-immediate-redirect?${change(target, name, value)}`)),
+        });
+        await expect(checkClientAtIssuer(request, first.fetchImpl)).rejects.toThrow("changed authorization parameters");
+      }
+      const extra = clerk({
+        second: (target) => redirect(signIn(`${accounts}/oauth-consent?${target.searchParams}&client_id=other`)),
+      });
+      await expect(checkClientAtIssuer(request, extra.fetchImpl)).rejects.toThrow("changed authorization parameters");
+    });
+
+    test("takes the accounts host only from the instance's own sign-in URL", async () => {
+      expect(signInPage({ display_config: { sign_in_url: "https://accounts.example.com/sign-in" } }).origin).toBe(
+        accounts,
+      );
+      for (const url of [
+        "http://accounts.example.com/sign-in",
+        "https://accounts.example.com/login",
+        "https://accounts.example.com/sign-in?x=1",
+        "not a url",
+        undefined,
+      ])
+        expect(() => signInPage({ display_config: { sign_in_url: url } })).toThrow("sign-in page");
+      const unavailable = clerk({ environment: new Response("{}", { status: 404 }) });
+      await expect(checkClientAtIssuer(request, unavailable.fetchImpl)).rejects.toThrow("environment replied HTTP 404");
+      await expect(
+        checkClientAtIssuer(
+          { ...request, authorizationEndpoint: "https://other.example.com/oauth/authorize" },
+          clerk().fetchImpl,
+        ),
+      ).rejects.toThrow("its own /oauth/authorize");
+    });
+
+    test("compares the eight authorization parameters exactly", () => {
+      const expected = new URLSearchParams({
+        client_id: "c",
+        redirect_uri: "r",
+        scope: "s",
+        resource: "x",
+        state: "t",
+        code_challenge: "h",
+        code_challenge_method: "S256",
+        response_type: "code",
+      });
+      expect(carriesParameters(new URL(`https://a.example/?${expected}`), expected)).toBe(true);
+      expect(carriesParameters(new URL(`https://a.example/?${expected}&state=t`), expected)).toBe(false);
+      expect(carriesParameters(new URL(`https://a.example/?${expected}&prompt=none`), expected)).toBe(false);
+    });
   });
 
   test("the release prints only its status, build, version and build number", () => {

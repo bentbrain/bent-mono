@@ -11,9 +11,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { constants, createWriteStream, existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { githubApi, requireReleaseChecks } from "../../../scripts/require-release-checks.mjs";
 import { protectedJson } from "../../../scripts/release-vercel.mjs";
@@ -213,19 +215,31 @@ export function failureDetail(text, hidden, limit = 4000) {
   return redact(text, hidden).slice(-limit);
 }
 
-/** The process IDs below `pid`, from `ps`. */
-function descendants(pid) {
-  const listing = spawnSync("ps", ["-A", "-o", "pid=,ppid="], {
+/** Every process, from `ps`: its ID, parent, group and seconds since it started. */
+function processTable() {
+  const listing = spawnSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,etime="], {
     encoding: "utf8",
     timeout: 10_000,
     killSignal: "SIGKILL",
   });
-  const children = new Map();
+  const table = [];
   for (const line of (listing.stdout ?? "").split("\n")) {
-    const [child, parent] = line.trim().split(/\s+/).map(Number);
-    if (!child || !parent) continue;
-    if (!children.has(parent)) children.set(parent, []);
-    children.get(parent).push(child);
+    const [pid, ppid, pgid, elapsed] = line.trim().split(/\s+/);
+    if (!Number(pid)) continue;
+    // `ps` writes elapsed time as [[dd-]hh:]mm:ss.
+    const [days, clock] = elapsed.includes("-") ? elapsed.split("-") : ["0", elapsed];
+    const seconds = clock.split(":").reduce((total, part) => total * 60 + Number(part), 0) + Number(days) * 86_400;
+    table.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), seconds });
+  }
+  return table;
+}
+
+/** The process IDs below `pid`. */
+function descendants(pid, table = processTable()) {
+  const children = new Map();
+  for (const row of table) {
+    if (!children.has(row.ppid)) children.set(row.ppid, []);
+    children.get(row.ppid).push(row.pid);
   }
   const found = [];
   const queue = [pid];
@@ -236,6 +250,52 @@ function descendants(pid) {
     }
   return found;
 }
+
+/**
+ * Runs an interactive command in a process group of its own and makes that
+ * group the terminal's foreground group, so prompts and Ctrl-C reach it. When
+ * the command exits, the terminal goes back to this release's group and the
+ * command's group is killed, which stops helpers whose parent has exited. On
+ * SIGTERM it stops the group: SIGTERM, then SIGKILL after the grace period
+ * in seconds, its first argument. Without a terminal it still supervises the
+ * group.
+ */
+const SUPERVISOR = String.raw`
+use strict;
+use POSIX qw(setpgid getpgrp tcgetpgrp tcsetpgrp _exit);
+my $grace = shift @ARGV;
+my ($fd, $foreground) = (-1, undef);
+if (open(my $tty, "+<", "/dev/tty")) { $fd = fileno($tty); $foreground = tcgetpgrp($fd); $main::tty = $tty; }
+$SIG{TTOU} = "IGNORE";
+$SIG{TTIN} = "IGNORE";
+my $pid = fork();
+defined $pid or die "fork: $!";
+if ($pid == 0) {
+  setpgid(0, 0);
+  tcsetpgrp($fd, getpgrp()) if $fd >= 0;
+  $SIG{TTOU} = "DEFAULT";
+  $SIG{TTIN} = "DEFAULT";
+  exec { $ARGV[0] } @ARGV;
+  _exit(127);
+}
+setpgid($pid, $pid);
+tcsetpgrp($fd, $pid) if $fd >= 0;
+my $restore = sub { tcsetpgrp($fd, $foreground) if $fd >= 0 && defined $foreground };
+for my $signal (qw(TERM HUP)) {
+  $SIG{$signal} = sub {
+    kill "TERM", -$pid;
+    select(undef, undef, undef, $grace);
+    kill "KILL", -$pid;
+    $restore->();
+    _exit(143);
+  };
+}
+waitpid($pid, 0);
+my $status = $?;
+$restore->();
+kill "KILL", -$pid;
+_exit($status & 127 ? 128 + ($status & 127) : $status >> 8);
+`;
 
 /**
  * Signals a child and everything below it: its process group, when it has
@@ -274,8 +334,9 @@ function stopChildrenOnInterrupt() {
  * A non-interactive command runs in its own process group. At the limit the
  * whole tree gets SIGTERM, then SIGKILL after `grace`, its pipes are closed
  * and the run fails at once, even if a descendant kept the pipes open. An
- * interactive command stays in the terminal's foreground group, so prompts
- * and Ctrl-C reach it, and its descendants are found with `ps` instead.
+ * interactive command runs under SUPERVISOR, in a group of its own that is
+ * the terminal's foreground group while it runs, and that group is killed
+ * when it exits.
  *
  * With `show`, output is written redacted as it arrives. Otherwise it is
  * returned, and shown redacted only when the command fails.
@@ -298,7 +359,10 @@ export function execute(
 ) {
   return new Promise((done, failed) => {
     const grouped = !interactive;
-    const child = spawn(command, args, {
+    const [program, programArgs] = interactive
+      ? ["perl", ["-e", SUPERVISOR, String(grace / 1000), command, ...args]]
+      : [command, args];
+    const child = spawn(program, programArgs, {
       cwd,
       env,
       detached: grouped,
@@ -312,9 +376,14 @@ export function execute(
     const err = redactingWriter((text) => errors.write(text), hidden);
     child.stdout.setEncoding("utf8").on("data", (chunk) => (show ? out.push(chunk) : (stdout += chunk)));
     child.stderr.setEncoding("utf8").on("data", (chunk) => (show ? err.push(chunk) : (stderr += chunk)));
-    if (input !== undefined) child.stdin.end(input);
     const timers = [];
     const known = new Set();
+    // A command that exits before reading its input closes the pipe; its
+    // exit code decides the run.
+    child.stdin?.on("error", (error) => {
+      if (!["EPIPE", "ERR_STREAM_DESTROYED", "ECONNRESET"].includes(error.code)) settle(error);
+    });
+    if (input !== undefined) child.stdin.end(input);
     let settled = false;
     let expired = false;
     const label = `${command} ${args.slice(0, 2).join(" ")}`;
@@ -381,6 +450,7 @@ async function easCli(workDir, version) {
   );
   if (installed.version !== version) fail(`Expected EAS CLI ${version}, found ${installed.version}.`);
   const eas = (args, options) => run("node", [bin, ...args], options);
+  eas.package = join(prefix, "node_modules/eas-cli/package.json");
   eas.show = (args, options) => execute("node", [bin, ...args], { ...options, show: true });
   return eas;
 }
@@ -482,15 +552,63 @@ export function checkAuthorizationServer(metadata, issuer) {
   if (!metadata.code_challenge_methods_supported?.includes("S256")) fail("The OAuth issuer does not offer PKCE S256.");
 }
 
+/** The authorization parameters Clerk must carry, unchanged, through each step of its flow. */
+const authorizationParameters = [
+  "client_id",
+  "redirect_uri",
+  "scope",
+  "resource",
+  "state",
+  "code_challenge",
+  "code_challenge_method",
+  "response_type",
+];
+
+/** Whether `url` carries exactly `expected`'s authorization parameters, each once, and nothing else. */
+export function carriesParameters(url, expected) {
+  const keys = [...url.searchParams.keys()];
+  return (
+    keys.length === authorizationParameters.length &&
+    authorizationParameters.every(
+      (name) => url.searchParams.getAll(name).length === 1 && url.searchParams.get(name) === expected.get(name),
+    )
+  );
+}
+
+/**
+ * Clerk's sign-in page for this instance, from the instance's own
+ * environment on the issuer origin: an HTTPS `/sign-in` page. Its origin is
+ * the accounts host the authorization flow must use.
+ */
+export function signInPage(environment) {
+  let page;
+  try {
+    page = new URL(environment?.display_config?.sign_in_url ?? "");
+  } catch {
+    fail("The OAuth issuer's environment names no sign-in page.");
+  }
+  if (page.protocol !== "https:" || page.pathname !== "/sign-in" || page.search || page.hash || page.username)
+    fail("The OAuth issuer's sign-in page is not an HTTPS /sign-in page.");
+  return page;
+}
+
 /**
  * Clerk must know the build's OAuth client with its redirect URI and scope.
  * This starts an authorization request the way the app does, without
- * following redirects or signing in, so it grants nothing. Clerk sends a
- * request it has not checked yet through its sign-in page back to its own
- * authorize step; that step answers an unknown client with `invalid_client`,
- * a wrong redirect URI with `invalid_request`, and a scope the client may not
- * request with an `invalid_scope` redirect to the app. A known client goes on
- * to the consent page.
+ * following redirects or signing in, so it grants nothing. Clerk's flow is
+ * checked step by step, with every redirect exact:
+ *
+ * 1. The issuer's `/oauth/authorize` sends the browser to the instance's
+ *    sign-in page, returning to the issuer's own
+ *    `/oauth/authorize-with-immediate-redirect`.
+ * 2. That step checks the client. It answers an unknown client with
+ *    `invalid_client`, a redirect URI the client does not have with
+ *    `invalid_request`, and a scope the client may not request with an
+ *    `invalid_scope` redirect to the app. A known client goes to the sign-in
+ *    page again, returning to `/oauth-consent` on the accounts host.
+ *
+ * Both returns must carry the request's eight authorization parameters
+ * exactly. Anything else stops the release.
  */
 export async function checkClientAtIssuer(
   { authorizationEndpoint, issuer, clientId, redirectUri, resource, scope = "fitness:health:enroll openid" },
@@ -498,7 +616,15 @@ export async function checkClientAtIssuer(
 ) {
   const origin = new URL(issuer).origin;
   const endpoint = new URL(authorizationEndpoint ?? "", issuer);
-  if (endpoint.origin !== origin) fail("The OAuth issuer's authorization endpoint is on another origin.");
+  if (endpoint.origin !== origin || endpoint.pathname !== "/oauth/authorize")
+    fail("The OAuth issuer's authorization endpoint is not its own /oauth/authorize.");
+  const refused = (detail) => fail(`Clerk does not accept the build's OAuth client for this app (${detail}).`);
+  const get = (url) => fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) });
+
+  const environment = await get(`${origin}/v1/environment`);
+  if (environment.status !== 200) refused(`its environment replied HTTP ${environment.status}`);
+  const signIn = signInPage(await environment.json());
+
   const verifier = randomBytes(48).toString("base64url");
   endpoint.search = new URLSearchParams({
     response_type: "code",
@@ -510,10 +636,11 @@ export async function checkClientAtIssuer(
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     code_challenge_method: "S256",
   }).toString();
-  const refused = (detail) => fail(`Clerk does not accept the build's OAuth client for this app (${detail}).`);
-  let url = endpoint.href;
-  for (let hop = 0; hop < 4; hop++) {
-    const response = await fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) });
+  const expected = endpoint.searchParams;
+
+  /** One step: a redirect to the sign-in page that returns to `back` with the parameters. */
+  const step = async (url, back) => {
+    const response = await get(url);
     const location = response.headers.get("location");
     if (response.status < 300 || response.status > 399 || !location) {
       let code;
@@ -527,22 +654,27 @@ export async function checkClientAtIssuer(
     await response.body?.cancel();
     if (location.startsWith(redirectUri))
       refused(new URL(location).searchParams.get("error") ?? "redirected to the app");
-    const next = new URL(location, url);
-    if (next.origin === origin) {
-      url = next.href;
-      continue;
+    const page = new URL(location, url);
+    if (
+      page.origin !== signIn.origin ||
+      page.pathname !== signIn.pathname ||
+      [...page.searchParams.keys()].join() !== "redirect_url"
+    )
+      refused("a redirect to another page than the instance's sign-in");
+    let returning;
+    try {
+      returning = new URL(page.searchParams.get("redirect_url"));
+    } catch {
+      refused("a sign-in redirect without a return address");
     }
-    const back = next.searchParams.get("redirect_url");
-    const returning = back ? new URL(back) : null;
-    if (returning?.origin === origin) {
-      url = returning.href;
-      continue;
-    }
-    if (next.protocol !== "https:" || next.searchParams.has("error") || returning?.searchParams.has("error"))
-      refused("an unexpected redirect");
-    return;
-  }
-  refused("too many redirects");
+    if (returning.origin !== back.origin || returning.pathname !== back.pathname || returning.hash)
+      refused(`a sign-in redirect returning to ${returning.origin}${returning.pathname}`);
+    if (!carriesParameters(returning, expected)) refused("a sign-in redirect with changed authorization parameters");
+    return returning;
+  };
+
+  const check = await step(endpoint.href, new URL("/oauth/authorize-with-immediate-redirect", origin));
+  await step(check.href, new URL("/oauth-consent", signIn.origin));
 }
 
 /** The EAS project ID that app.config.ts commits. */
@@ -587,31 +719,48 @@ export function effectiveIosProfile(profiles, name) {
   );
 }
 
-/** Settings that change what kind of app a profile builds, which the release does not allow. */
-const buildKindSettings = ["config", "prebuildCommand", "scheme", "enterpriseProvisioning", "withoutCredentials"];
+/**
+ * Checks an effective iOS build profile. Each value must have its exact type:
+ * eas-json reads `"true"` as `true` for booleans, so a boolean that may be
+ * set must be literally `false`, or literally `true` for `autoIncrement`.
+ */
+export function checkIosBuild(profile) {
+  const problems = [];
+  const exactly = (name, value) => profile[name] === value || problems.push(`${name} must be ${JSON.stringify(value)}`);
+  const offOrAbsent = (name) =>
+    profile[name] === undefined || profile[name] === false || problems.push(`${name} must be absent or false`);
+  const absent = (name) => profile[name] === undefined || problems.push(`${name} must be absent`);
+  exactly("image", IMAGE);
+  exactly("distribution", "store");
+  exactly("environment", "production");
+  exactly("credentialsSource", "remote");
+  exactly("autoIncrement", true);
+  for (const name of ["simulator", "developmentClient", "withoutCredentials"]) offOrAbsent(name);
+  for (const name of ["enterpriseProvisioning", "config", "prebuildCommand", "scheme"]) absent(name);
+  if (profile.buildConfiguration !== undefined && profile.buildConfiguration !== "Release")
+    problems.push('buildConfiguration must be absent or "Release"');
+  if (profile.env?.APP_VARIANT !== "production") problems.push('env.APP_VARIANT must be "production"');
+  if (problems.length)
+    fail(`The production iOS build must be a Release store build of the production variant: ${problems.join("; ")}.`);
+}
 
 /** The release settings eas.json must keep. Returns the pinned EAS CLI version. */
 export function checkEasJson(easJson) {
   if (easJson.cli?.requireCommit !== true) fail("eas.json must require a committed tree.");
-  const production = effectiveIosProfile(easJson.build, "production");
-  if (production.image !== IMAGE) fail(`The production iOS build must use ${IMAGE}.`);
-  if (
-    production.distribution !== "store" ||
-    production.environment !== "production" ||
-    production.env?.APP_VARIANT !== "production" ||
-    production.credentialsSource !== "remote" ||
-    production.autoIncrement !== true ||
-    production.simulator === true ||
-    production.developmentClient === true ||
-    (production.buildConfiguration !== undefined && production.buildConfiguration !== "Release") ||
-    buildKindSettings.some((setting) => production[setting] !== undefined)
-  )
-    fail(
-      "The production iOS build must be a Release store build of the production variant, in the production environment, with remote credentials and an incrementing build number.",
-    );
+  checkIosBuild(effectiveIosProfile(easJson.build, "production"));
   if (!/^\d+$/.test(easJson.submit?.production?.ios?.ascAppId ?? ""))
     fail("eas.json must name the App Store Connect app for production submissions.");
+  if (typeof easJson.cli.version !== "string") fail("eas.json must pin an exact EAS CLI version.");
   return easJson.cli.version;
+}
+
+/**
+ * The production iOS profile as the pinned EAS CLI itself resolves it, with
+ * eas-json's validation and type conversion, so the checks see what EAS builds.
+ */
+export async function pinnedIosProfile(easCliPackage, projectDir) {
+  const { EasJsonAccessor, EasJsonUtils } = createRequire(easCliPackage)("@expo/eas-json");
+  return EasJsonUtils.getBuildProfileAsync(EasJsonAccessor.fromProjectPath(projectDir), "ios", "production");
 }
 
 /** The finished EAS build must be the exact source and the production app. */
@@ -784,6 +933,7 @@ export function checkPriorAttempts(records, sha) {
  * refuses; `release` removes it only when the request never went out.
  */
 export async function claimBuild(path, record) {
+  await privateDirectory(dirname(path));
   let handle;
   try {
     handle = await open(path, "wx", 0o600);
@@ -801,6 +951,30 @@ export async function claimBuild(path, record) {
     await handle.close();
   }
   return { release: () => rm(path, { force: true }) };
+}
+
+/**
+ * Where a commit's build claim lives: one place per user, keyed by the EAS
+ * project and the commit, whatever work directory a release configuration
+ * names. Two configurations for one project therefore share their claims.
+ */
+export function claimPathFor(projectId, sha, home = homedir()) {
+  if (!/^[0-9a-f-]{36}$/.test(projectId) || !SHA.test(sha))
+    fail("A build claim needs an EAS project ID and a full SHA.");
+  return join(home, ".local/state/fitness-ios-release/claims", projectId, `${sha}.claim`);
+}
+
+/**
+ * EAS must have no production iOS build of the commit yet. This covers runs
+ * on other machines or accounts, which the local claim cannot see.
+ */
+export function checkNoEasBuilds(builds, sha) {
+  if (!Array.isArray(builds)) fail("EAS did not list the commit's builds.");
+  const existing = builds.filter((build) => build.gitCommitHash === sha && build.buildProfile === "production");
+  if (existing.length)
+    fail(
+      `EAS already has a production build of ${sha} (${existing.map((build) => `${build.id} ${build.status}`).join(", ")}). Check it and releases.jsonl before releasing the commit again.`,
+    );
 }
 
 /** The OAuth settings the production EAS environment gives the build. */
@@ -848,12 +1022,7 @@ async function build({ sha, config }) {
   secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
   const env = easEnvironment(process.env, config, expoToken);
   const journalPath = join(workDir, "releases.jsonl");
-  const claimPath = join(workDir, sha, "build.claim");
   checkPriorAttempts(await journalRecords(journalPath), sha);
-  if (existsSync(claimPath))
-    fail(
-      `A run already claimed this commit's build (${claimPath}). Check its EAS build and releases.jsonl before releasing it again.`,
-    );
 
   const quality = await requireReleaseChecks(sha, githubApi);
   // Each attempt has its own directory, so a stopped attempt's files stay.
@@ -865,7 +1034,13 @@ async function build({ sha, config }) {
   const appDir = join(checkout, APP_DIRECTORY);
   const easJson = JSON.parse(await readFile(join(appDir, "eas.json"), "utf8"));
   const eas = await easCli(workDir, checkEasJson(easJson));
+  checkIosBuild(await pinnedIosProfile(eas.package, appDir));
   const projectId = projectIdFrom(await readFile(join(appDir, "app.config.ts"), "utf8"));
+  const claimPath = claimPathFor(projectId, sha);
+  if (existsSync(claimPath))
+    fail(
+      `A run already claimed this commit's build (${claimPath}). Check its EAS build and releases.jsonl before releasing it again.`,
+    );
   await run("bun", ["install", "--frozen-lockfile"], { cwd: checkout, timeout: 20 * MINUTE });
   await verifyCheckout(sha, checkout);
 
@@ -876,7 +1051,25 @@ async function build({ sha, config }) {
   const admitted = await admit(sha, project, oauth);
   if (admitted.quality.qualityRunId !== quality.qualityRunId) fail("Quality qualification changed during the release.");
   checkEasJson(JSON.parse(await readFile(join(appDir, "eas.json"), "utf8")));
-  const claim = await claimBuild(claimPath, { sha, attempt: release, at: new Date().toISOString() });
+  checkIosBuild(await pinnedIosProfile(eas.package, appDir));
+  const listed = await eas(
+    [
+      "build:list",
+      "--platform",
+      "ios",
+      "--git-commit-hash",
+      sha,
+      "--build-profile",
+      "production",
+      "--limit",
+      "50",
+      "--json",
+      "--non-interactive",
+    ],
+    project.options(2 * MINUTE),
+  );
+  checkNoEasBuilds(JSON.parse(listed.stdout), sha);
+  const claim = await claimBuild(claimPath, { sha, projectId, attempt: release, at: new Date().toISOString() });
   try {
     await journal(journalPath, { sha, status: "build-requested", quality });
   } catch (error) {
