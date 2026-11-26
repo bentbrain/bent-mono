@@ -334,10 +334,13 @@ jobs:
         env:
           APP_VARIANT: production
         run: node scripts/native.mjs prebuild
+      # The production build uses Quality's default settings, which keep the
+      # HealthKit entitlements section that the artifact check reads.
       - name: Build the production app
         if: matrix.native == 'production'
         env:
           APP_VARIANT: production
+          XCODEBUILD_SETTINGS: ""
         run: NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs build
       - name: Check the production app's entitlements, Info.plist and contents
         if: matrix.native == 'production'
