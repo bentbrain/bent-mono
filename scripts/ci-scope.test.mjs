@@ -15,6 +15,7 @@ import {
   browserMatrix,
   comparison,
   includesPath,
+  iosNativeSelected,
   workspaceScope,
 } from "./ci-scope.mjs";
 
@@ -336,4 +337,92 @@ test("product-root tooling validates its nested applications", () =>
     );
     assert.equal(includesPath(scope, "products/drive/apps/web"), true);
     assert.equal(includesPath(scope, "apps/trackmap"), false);
+  }));
+
+const fitnessIos = { name: "@bent/fitness-ios", path: "apps/fitness-ios" };
+const contracts = {
+  name: "@bent/fitness-contracts",
+  path: "packages/fitness-contracts",
+};
+const fitness = { name: "@bent/fitness", path: "apps/fitness" };
+const iosPackages = [...packages, fitnessIos, contracts, fitness];
+function iosExecute(files, affected, fail = false) {
+  return (command, args, options) => {
+    if (command === "git") {
+      assert.deepEqual(args.slice(-2), [base, head]);
+      if (fail) throw new Error("Missing base history");
+      return files.join("\0") + "\0";
+    }
+    return JSON.stringify({
+      packages: { items: args.includes("--affected") ? affected : iosPackages },
+    });
+  };
+}
+const iosSelected = (env, files, affected, fail) =>
+  iosNativeSelected(workspaceScope(env, iosExecute(files, affected, fail)));
+
+test("the native iPhone suite runs for changes that reach the app, its contracts or Fitness", () =>
+  fixture((env) => {
+    const designTokens = packages[1];
+    for (const [files, affected] of [
+      [["apps/fitness-ios/src/app.tsx"], [fitnessIos]],
+      [
+        ["packages/fitness-contracts/src/index.ts"],
+        [contracts, fitness, fitnessIos],
+      ],
+      [["apps/fitness/src/server/db.ts"], [fitness]],
+      [["packages/design-tokens/src/index.css"], [designTokens, fitnessIos]],
+      [["apps/fitness-ios/package.json", "bun.lock"], [fitnessIos]],
+      [["scripts/ci-scope.mjs"], []],
+      [[".github/workflows/quality.yml"], []],
+    ])
+      assert.equal(iosSelected(env, files, affected), true, files.join());
+    assert.equal(iosSelected(env, [], [], true), true, "missing history");
+    for (const event of ["schedule", "workflow_dispatch"])
+      assert.equal(
+        iosSelected({ ...env, GITHUB_EVENT_NAME: event }, [], []),
+        true,
+        event,
+      );
+  }));
+
+test("the native iPhone suite is left out for changes to other products", () =>
+  fixture((env) => {
+    for (const [files, affected] of [
+      [["apps/jp/src/content/post.md"], [blog]],
+      [["apps/toolbar/src/index.ts"], [toolbar]],
+      [["apps/trackmap/src/main.ts"], [packages[0]]],
+      [["products/drive/apps/web/src/app.tsx"], [packages[3]]],
+      [["apps/trackmap/package.json", "bun.lock"], [packages[0]]],
+    ])
+      assert.equal(iosSelected(env, files, affected), false, files.join());
+  }));
+
+test("a main push scopes the native iPhone suite to its diff", () =>
+  fixture((env) => {
+    const directory = mkdtempSync(join(tmpdir(), "ci-scope-push-"));
+    const eventPath = join(directory, "event.json");
+    writeFileSync(eventPath, JSON.stringify({ before: base }));
+    try {
+      const push = {
+        ...env,
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_EVENT_PATH: eventPath,
+      };
+      assert.equal(
+        iosSelected(push, ["apps/jp/src/content/post.md"], [blog]),
+        false,
+      );
+      assert.equal(
+        iosSelected(push, ["apps/fitness-ios/src/app.tsx"], [fitnessIos]),
+        true,
+      );
+      assert.equal(
+        workspaceScope(push, iosExecute([], []), browserOptions).full,
+        true,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }));
