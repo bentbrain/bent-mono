@@ -522,10 +522,16 @@ async function checkArchive(archive, directory, oauth) {
  * and serves them with `Content-Encoding: br`, which the runner's curl saves
  * as is. A log that is valid UTF-8 is read as text, since a short text prefix
  * such as `=` is also a complete Brotli stream; gzip and Brotli bytes are
- * decoded. A log that is none of these contributes no text.
+ * decoded. A log that is none of these, or is cut short, contributes no text.
  */
 export function logText(bytes) {
-  if (bytes[0] === 0x1f && bytes[1] === 0x8b) return gunzipSync(bytes).toString("utf8");
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try {
+      return gunzipSync(bytes).toString("utf8");
+    } catch {
+      return "";
+    }
+  }
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
