@@ -1,10 +1,8 @@
 // Native settings for the fitness-health module: HealthKit read access with
-// background delivery, the Health purpose string, and the Fitness origin the
+// background delivery, the Health purpose strings, and the Fitness origin the
 // module pins every request to.
 const { withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
-
-const shareDescription =
-  "bent Fitness reads your weigh-ins and running workouts and sends them to your Fitness account.";
+const { shareDescription, updateDescription } = require("./purpose.js");
 
 /** @type {import("expo/config-plugins").ConfigPlugin<{ fitnessOrigin: string, allowLocalNetworking?: boolean }>} */
 function withFitnessHealth(config, options) {
@@ -22,8 +20,8 @@ function withFitnessHealth(config, options) {
   config = withInfoPlist(config, (mod) => {
     const plist = mod.modResults;
     plist.NSHealthShareUsageDescription = shareDescription;
-    // The app only reads Health data.
-    delete plist.NSHealthUpdateUsageDescription;
+    // The app only reads Health data, and this string says so; see purpose.js.
+    plist.NSHealthUpdateUsageDescription = updateDescription;
     delete plist.NSHealthClinicalHealthRecordsShareUsageDescription;
     plist.FitnessOrigin = origin;
     const transport = { ...(plist.NSAppTransportSecurity ?? {}) };
