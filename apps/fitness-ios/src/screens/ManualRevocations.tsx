@@ -10,10 +10,10 @@ export function ManualRevocations({ status, onChange }: { status: SyncStatus; on
   const [busy, setBusy] = useState(false);
   const notice = manualRevocationNotice(status);
   if (!notice) return null;
-  async function dismiss() {
+  async function dismiss(revision: number) {
     setBusy(true);
     try {
-      await FitnessHealth.dismissManualRevocations();
+      await FitnessHealth.dismissManualRevocations(revision);
     } finally {
       setBusy(false);
       onChange();
@@ -21,11 +21,11 @@ export function ManualRevocations({ status, onChange }: { status: SyncStatus; on
   }
   return (
     <>
-      <Notice testID="manual-revocations">{notice}</Notice>
+      <Notice testID="manual-revocations">{notice.text}</Notice>
       <Button
         label={copy.status.dismissManualRevocations}
         appearance="outline"
-        onPress={dismiss}
+        onPress={() => dismiss(notice.revision)}
         busy={busy}
         testID="dismiss-manual-revocations"
       />

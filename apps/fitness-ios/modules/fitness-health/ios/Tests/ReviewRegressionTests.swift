@@ -493,11 +493,34 @@ final class ReviewRegressionTests: XCTestCase {
     XCTAssertFalse(try credentials.load().keyInvalid)
     // Signing in again keeps it; only dismissing the notice clears it.
     _ = try await device.enroll(token: "b", revokeLater: false)
-    XCTAssertEqual(try credentials.load().manualRevocations, 1)
-    try await device.dismissManualRevocations()
-    XCTAssertEqual(try credentials.load().manualRevocations, 0)
-    try await device.dismissManualRevocations()
-    XCTAssertEqual(try credentials.load().manualRevocations, 0)
+    XCTAssertEqual(try credentials.load().unseenManualRevocations, 1)
+    try await device.dismissManualRevocations(revision: 1)
+    XCTAssertEqual(try credentials.load().unseenManualRevocations, 0)
+    try await device.dismissManualRevocations(revision: 1)
+    XCTAssertEqual(try credentials.load().unseenManualRevocations, 0)
+  }
+
+  /// A key refused after the notice was shown stays on it when the user
+  /// dismisses the notice they saw.
+  func testDismissingTheNoticeKeepsKeysRecordedAfterItWasShown() async throws {
+    let (device, credentials, _) = makeLifecycle()
+    var document = try credentials.load()
+    document.manualRevocations = 1
+    try credentials.save(document)
+    // The notice showed revision 1; a second refusal arrives before the tap.
+    document.manualRevocations = 2
+    try credentials.save(document)
+    try await device.dismissManualRevocations(revision: 1)
+    XCTAssertEqual(try credentials.load().unseenManualRevocations, 1)
+    XCTAssertEqual(try credentials.load().manualRevocationsDismissed, 1)
+    // A revision from the future dismisses only what exists, and an older one changes nothing.
+    try await device.dismissManualRevocations(revision: 5)
+    XCTAssertEqual(try credentials.load().manualRevocationsDismissed, 2)
+    try await device.dismissManualRevocations(revision: 1)
+    XCTAssertEqual(try credentials.load().manualRevocationsDismissed, 2)
+    // A document written before dismissals were recorded shows every key.
+    let legacy = try JSONDecoder().decode(CredentialDocument.self, from: Data(#"{"manualRevocations":3}"#.utf8))
+    XCTAssertEqual(legacy.unseenManualRevocations, 3)
   }
 }
 

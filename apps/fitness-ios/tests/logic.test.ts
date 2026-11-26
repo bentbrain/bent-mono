@@ -35,16 +35,31 @@ describe("manual revocations", () => {
   test("keys Fitness would not revoke stay on the notice after a disconnect, until dismissed", () => {
     expect(manualRevocationNotice(null)).toBeNull();
     expect(manualRevocationNotice(base)).toBeNull();
-    expect(manualRevocationNotice({ ...base, manualRevocations: 0 })).toBeNull();
+    expect(manualRevocationNotice({ ...base, manualRevocations: 0, manualRevocationsRevision: 2 })).toBeNull();
     // Signed out after a disconnect: the sign-in screen shows it.
     expect(screenFor({ ...base, manualRevocations: 1 })).toBe("signIn");
-    expect(manualRevocationNotice({ ...base, manualRevocations: 1 })).toBe(
-      "1 earlier key could not be revoked from this iPhone. Revoke it under Manage account → API keys in Fitness.",
+    expect(manualRevocationNotice({ ...base, manualRevocations: 1, manualRevocationsRevision: 1 })).toEqual({
+      text: "1 earlier key could not be revoked from this iPhone. Revoke it under Manage account → API keys in Fitness.",
+      revision: 1,
+    });
+    expect(manualRevocationNotice({ ...base, state: "invalid", manualRevocations: 2 })?.text).toContain(
+      "2 earlier keys",
     );
-    expect(manualRevocationNotice({ ...base, state: "invalid", manualRevocations: 2 })).toContain("2 earlier keys");
-    expect(manualRevocationNotice({ ...base, state: "active", manualRevocations: 2 })).toContain("2 earlier keys");
+    expect(manualRevocationNotice({ ...base, state: "active", manualRevocations: 2 })?.text).toContain(
+      "2 earlier keys",
+    );
     // Before the first unlock the count is unknown.
     expect(manualRevocationNotice({ ...base, state: "locked", manualRevocations: 2 })).toBeNull();
+  });
+
+  test("dismissing names the revision shown, so a key recorded later stays on the notice", () => {
+    // Three keys recorded, two dismissed earlier: the notice shows one, at revision 3.
+    expect(manualRevocationNotice({ ...base, manualRevocations: 1, manualRevocationsRevision: 3 })).toEqual({
+      text: expect.stringContaining("1 earlier key"),
+      revision: 3,
+    });
+    // A status from before revisions were reported dismisses what it shows.
+    expect(manualRevocationNotice({ ...base, manualRevocations: 2 })?.revision).toBe(2);
   });
 });
 

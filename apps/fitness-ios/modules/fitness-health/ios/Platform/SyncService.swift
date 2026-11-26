@@ -246,7 +246,10 @@ final class SyncService: @unchecked Sendable {
       return status
     }
     status["pendingRevocations"] = document.pending.count
-    status["manualRevocations"] = document.manualRevocations
+    // The notice shows keys recorded since the last dismissal; the revision
+    // names the count it was built from, so a dismissal never covers a newer one.
+    status["manualRevocations"] = document.unseenManualRevocations
+    status["manualRevocationsRevision"] = document.manualRevocations
     guard let active = document.active else {
       status["state"] = document.keyInvalid ? "invalid" : "signedOut"
       return status
