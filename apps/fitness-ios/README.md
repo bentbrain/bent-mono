@@ -125,19 +125,20 @@ Each EAS environment sets the build's public OAuth settings: `FITNESS_OAUTH_ISSU
 | `expoTokenPath` | Absolute path to a private file holding an Expo access token for the project's owner |
 | `workDir` | A private directory outside any checkout, for clones, the EAS CLI and the release log |
 
-The key, token and work directory must be private to you as well. The script:
+The key, token and work directory must be private to you as well. The script refuses to start while `NODE_DEBUG`, `NODE_OPTIONS`, `DEBUG`, `EXPO_DEBUG` or a similar debug setting is set, since debug output can include the Expo token. Then it:
 
 1. Requires the commit to be current `main`, merged from a reviewed pull request whose head passed native CodeQL and independent review, with every Quality job passed, using the same gate as `release:vercel`.
-2. Clones the repository fresh into `workDir/<sha>/source`, checks out the commit, checks that the tree is clean and has no `.easignore`, and installs with the frozen lockfile.
-3. Installs the EAS CLI version that `eas.json` pins into `workDir`, and gives it only the Expo token and the App Store Connect key.
-4. Checks that `https://fitness.bent.build/api/health/devices/ready` reports enrollment enabled, that the `production` EAS environment has both OAuth settings, and that the issuer offers `fitness:health:enroll` with PKCE S256.
-5. Checks qualification and readiness again, then runs `eas build --profile production --platform ios --non-interactive`.
-6. Requires one finished store build of the production bundle ID from exactly that commit in this EAS project, and the Xcode check in its log.
-7. Downloads the signed `.ipa` and checks it: exactly the HealthKit and background-delivery entitlements, no debugging entitlement, the production application identifier, a Health read purpose string and no write purpose string, no local networking, the fitness-health module linked in and no seeder.
-8. Checks qualification and readiness again, then submits that build with `eas submit --id <build>`. EAS adds it to an internal TestFlight group.
-9. Appends each step to `workDir/releases.jsonl`: the request, the build ID, the submission request and the result, with the version, build number and Quality run.
+2. Refuses a commit whose build was already requested, according to `workDir/releases.jsonl`; check that build in EAS first. Otherwise it starts a new attempt in its own directory under `workDir/<sha>/`, so an earlier attempt's files stay.
+3. Clones the repository fresh, checks out the commit, checks that the tree is clean and has no `.easignore`, and installs with the frozen lockfile.
+4. Installs the EAS CLI version that `eas.json` pins into `workDir`. Each command it runs gets only `PATH`, `HOME`, the user, shell, temporary-directory, locale and terminal settings, and EAS also gets the Expo token and the App Store Connect key.
+5. Reads `FITNESS_OAUTH_ISSUER` and `FITNESS_OAUTH_CLIENT_ID` from the `production` EAS environment, then checks them against production: `fitness.bent.build/.well-known/oauth-protected-resource` must name that issuer as its only authorization server, and `/api/health/devices/ready?clientId=<client>` must reply `200 {"enrollment":"enabled"}`, while an unlisted client gets `403 client_not_allowed`. The issuer must offer `fitness:health:enroll` with PKCE S256.
+6. Checks qualification and the OAuth settings again, then runs `eas build --profile production --platform ios --non-interactive`. The production profile, with its `extends` chain applied, must build the production variant for the store on `macos-tahoe-26.5-xcode-26.6`.
+7. Requires one finished store build of the production bundle ID from exactly that commit in this EAS project, and the Xcode check in its log.
+8. Downloads the signed `.ipa` and checks it: exactly the HealthKit and background-delivery entitlements, no debugging entitlement, the production application identifier, a Health read purpose string and no write purpose string, no local networking, the fitness-health module linked in and no seeder. Its embedded app config must be the production variant with the issuer and client checked in step 5.
+9. Checks qualification and the OAuth settings again, checks that `fitness.bent.build/privacy` serves the privacy policy, then submits that build with `eas submit --id <build>`. EAS adds it to an internal TestFlight group.
+10. Appends each step to `workDir/releases.jsonl`: the attempt, the build request, the build ID, the submission request and the result, with the version, build number, OAuth client and Quality run.
 
-Every command has a time limit, and a step that fails stops the release. The script prints no secrets.
+Every command has a time limit, and a step that fails stops the release. Output the script shows has the Expo token and the App Store Connect key replaced with `[redacted]`.
 
 Non-interactive builds use signing credentials and a submission key stored in EAS. Set them up once with `bun run release:ios credentials --config <private-file>`, which opens `eas credentials` with the same access. Choose the `production` profile, set up the build credentials (distribution certificate and provisioning profile), then set up the App Store Connect API key for EAS Submit with the same key.
 
