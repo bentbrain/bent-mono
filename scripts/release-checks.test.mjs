@@ -174,6 +174,14 @@ test("provider IDs used in request paths must be positive safe integers, and a b
     }
   }
 });
+test("the merged pull request number must be a positive safe integer, and a bad one is never shown", async () => {
+  for (const number of ["2", email, 2.5, 0, -1, null]) {
+    await assert.rejects(requireReleaseChecks(sha, fixture(d => {
+      d.pulls[0].number = number;
+      d.statuses[0].target_url = `https://github.com/${repo}/pull/${number}#issuecomment-123`;
+    })), error => error.message === "GitHub returned a malformed pull request number." && !error.message.includes(String(number)));
+  }
+});
 async function qualify(env, preload = []) {
   const checkout = await mkdtemp(join(tmpdir(), "release-checks-"));
   try {

@@ -76,6 +76,7 @@ export async function requireQualityChecks({ sha, branch, event }, api) {
 }
 
 export async function requireReviewedHead({ sha, pullRequest }, api) {
+  if (!isId(pullRequest)) fail("GitHub returned a malformed pull request number.");
   const prefix = `/repos/${REPOSITORY}`;
   const checks = await pages(api, `${prefix}/commits/${sha}/check-runs?filter=latest`, "check_runs", "the check runs");
   const security = checks.filter(check => check.name === "CodeQL" && check.app?.slug === "github-advanced-security");
@@ -99,6 +100,7 @@ export async function requireReleaseChecks(sha, api) {
   const merged = pulls.filter(pr => pr.merged_at && pr.merge_commit_sha === sha && pr.base?.ref === "main" &&
     pr.base.repo?.full_name === REPOSITORY && pr.head?.repo?.full_name === REPOSITORY && SHA.test(pr.head.sha));
   if (merged.length !== 1) fail("Release source must be a reviewed pull request merged into canonical main.");
+  if (!isId(merged[0].number)) fail("GitHub returned a malformed pull request number.");
   // GitHub publishes its native code-scanning check on PR heads, not on the
   // squash-main commit. Main must pass the complete raw-SARIF Quality gate;
   // the merged PR must also have passed the native security check.
