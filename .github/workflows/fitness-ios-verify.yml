@@ -381,7 +381,7 @@ jobs:
         run: |
           if [ -n "${POSTGRES_BIN:-}" ]; then "$POSTGRES_BIN/pg_ctl" -D "$RUNNER_TEMP/postgres" -w stop; fi
   verification:
-    # The Deploy Fitness iOS and Fitness web release qualifications require this job and each job above.
+    # Requires each job above. Releases don't wait for this workflow; it reports the result after merge and nightly.
     name: Fitness iOS verification
     if: always()
     needs: [codeql-swift-app, codeql-swift-tools, simulator-flow]
