@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Build output stays in this user's caches unless NATIVE_BUILD_DIR names another place.
@@ -28,7 +29,6 @@ const seederDerived = join(buildDir, "seeder");
 const core = join(app, "modules/fitness-health/ios");
 const seeder = join(app, "tools/health-seed");
 const variant = process.env.APP_VARIANT || "production";
-const bundleIds = { production: "build.bent.fitness", development: "build.bent.fitness.dev" };
 
 function run(command, args, options = {}) {
   console.log(`$ ${command} ${args.join(" ")}`);
@@ -77,7 +77,7 @@ function swiftCommands(log, targets) {
 /** Extra xcodebuild settings, such as CodeQL's, from XCODEBUILD_SETTINGS. */
 const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filter(Boolean);
 
-/** The generated project's name: FitnessSync, or FitnessSyncDev for development. */
+/** The generated project's name: bentFitness, or bentFitnessDev for development. */
 function project() {
   const workspace = readdirSync(join(app, "ios")).find((name) => name.endsWith(".xcworkspace"));
   if (!workspace) throw new Error("Run prebuild first.");
@@ -93,6 +93,7 @@ const commands = {
     const reported = output("xcodebuild", ["-version"]).split("\n")[0]?.trim();
     if (reported !== `Xcode ${version}`) throw new Error(`Expected Xcode ${version}, found ${reported}.`);
     console.log(output("xcrun", ["swift", "--version"]).trim());
+    console.log(`Verified Xcode ${version}.`);
   },
 
   prebuild() {
@@ -200,26 +201,10 @@ const commands = {
         input: Buffer.from(bytes.map((b) => parseInt(b, 16))),
       }),
     );
-    const health = Object.keys(entitlements)
-      .filter((key) => key.startsWith("com.apple.developer.healthkit"))
-      .sort();
-    const expected = ["com.apple.developer.healthkit", "com.apple.developer.healthkit.background-delivery"];
-    if (health.join() !== expected.join() || expected.some((key) => entitlements[key] !== true))
-      throw new Error(`Unexpected HealthKit entitlements: ${JSON.stringify(entitlements)}`);
+    const health = checkHealthEntitlements(entitlements);
     const plist = JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "Info.plist")]));
-    if (!plist.NSHealthShareUsageDescription) throw new Error("NSHealthShareUsageDescription is missing.");
-    if ("NSHealthUpdateUsageDescription" in plist) throw new Error("The app must not ask to write Health data.");
-    if (plist.CFBundleIdentifier !== bundleIds[variant])
-      throw new Error(`Expected bundle ID ${bundleIds[variant]}, found ${plist.CFBundleIdentifier}.`);
-    if (variant === "production" && plist.NSAppTransportSecurity?.NSAllowsLocalNetworking)
-      throw new Error("Production builds must not allow local networking.");
-    // The seeder is its own project and bundle; nothing of it ships in the app.
-    const files = output("find", [appPath()]).split("\n");
-    if (files.some((file) => /HealthSeed|healthseed/.test(file))) throw new Error("The seeder is inside the app.");
-    const symbols = output("nm", ["-U", binary]);
-    if (/HealthSeed|Seeder/.test(symbols)) throw new Error("Seeder code is linked into the app.");
-    // Expo leaves out a local module it cannot link, so check it is there.
-    if (!/FitnessHealthModule/.test(symbols)) throw new Error("The fitness-health module is not linked.");
+    checkInfoPlist(plist, variant);
+    checkAppContents({ files: output("find", [appPath()]).split("\n"), code: output("nm", ["-U", binary]) });
     console.log(`Artifact: ${plist.CFBundleIdentifier} reads Health data only, with ${health.join(", ")}.`);
   },
 
@@ -229,13 +214,7 @@ const commands = {
       .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
     if (!runtime) throw new Error("No iOS Simulator runtime is installed.");
     const type = runtime.supportedDeviceTypes.filter((t) => t.productFamily === "iPhone").at(-1);
-    const udid = output("xcrun", [
-      "simctl",
-      "create",
-      "Fitness flows",
-      type.identifier,
-      runtime.identifier,
-    ]).trim();
+    const udid = output("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier]).trim();
     try {
       run("xcrun", ["simctl", "boot", udid]);
       run("xcrun", ["simctl", "bootstatus", udid, "-b"]);

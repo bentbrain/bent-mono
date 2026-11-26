@@ -19,7 +19,9 @@
     "fingerprint:check": "node scripts/fingerprint-check.mjs",
     "native:build": "node scripts/native.mjs build",
     "native:test": "node scripts/native.mjs core-test",
-    "roundtrip": "node scripts/roundtrip.mjs"
+    "roundtrip": "node scripts/roundtrip.mjs",
+    "release:ios": "node scripts/release-ios.mjs",
+    "eas-build-post-install": "node scripts/native.mjs xcode 26.6"
   },
   "dependencies": {
     "@bent/design-tokens": "workspace:*",

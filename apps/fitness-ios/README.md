@@ -109,4 +109,38 @@ The artifact check reads the production Simulator build: exactly the HealthKit a
 
 ## EAS
 
-`eas.json` has `development` and `production` profiles with Node 24, Bun 1.4.4 and the `macos-tahoe-26.5-xcode-26.6` image, and requires a committed tree. The EAS project ID is in `app.config.ts`.
+`eas.json` has `development` and `production` profiles with Node 24, Bun 1.4.4 and the `macos-tahoe-26.5-xcode-26.6` image, and requires a committed tree. The EAS project and its owner are in `app.config.ts`. After installing dependencies on EAS, the `eas-build-post-install` script fails the build unless the image reports Xcode 26.6, the version CI builds and analyzes, and prints `Verified Xcode 26.6.` when it does. Production submissions go to the App Store Connect app that `submit.production.ios.ascAppId` names.
+
+Each EAS environment sets the build's public OAuth settings: `FITNESS_OAUTH_ISSUER` and `FITNESS_OAUTH_CLIENT_ID` for that environment's Clerk instance and its Fitness iOS application. The `production` environment uses the production instance.
+
+## Release
+
+`bun run release:ios build --sha <full-sha> --config <private-file>` builds an exact main commit and submits it to TestFlight. The config is a private JSON file, owned by you and readable only by you:
+
+| Field | Value |
+| --- | --- |
+| `ascKeyPath` | Absolute path to the App Store Connect team API key (`.p8`), with Admin access |
+| `ascKeyId`, `ascIssuerId` | The key's ID and issuer ID |
+| `appleTeamId`, `appleTeamType` | The Apple Developer team ID, and `INDIVIDUAL` or `COMPANY_OR_ORGANIZATION` |
+| `expoTokenPath` | Absolute path to a private file holding an Expo access token for the project's owner |
+| `workDir` | A private directory outside any checkout, for clones, the EAS CLI and the release log |
+
+The key, token and work directory must be private to you as well. The script:
+
+1. Requires the commit to be current `main`, merged from a reviewed pull request whose head passed native CodeQL and independent review, with every Quality job passed, using the same gate as `release:vercel`.
+2. Clones the repository fresh into `workDir/<sha>/source`, checks out the commit, checks that the tree is clean and has no `.easignore`, and installs with the frozen lockfile.
+3. Installs the EAS CLI version that `eas.json` pins into `workDir`, and gives it only the Expo token and the App Store Connect key.
+4. Checks that `https://fitness.bent.build/api/health/devices/ready` reports enrollment enabled, that the `production` EAS environment has both OAuth settings, and that the issuer offers `fitness:health:enroll` with PKCE S256.
+5. Checks qualification and readiness again, then runs `eas build --profile production --platform ios --non-interactive`.
+6. Requires one finished store build of the production bundle ID from exactly that commit in this EAS project, and the Xcode check in its log.
+7. Downloads the signed `.ipa` and checks it: exactly the HealthKit and background-delivery entitlements, no debugging entitlement, the production application identifier, a Health read purpose string and no write purpose string, no local networking, the fitness-health module linked in and no seeder.
+8. Checks qualification and readiness again, then submits that build with `eas submit --id <build>`. EAS adds it to an internal TestFlight group.
+9. Appends each step to `workDir/releases.jsonl`: the request, the build ID, the submission request and the result, with the version, build number and Quality run.
+
+Every command has a time limit, and a step that fails stops the release. The script prints no secrets.
+
+Non-interactive builds use signing credentials and a submission key stored in EAS. Set them up once with `bun run release:ios credentials --config <private-file>`, which opens `eas credentials` with the same access. Choose the `production` profile, set up the build credentials (distribution certificate and provisioning profile), then set up the App Store Connect API key for EAS Submit with the same key.
+
+TestFlight builds expire after 90 days. Release again before then to keep the app installed.
+
+[`fitness.bent.build/privacy`](https://fitness.bent.build/privacy) is the app's privacy policy, for App Store Connect.
