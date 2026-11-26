@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parse } from "yaml";
 import {
   browserMatrix,
   comparison,
@@ -572,17 +571,62 @@ const unrelatedRootFiles = [
   "scripts/ci-scope.test.mjs",
 ];
 
+// The workflow's `on.push` mapping. The root tests run without installed
+// dependencies, so this reads the block's YAML directly and rejects any line
+// it does not recognise: a key, a flow sequence of plain scalars, a block
+// sequence of plain or double-quoted scalars, or a comment.
+function pushTrigger(source) {
+  const lines = source.split("\n");
+  const start = lines.indexOf("  push:");
+  assert.ok(start > 0 && lines.slice(0, start).includes("on:"), "on.push");
+  const push = {};
+  let key;
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith("   ")) break;
+    if (/^\s*#/.test(line)) continue;
+    const mapping = line.match(/^    ([a-z-]+):(?: \[([^\]"'#]*)\])?$/);
+    const item = line.match(/^      - (?:"([^"\\]*)"|([^\s"'#][^#]*?))$/);
+    if (mapping) {
+      key = mapping[1];
+      assert.ok(!(key in push), `duplicate key ${key}`);
+      push[key] =
+        mapping[2] === undefined
+          ? []
+          : mapping[2].split(",").map((value) => value.trim());
+    } else if (item && key && Array.isArray(push[key])) {
+      push[key].push(item[1] ?? item[2]);
+    } else {
+      assert.fail(`Unrecognised push trigger line: ${line}`);
+    }
+  }
+  return push;
+}
+
 test("the Fitness iOS Verification push paths are the shared native iPhone inputs", () => {
-  const workflow = parse(
-    readFileSync(
-      join(repositoryRoot, ".github/workflows/fitness-ios-verify.yml"),
-      "utf8",
-    ),
+  const source = readFileSync(
+    join(repositoryRoot, ".github/workflows/fitness-ios-verify.yml"),
+    "utf8",
   );
-  assert.deepEqual(workflow.on.push, {
+  assert.deepEqual(pushTrigger(source), {
     branches: ["main"],
     paths: iosNativeInputs,
   });
+  // The reader rejects a block it cannot read exactly.
+  for (const changed of [
+    source.replace("    paths:\n", "    paths-ignore:\n    paths:\n"),
+    source.replace("      - bun.lock\n", "      - 'bun.lock'\n"),
+    source.replace("      - bun.lock\n", "      - bun.lock # lockfile\n"),
+    source.replace(
+      "    branches: [main]\n",
+      "    branches:\n      - main\n    branches: [main]\n",
+    ),
+  ])
+    assert.throws(() =>
+      assert.deepEqual(pushTrigger(changed), {
+        branches: ["main"],
+        paths: iosNativeInputs,
+      }),
+    );
   assert.ok(workspaces.some((item) => item.path === "apps/fitness-ios"));
   // Each root input names a tracked file, or a directory with tracked files.
   for (const pattern of iosNativeInputs.filter((p) => !insideWorkspace(p))) {
