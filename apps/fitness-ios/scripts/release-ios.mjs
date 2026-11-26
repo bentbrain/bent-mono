@@ -9,12 +9,14 @@
 //   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_*)
 //   same-quality --initial <path> --current <path>
 //   check-no-builds --sha <sha> --file <eas build:list JSON>
-//   check-build --sha <sha> --build-file <eas build JSON> --downloads-dir <dir> --out <path>
+//   check-build --sha <sha> --build-file <eas build JSON> [--build-id <id>] --downloads-dir <dir> --out <path>
+//   submissions-query --build-id <id> --out <path>
+//   check-no-submissions --build-id <id> --file <EAS GraphQL reply>
 //   verify-archive --archive <ipa> --logs-dir <dir> --build <path> --work-dir <dir> --out <path>
 //   summary --file <verify-build output> --sha <sha> [--status <status>]
 //
 // Nothing here prints a signed URL: check-build writes the archive and log URLs
-// to private files, and the workflow downloads them with curl.
+// into private curl config files, which the workflow downloads with curl.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
@@ -538,17 +540,57 @@ export function checkNoEasIgnore(root = repoRoot) {
 const downloadUrl = (url) =>
   typeof url === "string" && /^https:\/\/[^\s"'`$\\]+$/.test(url) ? url : fail("EAS gave a malformed download URL.");
 
+/** A path curl writes to, which must be quoted safely in its config. */
+const configPath = (path) =>
+  /^\/[^\s"\\]+$/.test(path) ? path : fail("Download paths must be absolute, with no spaces, quotes or backslashes.");
+
 /**
- * Checks the finished EAS build and returns what the workflow downloads,
- * by curl so these URLs are never printed, and what the archive must match.
+ * A curl config that downloads `url` to `output`. curl reads the URL from
+ * this private file, so it never appears in a process list or a log.
  */
-export function buildDownloads(builds, { sha, projectId }) {
-  const build = checkBuild(builds, { sha, projectId });
+export function curlConfig(url, output) {
+  return `url = "${downloadUrl(url)}"\noutput = "${configPath(output)}"\n`;
+}
+
+/** A build as `eas build --json` (a list of one) or `eas build:view --json` (the build) reports it. */
+const asBuildList = (reply) => (Array.isArray(reply) ? reply : reply && typeof reply === "object" ? [reply] : reply);
+
+/**
+ * Checks the finished EAS build, and when `buildId` is given that it is that
+ * build. Returns the curl configs for the archive and logs, which hold the
+ * signed URLs, and what the archive must match.
+ */
+export function buildDownloads(reply, { sha, projectId, buildId, directory }) {
+  const build = checkBuild(asBuildList(reply), { sha, projectId });
+  if (buildId && build.id !== buildId) fail("EAS reported another build than the one to resume.");
+  const archive = join(directory, "app.ipa");
   return {
-    archive: downloadUrl(build.artifacts.applicationArchiveUrl),
-    logs: (build.logFiles ?? []).map(downloadUrl),
+    archive: curlConfig(build.artifacts.applicationArchiveUrl, archive),
+    logs: (build.logFiles ?? []).map((url, index) => curlConfig(url, join(directory, "logs", `${index + 1}.txt`))),
     build: { buildId: build.id, version: build.appVersion, buildNumber: build.appBuildVersion },
   };
+}
+
+/** The EAS GraphQL request for a build's submissions, sent by curl in a step with the Expo token. */
+export function submissionsQuery(buildId) {
+  if (!/^[0-9a-f-]{36}$/.test(buildId ?? "")) fail("Pass the EAS build ID to resume.");
+  return {
+    query:
+      "query BuildSubmissions($buildId: ID!) { builds { byId(buildId: $buildId) { id submissions { id status } } } }",
+    variables: { buildId },
+  };
+}
+
+/** A build being resumed must have no submission yet, whatever its status. */
+export function checkNoSubmissions(reply, buildId) {
+  if (reply?.errors?.length) fail("EAS could not list the build's submissions.");
+  const build = reply?.data?.builds?.byId;
+  if (!build || build.id !== buildId || !Array.isArray(build.submissions))
+    fail("EAS did not list the build's submissions.");
+  if (build.submissions.length)
+    fail(
+      `EAS build ${buildId} already has a submission (${build.submissions.map((item) => `${item.id} ${item.status}`).join(", ")}). Check it in EAS and App Store Connect instead of submitting again.`,
+    );
 }
 
 /** Checks the downloaded archive and logs against the build, and returns the build's safe summary. */
@@ -641,17 +683,29 @@ const commands = {
     console.log("EAS has no production build of this commit.");
   },
   async "check-build"(argv) {
-    const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });
+    const found = options(argv, { values: ["--sha", "--build-file", "--build-id", "--downloads-dir", "--out"] });
+    const directory = resolve(required(found, "--downloads-dir"));
     const downloads = buildDownloads(await readJson(required(found, "--build-file")), {
       sha: requireSha(found["--sha"]),
       projectId: (await configSummary()).projectId,
+      buildId: found["--build-id"] || undefined,
+      directory,
     });
-    const directory = required(found, "--downloads-dir");
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(join(directory, "archive-url"), `${downloads.archive}\n`, { mode: 0o600 });
-    await writeFile(join(directory, "log-urls"), downloads.logs.map((url) => `${url}\n`).join(""), { mode: 0o600 });
+    await mkdir(join(directory, "logs"), { recursive: true, mode: 0o700 });
+    await writeFile(join(directory, "archive.curlrc"), downloads.archive, { mode: 0o600 });
+    for (const [index, config] of downloads.logs.entries())
+      await writeFile(join(directory, `log-${index + 1}.curlrc`), config, { mode: 0o600 });
     await writeJson(required(found, "--out"), downloads.build);
     console.log(`EAS build ${downloads.build.buildId} is the finished production build of this commit.`);
+  },
+  async "submissions-query"(argv) {
+    const found = options(argv, { values: ["--build-id", "--out"] });
+    await writeJson(required(found, "--out"), submissionsQuery(found["--build-id"]));
+  },
+  async "check-no-submissions"(argv) {
+    const found = options(argv, { values: ["--build-id", "--file"] });
+    checkNoSubmissions(await readJson(required(found, "--file")), found["--build-id"]);
+    console.log("The build has no submission yet.");
   },
   async "verify-archive"(argv) {
     const found = options(argv, { values: ["--archive", "--logs-dir", "--build", "--work-dir", "--out"] });
