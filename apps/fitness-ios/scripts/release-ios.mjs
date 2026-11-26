@@ -1,27 +1,30 @@
-// Releases bent Fitness to TestFlight from an exact, qualified main commit.
+// Release checks for bent Fitness, run by the Deploy Fitness iOS workflow
+// (.github/workflows/deploy-fitness-ios.yml). The workflow runs the EAS CLI
+// with the Expo token in the steps that need it; these subcommands check what
+// those steps read and write, in files under $RUNNER_TEMP, without the token.
 //
-//   bun run release:ios build --sha <full-sha> --config <private-file>
+//   check-config [--out <path>]
+//   check-profile --eas-package <eas-cli package.json>
+//   admit --env-file <eas env:list output> [--expected-oauth <path>] [--check-privacy] [--out <path>]
+//   same-quality --initial <path> --current <path>
+//   check-no-builds --sha <sha> --file <eas build:list JSON>
+//   verify-build --sha <sha> --build-file <eas build JSON> --oauth-file <path> --work-dir <dir> --out <path>
+//   summary --file <verify-build output> --sha <sha> [--status <status>]
 //
-// `build` qualifies the commit, builds it on EAS from a fresh clone, checks
-// the signed app and submits that exact build to TestFlight.
-import { spawn, spawnSync } from "node:child_process";
-import { constants, createWriteStream, existsSync } from "node:fs";
+// Nothing here prints a signed URL: build archives and logs are fetched, never shown.
+import { execFileSync } from "node:child_process";
+import { createWriteStream, existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { githubApi, requireReleaseChecks } from "../../../scripts/require-release-checks.mjs";
-import { protectedJson } from "../../../scripts/release-vercel.mjs";
 import { bundleIds, checkAppContents, checkHealthEntitlements, checkInfoPlist } from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(app, "../..");
-const REPOSITORY_URL = "https://github.com/bentbrain/bent-mono.git";
-const APP_DIRECTORY = "apps/fitness-ios";
 const FITNESS_ORIGIN = "https://fitness.bent.build";
 const XCODE = "26.6";
 const IMAGE = "macos-tahoe-26.5-xcode-26.6";
@@ -31,431 +34,16 @@ const fail = (message) => {
   throw new Error(message);
 };
 
-// ---------------------------------------------------------------- inputs
-
-export function parseArgs(argv) {
-  const [action, ...rest] = argv;
-  const usage = "Usage: bun run release:ios build --sha <full-sha> --config <private-file>";
-  if (action !== "build") fail(usage);
-  const options = {};
-  for (let index = 0; index < rest.length; index += 2) {
-    const name = rest[index];
-    const value = rest[index + 1];
-    if (!["--sha", "--config"].includes(name) || !value || name in options) fail(usage);
-    options[name] = value;
-  }
-  if (!options["--config"] || !isAbsolute(options["--config"])) fail(usage);
-  if (!SHA.test(options["--sha"] ?? "")) fail(usage);
-  return { action, sha: options["--sha"], configPath: options["--config"] };
-}
-
-/**
- * The protected release configuration: the App Store Connect team key, the
- * Apple team, the Expo token file and a private work directory outside any
- * checkout.
- */
-export function validateConfig(config) {
-  const absolute = (value) => typeof value === "string" && isAbsolute(value);
-  if (
-    !config ||
-    typeof config !== "object" ||
-    !absolute(config.ascKeyPath) ||
-    !/^[A-Z0-9]{10}$/.test(config.ascKeyId ?? "") ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(config.ascIssuerId ?? "") ||
-    !/^[A-Z0-9]{10}$/.test(config.appleTeamId ?? "") ||
-    !["INDIVIDUAL", "COMPANY_OR_ORGANIZATION"].includes(config.appleTeamType) ||
-    !absolute(config.expoTokenPath) ||
-    !absolute(config.workDir)
-  )
-    fail(
-      "The release configuration needs ascKeyPath, ascKeyId, ascIssuerId, appleTeamId, appleTeamType, expoTokenPath and workDir.",
-    );
-  const workDir = resolve(config.workDir);
-  if (workDir === repoRoot || workDir.startsWith(`${repoRoot}${sep}`))
-    fail("The release work directory must be outside the source checkout.");
-  return { ...config, workDir };
-}
-
-/** Reads a private file owned by this user, as release-vercel.mjs does for JSON. */
-async function privateText(path) {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.uid !== process.getuid() || (metadata.mode & 0o077) !== 0)
-      fail("Release inputs must be private files owned by the operator.");
-    return (await handle.readFile("utf8")).trim();
-  } finally {
-    await handle.close();
-  }
-}
-
-async function privateDirectory(path) {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  const real = await realpath(path);
-  const metadata = await stat(real);
-  if (!metadata.isDirectory() || metadata.uid !== process.getuid() || (metadata.mode & 0o077) !== 0)
-    fail("The release work directory must be private and owned by the operator.");
-  return real;
-}
-
-/**
- * Variables that make Node, Bun, Expo or EAS print internals, such as
- * environments or request headers, that can include the Expo token. The
- * release refuses to start while any is set.
- */
-const debugVariables = [
-  "NODE_DEBUG",
-  "NODE_DEBUG_NATIVE",
-  "NODE_OPTIONS",
-  "NODE_V8_COVERAGE",
-  "DEBUG",
-  "EXPO_DEBUG",
-  "EXPO_PROFILE",
-  "EAS_DEBUG",
-  "EAS_VERBOSE",
-  "BUN_CONFIG_VERBOSE_FETCH",
-  "GIT_TRACE",
-  "GIT_CURL_VERBOSE",
-  "npm_config_loglevel",
-  "NPM_CONFIG_LOGLEVEL",
-];
-
-/** The debug variables set in `environment`; the release needs none. */
-export function unsafeDebugVariables(environment) {
-  return debugVariables.filter((name) => (environment[name] ?? "").trim() !== "");
-}
-
-/** The only variables a child inherits from this shell. */
-const inherited = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM"];
-
-/** A child's environment: the allowlisted variables of `base`, plus `extra`. */
-export function childEnvironment(base, extra = {}) {
-  const environment = {};
-  for (const name of inherited) if (base[name] !== undefined) environment[name] = base[name];
-  return { ...environment, NO_COLOR: "1", ...extra };
-}
-
-/** The environment for EAS: the allowlist, the Expo token and the App Store Connect team key. */
-export function easEnvironment(base, config, expoToken) {
-  return childEnvironment(base, {
-    EXPO_TOKEN: expoToken,
-    EXPO_ASC_API_KEY_PATH: config.ascKeyPath,
-    EXPO_ASC_KEY_ID: config.ascKeyId,
-    EXPO_ASC_ISSUER_ID: config.ascIssuerId,
-    EXPO_APPLE_TEAM_ID: config.appleTeamId,
-    EXPO_APPLE_TEAM_TYPE: config.appleTeamType,
-    EXPO_NO_DOTENV: "1",
-    EAS_BUILD_NO_EXPO_GO_WARNING: "true",
-  });
-}
-
-/**
- * The secret strings to keep out of anything the release prints: the Expo
- * token, and the App Store Connect key whole and line by line.
- */
-export function secretsFrom(expoToken, ascKey) {
-  const lines = ascKey
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 16 && !line.startsWith("-----"));
-  return [expoToken, ascKey.trim(), ...lines].filter((value) => value.length >= 8);
-}
-
-/** `text` with each secret replaced by `[redacted]`. */
-export function redact(text, secrets) {
-  let result = text;
-  for (const secret of [...secrets].sort((a, b) => b.length - a.length))
-    result = result.split(secret).join("[redacted]");
-  return result;
-}
-
-/**
- * Redacts a stream as it arrives. It holds back only a tail that could be the
- * start of a secret, so prompts still show as they are written.
- */
-export function redactingWriter(write, secrets) {
-  let pending = "";
-  const held = (text) => {
-    let keep = 0;
-    for (const secret of secrets)
-      for (let length = Math.min(secret.length - 1, text.length); length > keep; length--)
-        if (secret.startsWith(text.slice(text.length - length))) {
-          keep = length;
-          break;
-        }
-    return keep;
-  };
-  return {
-    push(chunk) {
-      const text = redact(pending + chunk, secrets);
-      const keep = held(text);
-      pending = text.slice(text.length - keep);
-      if (text.length > keep) write(text.slice(0, text.length - keep));
-    },
-    end() {
-      if (pending) write(redact(pending, secrets));
-      pending = "";
-    },
-  };
-}
-
-// ---------------------------------------------------------------- processes
-
-/** Secrets the release has read, for redaction. */
-const secrets = [];
-
-/** Failure output for display: redacted first, then cut to its last `limit` characters. */
-export function failureDetail(text, hidden, limit = 4000) {
-  return redact(text, hidden).slice(-limit);
-}
-
-/** Every process, from `ps`: its ID, parent, group and seconds since it started. */
-function processTable() {
-  const listing = spawnSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,etime="], {
-    encoding: "utf8",
-    timeout: 10_000,
-    killSignal: "SIGKILL",
-  });
-  const table = [];
-  for (const line of (listing.stdout ?? "").split("\n")) {
-    const [pid, ppid, pgid, elapsed] = line.trim().split(/\s+/);
-    if (!Number(pid)) continue;
-    // `ps` writes elapsed time as [[dd-]hh:]mm:ss.
-    const [days, clock] = elapsed.includes("-") ? elapsed.split("-") : ["0", elapsed];
-    const seconds = clock.split(":").reduce((total, part) => total * 60 + Number(part), 0) + Number(days) * 86_400;
-    table.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), seconds });
-  }
-  return table;
-}
-
-/** The process IDs below `pid`. */
-function descendants(pid, table = processTable()) {
-  const children = new Map();
-  for (const row of table) {
-    if (!children.has(row.ppid)) children.set(row.ppid, []);
-    children.get(row.ppid).push(row.pid);
-  }
-  const found = [];
-  const queue = [pid];
-  while (queue.length)
-    for (const child of children.get(queue.shift()) ?? []) {
-      found.push(child);
-      queue.push(child);
-    }
-  return found;
-}
-
-/**
- * The process group of a child spawned `detached`, which makes it the leader
- * of a new group whose ID is its own process ID. This checks that with `ps`
- * before the group is ever signalled, and returns null, so nothing is sent to
- * the group, if the child shows another group or the group is this release's
- * own. A child that has already exited is no longer listed; it made its group
- * when it started, so the group is its process ID.
- */
-export function ownedGroup(pid, table, self = process.pid) {
-  const own = table.find((row) => row.pid === self)?.pgid;
-  const row = table.find((item) => item.pid === pid);
-  if (row && row.pgid !== pid) return null;
-  if (pid === own || pid <= 1) return null;
-  return pid;
-}
-
-function killGroup(group, signal) {
-  if (!group) return;
-  try {
-    process.kill(-group, signal);
-  } catch {
-    // The group is gone already.
-  }
-}
-
-/**
- * Signals a command and everything below it: the process group it leads,
- * when that was verified, and each descendant. `known` collects the
- * descendants found, so a later signal still reaches one whose parent has
- * already exited.
- */
-function signalTree(entry, signal) {
-  const { child, known } = entry;
-  for (const pid of descendants(child.pid)) known.add(pid);
-  killGroup(entry.group, signal);
-  for (const pid of [...known, child.pid])
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // The process is gone already.
-    }
-}
-
-/** Children still running, so an interrupted release stops them too. */
-const running = new Set();
-/** Set once the release is stopping, so the runs it stops do not settle. */
-let interrupting = false;
-
-/**
- * Stops a running command and everything it started, within a bound: the
- * tree gets SIGTERM, then SIGKILL after the grace period.
- */
-async function stopTree(entry) {
-  const { child, grace } = entry;
-  const exited =
-    child.exitCode !== null || child.signalCode !== null
-      ? Promise.resolve()
-      : new Promise((resolve) => child.once("exit", resolve));
-  signalTree(entry, "SIGTERM");
-  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, grace))]);
-  signalTree(entry, "SIGKILL");
-}
-
-/** Stops every running command; see `stopTree`. */
-export async function stopRunning() {
-  await Promise.all([...running].map((entry) => stopTree(entry)));
-}
-
-/**
- * On SIGINT, SIGTERM or SIGHUP, stops every running command, then runs
- * `beforeExit` and exits with 128 plus the signal number.
- */
-export function stopChildrenOnInterrupt({ beforeExit } = {}) {
-  for (const [signal, code] of [
-    ["SIGINT", 130],
-    ["SIGTERM", 143],
-    ["SIGHUP", 129],
-  ])
-    process.on(signal, async () => {
-      if (interrupting) return;
-      interrupting = true;
-      await stopRunning();
-      await beforeExit?.(signal);
-      process.exit(code);
-    });
-}
-
-/**
- * Runs a command with a hard time limit and the allowlisted environment.
- *
- * The command runs in a process group of its own. At the limit, and when
- * the release is interrupted, the whole tree gets SIGTERM, then SIGKILL
- * after `grace`; its pipes are closed and the run fails at once, even if a
- * descendant kept the pipes open.
- *
- * With `show`, output is written redacted to stderr as it arrives, so stdout
- * stays for the release's summary. Otherwise it is returned, and shown
- * redacted only when the command fails.
- */
-export function execute(
-  command,
-  args,
-  {
-    cwd,
-    env = childEnvironment(process.env),
-    timeout,
+/** Runs a macOS tool with a hard time limit and returns its output. */
+function tool(command, args, { input, timeout = MINUTE } = {}) {
+  return execFileSync(command, args, {
     input,
-    show = false,
-    hidden = secrets,
-    output = process.stderr,
-    errors = process.stderr,
-    grace = 2000,
-  },
-) {
-  return new Promise((done, failed) => {
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      detached: true,
-      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-    });
-    const entry = {
-      child,
-      known: new Set(),
-      grace,
-      group: child.pid ? ownedGroup(child.pid, processTable()) : null,
-    };
-    running.add(entry);
-    let stdout = "";
-    let stderr = "";
-    const out = redactingWriter((text) => output.write(text), hidden);
-    const err = redactingWriter((text) => errors.write(text), hidden);
-    child.stdout.setEncoding("utf8").on("data", (chunk) => (show ? out.push(chunk) : (stdout += chunk)));
-    child.stderr.setEncoding("utf8").on("data", (chunk) => (show ? err.push(chunk) : (stderr += chunk)));
-    const timers = [];
-    // A command that exits before reading its input closes the pipe; its
-    // exit code decides the run.
-    child.stdin?.on("error", (error) => {
-      if (!["EPIPE", "ERR_STREAM_DESTROYED", "ECONNRESET"].includes(error.code)) settle(error);
-    });
-    if (input !== undefined) child.stdin.end(input);
-    let settled = false;
-    let expired = false;
-    const label = `${command} ${args.slice(0, 2).join(" ")}`;
-    const limit =
-      timeout >= MINUTE
-        ? `${Math.round(timeout / MINUTE)}-minute`
-        : `${Math.max(1, Math.round(timeout / 1000))}-second`;
-    const settle = (error, code) => {
-      if (settled) return;
-      settled = true;
-      for (const timer of timers) clearTimeout(timer);
-      running.delete(entry);
-      // Descendants still running, or left holding the pipes, stop with the command.
-      signalTree(entry, "SIGKILL");
-      child.stdout.destroy();
-      child.stderr.destroy();
-      out.end();
-      err.end();
-      // A release that is stopping exits from its signal handler instead.
-      if (interrupting) return;
-      const reject = (message) => failed(new Error(redact(message, hidden)));
-      if (expired) reject(`${label} ran past its ${limit} limit.`);
-      else if (error) failed(error);
-      else if (code !== 0)
-        reject(
-          `${label} failed with exit code ${code}.${show ? "" : `\n${failureDetail(`${stdout}\n${stderr}`, hidden)}`}`,
-        );
-      else done({ stdout, stderr });
-    };
-    timers.push(
-      setTimeout(() => {
-        expired = true;
-        // Settles once the tree is stopped, even while a descendant keeps the pipes open.
-        stopTree(entry).then(() => settle());
-      }, timeout),
-    );
-    child.on("error", (error) => settle(error));
-    // Output can still be arriving when the command exits; a descendant that
-    // keeps the pipes open past `grace` does not hold the run.
-    child.on("exit", (code, signal) => timers.push(setTimeout(() => settle(null, code ?? (signal ? 1 : 0)), grace)));
-    child.on("close", (code, signal) => settle(null, code ?? (signal ? 1 : 0)));
+    timeout,
+    killSignal: "SIGKILL",
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
-}
-
-/** Runs a command and returns its output; see `execute`. */
-const run = (command, args, options) => execute(command, args, { ...options, show: false });
-
-/** EAS CLI at the version eas.json pins, installed once into the work directory. */
-async function easCli(workDir, version) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) fail("eas.json must pin an exact EAS CLI version.");
-  const prefix = join(workDir, `eas-cli-${version}`);
-  const bin = join(prefix, "node_modules/eas-cli/bin/run");
-  if (!existsSync(bin))
-    await run(
-      "npm",
-      ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--ignore-scripts", `eas-cli@${version}`],
-      {
-        cwd: workDir,
-        timeout: 10 * MINUTE,
-      },
-    );
-  const installed = JSON.parse(
-    (await run("node", ["-p", "JSON.stringify(require('eas-cli/package.json'))"], { cwd: prefix, timeout: MINUTE }))
-      .stdout,
-  );
-  if (installed.version !== version) fail(`Expected EAS CLI ${version}, found ${installed.version}.`);
-  const eas = (args, options) => run("node", [bin, ...args], options);
-  eas.package = join(prefix, "node_modules/eas-cli/package.json");
-  eas.show = (args, options) => execute("node", [bin, ...args], { ...options, show: true });
-  return eas;
 }
 
 // ---------------------------------------------------------------- checks
@@ -840,19 +428,15 @@ async function checkArchive(build, directory, oauth) {
   if (!response.ok || !response.body) fail(`The build archive download failed with HTTP ${response.status}.`);
   await pipeline(Readable.fromWeb(response.body), createWriteStream(archive, { flags: "wx", mode: 0o600 }));
   const extracted = join(directory, "extracted");
-  await run("ditto", ["-x", "-k", archive, extracted], { timeout: 5 * MINUTE });
+  tool("ditto", ["-x", "-k", archive, extracted], { timeout: 5 * MINUTE });
   const payload = join(extracted, "Payload");
   const apps = (await readdir(payload)).filter((name) => name.endsWith(".app"));
   if (apps.length !== 1) fail("The archive must hold exactly one app.");
   const bundle = join(payload, apps[0]);
-  const signed = (await run("codesign", ["-d", "--entitlements", "-", "--xml", bundle], { timeout: MINUTE })).stdout;
-  const entitlements = JSON.parse(
-    (await run("plutil", ["-convert", "json", "-o", "-", "-"], { input: signed, timeout: MINUTE })).stdout,
-  );
+  const signed = tool("codesign", ["-d", "--entitlements", "-", "--xml", bundle]);
+  const entitlements = JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", "-"], { input: signed }));
   const health = checkSignedEntitlements(entitlements);
-  const plist = JSON.parse(
-    (await run("plutil", ["-convert", "json", "-o", "-", join(bundle, "Info.plist")], { timeout: MINUTE })).stdout,
-  );
+  const plist = JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", join(bundle, "Info.plist")]));
   checkInfoPlist(plist, "production");
   const binary = join(bundle, plist.CFBundleExecutable);
   const contents = (await files(bundle)).map((path) => relative(bundle, path));
@@ -879,134 +463,35 @@ async function buildLogs(build) {
   return logs;
 }
 
-// ---------------------------------------------------------------- release
-
-/** A fresh clone of the canonical repository at exactly `sha`. */
-async function pristineCheckout(sha, directory) {
-  if (existsSync(directory)) fail(`${directory} already exists; each release uses a fresh clone.`);
-  await run("git", ["clone", "--quiet", "--no-checkout", REPOSITORY_URL, directory], { timeout: 10 * MINUTE });
-  await run("git", ["checkout", "--quiet", "--detach", sha], { cwd: directory, timeout: 5 * MINUTE });
-  await verifyCheckout(sha, directory);
-}
-
-async function verifyCheckout(sha, directory) {
-  const git = async (args) => (await run("git", args, { cwd: directory, timeout: MINUTE })).stdout.trim();
-  const head = await git(["rev-parse", "HEAD"]);
-  const status = await git(["status", "--porcelain", "--untracked-files=normal"]);
-  if (head !== sha || status) fail("The release checkout must be clean and at the exact source commit.");
-  if (await git(["ls-files", "--cached", "--others", "--", "*.easignore", ".easignore"]))
-    fail("The release checkout must not contain an .easignore file.");
-}
-
-async function journal(path, record) {
-  const handle = await open(path, "a", 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify({ ...record, at: new Date().toISOString() })}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-/** The release log's records, oldest first. */
-async function journalRecords(path) {
-  let text;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  }
-  return text
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
-
 /**
- * A commit can be released again only while no build of it was requested: an
- * attempt that stopped before `eas build` left nothing on EAS. Once a build
- * may exist, the log and EAS need a person to reconcile them.
- */
-export function checkPriorAttempts(records, sha) {
-  const requested = records.filter(
-    (record) =>
-      record.sha === sha && ["build-requested", "built", "submit-requested", "submitted"].includes(record.status),
-  );
-  if (requested.length)
-    fail(
-      `A build of ${sha} was already requested (${requested.at(-1).status}). Check its EAS build and releases.jsonl before releasing it again.`,
-    );
-}
-
-/**
- * Claims a commit's build for this run. The claim is a file created only if
- * it does not exist, so of two runs that pass the journal check together,
- * one gets it. It stays once the build is requested, so every later run
- * refuses; `release` removes it only when the request never went out.
- */
-export async function claimBuild(path, record) {
-  await privateDirectory(dirname(path));
-  let handle;
-  try {
-    handle = await open(path, "wx", 0o600);
-  } catch (error) {
-    if (error.code === "EEXIST")
-      fail(
-        `A run already claimed this commit's build (${path}). Check its EAS build and releases.jsonl before releasing it again.`,
-      );
-    throw error;
-  }
-  try {
-    await handle.writeFile(`${JSON.stringify(record)}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  return { release: () => rm(path, { force: true }) };
-}
-
-/**
- * Where a commit's build claim lives: one place per user, keyed by the EAS
- * project and the commit, whatever work directory a release configuration
- * names. Two configurations for one project therefore share their claims.
- */
-export function claimPathFor(projectId, sha, home = homedir()) {
-  if (!/^[0-9a-f-]{36}$/.test(projectId) || !SHA.test(sha))
-    fail("A build claim needs an EAS project ID and a full SHA.");
-  return join(home, ".local/state/fitness-ios-release/claims", projectId, `${sha}.claim`);
-}
-
-/**
- * EAS must have no production iOS build of the commit yet. This covers runs
- * on other machines or accounts, which the local claim cannot see.
+ * EAS must have no production iOS build of the commit yet. This covers
+ * every run, wherever it started.
  */
 export function checkNoEasBuilds(builds, sha) {
   if (!Array.isArray(builds)) fail("EAS did not list the commit's builds.");
   const existing = builds.filter((build) => build.gitCommitHash === sha && build.buildProfile === "production");
   if (existing.length)
     fail(
-      `EAS already has a production build of ${sha} (${existing.map((build) => `${build.id} ${build.status}`).join(", ")}). Check it and releases.jsonl before releasing the commit again.`,
+      `EAS already has a production build of ${sha} (${existing.map((build) => `${build.id} ${build.status}`).join(", ")}). Check that build before releasing the commit again.`,
     );
 }
 
-/** The OAuth settings the production EAS environment gives the build. */
-const productionOAuth = async (project) =>
-  checkOAuthSettings(
-    parseEnvList(
-      (await project.eas(["env:list", "--environment", "production", "--format", "short"], project.options(2 * MINUTE)))
-        .stdout,
-    ),
-  );
+async function getJsonOk(url) {
+  const reply = await getJson(url);
+  if (reply.status !== 200) fail(`${url} replied HTTP ${reply.status}.`);
+  return reply.body;
+}
+
+/** What a release reports when it finishes: no URLs and nothing secret. */
+export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
 
 /**
- * Admission: the commit's qualification, and acceptance of the build's OAuth
- * issuer and client by Fitness production and by the issuer, which must stay
- * the same through the release.
+ * The build's OAuth issuer and client, from the production EAS environment,
+ * accepted by Fitness production and by the issuer. `expected` is what an
+ * earlier admission saw, which must not have changed.
  */
-async function admit(sha, project, expected) {
-  const quality = await requireReleaseChecks(sha, githubApi);
-  const oauth = await productionOAuth(project);
+export async function admit(envList, expected) {
+  const oauth = checkOAuthSettings(parseEnvList(envList));
   if (expected && (oauth.issuer !== expected.issuer || oauth.clientId !== expected.clientId))
     fail("The production EAS environment's OAuth settings changed during the release.");
   checkProtectedResource(await getJsonOk(`${FITNESS_ORIGIN}/.well-known/oauth-protected-resource`), oauth.issuer);
@@ -1020,132 +505,135 @@ async function admit(sha, project, expected) {
     redirectUri: `${bundleIds.production}://oauth`,
     resource: `${FITNESS_ORIGIN}/api/mcp`,
   });
-  return { quality, oauth };
+  return oauth;
 }
 
-async function getJsonOk(url) {
-  const reply = await getJson(url);
-  if (reply.status !== 200) fail(`${url} replied HTTP ${reply.status}.`);
-  return reply.body;
+/** The two qualifications of one release must name the same Quality run. */
+export function checkSameQuality(initial, current) {
+  if (
+    !Number.isSafeInteger(initial?.qualityRunId) ||
+    initial.sha !== current?.sha ||
+    initial.qualityRunId !== current.qualityRunId ||
+    initial.qualityAttempt !== current.qualityAttempt
+  )
+    fail("Quality qualification changed during the release.");
 }
 
-async function build({ sha, config }) {
-  const workDir = await privateDirectory(config.workDir);
-  const expoToken = await privateText(config.expoTokenPath);
-  secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
-  const env = easEnvironment(process.env, config, expoToken);
-  const journalPath = join(workDir, "releases.jsonl");
-  checkPriorAttempts(await journalRecords(journalPath), sha);
-
-  const quality = await requireReleaseChecks(sha, githubApi);
-  // Each attempt has its own directory, so a stopped attempt's files stay.
-  const release = join(workDir, sha, new Date().toISOString().replace(/[:.]/g, "-"));
-  await mkdir(release, { recursive: true, mode: 0o700 });
-  await journal(journalPath, { sha, status: "attempt-started", directory: release });
-  const checkout = join(release, "source");
-  await pristineCheckout(sha, checkout);
-  const appDir = join(checkout, APP_DIRECTORY);
-  const easJson = JSON.parse(await readFile(join(appDir, "eas.json"), "utf8"));
-  const eas = await easCli(workDir, checkEasJson(easJson));
-  checkIosBuild(await pinnedIosProfile(eas.package, appDir));
-  const projectId = projectIdFrom(await readFile(join(appDir, "app.config.ts"), "utf8"));
-  const claimPath = claimPathFor(projectId, sha);
-  if (existsSync(claimPath))
-    fail(
-      `A run already claimed this commit's build (${claimPath}). Check its EAS build and releases.jsonl before releasing it again.`,
-    );
-  await run("bun", ["install", "--frozen-lockfile"], { cwd: checkout, timeout: 20 * MINUTE });
-  await verifyCheckout(sha, checkout);
-
-  const project = { eas, options: (timeout) => ({ cwd: appDir, env, timeout }) };
-  const { oauth } = await admit(sha, project);
-
-  // Admission again, immediately before the first change: the EAS build.
-  const admitted = await admit(sha, project, oauth);
-  if (admitted.quality.qualityRunId !== quality.qualityRunId) fail("Quality qualification changed during the release.");
-  checkEasJson(JSON.parse(await readFile(join(appDir, "eas.json"), "utf8")));
-  checkIosBuild(await pinnedIosProfile(eas.package, appDir));
-  const listed = await eas(
-    [
-      "build:list",
-      "--platform",
-      "ios",
-      "--git-commit-hash",
-      sha,
-      "--build-profile",
-      "production",
-      "--limit",
-      "50",
-      "--json",
-      "--non-interactive",
-    ],
-    project.options(2 * MINUTE),
-  );
-  checkNoEasBuilds(JSON.parse(listed.stdout), sha);
-  const claim = await claimBuild(claimPath, { sha, projectId, attempt: release, at: new Date().toISOString() });
-  try {
-    await journal(journalPath, { sha, status: "build-requested", quality });
-  } catch (error) {
-    await claim.release();
-    throw error;
-  }
-  const builds = JSON.parse(
-    (
-      await eas(
-        ["build", "--profile", "production", "--platform", "ios", "--non-interactive", "--json", "--wait"],
-        project.options(150 * MINUTE),
-      )
-    ).stdout,
-  );
-  const finished = checkBuild(builds, { sha, projectId });
-  await journal(journalPath, { sha, status: "built", buildId: finished.id, appBuildVersion: finished.appBuildVersion });
-  checkXcodeLog(await buildLogs(finished));
-  const artifact = await checkArchive(finished, release, oauth);
-  if (artifact.buildNumber !== finished.appBuildVersion || artifact.version !== finished.appVersion)
-    fail("The archive's version does not match the EAS build.");
-
-  // Admission again, immediately before submitting to TestFlight.
-  const final = await admit(sha, project, oauth);
-  if (final.quality.qualityRunId !== quality.qualityRunId) fail("Quality qualification changed during the release.");
-  await privacyPage();
-  await journal(journalPath, { sha, status: "submit-requested", buildId: finished.id });
-  await eas.show(
-    ["submit", "--profile", "production", "--platform", "ios", "--id", finished.id, "--non-interactive", "--wait"],
-    project.options(60 * MINUTE),
-  );
-  const receipt = {
-    sha,
-    status: "submitted",
-    buildId: finished.id,
-    bundleId: bundleIds.production,
-    version: artifact.version,
-    buildNumber: artifact.buildNumber,
-    fingerprint: finished.fingerprint?.hash ?? null,
-    entitlements: artifact.health,
-    oauthClientId: oauth.clientId,
-    quality,
-  };
-  // The full receipt stays in the private journal.
-  await journal(journalPath, receipt);
-  return receipt;
+/** The repository must have no .easignore, so EAS uploads exactly the commit. */
+export function checkNoEasIgnore(root = repoRoot) {
+  for (const path of [join(root, ".easignore"), join(root, "apps/fitness-ios/.easignore")])
+    if (existsSync(path)) fail("The release checkout must not contain an .easignore file.");
 }
-
-/** What the release prints when it finishes; the rest is in the journal. */
-export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
 
 /**
- * Writes the summary as the only line on stdout. Everything the release
- * shows while it runs, its own and its commands' output, goes to stderr.
+ * Checks the finished EAS build and its signed archive, and returns the
+ * build's safe summary. The archive and logs are fetched by URL; the URLs are
+ * never written anywhere.
  */
-export function printSummary(receipt, stdout = process.stdout) {
-  stdout.write(`${JSON.stringify(summary(receipt))}\n`);
+async function verifyBuild({ sha, builds, oauth, workDir, projectId }) {
+  const build = checkBuild(builds, { sha, projectId });
+  checkXcodeLog(await buildLogs(build));
+  await mkdir(workDir, { recursive: true, mode: 0o700 });
+  const artifact = await checkArchive(build, workDir, oauth);
+  if (artifact.buildNumber !== build.appBuildVersion || artifact.version !== build.appVersion)
+    fail("The archive's version does not match the EAS build.");
+  return summary({ status: "built", buildId: build.id, version: artifact.version, buildNumber: artifact.buildNumber });
 }
 
+/** The step summary: status, commit, build, version and build number. */
+export function summaryMarkdown(result, sha) {
+  const { status, buildId, version, buildNumber } = summary(result);
+  return [
+    "## bent Fitness iOS release",
+    "",
+    "| Status | Commit | Build | Version | Build number |",
+    "| --- | --- | --- | --- | --- |",
+    `| ${status} | \`${sha}\` | \`${buildId}\` | ${version} | ${buildNumber} |`,
+    "",
+  ].join("\n");
+}
+
+/** Reads `--name value` and `--flag` options for a subcommand. */
+export function options(argv, { values = [], flags = [] }) {
+  const found = {};
+  for (let index = 0; index < argv.length; index++) {
+    const name = argv[index];
+    if (flags.includes(name)) found[name] = true;
+    else if (values.includes(name) && argv[index + 1] !== undefined && !(name in found)) found[name] = argv[++index];
+    else fail(`Unexpected argument ${name}.`);
+  }
+  return found;
+}
+
+const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
+const writeJson = (path, value) => writeFile(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+const requireSha = (sha) => (SHA.test(sha ?? "") ? sha : fail("Pass the full 40-character commit SHA."));
+const required = (found, name) => found[name] ?? fail(`Pass ${name}.`);
+
+/** The pinned EAS CLI version and the EAS project, from the committed config. */
+export async function configSummary(root = repoRoot) {
+  checkNoEasIgnore(root);
+  const easCliVersion = checkEasJson(await readJson(join(root, "apps/fitness-ios/eas.json")));
+  if (!/^\d+\.\d+\.\d+$/.test(easCliVersion)) fail("eas.json must pin an exact EAS CLI version.");
+  const projectId = projectIdFrom(await readFile(join(root, "apps/fitness-ios/app.config.ts"), "utf8"));
+  return { easCliVersion, projectId };
+}
+
+const commands = {
+  async "check-config"(argv) {
+    const found = options(argv, { values: ["--out"] });
+    const config = await configSummary();
+    if (found["--out"]) await writeJson(found["--out"], config);
+    console.log(JSON.stringify(config));
+  },
+  async "check-profile"(argv) {
+    const found = options(argv, { values: ["--eas-package"] });
+    checkIosBuild(await pinnedIosProfile(resolve(required(found, "--eas-package")), app));
+    console.log("The production iOS profile is a Release store build of the production variant.");
+  },
+  async admit(argv) {
+    const found = options(argv, {
+      values: ["--env-file", "--expected-oauth", "--out"],
+      flags: ["--check-privacy"],
+    });
+    const expected = found["--expected-oauth"] ? await readJson(found["--expected-oauth"]) : undefined;
+    const oauth = await admit(await readFile(required(found, "--env-file"), "utf8"), expected);
+    if (found["--check-privacy"]) await privacyPage();
+    if (found["--out"]) await writeJson(found["--out"], oauth);
+    console.log("Fitness production and the OAuth issuer accept the build's OAuth client.");
+  },
+  async "same-quality"(argv) {
+    const found = options(argv, { values: ["--initial", "--current"] });
+    checkSameQuality(await readJson(required(found, "--initial")), await readJson(required(found, "--current")));
+    console.log("Quality qualification is unchanged.");
+  },
+  async "check-no-builds"(argv) {
+    const found = options(argv, { values: ["--sha", "--file"] });
+    checkNoEasBuilds(await readJson(required(found, "--file")), requireSha(found["--sha"]));
+    console.log("EAS has no production build of this commit.");
+  },
+  async "verify-build"(argv) {
+    const found = options(argv, { values: ["--sha", "--build-file", "--oauth-file", "--work-dir", "--out"] });
+    const result = await verifyBuild({
+      sha: requireSha(found["--sha"]),
+      builds: await readJson(required(found, "--build-file")),
+      oauth: await readJson(required(found, "--oauth-file")),
+      workDir: resolve(required(found, "--work-dir")),
+      projectId: (await configSummary()).projectId,
+    });
+    await writeJson(required(found, "--out"), result);
+    console.log(JSON.stringify(result));
+  },
+  async summary(argv) {
+    const found = options(argv, { values: ["--file", "--sha", "--status"] });
+    const result = await readJson(required(found, "--file"));
+    if (found["--status"]) result.status = found["--status"];
+    process.stdout.write(summaryMarkdown(result, requireSha(found["--sha"])));
+  },
+};
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const unsafe = unsafeDebugVariables(process.env);
-  if (unsafe.length) fail(`Unset ${unsafe.join(", ")} first: debug output can include the Expo token.`);
-  const { sha, configPath } = parseArgs(process.argv.slice(2));
-  const config = validateConfig(await protectedJson(configPath));
-  stopChildrenOnInterrupt();
-  printSummary(await build({ sha, config }));
+  const [name, ...argv] = process.argv.slice(2);
+  const command = commands[name] ?? fail(`Run one of: ${Object.keys(commands).join(", ")}.`);
+  await command(argv);
 }

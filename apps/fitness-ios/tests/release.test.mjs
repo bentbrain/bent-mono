@@ -1,58 +1,41 @@
+/* global Bun */
 import { describe, expect, test } from "bun:test";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
+  admit,
   checkAuthorizationServer,
+  checkNoEasIgnore,
+  checkSameQuality,
+  configSummary,
+  options,
+  summaryMarkdown,
   checkBuild,
   carriesParameters,
   checkClientAtIssuer,
   checkIosBuild,
   checkNoEasBuilds,
-  claimBuild,
-  claimPathFor,
   checkEasJson,
   checkEmbeddedConfig,
   checkOAuthSettings,
-  checkPriorAttempts,
   checkPrivacyPage,
   checkProtectedResource,
   checkReadiness,
   checkSignedEntitlements,
   checkXcodeLog,
-  ownedGroup,
-  printSummary,
-  childEnvironment,
-  easEnvironment,
   effectiveIosProfile,
-  execute,
-  failureDetail,
-  parseArgs,
   parseEnvList,
   projectIdFrom,
-  redact,
-  redactingWriter,
   resolveProfile,
-  secretsFrom,
   signInPage,
   summary,
-  unsafeDebugVariables,
-  validateConfig,
 } from "../scripts/release-ios.mjs";
 
 const sha = "a".repeat(40);
 const projectId = "50ba8677-0be0-45a5-ac8c-ceff89d65696";
-const config = {
-  ascKeyPath: "/private/release/AuthKey.p8",
-  ascKeyId: "ABCDE12345",
-  ascIssuerId: "00000000-0000-4000-8000-000000000000",
-  appleTeamId: "TEAM123456",
-  appleTeamType: "INDIVIDUAL",
-  expoTokenPath: "/private/release/expo-token",
-  workDir: "/private/release/work",
-};
 const build = {
   id: "11111111-2222-4333-8444-555555555555",
   status: "FINISHED",
@@ -69,322 +52,6 @@ const healthKit = {
   "com.apple.developer.healthkit": true,
   "com.apple.developer.healthkit.background-delivery": true,
 };
-
-describe("release arguments and configuration", () => {
-  test("build needs a full SHA and an absolute private config", () => {
-    expect(parseArgs(["build", "--sha", sha, "--config", "/private/release.json"])).toEqual({
-      action: "build",
-      sha,
-      configPath: "/private/release.json",
-    });
-    expect(() => parseArgs(["build", "--sha", "abc", "--config", "/private/release.json"])).toThrow("Usage");
-    expect(() => parseArgs(["build", "--sha", sha, "--config", "release.json"])).toThrow("Usage");
-    expect(() => parseArgs(["build", "--sha", sha, "--sha", sha, "--config", "/x"])).toThrow("Usage");
-    expect(() => parseArgs(["update", "--config", "/x"])).toThrow("Usage");
-    expect(() => parseArgs(["credentials", "--config", "/x"])).toThrow("Usage");
-    expect(() => parseArgs(["build", "--config", "/x"])).toThrow("Usage");
-  });
-
-  test("the configuration names the team key, the Apple team and a work directory outside the checkout", () => {
-    expect(validateConfig(config).workDir).toBe("/private/release/work");
-    expect(() => validateConfig({ ...config, ascKeyId: "short" })).toThrow("ascKeyPath");
-    expect(() => validateConfig({ ...config, appleTeamType: "IN_HOUSE" })).toThrow("ascKeyPath");
-    expect(() => validateConfig({ ...config, expoTokenPath: "token" })).toThrow("ascKeyPath");
-    const inside = new URL("..", import.meta.url).pathname;
-    expect(() => validateConfig({ ...config, workDir: inside })).toThrow("outside the source checkout");
-  });
-
-  test("EAS gets the allowlisted environment, the Expo token and the App Store Connect key, and nothing else", () => {
-    const shell = {
-      PATH: "/bin",
-      HOME: "/home/example",
-      GH_TOKEN: "gh",
-      VERCEL_TOKEN: "v",
-      NODE_DEBUG: "child_process",
-      NODE_OPTIONS: "--require ./trace.js",
-      AWS_SECRET_ACCESS_KEY: "other",
-    };
-    const env = easEnvironment(shell, config, "expo");
-    expect(env).toEqual({
-      PATH: "/bin",
-      HOME: "/home/example",
-      NO_COLOR: "1",
-      EXPO_TOKEN: "expo",
-      EXPO_ASC_API_KEY_PATH: config.ascKeyPath,
-      EXPO_ASC_KEY_ID: config.ascKeyId,
-      EXPO_ASC_ISSUER_ID: config.ascIssuerId,
-      EXPO_APPLE_TEAM_ID: config.appleTeamId,
-      EXPO_APPLE_TEAM_TYPE: "INDIVIDUAL",
-      EXPO_NO_DOTENV: "1",
-      EAS_BUILD_NO_EXPO_GO_WARNING: "true",
-    });
-    expect(childEnvironment(shell)).toEqual({ PATH: "/bin", HOME: "/home/example", NO_COLOR: "1" });
-  });
-
-  const sink = () => {
-    const parts = [];
-    return { parts, write: (text) => parts.push(text) };
-  };
-  const quiet = { env: childEnvironment(process.env), hidden: [], output: sink(), errors: sink() };
-  const alive = (pid) => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  /** Whether `pid` has exited within two seconds; a killed process can take a moment to go. */
-  const exits = async (pid) => {
-    for (let wait = 0; wait < 40 && alive(pid); wait++) await new Promise((wake) => setTimeout(wake, 50));
-    return !alive(pid);
-  };
-
-  test("shown child output is redacted as it arrives", async () => {
-    const token = "expo_token_0123456789";
-    const output = sink();
-    const errors = sink();
-    await execute(
-      process.execPath,
-      [
-        "-e",
-        `process.stdout.write("token ${token.slice(0, 6)}"); setTimeout(() => { process.stdout.write("${token.slice(6)}!"); console.error("${token}"); }, 20);`,
-      ],
-      { env: childEnvironment(process.env), timeout: 30_000, show: true, hidden: [token], output, errors },
-    );
-    expect(output.parts.join("")).toBe("token [redacted]!");
-    expect(errors.parts.join("")).toBe("[redacted]\n");
-    await expect(execute(process.execPath, ["-e", "process.exit(3)"], { ...quiet, timeout: 30_000 })).rejects.toThrow(
-      "exit code 3",
-    );
-    expect(
-      (await execute(process.execPath, ["-e", "process.stdout.write('ok')"], { ...quiet, timeout: 30_000 })).stdout,
-    ).toBe("ok");
-  });
-
-  test("failure output is redacted before it is cut, so no part of a secret shows", async () => {
-    const token = "expo_token_0123456789";
-    // The token straddles the 4000-character cut.
-    const text = `${token}${"x".repeat(3995)}`;
-    expect(failureDetail(text, [token])).not.toContain("0123456789".slice(-5));
-    expect(failureDetail(text, [token])).toBe(`[redacted]${"x".repeat(3995)}`.slice(-4000));
-    const shown = `${"y".repeat(3990)}${token}`;
-    const script = `process.stderr.write(${JSON.stringify(shown)}); process.exit(1)`;
-    const failure = await execute(process.execPath, ["-e", script], {
-      ...quiet,
-      hidden: [token],
-      timeout: 30_000,
-    }).catch((error) => error);
-    expect(failure.message).toContain("[redacted]");
-    expect(failure.message).not.toMatch(/_token|56789/);
-  });
-
-  test("a command past its limit is stopped with its descendants", async () => {
-    // The child starts a grandchild that inherits the pipes, then both wait.
-    const script =
-      "const { spawn } = require('node:child_process');" +
-      "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
-      "console.log(grandchild.pid); setTimeout(() => {}, 60000);";
-    const output = sink();
-    const started = Date.now();
-    const failure = await execute(process.execPath, ["-e", script], {
-      ...quiet,
-      timeout: 400,
-      grace: 200,
-      show: true,
-      output,
-    }).catch((error) => error);
-    expect(failure.message).toContain("limit");
-    expect(Date.now() - started).toBeLessThan(5_000);
-    const grandchild = Number(output.parts.join("").trim());
-    expect(grandchild).toBeGreaterThan(0);
-    expect(await exits(grandchild)).toBe(true);
-  });
-
-  test("a command leads a process group of its own, apart from the release's", async () => {
-    const group = (pid) =>
-      Number(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
-    const script =
-      "const { execSync } = require('node:child_process'); console.log(execSync('ps -o pgid= -p ' + process.pid).toString().trim(), process.pid);";
-    const reply = await execute(process.execPath, ["-e", script], { ...quiet, timeout: 30_000 });
-    const [pgid, pid] = reply.stdout.trim().split(/\s+/).map(Number);
-    expect(pgid).toBe(pid);
-    expect(pgid).not.toBe(group(process.pid));
-  });
-
-  test("only a group the command leads is ever signalled", () => {
-    const table = [
-      { pid: 60, ppid: 50, pgid: 60, seconds: 9 }, // the release, leading its shell job
-      { pid: 70, ppid: 60, pgid: 70, seconds: 1 }, // a command that made its own group
-      { pid: 71, ppid: 60, pgid: 60, seconds: 1 }, // a command that inherited the release's group
-      { pid: 72, ppid: 60, pgid: 90, seconds: 1 }, // a command in some other group
-    ];
-    expect(ownedGroup(70, table, 60)).toBe(70);
-    expect(ownedGroup(71, table, 60)).toBeNull();
-    expect(ownedGroup(72, table, 60)).toBeNull();
-    // The release's own group, or init's, is never a command's.
-    expect(ownedGroup(60, table, 60)).toBeNull();
-    expect(ownedGroup(1, table, 60)).toBeNull();
-    // A command that already exited made its group when it started.
-    expect(ownedGroup(80, table, 60)).toBe(80);
-  });
-
-  /** A release runner: it runs one command that starts a helper, as the release does, until it is stopped. */
-  const runnerSource = `
-import { writeFileSync } from "node:fs";
-const [, , modulePath, dir] = process.argv;
-const { childEnvironment, execute, stopChildrenOnInterrupt } = await import(modulePath);
-writeFileSync(dir + "/runner", JSON.stringify({ pid: process.pid }));
-stopChildrenOnInterrupt({ beforeExit: (signal) => writeFileSync(dir + "/after", JSON.stringify({ signal })) });
-const command = [
-  "const { spawn } = require('node:child_process');",
-  "const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });",
-  "require('node:fs').writeFileSync(" + JSON.stringify(dir + "/command") + ", JSON.stringify({ pid: process.pid, helper: helper.pid }));",
-  "setTimeout(() => {}, 60000);",
-].join("\\n");
-await execute(process.execPath, ["-e", command], {
-  env: childEnvironment(process.env),
-  timeout: 60000,
-  grace: 300,
-  show: true,
-  hidden: [],
-});
-`;
-  const waitFor = async (path) => {
-    for (let wait = 0; wait < 300 && !existsSync(path); wait++) await new Promise((wake) => setTimeout(wake, 50));
-    return JSON.parse(readFileSync(path, "utf8"));
-  };
-  const runRelease = () => {
-    const dir = mkdtempSync(join(tmpdir(), "release-stop-"));
-    const runner = join(dir, "runner.mjs");
-    writeFileSync(runner, runnerSource);
-    const module = new URL("../scripts/release-ios.mjs", import.meta.url).href;
-    const child = spawn(process.execPath, [runner, module, dir], { stdio: "ignore" });
-    const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve(code ?? signal)));
-    return { dir, exited, kill: () => child.kill("SIGKILL") };
-  };
-
-  for (const [signal, code] of [
-    ["SIGTERM", 143],
-    ["SIGINT", 130],
-    ["SIGHUP", 129],
-  ])
-    test(`${signal} to the release stops each command's tree before it exits`, async () => {
-      const release = runRelease();
-      try {
-        const runner = await waitFor(join(release.dir, "runner"));
-        const command = await waitFor(join(release.dir, "command"));
-        process.kill(runner.pid, signal);
-        // The release exits from its own handler, after stopping the tree.
-        expect(await release.exited).toBe(code);
-        expect(await waitFor(join(release.dir, "after"))).toEqual({ signal });
-        expect(await exits(command.helper)).toBe(true);
-        expect(await exits(command.pid)).toBe(true);
-      } finally {
-        release.kill();
-        rmSync(release.dir, { recursive: true, force: true });
-      }
-    }, 30_000);
-
-  test("stdout carries only the final JSON summary, while command output goes to stderr", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "release-stdout-"));
-    try {
-      // A fake eas that prints progress on both streams, then succeeds.
-      const fakeEas = join(dir, "eas.mjs");
-      writeFileSync(
-        fakeEas,
-        "process.stdout.write('Submitting build...\\n'); console.error('Waiting for App Store Connect'); process.stdout.write('✔ Submitted\\n');",
-      );
-      const script = join(dir, "release.mjs");
-      writeFileSync(
-        script,
-        `const { childEnvironment, execute, printSummary } = await import(${JSON.stringify(new URL("../scripts/release-ios.mjs", import.meta.url).href)});
-await execute(process.execPath, [${JSON.stringify(fakeEas)}, "submit"], { env: childEnvironment(process.env), timeout: 30000, show: true, hidden: [] });
-printSummary({ status: "submitted", buildId: "b1", version: "1.0.0", buildNumber: "7", oauthClientId: "client", quality: {} });`,
-      );
-      const result = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 30_000 });
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe('{"status":"submitted","buildId":"b1","version":"1.0.0","buildNumber":"7"}\n');
-      expect(JSON.parse(result.stdout)).toEqual({
-        status: "submitted",
-        buildId: "b1",
-        version: "1.0.0",
-        buildNumber: "7",
-      });
-      expect(result.stderr).toContain("Submitting build...");
-      expect(result.stderr).toContain("Waiting for App Store Connect");
-      expect(result.stderr).toContain("✔ Submitted");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("printSummary writes one JSON line", () => {
-    const written = [];
-    printSummary(
-      { status: "submitted", buildId: "b", version: "1", buildNumber: "2", sha },
-      { write: (text) => written.push(text) },
-    );
-    expect(written).toEqual(['{"status":"submitted","buildId":"b","version":"1","buildNumber":"2"}\n']);
-  });
-
-  test("a command that exits before reading its input settles normally", async () => {
-    const input = "x".repeat(4 * 1024 * 1024);
-    await expect(
-      execute(process.execPath, ["-e", "process.exit(0)"], { ...quiet, input, timeout: 30_000 }),
-    ).resolves.toEqual({ stdout: "", stderr: "" });
-    await expect(
-      execute(process.execPath, ["-e", "process.exit(2)"], { ...quiet, input, timeout: 30_000 }),
-    ).rejects.toThrow("exit code 2");
-    // A command that reads its input still gets all of it.
-    const { stdout } = await execute(
-      process.execPath,
-      ["-e", "let n = 0; process.stdin.on('data', (c) => (n += c.length)).on('end', () => console.log(n));"],
-      { ...quiet, input, timeout: 30_000 },
-    );
-    expect(Number(stdout)).toBe(input.length);
-  });
-
-  test("a descendant left holding the pipes does not hold a finished command", async () => {
-    const script =
-      "const { spawn } = require('node:child_process');" +
-      "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
-      "console.log(grandchild.pid); grandchild.unref(); process.exit(0);";
-    const started = Date.now();
-    const { stdout } = await execute(process.execPath, ["-e", script], { ...quiet, timeout: 30_000, grace: 200 });
-    expect(Date.now() - started).toBeLessThan(5_000);
-    expect(await exits(Number(stdout.trim()))).toBe(true);
-  });
-
-  test("debug settings that can print the Expo token stop the release", () => {
-    expect(unsafeDebugVariables({ PATH: "/bin", NODE_OPTIONS: " " })).toEqual([]);
-    expect(
-      unsafeDebugVariables({ NODE_DEBUG: "child_process", NODE_OPTIONS: "--inspect", DEBUG: "*", EXPO_DEBUG: "1" }),
-    ).toEqual(["NODE_DEBUG", "NODE_OPTIONS", "DEBUG", "EXPO_DEBUG"]);
-  });
-
-  test("the Expo token and the App Store Connect key are redacted from output", () => {
-    const token = "expo_token_0123456789";
-    const key =
-      // A synthetic key in PEM layout; the label is split so the public-source audit reads it as text.
-      `-----BEGIN ${"PRIVATE"} KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49\nAwEHBHkwdwIBAQQg0123456789abcdef\n-----END ${"PRIVATE"} KEY-----\n`;
-    const secrets = secretsFrom(token, key);
-    expect(secrets).toContain(token);
-    expect(secrets).toContain("MIGTAgEAMBMGByqGSM49AgEGCCqGSM49");
-    expect(secrets.some((secret) => secret.startsWith("-----") && !secret.includes("\n"))).toBe(false);
-    expect(redact(`Authorization: Bearer ${token}\n${key}`, secrets)).not.toMatch(/expo_token|MIGTAgEA|AwEHBHkw/);
-
-    // A secret split across chunks is still redacted, and a prompt is shown as it arrives.
-    const written = [];
-    const writer = redactingWriter((text) => written.push(text), secrets);
-    writer.push("? Choose a profile ");
-    expect(written.join("")).toBe("? Choose a profile ");
-    writer.push(`token=${token.slice(0, 9)}`);
-    writer.push(`${token.slice(9)} done`);
-    writer.end();
-    expect(written.join("")).toBe("? Choose a profile token=[redacted] done");
-  });
-});
 
 describe("committed release settings", () => {
   const easJson = JSON.parse(readFileSync(new URL("../eas.json", import.meta.url), "utf8"));
@@ -490,17 +157,6 @@ describe("committed release settings", () => {
 });
 
 describe("release admission", () => {
-  test("build claims live in one place per user, keyed by EAS project and commit", () => {
-    const projectId = "50ba8677-0be0-45a5-ac8c-ceff89d65696";
-    expect(claimPathFor(projectId, sha, "/home/example")).toBe(
-      `/home/example/.local/state/fitness-ios-release/claims/${projectId}/${sha}.claim`,
-    );
-    // The work directory plays no part, so two configurations share a claim.
-    expect(claimPathFor(projectId, sha, "/home/example")).toBe(claimPathFor(projectId, sha, "/home/example"));
-    expect(() => claimPathFor("../x", sha)).toThrow("EAS project ID");
-    expect(() => claimPathFor(projectId, "abc")).toThrow("full SHA");
-  });
-
   test("EAS must have no production build of the commit already", () => {
     expect(() => checkNoEasBuilds([], sha)).not.toThrow();
     expect(() => checkNoEasBuilds([{ ...build, gitCommitHash: "b".repeat(40) }], sha)).not.toThrow();
@@ -544,36 +200,6 @@ describe("release admission", () => {
     expect(() => checkPrivacyPage(200, "<h1>bent Fitness privacy</h1>")).not.toThrow();
     expect(() => checkPrivacyPage(200, "Account services need setup.")).toThrow("/privacy");
     expect(() => checkPrivacyPage(404, "")).toThrow("HTTP 404");
-  });
-
-  test("a commit is released again only while none of its builds was requested", () => {
-    const records = [
-      { sha, status: "attempt-started" },
-      { sha: "b".repeat(40), status: "submitted" },
-    ];
-    expect(() => checkPriorAttempts(records, sha)).not.toThrow();
-    for (const status of ["build-requested", "built", "submit-requested", "submitted"])
-      expect(() => checkPriorAttempts([...records, { sha, status }], sha)).toThrow(status);
-  });
-
-  test("of two runs claiming a commit's build at once, one gets it, and the claim stays", async () => {
-    const home = mkdtempSync(join(tmpdir(), "release-claim-"));
-    try {
-      const path = claimPathFor(projectId, sha, home);
-      const results = await Promise.allSettled([claimBuild(path, { run: 1 }), claimBuild(path, { run: 2 })]);
-      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-      const refused = results.find((result) => result.status === "rejected");
-      expect(refused.reason.message).toContain("already claimed");
-      expect(JSON.parse(readFileSync(path, "utf8")).run).toBeGreaterThan(0);
-      await expect(claimBuild(path, { run: 3 })).rejects.toThrow("already claimed");
-      // A run that stops before the build request releases its claim.
-      await results.find((result) => result.status === "fulfilled").value.release();
-      const again = await claimBuild(path, { run: 4 });
-      expect(JSON.parse(readFileSync(path, "utf8")).run).toBe(4);
-      await again.release();
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 
   describe("Clerk's authorization flow", () => {
@@ -948,5 +574,213 @@ describe("the built app", () => {
     expect(() => checkAppContents({ files: ["Info.plist"], code: "FitnessHealthModule" })).not.toThrow();
     expect(() => checkAppContents({ files: ["HealthSeed.bundle"], code: "FitnessHealthModule" })).toThrow("seeder");
     expect(() => checkAppContents({ files: [], code: "" })).toThrow("not linked");
+  });
+});
+
+describe("the Deploy Fitness iOS workflow", () => {
+  const source = readFileSync(new URL("../../../.github/workflows/deploy-fitness-ios.yml", import.meta.url), "utf8");
+  const workflow = Bun.YAML.parse(source);
+  const job = workflow.jobs.release;
+  const steps = job.steps;
+  const runsEas = (step) => /eas-cli\/bin\/run/.test(step.run ?? "");
+  const index = (pattern) => {
+    const found = steps.findIndex((step) => pattern.test(`${step.name ?? ""} ${step.uses ?? ""} ${step.run ?? ""}`));
+    expect(found).toBeGreaterThanOrEqual(0);
+    return found;
+  };
+
+  test("runs only when dispatched on main in this repository, one release at a time", () => {
+    expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
+    expect(workflow.on.workflow_dispatch.inputs.sha).toMatchObject({ required: true, type: "string" });
+    expect(workflow.concurrency).toEqual({ group: "fitness-ios-production", "cancel-in-progress": false });
+    expect(Object.keys(workflow.jobs)).toEqual(["release"]);
+    for (const guard of [
+      "github.repository == 'bentbrain/bent-mono'",
+      "github.ref == 'refs/heads/main'",
+      "github.event_name == 'workflow_dispatch'",
+    ])
+      expect(job.if).toContain(guard);
+    expect(job.environment).toEqual({ name: "fitness-ios-production" });
+    expect(job["runs-on"]).toBe("macos-26");
+    expect(job["timeout-minutes"]).toBeLessThanOrEqual(240);
+  });
+
+  test("grants read permissions only", () => {
+    expect(Object.values(workflow.permissions).every((level) => level === "read")).toBe(true);
+    expect(job.permissions).toBeUndefined();
+  });
+
+  test("keeps the Expo token to the steps that run EAS", () => {
+    expect(workflow.env).toBeUndefined();
+    expect(job.env).toEqual({ RELEASE_SHA: "${{ github.sha }}" });
+    const withToken = steps.filter((step) => step.env?.EXPO_TOKEN !== undefined);
+    expect(withToken.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(Boolean(step.env?.EXPO_TOKEN)).toBe(runsEas(step));
+      if (runsEas(step)) {
+        expect(step.env.EXPO_TOKEN).toBe("${{ secrets.EXPO_TOKEN }}");
+        expect(step["timeout-minutes"]).toBeGreaterThan(0);
+        // EAS steps run the CLI and write to a file; they run no project code.
+        expect(step.run).not.toMatch(/release-ios\.mjs|bun |npm /);
+      }
+    }
+    // Installs and checks never see the token.
+    for (const pattern of [
+      /\.github\/actions\/setup/,
+      /npm install/,
+      /check-no-builds/,
+      /verify-build/,
+      /admit --env-file/,
+    ])
+      expect(steps[index(pattern)].env?.EXPO_TOKEN).toBeUndefined();
+    expect(source.match(/secrets\./g)).toHaveLength(withToken.length);
+  });
+
+  test("pins every action to a commit and never keeps checkout credentials", () => {
+    for (const step of steps.filter((item) => item.uses)) {
+      expect(step.uses).toMatch(/^(\.\/\.github\/actions\/[a-z-]+|[\w-]+\/[\w-]+@[0-9a-f]{40})$/);
+      if (step.uses.startsWith("actions/checkout@")) expect(step.with["persist-credentials"]).toBe(false);
+    }
+    expect(steps.filter((step) => step.uses?.startsWith("actions/checkout@"))).toHaveLength(1);
+  });
+
+  test("passes inputs and outputs through env, never into scripts", () => {
+    for (const step of steps) if (step.run) expect(step.run).not.toContain("${{");
+    expect(steps[0].env).toEqual({ INPUT_SHA: "${{ inputs.sha }}" });
+    expect(steps[0].run).toContain('"$INPUT_SHA" != "$RELEASE_SHA"');
+  });
+
+  test("uploads nothing and removes build files whatever happens", () => {
+    expect(source).not.toMatch(/upload-artifact|actions\/cache/);
+    const cleanup = steps.at(-1);
+    expect(cleanup.if).toBe("always()");
+    for (const path of ["ipa", "eas-build.json", "eas-existing.json", "eas-env-pre.txt", "eas-env-post.txt", "eas-cli"])
+      expect(cleanup.run).toContain(`"$RUNNER_TEMP/${path}"`);
+    // Only the build ID leaves a step; the summary has no URLs.
+    expect(source.match(/GITHUB_OUTPUT/g)).toHaveLength(1);
+    expect(steps[index(/verify-build/)].run).toContain("build_id=");
+  });
+
+  test("qualifies, checks and admits in order around the build and the submission", () => {
+    const qualify = index(/Qualify exact main source before installing/);
+    const setup = index(/\.github\/actions\/setup/);
+    const profile = index(/check-profile/);
+    const admitBuild = index(/admit --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
+    const requalify = index(/quality-build\.json/);
+    const noBuilds = index(/check-no-builds/);
+    const easBuild = index(/ build --profile production/);
+    const verify = index(/verify-build/);
+    const readmit = index(/--expected-oauth/);
+    const submit = index(/ submit --profile production/);
+    expect(qualify).toBeLessThan(setup);
+    expect(setup).toBeLessThan(profile);
+    expect(profile).toBeLessThan(admitBuild);
+    expect(admitBuild).toBeLessThan(requalify);
+    expect(requalify).toBeLessThan(noBuilds);
+    expect(noBuilds).toBeLessThan(easBuild);
+    expect(easBuild).toBeLessThan(verify);
+    expect(verify).toBeLessThan(readmit);
+    expect(readmit).toBeLessThan(submit);
+    expect(steps[readmit].run).toContain("--check-privacy");
+    expect(steps[readmit].run).toContain("same-quality");
+    expect(steps[submit].env.BUILD_ID).toBe("${{ steps.verify.outputs.build_id }}");
+    expect(steps[easBuild]["timeout-minutes"]).toBe(150);
+  });
+});
+
+describe("the release subcommands", () => {
+  const script = new URL("../scripts/release-ios.mjs", import.meta.url).pathname;
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 30_000 });
+
+  test("read only the options each subcommand takes", () => {
+    expect(options(["--sha", sha, "--check-privacy"], { values: ["--sha"], flags: ["--check-privacy"] })).toEqual({
+      "--sha": sha,
+      "--check-privacy": true,
+    });
+    expect(() => options(["--other", "x"], { values: ["--sha"] })).toThrow("Unexpected argument --other");
+    expect(() => options(["--sha"], { values: ["--sha"] })).toThrow("Unexpected argument --sha");
+    expect(() => options(["--sha", "a", "--sha", "b"], { values: ["--sha"] })).toThrow("Unexpected argument --sha");
+    const unknown = run("credentials");
+    expect(unknown.status).not.toBe(0);
+    expect(unknown.stderr).toContain("Run one of: check-config, check-profile, admit, same-quality, check-no-builds");
+  });
+
+  test("check-config reads the pinned EAS CLI and the project, and refuses an .easignore", async () => {
+    expect(await configSummary()).toEqual({ easCliVersion: "27.11.0", projectId });
+    const result = run("check-config");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ easCliVersion: "27.11.0", projectId });
+    const root = mkdtempSync(join(tmpdir(), "release-easignore-"));
+    try {
+      expect(() => checkNoEasIgnore(root)).not.toThrow();
+      writeFileSync(join(root, ".easignore"), "");
+      expect(() => checkNoEasIgnore(root)).toThrow(".easignore");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("both qualifications must name the same Quality run", () => {
+    const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };
+    expect(() => checkSameQuality(quality, { ...quality })).not.toThrow();
+    for (const change of [{ qualityRunId: 24 }, { qualityAttempt: 3 }, { sha: "b".repeat(40) }])
+      expect(() => checkSameQuality(quality, { ...quality, ...change })).toThrow("changed");
+    expect(() => checkSameQuality({}, {})).toThrow("changed");
+  });
+
+  test("check-no-builds reads the EAS build list", () => {
+    const directory = mkdtempSync(join(tmpdir(), "release-builds-"));
+    try {
+      const file = join(directory, "builds.json");
+      writeFileSync(file, "[]");
+      expect(run("check-no-builds", "--sha", sha, "--file", file).status).toBe(0);
+      writeFileSync(file, JSON.stringify([build]));
+      const refused = run("check-no-builds", "--sha", sha, "--file", file);
+      expect(refused.status).not.toBe(0);
+      expect(refused.stderr).toContain("already has a production build");
+      expect(run("check-no-builds", "--sha", "abc", "--file", file).stderr).toContain("40-character");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("admit refuses OAuth settings that changed since the first admission, before any request", async () => {
+    const original = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      throw new Error("no network in this test");
+    };
+    try {
+      const env = "FITNESS_OAUTH_ISSUER=https://clerk.example.com\nFITNESS_OAUTH_CLIENT_ID=client123\n";
+      await expect(admit(env, { issuer: "https://clerk.example.com", clientId: "client_old" })).rejects.toThrow(
+        "changed during the release",
+      );
+      await expect(admit("FITNESS_OAUTH_ISSUER=https://clerk.example.com\n")).rejects.toThrow(
+        "FITNESS_OAUTH_CLIENT_ID",
+      );
+      expect(requests).toBe(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("the summary names the status, commit, build, version and build number, and nothing else", () => {
+    const markdown = summaryMarkdown(
+      { status: "submitted", buildId: build.id, version: "1.0.0", buildNumber: "7", url: "https://example.invalid/x" },
+      sha,
+    );
+    expect(markdown).toContain(`| submitted | \`${sha}\` | \`${build.id}\` | 1.0.0 | 7 |`);
+    expect(markdown).not.toContain("https://");
+    const directory = mkdtempSync(join(tmpdir(), "release-summary-"));
+    try {
+      const file = join(directory, "verified.json");
+      writeFileSync(file, JSON.stringify({ status: "built", buildId: build.id, version: "1.0.0", buildNumber: "7" }));
+      const result = run("summary", "--file", file, "--sha", sha, "--status", "submitted");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("| submitted |");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
