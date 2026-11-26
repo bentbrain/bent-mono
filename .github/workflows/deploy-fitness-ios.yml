@@ -64,18 +64,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/quality-initial.json"
-      - uses: ./.github/actions/setup
-      - name: Require a clean checkout of the exact commit
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          test -z "$(git status --porcelain --untracked-files=normal)"
       - name: Check the release config and install the pinned EAS CLI
         timeout-minutes: 10
         run: |
           set -euo pipefail
           checks="$GITHUB_WORKSPACE/apps/fitness-ios/scripts/release-ios.mjs"
-          node "$checks" check-config --out "$RUNNER_TEMP/release-config.json"
+          node "$checks" check-config --out "$RUNNER_TEMP/release-config.json" --static-dir "$RUNNER_TEMP/eas-static"
           version="$(node -p 'require(process.argv[1]).easCliVersion' "$RUNNER_TEMP/release-config.json")"
           mkdir -p "$RUNNER_TEMP/eas-cli"
           cd "$RUNNER_TEMP/eas-cli"
@@ -85,9 +79,11 @@ jobs:
           node "$checks" check-profile --eas-package "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/package.json"
       - name: Read the production EAS environment
         timeout-minutes: 5
-        working-directory: apps/fitness-ios
+        working-directory: ${{ runner.temp }}/eas-static
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
           EXPO_NO_DOTENV: "1"
           NO_COLOR: "1"
         run: >-
@@ -103,9 +99,11 @@ jobs:
       - name: List EAS builds of the commit
         if: inputs.build_id == ''
         timeout-minutes: 5
-        working-directory: apps/fitness-ios
+        working-directory: ${{ runner.temp }}/eas-static
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
           EXPO_NO_DOTENV: "1"
           NO_COLOR: "1"
         run: >-
@@ -117,6 +115,15 @@ jobs:
         run: >-
           node apps/fitness-ios/scripts/release-ios.mjs check-no-builds --sha "$RELEASE_SHA"
           --file "$RUNNER_TEMP/eas-existing.json"
+      # The workspace is installed only for the build, after the EAS steps that hold the token run from the static directory.
+      - uses: ./.github/actions/setup
+        if: inputs.build_id == ''
+      - name: Require a clean checkout of the exact commit
+        if: inputs.build_id == ''
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain --untracked-files=normal)"
       - name: Qualify again immediately before the build
         if: inputs.build_id == ''
         timeout-minutes: 5
@@ -133,6 +140,7 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_NO_DOTENV: "1"
+          EAS_SKIP_AUTO_FINGERPRINT: "1"
           NO_COLOR: "1"
         run: >-
           node "$RUNNER_TEMP/eas-cli/node_modules/eas-cli/bin/run" build --profile production --platform ios
@@ -140,9 +148,11 @@ jobs:
       - name: Read the build to resume
         if: inputs.build_id != ''
         timeout-minutes: 5
-        working-directory: apps/fitness-ios
+        working-directory: ${{ runner.temp }}/eas-static
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
           EXPO_NO_DOTENV: "1"
           NO_COLOR: "1"
           BUILD_INPUT: ${{ inputs.build_id }}
@@ -187,9 +197,11 @@ jobs:
           echo "build_id=$(node -p 'require(process.argv[1]).buildId' "$RUNNER_TEMP/verified.json")" >> "$GITHUB_OUTPUT"
       - name: Read the production EAS environment again
         timeout-minutes: 5
-        working-directory: apps/fitness-ios
+        working-directory: ${{ runner.temp }}/eas-static
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
           EXPO_NO_DOTENV: "1"
           NO_COLOR: "1"
         run: >-
@@ -241,9 +253,11 @@ jobs:
           node apps/fitness-ios/scripts/release-ios.mjs same-quality --initial "$RUNNER_TEMP/quality-initial.json" --current "$RUNNER_TEMP/quality-submit.json"
       - name: Submit the build to TestFlight
         timeout-minutes: 60
-        working-directory: apps/fitness-ios
+        working-directory: ${{ runner.temp }}/eas-static
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_NO_VCS: "1"
+          EAS_PROJECT_ROOT: ${{ runner.temp }}/eas-static
           EXPO_NO_DOTENV: "1"
           NO_COLOR: "1"
           BUILD_ID: ${{ steps.verify.outputs.build_id }}
@@ -259,4 +273,4 @@ jobs:
         run: >-
           rm -rf "$RUNNER_TEMP/ipa" "$RUNNER_TEMP/eas-build.json" "$RUNNER_TEMP/eas-existing.json"
           "$RUNNER_TEMP/eas-env-pre.txt" "$RUNNER_TEMP/eas-env-post.txt" "$RUNNER_TEMP/eas-submissions.json"
-          "$RUNNER_TEMP/eas-cli"
+          "$RUNNER_TEMP/eas-cli" "$RUNNER_TEMP/eas-static"

@@ -1,12 +1,24 @@
 /* global Bun */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
   admit,
+  appConfigMetadata,
+  staticEasFiles,
+  writeStaticEasDir,
   buildDownloads,
   checkNoSubmissions,
   curlConfig,
@@ -725,12 +737,13 @@ describe("the Deploy Fitness iOS workflow", () => {
 
   test("qualifies again immediately before each EAS change", () => {
     const qualify = index(/Qualify exact main source before installing/);
-    const setup = index(/\.github\/actions\/setup/);
     const profile = index(/check-profile/);
     const handOff = index(/oauth-env --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
     const admitBuild = index(/release-ios\.mjs admit$/m);
     const list = index(/ build:list --platform ios/);
     const noBuilds = index(/check-no-builds/);
+    const setup = index(/\.github\/actions\/setup/);
+    const clean = index(/Require a clean checkout/);
     const requalifyBuild = index(/quality-build\.json/);
     const easBuild = index(/ build --profile production/);
     const view = index(/ build:view "\$BUILD_INPUT" --json/);
@@ -743,12 +756,13 @@ describe("the Deploy Fitness iOS workflow", () => {
     const submit = index(/ submit --profile production/);
     const order = [
       qualify,
-      setup,
       profile,
       handOff,
       admitBuild,
       list,
       noBuilds,
+      setup,
+      clean,
       requalifyBuild,
       easBuild,
       view,
@@ -767,6 +781,36 @@ describe("the Deploy Fitness iOS workflow", () => {
     for (const position of [requalifyBuild, requalifySubmit]) expect(steps[position].run).toContain("same-quality");
     expect(steps[readmit].run).toContain("--check-privacy");
     expect(steps[easBuild]["timeout-minutes"]).toBe(150);
+  });
+
+  test("runs every EAS step that holds the token, except the build, from the static directory", () => {
+    const build = steps[index(/ build --profile production/)];
+    const others = steps.filter((step) => runsEas(step) && step !== build);
+    expect(others.length).toBe(5);
+    for (const step of others) {
+      expect(step["working-directory"]).toBe("${{ runner.temp }}/eas-static");
+      expect(step.env).toMatchObject({
+        EAS_NO_VCS: "1",
+        EAS_PROJECT_ROOT: "${{ runner.temp }}/eas-static",
+        EXPO_NO_DOTENV: "1",
+      });
+    }
+    // The build is the only step with the token in the workspace.
+    expect(steps.filter((step) => step.env?.EXPO_TOKEN && step["working-directory"] === "apps/fitness-ios")).toEqual([
+      build,
+    ]);
+    expect(build.env).toMatchObject({ EXPO_NO_DOTENV: "1", EAS_SKIP_AUTO_FINGERPRINT: "1" });
+    expect(build.env.EAS_NO_VCS).toBeUndefined();
+    // The workspace is installed only for the build, after the other pre-build EAS steps.
+    const setup = index(/\.github\/actions\/setup/);
+    expect(steps.filter((step) => step.uses === "./.github/actions/setup")).toHaveLength(1);
+    expect(setup).toBeGreaterThan(index(/> "\$RUNNER_TEMP\/eas-env-pre.txt"/));
+    expect(setup).toBeGreaterThan(index(/ build:list --platform ios/));
+    expect(setup).toBeLessThan(index(/ build --profile production/));
+    expect(building(steps[setup])).toBe(true);
+    expect(building(steps[index(/Require a clean checkout/)])).toBe(true);
+    expect(steps[index(/check-config/)].run).toContain('--static-dir "$RUNNER_TEMP/eas-static"');
+    expect(steps.at(-1).run).toContain('"$RUNNER_TEMP/eas-static"');
   });
 
   test("builds a new commit, or resumes a given build after checking it has no submission", () => {
@@ -815,7 +859,7 @@ describe("the release subcommands", () => {
   });
 
   test("check-config reads the pinned EAS CLI and the project, and refuses an .easignore", async () => {
-    expect(await configSummary()).toEqual({ easCliVersion: "27.11.0", projectId });
+    expect(await configSummary()).toMatchObject({ easCliVersion: "27.11.0", projectId });
     const result = run("check-config");
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({ easCliVersion: "27.11.0", projectId });
@@ -828,6 +872,126 @@ describe("the release subcommands", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("the EAS project metadata is read from the config as text", async () => {
+    const appConfig = readFileSync(new URL("../app.config.ts", import.meta.url), "utf8");
+    const variants = readFileSync(new URL("../src/config/variants.ts", import.meta.url), "utf8");
+    expect(appConfigMetadata(appConfig, variants)).toEqual({
+      projectId,
+      slug: "fitnessbentbuild",
+      owner: "bentbuilds-team",
+      name: "bent Fitness",
+      bundleIdentifier: "build.bent.fitness",
+    });
+    expect(() => appConfigMetadata(appConfig.replace('  slug: "fitnessbentbuild",\n', ""), variants)).toThrow(
+      "EAS slug",
+    );
+    expect(() =>
+      appConfigMetadata(appConfig.replace('owner: "bentbuilds-team"', "owner: process.env.OWNER"), variants),
+    ).toThrow("EAS owner");
+    expect(() => appConfigMetadata(`${appConfig}\n  slug: "other",\n`, variants)).toThrow("EAS slug");
+    expect(() =>
+      appConfigMetadata(
+        appConfig,
+        variants.replace('bundleIdentifier: "build.bent.fitness",\n  },', 'bundleIdentifier: "build.other",\n  },'),
+      ),
+    ).toThrow("production bundle ID");
+  });
+
+  test("the static EAS directory gives the EAS CLI no code to run, even beside a poisoned workspace", async () => {
+    const root = mkdtempSync(join(tmpdir(), "release-static-"));
+    try {
+      const { metadata, easJson } = await configSummary();
+      const staticDir = join(root, "eas-static");
+      await writeStaticEasDir(staticDir, metadata, easJson);
+      await expect(writeStaticEasDir(staticDir, metadata, easJson)).rejects.toThrow("new or empty");
+      expect(readdirSync(staticDir).sort()).toEqual(["app.json", "eas.json", "package.json"]);
+      expect(statSync(staticDir).mode & 0o777).toBe(0o700);
+      for (const name of readdirSync(staticDir)) expect(statSync(join(staticDir, name)).mode & 0o777).toBe(0o600);
+      const files = staticEasFiles(metadata, easJson);
+      expect(JSON.parse(readFileSync(join(staticDir, "package.json"), "utf8"))).toEqual(files["package.json"]);
+      expect(files["package.json"]).toEqual({ name: "fitness-ios-eas-static", version: "0.0.0", private: true });
+      expect(JSON.parse(readFileSync(join(staticDir, "app.json"), "utf8"))).toEqual({
+        expo: {
+          name: "bent Fitness",
+          slug: "fitnessbentbuild",
+          owner: "bentbuilds-team",
+          ios: { bundleIdentifier: "build.bent.fitness" },
+          extra: { eas: { projectId } },
+        },
+      });
+      expect(JSON.parse(readFileSync(join(staticDir, "eas.json"), "utf8"))).toEqual(easJson);
+
+      // A decoy workspace beside it, where each config hook writes the token to a marker.
+      const marker = join(root, "marker");
+      const poison = `require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.env.EXPO_TOKEN));`;
+      const decoy = join(root, "workspace");
+      mkdirSync(join(decoy, "node_modules/expo/bin"), { recursive: true });
+      writeFileSync(join(decoy, "package.json"), JSON.stringify({ name: "decoy", dependencies: { expo: "58.0.26" } }));
+      writeFileSync(
+        join(decoy, "node_modules/expo/package.json"),
+        JSON.stringify({ name: "expo", version: "58.0.26" }),
+      );
+      writeFileSync(join(decoy, "node_modules/expo/bin/cli.js"), poison);
+      writeFileSync(join(decoy, "plugin.js"), `${poison}\nmodule.exports = (config) => config;`);
+      writeFileSync(
+        join(decoy, "app.config.js"),
+        `${poison}\nmodule.exports = { name: "decoy", slug: "decoy", plugins: ["./plugin.js"] };`,
+      );
+      writeFileSync(join(decoy, ".env"), "EXPO_PUBLIC_DECOY=1\n");
+
+      const repoModules = new URL("../../../node_modules/", import.meta.url).pathname;
+      const probe = join(root, "probe.cjs");
+      writeFileSync(
+        probe,
+        `const { getConfig, getConfigFilePaths } = require(${JSON.stringify(join(repoModules, "@expo/config"))});
+const resolveFrom = require(${JSON.stringify(join(repoModules, "resolve-from"))});
+const dir = process.argv[2];
+const result = {
+  cli: resolveFrom.silent(dir, "expo/bin/cli") ?? null,
+  paths: getConfigFilePaths(dir),
+  exp: getConfig(dir, { skipSDKVersionRequirement: true }).exp,
+};
+process.stdout.write(JSON.stringify(result));`,
+      );
+      const inspect = (dir) =>
+        spawnSync("node", [probe, dir], {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 60_000,
+          env: {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            EXPO_TOKEN: "expo_synthetic_boundary_canary",
+            EXPO_NO_DOTENV: "1",
+            EAS_NO_VCS: "1",
+          },
+        });
+
+      const result = inspect(staticDir);
+      expect(result.status).toBe(0);
+      const seen = JSON.parse(result.stdout);
+      expect(seen.cli).toBeNull();
+      expect(seen.paths.dynamicConfigPath).toBeNull();
+      expect(seen.paths.staticConfigPath).toBe(join(staticDir, "app.json"));
+      expect(seen.exp).toMatchObject({
+        name: "bent Fitness",
+        slug: "fitnessbentbuild",
+        owner: "bentbuilds-team",
+        ios: { bundleIdentifier: "build.bent.fitness" },
+        extra: { eas: { projectId } },
+      });
+      expect(seen.exp.plugins).toBeUndefined();
+      expect(JSON.stringify(seen)).not.toContain("DECOY");
+      expect(existsSync(marker)).toBe(false);
+
+      // The same probe on the decoy runs its config, so the marker would show a leak.
+      inspect(decoy);
+      expect(readFileSync(marker, "utf8")).toBe("expo_synthetic_boundary_canary");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   test("both qualifications must name the same Quality run", () => {
     const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };

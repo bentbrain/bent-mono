@@ -3,7 +3,7 @@
 // with the Expo token in the steps that need it; these subcommands check what
 // those steps read and write, in files under $RUNNER_TEMP, without the token.
 //
-//   check-config [--out <path>]
+//   check-config [--out <path>] [--static-dir <dir>]
 //   check-profile --eas-package <eas-cli package.json>
 //   oauth-env --env-file <eas env:list output>          (lines for $GITHUB_ENV)
 //   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_*)
@@ -640,19 +640,73 @@ const writeJson = (path, value) => writeFile(path, `${JSON.stringify(value)}\n`,
 const requireSha = (sha) => (SHA.test(sha ?? "") ? sha : fail("Pass the full 40-character commit SHA."));
 const required = (found, name) => found[name] ?? fail(`Pass ${name}.`);
 
+/** Exactly one match of `pattern` in `source`, or a failure naming `what`. */
+function single(source, pattern, what) {
+  const matches = [...source.matchAll(pattern)];
+  if (matches.length !== 1) fail(`app.config.ts and src/config/variants.ts must name the ${what} once, as a literal.`);
+  return matches[0];
+}
+
+/**
+ * The EAS project metadata, read as text from the committed config without
+ * running it: the project ID, slug and owner from app.config.ts, and the
+ * production name and bundle ID from src/config/variants.ts.
+ */
+export function appConfigMetadata(appConfigSource, variantsSource) {
+  const projectId = projectIdFrom(appConfigSource);
+  const slug = single(appConfigSource, /^ {2}slug: "([a-z0-9-]{1,64})",$/gm, "EAS slug")[1];
+  const owner = single(appConfigSource, /^ {2}owner: "([a-z0-9-]{1,64})",$/gm, "EAS owner")[1];
+  const production = single(
+    variantsSource,
+    /^ {2}production: \{\n {4}name: "([A-Za-z0-9 ]{1,30})",\n {4}bundleIdentifier: "([a-z0-9.]{1,100})",\n {2}\},$/gm,
+    "production variant",
+  );
+  if (production[2] !== bundleIds.production) fail(`The production bundle ID must be ${bundleIds.production}.`);
+  return { projectId, slug, owner, name: production[1], bundleIdentifier: production[2] };
+}
+
+/**
+ * The directory the EAS steps that hold the Expo token run in, apart from
+ * `eas build`: a package.json with no dependencies or scripts, so the EAS CLI
+ * never runs the workspace's Expo CLI, a static app.json with no plugins,
+ * and the checked eas.json. Nothing in it runs code.
+ */
+export function staticEasFiles({ projectId, slug, owner, name, bundleIdentifier }, easJson) {
+  return {
+    "package.json": { name: "fitness-ios-eas-static", version: "0.0.0", private: true },
+    "app.json": { expo: { name, slug, owner, ios: { bundleIdentifier }, extra: { eas: { projectId } } } },
+    "eas.json": easJson,
+  };
+}
+
+/** Writes the static EAS directory, private, with exactly its three files. */
+export async function writeStaticEasDir(directory, metadata, easJson) {
+  if (existsSync(directory) && (await readdir(directory)).length)
+    fail("The static EAS directory must be new or empty.");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  for (const [name, value] of Object.entries(staticEasFiles(metadata, easJson)))
+    await writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+}
+
 /** The pinned EAS CLI version and the EAS project, from the committed config. */
 export async function configSummary(root = repoRoot) {
   checkNoEasIgnore(root);
-  const easCliVersion = checkEasJson(await readJson(join(root, "apps/fitness-ios/eas.json")));
+  const easJson = await readJson(join(root, "apps/fitness-ios/eas.json"));
+  const easCliVersion = checkEasJson(easJson);
   if (!/^\d+\.\d+\.\d+$/.test(easCliVersion)) fail("eas.json must pin an exact EAS CLI version.");
-  const projectId = projectIdFrom(await readFile(join(root, "apps/fitness-ios/app.config.ts"), "utf8"));
-  return { easCliVersion, projectId };
+  const metadata = appConfigMetadata(
+    await readFile(join(root, "apps/fitness-ios/app.config.ts"), "utf8"),
+    await readFile(join(root, "apps/fitness-ios/src/config/variants.ts"), "utf8"),
+  );
+  return { easCliVersion, projectId: metadata.projectId, metadata, easJson };
 }
 
 const commands = {
   async "check-config"(argv) {
-    const found = options(argv, { values: ["--out"] });
-    const config = await configSummary();
+    const found = options(argv, { values: ["--out", "--static-dir"] });
+    const { easCliVersion, projectId, metadata, easJson } = await configSummary();
+    if (found["--static-dir"]) await writeStaticEasDir(resolve(found["--static-dir"]), metadata, easJson);
+    const config = { easCliVersion, projectId };
     if (found["--out"]) await writeJson(found["--out"], config);
     console.log(JSON.stringify(config));
   },
