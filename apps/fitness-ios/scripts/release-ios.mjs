@@ -8,10 +8,10 @@
 //   oauth-env --env-file <eas env:list output>          (lines for $GITHUB_ENV)
 //   admit [--current-env-file <eas env:list output>] [--check-privacy]   (reads RELEASE_OAUTH_*)
 //   same-quality --initial <path> --current <path>
-//   check-no-builds --sha <sha> --file <eas build:list JSON>
-//   check-build --sha <sha> --build-file <eas build JSON> [--build-id <id>] --downloads-dir <dir> --out <path>
-//   submissions-query --build-id <id> --out <path>
-//   check-no-submissions --build-id <id> --file <EAS GraphQL reply>
+//   check-build --sha <sha> --build-file <eas build JSON> --downloads-dir <dir> --out <path>
+//   submissions-query (--build-list <eas build:list JSON> --sha <sha> | --build-id <id>) --out <path>
+//   check-no-submissions (--build-list <path> --sha <sha> | --build-id <id>) --file <EAS GraphQL reply>
+//   submission-status --build-id <id> --file <EAS GraphQL reply>
 //   verify-archive --archive <ipa> --logs-dir <dir> --build <path> --work-dir <dir> --out <path>
 //   summary --file <verify-build output> --sha <sha> [--status <status>]
 //
@@ -455,17 +455,28 @@ export function checkXcodeLog(logs) {
     fail(`The EAS build log does not show the Xcode ${XCODE} check.`);
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** At most this many builds of one commit are checked; `eas build:list` is asked for this many. */
+export const buildListLimit = 50;
+
 /**
- * EAS must have no production iOS build of the commit yet. This covers
- * every run, wherever it started.
+ * The IDs of the commit's production iOS builds, from `eas build:list`.
+ * Every listed build must be of that commit and profile, and a full page is
+ * refused, since more builds could exist.
  */
-export function checkNoEasBuilds(builds, sha) {
+export function commitBuildIds(builds, sha) {
   if (!Array.isArray(builds)) fail("EAS did not list the commit's builds.");
-  const existing = builds.filter((build) => build.gitCommitHash === sha && build.buildProfile === "production");
-  if (existing.length)
-    fail(
-      `EAS already has a production build of ${sha} (${existing.map((build) => `${build.id} ${build.status}`).join(", ")}). Check that build before releasing the commit again.`,
-    );
+  if (builds.length >= buildListLimit) fail(`EAS lists ${buildListLimit} or more builds of ${sha}; check them in EAS.`);
+  for (const build of builds)
+    if (
+      !UUID.test(build?.id ?? "") ||
+      build.gitCommitHash !== sha ||
+      build.buildProfile !== "production" ||
+      build.platform !== "IOS"
+    )
+      fail("EAS listed a build that is not a production iOS build of this commit.");
+  return builds.map((build) => build.id);
 }
 
 async function getJsonOk(url) {
@@ -552,17 +563,13 @@ export function curlConfig(url, output) {
   return `url = "${downloadUrl(url)}"\noutput = "${configPath(output)}"\n`;
 }
 
-/** A build as `eas build --json` (a list of one) or `eas build:view --json` (the build) reports it. */
-const asBuildList = (reply) => (Array.isArray(reply) ? reply : reply && typeof reply === "object" ? [reply] : reply);
-
 /**
- * Checks the finished EAS build, and when `buildId` is given that it is that
- * build. Returns the curl configs for the archive and logs, which hold the
- * signed URLs, and what the archive must match.
+ * Checks the finished EAS build this run started. Returns the curl configs
+ * for the archive and logs, which hold the signed URLs, and what the archive
+ * must match.
  */
-export function buildDownloads(reply, { sha, projectId, buildId, directory }) {
-  const build = checkBuild(asBuildList(reply), { sha, projectId });
-  if (buildId && build.id !== buildId) fail("EAS reported another build than the one to resume.");
+export function buildDownloads(builds, { sha, projectId, directory }) {
+  const build = checkBuild(builds, { sha, projectId });
   const archive = join(directory, "app.ipa");
   return {
     archive: curlConfig(build.artifacts.applicationArchiveUrl, archive),
@@ -571,26 +578,59 @@ export function buildDownloads(reply, { sha, projectId, buildId, directory }) {
   };
 }
 
-/** The EAS GraphQL request for a build's submissions, sent by curl in a step with the Expo token. */
-export function submissionsQuery(buildId) {
-  if (!/^[0-9a-f-]{36}$/.test(buildId ?? "")) fail("Pass the EAS build ID to resume.");
+/**
+ * The EAS GraphQL request for the submissions of each build, sent by curl in
+ * a step with the Expo token. Each build is one aliased field, `b0`, `b1`...
+ */
+export function submissionsQuery(buildIds) {
+  if (!Array.isArray(buildIds) || !buildIds.length || buildIds.length >= buildListLimit)
+    fail("Pass between one and 49 EAS build IDs.");
+  for (const id of buildIds) if (!UUID.test(id ?? "")) fail("Pass EAS build IDs as UUIDs.");
+  const names = buildIds.map((_, index) => `b${index}`);
   return {
-    query:
-      "query BuildSubmissions($buildId: ID!) { builds { byId(buildId: $buildId) { id submissions { id status } } } }",
-    variables: { buildId },
+    query: `query BuildSubmissions(${names.map((name) => `$${name}: ID!`).join(", ")}) { ${names
+      .map((name) => `${name}: builds { byId(buildId: $${name}) { id submissions { id status } } }`)
+      .join(" ")} }`,
+    variables: Object.fromEntries(names.map((name, index) => [name, buildIds[index]])),
   };
 }
 
-/** A build being resumed must have no submission yet, whatever its status. */
-export function checkNoSubmissions(reply, buildId) {
-  if (reply?.errors?.length) fail("EAS could not list the build's submissions.");
-  const build = reply?.data?.builds?.byId;
-  if (!build || build.id !== buildId || !Array.isArray(build.submissions))
-    fail("EAS did not list the build's submissions.");
-  if (build.submissions.length)
+/** Each build's submissions from the GraphQL reply, in the order asked. */
+function submissionsOf(reply, buildIds) {
+  if (reply?.errors?.length) fail("EAS could not list the builds' submissions.");
+  return buildIds.map((id, index) => {
+    const build = reply?.data?.[`b${index}`]?.byId;
+    if (!build || build.id !== id || !Array.isArray(build.submissions))
+      fail("EAS did not list the builds' submissions.");
+    return build.submissions;
+  });
+}
+
+/**
+ * None of the builds may have a submission, whatever its status, so each
+ * commit reaches App Store Connect at most once.
+ */
+export function checkNoSubmissions(reply, buildIds) {
+  const submitted = submissionsOf(reply, buildIds)
+    .map((submissions, index) => (submissions.length ? buildIds[index] : null))
+    .filter(Boolean);
+  if (submitted.length)
     fail(
-      `EAS build ${buildId} already has a submission (${build.submissions.map((item) => `${item.id} ${item.status}`).join(", ")}). Check it in EAS and App Store Connect instead of submitting again.`,
+      `This commit was already submitted, from EAS build ${submitted.join(", ")}. Check it in EAS and App Store Connect.`,
     );
+}
+
+/** The submission statuses EAS reports. */
+const submissionStatuses = new Set(["AWAITING_BUILD", "IN_QUEUE", "IN_PROGRESS", "FINISHED", "ERRORED", "CANCELED"]);
+
+/** The one submission of the build this run submitted, as safe values: its ID and status. */
+export function submissionStatus(reply, buildId) {
+  const [submissions] = submissionsOf(reply, [buildId]);
+  if (submissions.length !== 1) fail("EAS does not list exactly one submission of the build.");
+  const [submission] = submissions;
+  if (!UUID.test(submission?.id ?? "") || !submissionStatuses.has(submission.status))
+    fail("EAS reported a malformed submission.");
+  return { submissionId: submission.id, status: submission.status };
 }
 
 /** Checks the downloaded archive and logs against the build, and returns the build's safe summary. */
@@ -639,6 +679,13 @@ const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 const writeJson = (path, value) => writeFile(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
 const requireSha = (sha) => (SHA.test(sha ?? "") ? sha : fail("Pass the full 40-character commit SHA."));
 const required = (found, name) => found[name] ?? fail(`Pass ${name}.`);
+
+/** The builds to check: every listed production build of the commit, or the one build this run made. */
+async function buildIdsFrom(found) {
+  if (found["--build-list"]) return commitBuildIds(await readJson(found["--build-list"]), requireSha(found["--sha"]));
+  if (UUID.test(found["--build-id"] ?? "")) return [found["--build-id"]];
+  return fail("Pass --build-list and --sha, or --build-id.");
+}
 
 /** Exactly one match of `pattern` in `source`, or a failure naming `what`. */
 function single(source, pattern, what) {
@@ -731,18 +778,12 @@ const commands = {
     checkSameQuality(await readJson(required(found, "--initial")), await readJson(required(found, "--current")));
     console.log("Quality qualification is unchanged.");
   },
-  async "check-no-builds"(argv) {
-    const found = options(argv, { values: ["--sha", "--file"] });
-    checkNoEasBuilds(await readJson(required(found, "--file")), requireSha(found["--sha"]));
-    console.log("EAS has no production build of this commit.");
-  },
   async "check-build"(argv) {
-    const found = options(argv, { values: ["--sha", "--build-file", "--build-id", "--downloads-dir", "--out"] });
+    const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });
     const directory = resolve(required(found, "--downloads-dir"));
     const downloads = buildDownloads(await readJson(required(found, "--build-file")), {
       sha: requireSha(found["--sha"]),
       projectId: (await configSummary()).projectId,
-      buildId: found["--build-id"] || undefined,
       directory,
     });
     await mkdir(join(directory, "logs"), { recursive: true, mode: 0o700 });
@@ -753,13 +794,27 @@ const commands = {
     console.log(`EAS build ${downloads.build.buildId} is the finished production build of this commit.`);
   },
   async "submissions-query"(argv) {
-    const found = options(argv, { values: ["--build-id", "--out"] });
-    await writeJson(required(found, "--out"), submissionsQuery(found["--build-id"]));
+    const found = options(argv, { values: ["--build-list", "--sha", "--build-id", "--out"] });
+    const ids = await buildIdsFrom(found);
+    // No builds means nothing to ask: the lookup step sees an empty file and sends no request.
+    await writeFile(required(found, "--out"), ids.length ? `${JSON.stringify(submissionsQuery(ids))}\n` : "", {
+      mode: 0o600,
+    });
   },
   async "check-no-submissions"(argv) {
+    const found = options(argv, { values: ["--build-list", "--sha", "--build-id", "--file"] });
+    const ids = await buildIdsFrom(found);
+    if (ids.length) checkNoSubmissions(await readJson(required(found, "--file")), ids);
+    console.log(
+      ids.length ? `None of the ${ids.length} builds checked has a submission.` : "No earlier build to check.",
+    );
+  },
+  async "submission-status"(argv) {
     const found = options(argv, { values: ["--build-id", "--file"] });
-    checkNoSubmissions(await readJson(required(found, "--file")), found["--build-id"]);
-    console.log("The build has no submission yet.");
+    const buildId = UUID.test(found["--build-id"] ?? "") ? found["--build-id"] : fail("Pass the EAS build ID.");
+    const { submissionId, status } = submissionStatus(await readJson(required(found, "--file")), buildId);
+    console.log(`EAS submission ${submissionId} of build ${buildId}: ${status}.`);
+    if (status !== "FINISHED") fail(`The submission is ${status}.`);
   },
   async "verify-archive"(argv) {
     const found = options(argv, { values: ["--archive", "--logs-dir", "--build", "--work-dir", "--out"] });

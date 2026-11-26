@@ -35,7 +35,8 @@ import {
   carriesParameters,
   checkClientAtIssuer,
   checkIosBuild,
-  checkNoEasBuilds,
+  commitBuildIds,
+  submissionStatus,
   checkEasJson,
   checkEmbeddedConfig,
   checkOAuthSettings,
@@ -175,12 +176,26 @@ describe("committed release settings", () => {
 });
 
 describe("release admission", () => {
-  test("EAS must have no production build of the commit already", () => {
-    expect(() => checkNoEasBuilds([], sha)).not.toThrow();
-    expect(() => checkNoEasBuilds([{ ...build, gitCommitHash: "b".repeat(40) }], sha)).not.toThrow();
-    for (const status of ["FINISHED", "ERRORED", "CANCELED", "IN_PROGRESS"])
-      expect(() => checkNoEasBuilds([{ ...build, status }], sha)).toThrow(`${build.id} ${status}`);
-    expect(() => checkNoEasBuilds({}, sha)).toThrow("did not list");
+  test("the commit's builds come from the EAS build list, all of this commit and profile", () => {
+    expect(commitBuildIds([], sha)).toEqual([]);
+    expect(commitBuildIds([build, { ...build, id: "22222222-2222-4333-8444-555555555555" }], sha)).toEqual([
+      build.id,
+      "22222222-2222-4333-8444-555555555555",
+    ]);
+    for (const change of [
+      { gitCommitHash: "b".repeat(40) },
+      { buildProfile: "preview" },
+      { platform: "ANDROID" },
+      { id: "x" },
+    ])
+      expect(() => commitBuildIds([{ ...build, ...change }], sha)).toThrow("not a production iOS build of this commit");
+    expect(() =>
+      commitBuildIds(
+        Array.from({ length: 50 }, () => build),
+        sha,
+      ),
+    ).toThrow("50 or more builds");
+    expect(() => commitBuildIds({}, sha)).toThrow("did not list");
   });
 
   test("Fitness production must accept the build's OAuth client, and show that it checks clients", () => {
@@ -607,17 +622,11 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(found).toBeGreaterThanOrEqual(0);
     return found;
   };
-  const resuming = (step) => step.if === "inputs.build_id != ''";
-  const building = (step) => step.if === "inputs.build_id == ''";
 
   test("runs only when dispatched on main in this repository, one release at a time", () => {
     expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
+    expect(Object.keys(workflow.on.workflow_dispatch.inputs)).toEqual(["sha"]);
     expect(workflow.on.workflow_dispatch.inputs.sha).toMatchObject({ required: true, type: "string" });
-    expect(workflow.on.workflow_dispatch.inputs.build_id).toMatchObject({
-      required: false,
-      type: "string",
-      default: "",
-    });
     expect(workflow.concurrency).toEqual({ group: "fitness-ios-production", "cancel-in-progress": false });
     expect(Object.keys(workflow.jobs)).toEqual(["release"]);
     for (const guard of [
@@ -629,6 +638,9 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(job.environment).toEqual({ name: "fitness-ios-production" });
     expect(job["runs-on"]).toBe("macos-26");
     expect(job["timeout-minutes"]).toBeLessThanOrEqual(240);
+    // Every run builds from the checkout; no step runs only sometimes.
+    for (const step of steps.slice(0, -1)) expect(step.if).toBeUndefined();
+    expect(source).not.toMatch(/build_id ==|build_id !=|build:view|inputs\.build_id/);
   });
 
   test("grants read permissions only", () => {
@@ -640,7 +652,7 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(workflow.env).toBeUndefined();
     expect(job.env).toEqual({ RELEASE_SHA: "${{ github.sha }}" });
     const withToken = steps.filter((step) => step.env?.EXPO_TOKEN !== undefined);
-    expect(withToken.length).toBeGreaterThan(0);
+    expect(withToken).toHaveLength(8);
     for (const step of steps) {
       expect(Boolean(step.env?.EXPO_TOKEN)).toBe(runsEas(step) || callsExpo(step));
       if (step.env?.EXPO_TOKEN) {
@@ -650,23 +662,96 @@ describe("the Deploy Fitness iOS workflow", () => {
         expect(step.run).not.toMatch(/release-ios\.mjs|bun |npm /);
       }
     }
-    // The GraphQL lookup reads the token from stdin, not the command line.
-    const lookup = steps.find(callsExpo);
-    expect(lookup.run).toContain(`printf 'header = "Authorization: Bearer %s"\\n' "$EXPO_TOKEN" | curl`);
-    expect(lookup.run).toContain("--config -");
-    expect(lookup.run).not.toMatch(/-H "Authorization|--header "Authorization/);
+    // The GraphQL lookups read the token from stdin, not the command line.
+    const lookups = steps.filter(callsExpo);
+    expect(lookups).toHaveLength(3);
+    for (const lookup of lookups) {
+      expect(lookup.run).toContain(`printf 'header = "Authorization: Bearer %s"\\n' "$EXPO_TOKEN" | curl`);
+      expect(lookup.run).toContain("--config -");
+      expect(lookup.run).toContain("2>/dev/null || status=$?");
+      expect(lookup.run).not.toMatch(/-H "Authorization|--header "Authorization/);
+    }
     // Installs and checks never see the token.
     for (const pattern of [
       /\.github\/actions\/setup/,
       /npm install/,
-      /check-no-builds/,
+      /check-no-submissions --build-list/,
+      /check-no-submissions --build-id/,
       /verify-archive/,
       /oauth-env/,
       /release-ios\.mjs admit$/m,
-      /check-no-submissions/,
+      /submission-status/,
     ])
       expect(steps[index(pattern)].env?.EXPO_TOKEN).toBeUndefined();
     expect(source.match(/secrets\./g)).toHaveLength(withToken.length);
+  });
+
+  test("keeps every EAS CLI message in private files and shows only a fixed message", () => {
+    const eas = steps.filter(runsEas);
+    expect(eas.map((step) => step.name)).toEqual([
+      "Read the production EAS environment",
+      "List EAS builds of the commit",
+      "Build on EAS",
+      "Read the production EAS environment again",
+      "Submit the build to TestFlight",
+    ]);
+    for (const step of eas) {
+      expect(step.run).toContain("umask 077");
+      expect(step.run).toMatch(
+        /> "\$RUNNER_TEMP\/eas-[a-z-]+\.(json|txt|out)" 2> "\$RUNNER_TEMP\/eas-[a-z-]+\.err" \|\| status=\$\?/,
+      );
+      expect(step.run).toMatch(/echo "eas [a-z:]+ failed \(exit \$status\)\." >&2/);
+    }
+    const cleanup = steps.at(-1).run;
+    for (const file of source.matchAll(/"\$RUNNER_TEMP\/(eas-[a-z-]+\.(?:err|out|txt|json))"/g))
+      expect(cleanup).toContain(`"$RUNNER_TEMP/${file[1]}"`);
+  });
+
+  test("an EAS CLI failure shows no signed URL or email, only its exit code", () => {
+    const root = mkdtempSync(join(tmpdir(), "release-eas-output-"));
+    try {
+      const bin = join(root, "eas-cli/node_modules/eas-cli/bin");
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(join(root, "eas-static"));
+      const signed = "https://storage.example.invalid/archive.tar.gz?X-Amz-Signature=deadbeefcafe";
+      const email = "owner@example.invalid";
+      const fake = (code) =>
+        `console.log(${JSON.stringify(`upload failed: ${signed}`)}); console.error(${JSON.stringify(
+          `request to ${signed} failed; invited ${email}`,
+        )}); process.exit(${code});`;
+      for (const [code, visible] of [
+        [1, /eas [a-z:]+ failed \(exit 1\)\./],
+        [0, /^$/],
+      ]) {
+        writeFileSync(join(bin, "run"), fake(code));
+        for (const step of steps.filter(runsEas)) {
+          const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+            cwd: join(root, "eas-static"),
+            encoding: "utf8",
+            timeout: 30_000,
+            env: {
+              PATH: process.env.PATH,
+              RUNNER_TEMP: root,
+              RELEASE_SHA: sha,
+              BUILD_ID: build.id,
+              EXPO_TOKEN: "expo_synthetic_token",
+            },
+          });
+          const shown = `${result.stdout}${result.stderr}`;
+          expect({ step: step.name, status: result.status === 0 }).toEqual({ step: step.name, status: code === 0 });
+          expect(shown.trim()).toMatch(visible);
+          for (const secret of ["X-Amz-Signature", "storage.example.invalid", email, "expo_synthetic_token"])
+            expect(shown).not.toContain(secret);
+        }
+      }
+      // The captures hold the output, privately, for the steps that parse it.
+      const capture = join(root, "eas-build.json");
+      expect(readFileSync(capture, "utf8")).toContain("X-Amz-Signature");
+      expect(statSync(capture).mode & 0o777).toBe(0o600);
+      expect(statSync(join(root, "eas-build.err")).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("pins every action to a commit and never keeps checkout credentials", () => {
@@ -679,24 +764,15 @@ describe("the Deploy Fitness iOS workflow", () => {
 
   test("passes inputs and outputs through env, never into scripts", () => {
     for (const step of steps) if (step.run) expect(step.run).not.toContain("${{");
-    expect(steps[0].env).toEqual({ INPUT_SHA: "${{ inputs.sha }}", INPUT_BUILD_ID: "${{ inputs.build_id }}" });
+    expect(steps[0].env).toEqual({ INPUT_SHA: "${{ inputs.sha }}" });
     expect(steps[0].run).toContain('"$INPUT_SHA" != "$RELEASE_SHA"');
-    expect(steps[0].run).toContain('"$INPUT_BUILD_ID" =~ ^[0-9a-f]{8}-');
   });
 
-  test("uploads nothing and removes build files whatever happens", () => {
+  test("uploads no GitHub Actions artifacts and removes build files whatever happens", () => {
     expect(source).not.toMatch(/upload-artifact|actions\/cache/);
     const cleanup = steps.at(-1);
     expect(cleanup.if).toBe("always()");
-    for (const path of [
-      "ipa",
-      "eas-build.json",
-      "eas-existing.json",
-      "eas-env-pre.txt",
-      "eas-env-post.txt",
-      "eas-submissions.json",
-      "eas-cli",
-    ])
+    for (const path of ["ipa", "eas-build.json", "eas-existing.json", "eas-submitted.json", "eas-cli", "eas-static"])
       expect(cleanup.run).toContain(`"$RUNNER_TEMP/${path}"`);
     // Only the build ID leaves a step as an output, and only the checked OAuth settings as env.
     expect(source.match(/GITHUB_OUTPUT/g)).toHaveLength(1);
@@ -708,7 +784,6 @@ describe("the Deploy Fitness iOS workflow", () => {
   test("downloads through curl configs, following HTTPS redirects only, and shows only curl's exit code", () => {
     const verify = steps[index(/verify-archive/)];
     expect(verify.run).toContain("check-build");
-    expect(verify.run).toContain('--build-id "$BUILD_INPUT"');
     const curl = verify.run.split("\n").find((line) => /\bcurl --/.test(line));
     for (const flag of [
       "--fail",
@@ -723,70 +798,24 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(verify.run).toContain('--max-time "$2" --config "$1" 2>/dev/null');
     expect(verify.run).toContain('download "$downloads/archive.curlrc" 1200');
     expect(verify.run).toContain('for config in "$downloads"/log-*.curlrc; do');
-    // No URL reaches the command line or the log.
     expect(verify.run).not.toMatch(/archive-url|log-urls|\$\(cat|set -x|echo "?\$url/);
     expect(verify.run).toContain('echo "The build archive could not be downloaded (curl exit $status)." >&2');
   });
 
-  test("submits without letting EAS set up TestFlight groups", () => {
+  test("submits once without letting EAS set up TestFlight groups, then reports the submission's status", () => {
     const submit = steps[index(/ submit --profile production/)];
     expect(submit.run).toContain("--no-auto-testflight-setup");
     expect(submit.run).toContain('--id "$BUILD_ID"');
     expect(submit.env.BUILD_ID).toBe("${{ steps.verify.outputs.build_id }}");
-  });
-
-  test("qualifies again immediately before each EAS change", () => {
-    const qualify = index(/Qualify exact main source before installing/);
-    const profile = index(/check-profile/);
-    const handOff = index(/oauth-env --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
-    const admitBuild = index(/release-ios\.mjs admit$/m);
-    const list = index(/ build:list --platform ios/);
-    const noBuilds = index(/check-no-builds/);
-    const setup = index(/\.github\/actions\/setup/);
-    const clean = index(/Require a clean checkout/);
-    const requalifyBuild = index(/quality-build\.json/);
-    const easBuild = index(/ build --profile production/);
-    const view = index(/ build:view "\$BUILD_INPUT" --json/);
-    const verify = index(/verify-archive/);
-    const readmit = index(/--current-env-file/);
-    const query = index(/submissions-query/);
-    const lookup = index(/api\.expo\.dev\/graphql/);
-    const noSubmissions = index(/check-no-submissions/);
-    const requalifySubmit = index(/quality-submit\.json/);
-    const submit = index(/ submit --profile production/);
-    const order = [
-      qualify,
-      profile,
-      handOff,
-      admitBuild,
-      list,
-      noBuilds,
-      setup,
-      clean,
-      requalifyBuild,
-      easBuild,
-      view,
-      verify,
-      readmit,
-      query,
-      lookup,
-      noSubmissions,
-      requalifySubmit,
-      submit,
-    ];
-    expect([...order].sort((x, y) => x - y)).toEqual(order);
-    // The qualification steps sit right before the EAS change they guard.
-    expect(easBuild).toBe(requalifyBuild + 1);
-    expect(submit).toBe(requalifySubmit + 1);
-    for (const position of [requalifyBuild, requalifySubmit]) expect(steps[position].run).toContain("same-quality");
-    expect(steps[readmit].run).toContain("--check-privacy");
-    expect(steps[easBuild]["timeout-minutes"]).toBe(150);
+    const report = index(/submission-status --build-id/);
+    expect(report).toBeGreaterThan(index(/eas-submitted\.json" 2>\/dev\/null/));
+    expect(index(/eas-submitted\.json" 2>\/dev\/null/)).toBeGreaterThan(index(/ submit --profile production/));
   });
 
   test("runs every EAS step that holds the token, except the build, from the static directory", () => {
-    const build = steps[index(/ build --profile production/)];
-    const others = steps.filter((step) => runsEas(step) && step !== build);
-    expect(others.length).toBe(5);
+    const easBuild = steps[index(/ build --profile production/)];
+    const others = steps.filter((step) => runsEas(step) && step !== easBuild);
+    expect(others).toHaveLength(4);
     for (const step of others) {
       expect(step["working-directory"]).toBe("${{ runner.temp }}/eas-static");
       expect(step.env).toMatchObject({
@@ -797,45 +826,71 @@ describe("the Deploy Fitness iOS workflow", () => {
     }
     // The build is the only step with the token in the workspace.
     expect(steps.filter((step) => step.env?.EXPO_TOKEN && step["working-directory"] === "apps/fitness-ios")).toEqual([
-      build,
+      easBuild,
     ]);
-    expect(build.env).toMatchObject({ EXPO_NO_DOTENV: "1", EAS_SKIP_AUTO_FINGERPRINT: "1" });
-    expect(build.env.EAS_NO_VCS).toBeUndefined();
+    expect(easBuild.env).toMatchObject({ EXPO_NO_DOTENV: "1", EAS_SKIP_AUTO_FINGERPRINT: "1" });
+    expect(easBuild.env.EAS_NO_VCS).toBeUndefined();
     // The workspace is installed only for the build, after the other pre-build EAS steps.
     const setup = index(/\.github\/actions\/setup/);
     expect(steps.filter((step) => step.uses === "./.github/actions/setup")).toHaveLength(1);
-    expect(setup).toBeGreaterThan(index(/> "\$RUNNER_TEMP\/eas-env-pre.txt"/));
+    expect(setup).toBeGreaterThan(index(/eas-env-pre\.err/));
     expect(setup).toBeGreaterThan(index(/ build:list --platform ios/));
     expect(setup).toBeLessThan(index(/ build --profile production/));
-    expect(building(steps[setup])).toBe(true);
-    expect(building(steps[index(/Require a clean checkout/)])).toBe(true);
     expect(steps[index(/check-config/)].run).toContain('--static-dir "$RUNNER_TEMP/eas-static"');
     expect(steps.at(-1).run).toContain('"$RUNNER_TEMP/eas-static"');
   });
 
-  test("builds a new commit, or resumes a given build after checking it has no submission", () => {
-    for (const pattern of [
-      / build:list --platform ios/,
-      /check-no-builds/,
-      /quality-build\.json/,
-      / build --profile production/,
-    ])
-      expect(building(steps[index(pattern)])).toBe(true);
-    for (const pattern of [
-      / build:view "\$BUILD_INPUT"/,
-      /submissions-query/,
-      /api\.expo\.dev\/graphql/,
-      /check-no-submissions/,
-    ])
-      expect(resuming(steps[index(pattern)])).toBe(true);
-    // Everything else runs on both paths.
-    for (const pattern of [
-      /verify-archive/,
-      /--current-env-file/,
-      /quality-submit\.json/,
-      / submit --profile production/,
-    ])
-      expect(steps[index(pattern)].if).toBeUndefined();
+  test("refuses a commit with a submitted build, and qualifies again immediately before each EAS change", () => {
+    const qualify = index(/Qualify exact main source before installing/);
+    const profile = index(/check-profile/);
+    const handOff = index(/oauth-env --env-file "\$RUNNER_TEMP\/eas-env-pre.txt"/);
+    const admitBuild = index(/release-ios\.mjs admit$/m);
+    const list = index(/ build:list --platform ios/);
+    const commitQuery = index(/submissions-query --build-list/);
+    const commitLookup = index(/eas-existing-submissions\.json" 2>\/dev\/null/);
+    const noSubmittedBuild = index(/check-no-submissions --build-list/);
+    const setup = index(/\.github\/actions\/setup/);
+    const clean = index(/Require a clean checkout/);
+    const requalifyBuild = index(/quality-build\.json/);
+    const easBuild = index(/ build --profile production/);
+    const verify = index(/verify-archive/);
+    const readmit = index(/--current-env-file/);
+    const buildQuery = index(/submissions-query --build-id/);
+    const buildLookup = index(/eas-build-submissions\.json" 2>\/dev\/null/);
+    const noSubmission = index(/check-no-submissions --build-id/);
+    const requalifySubmit = index(/quality-submit\.json/);
+    const submit = index(/ submit --profile production/);
+    const order = [
+      qualify,
+      profile,
+      handOff,
+      admitBuild,
+      list,
+      commitQuery,
+      commitLookup,
+      noSubmittedBuild,
+      setup,
+      clean,
+      requalifyBuild,
+      easBuild,
+      verify,
+      readmit,
+      buildQuery,
+      buildLookup,
+      noSubmission,
+      requalifySubmit,
+      submit,
+    ];
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
+    // The qualification steps sit right before the EAS change they guard.
+    expect(easBuild).toBe(requalifyBuild + 1);
+    expect(submit).toBe(requalifySubmit + 1);
+    for (const position of [requalifyBuild, requalifySubmit]) expect(steps[position].run).toContain("same-quality");
+    expect(steps[readmit].run).toContain("--check-privacy");
+    expect(steps[easBuild]["timeout-minutes"]).toBe(150);
+    // A commit with no earlier build sends no lookup.
+    expect(steps[commitLookup].run).toContain('if [[ ! -s "$RUNNER_TEMP/eas-existing-query.json" ]]; then');
+    expect(steps[list].run).toContain("--limit 50");
   });
 });
 
@@ -854,7 +909,7 @@ describe("the release subcommands", () => {
     const unknown = run("credentials");
     expect(unknown.status).not.toBe(0);
     expect(unknown.stderr).toContain(
-      "Run one of: check-config, check-profile, oauth-env, admit, same-quality, check-no-builds, check-build",
+      "Run one of: check-config, check-profile, oauth-env, admit, same-quality, check-build, submissions-query",
     );
   });
 
@@ -1001,17 +1056,31 @@ process.stdout.write(JSON.stringify(result));`,
     expect(() => checkSameQuality({}, {})).toThrow("changed");
   });
 
-  test("check-no-builds reads the EAS build list", () => {
+  test("submissions-query asks about every build of the commit, or none when there are none", () => {
     const directory = mkdtempSync(join(tmpdir(), "release-builds-"));
     try {
-      const file = join(directory, "builds.json");
-      writeFileSync(file, "[]");
-      expect(run("check-no-builds", "--sha", sha, "--file", file).status).toBe(0);
-      writeFileSync(file, JSON.stringify([build]));
-      const refused = run("check-no-builds", "--sha", sha, "--file", file);
+      const list = join(directory, "builds.json");
+      const out = join(directory, "query.json");
+      writeFileSync(list, "[]");
+      expect(run("submissions-query", "--build-list", list, "--sha", sha, "--out", out).status).toBe(0);
+      expect(readFileSync(out, "utf8")).toBe("");
+      expect(
+        run("check-no-submissions", "--build-list", list, "--sha", sha, "--file", join(directory, "none")).status,
+      ).toBe(0);
+      writeFileSync(list, JSON.stringify([build]));
+      expect(run("submissions-query", "--build-list", list, "--sha", sha, "--out", out).status).toBe(0);
+      expect(JSON.parse(readFileSync(out, "utf8")).variables).toEqual({ b0: build.id });
+      const reply = join(directory, "reply.json");
+      writeFileSync(
+        reply,
+        JSON.stringify({ data: { b0: { byId: { id: build.id, submissions: [{ id: "s", status: "FINISHED" }] } } } }),
+      );
+      const refused = run("check-no-submissions", "--build-list", list, "--sha", sha, "--file", reply);
       expect(refused.status).not.toBe(0);
-      expect(refused.stderr).toContain("already has a production build");
-      expect(run("check-no-builds", "--sha", "abc", "--file", file).stderr).toContain("40-character");
+      expect(refused.stderr).toContain("already submitted");
+      expect(run("submissions-query", "--build-list", list, "--sha", "abc", "--out", out).stderr).toContain(
+        "40-character",
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1074,13 +1143,9 @@ process.stdout.write(JSON.stringify(result));`,
       logs: [`url = "${signed}&log=1"\noutput = "/runner/temp/ipa/logs/1.txt"\n`],
       build: { buildId: build.id, version: "1.0.0", buildNumber: "7" },
     });
-    // eas build:view reports the build itself rather than a list.
-    expect(buildDownloads(finished, options_).build.buildId).toBe(build.id);
-    expect(buildDownloads(finished, { ...options_, buildId: build.id }).build.buildId).toBe(build.id);
-    expect(() => buildDownloads(finished, { ...options_, buildId: "22222222-2222-4333-8444-555555555555" })).toThrow(
-      "another build",
-    );
-    expect(() => buildDownloads({ ...finished, gitCommitHash: "b".repeat(40) }, options_)).toThrow(
+    // eas build --json reports a list of one build.
+    expect(() => buildDownloads(finished, options_)).toThrow("exactly one build");
+    expect(() => buildDownloads([{ ...finished, gitCommitHash: "b".repeat(40) }], options_)).toThrow(
       "not the finished production build",
     );
     for (const url of [
@@ -1107,8 +1172,6 @@ process.stdout.write(JSON.stringify(result));`,
         sha,
         "--build-file",
         file,
-        "--build-id",
-        "",
         "--downloads-dir",
         downloads,
         "--out",
@@ -1130,23 +1193,54 @@ process.stdout.write(JSON.stringify(result));`,
     }
   });
 
-  test("a resumed build must have no submission yet", () => {
-    const id = build.id;
-    expect(submissionsQuery(id)).toEqual({
+  test("asks EAS for each build's submissions and refuses any submitted build", () => {
+    const second = "22222222-2222-4333-8444-555555555555";
+    expect(submissionsQuery([build.id, second])).toEqual({
       query:
-        "query BuildSubmissions($buildId: ID!) { builds { byId(buildId: $buildId) { id submissions { id status } } } }",
-      variables: { buildId: id },
+        "query BuildSubmissions($b0: ID!, $b1: ID!) { b0: builds { byId(buildId: $b0) { id submissions { id status } } } b1: builds { byId(buildId: $b1) { id submissions { id status } } } }",
+      variables: { b0: build.id, b1: second },
     });
-    expect(() => submissionsQuery("abc")).toThrow("EAS build ID");
-    const reply = (submissions, buildId = id) => ({ data: { builds: { byId: { id: buildId, submissions } } } });
-    expect(() => checkNoSubmissions(reply([]), id)).not.toThrow();
+    expect(() => submissionsQuery([])).toThrow("between one and 49");
+    expect(() => submissionsQuery(["abc"])).toThrow("UUIDs");
+    expect(() => submissionsQuery(Array.from({ length: 50 }, () => build.id))).toThrow("between one and 49");
+    const reply = (...builds) => ({
+      data: Object.fromEntries(builds.map(([id, submissions], index) => [`b${index}`, { byId: { id, submissions } }])),
+    });
+    expect(() => checkNoSubmissions(reply([build.id, []], [second, []]), [build.id, second])).not.toThrow();
     for (const status of ["FINISHED", "ERRORED", "CANCELED", "IN_PROGRESS"])
-      expect(() => checkNoSubmissions(reply([{ id: "s1", status }]), id)).toThrow(
-        `already has a submission (s1 ${status})`,
-      );
-    expect(() => checkNoSubmissions(reply([], "other"), id)).toThrow("did not list");
-    expect(() => checkNoSubmissions({ errors: [{ message: "Unauthorized" }] }, id)).toThrow("could not list");
-    expect(() => checkNoSubmissions({}, id)).toThrow("did not list");
+      expect(() =>
+        checkNoSubmissions(reply([build.id, []], [second, [{ id: "s1", status }]]), [build.id, second]),
+      ).toThrow(`already submitted, from EAS build ${second}`);
+    expect(() => checkNoSubmissions(reply(["other", []]), [build.id])).toThrow("did not list");
+    expect(() => checkNoSubmissions(reply([build.id, []]), [build.id, second])).toThrow("did not list");
+    expect(() => checkNoSubmissions({ errors: [{ message: "Unauthorized" }] }, [build.id])).toThrow("could not list");
+    expect(() => checkNoSubmissions({}, [build.id])).toThrow("did not list");
+  });
+
+  test("reports the build's one submission as a validated ID and status", () => {
+    const submission = "33333333-3333-4333-8444-555555555555";
+    const reply = (submissions) => ({ data: { b0: { byId: { id: build.id, submissions } } } });
+    expect(submissionStatus(reply([{ id: submission, status: "FINISHED" }]), build.id)).toEqual({
+      submissionId: submission,
+      status: "FINISHED",
+    });
+    expect(() => submissionStatus(reply([]), build.id)).toThrow("exactly one submission");
+    expect(() => submissionStatus(reply([{ id: "x", status: "FINISHED" }]), build.id)).toThrow("malformed");
+    expect(() =>
+      submissionStatus(reply([{ id: submission, status: "FINISHED https://storage.example.invalid" }]), build.id),
+    ).toThrow("malformed");
+    const directory = mkdtempSync(join(tmpdir(), "release-submission-"));
+    try {
+      const file = join(directory, "reply.json");
+      writeFileSync(file, JSON.stringify(reply([{ id: submission, status: "FINISHED" }])));
+      const done = run("submission-status", "--build-id", build.id, "--file", file);
+      expect(done.status).toBe(0);
+      expect(done.stdout).toBe(`EAS submission ${submission} of build ${build.id}: FINISHED.\n`);
+      writeFileSync(file, JSON.stringify(reply([{ id: submission, status: "ERRORED" }])));
+      expect(run("submission-status", "--build-id", build.id, "--file", file).status).not.toBe(0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("the summary names the status, commit, build, version and build number, and nothing else", () => {
