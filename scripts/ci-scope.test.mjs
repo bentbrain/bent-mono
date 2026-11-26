@@ -550,7 +550,7 @@ const insideWorkspace = (file) =>
 const rootInputs = iosNativeInputs
   .filter((pattern) => !insideWorkspace(pattern))
   .map((pattern) =>
-    pattern.replace("/**", "/nested/example.yml").replace("*", "example"),
+    pattern.replace("/**", "/nested/example.yml").replaceAll("*", "example"),
   );
 // Documentation and root files that no native iPhone check reads.
 const unrelatedRootFiles = [
