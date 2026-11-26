@@ -120,7 +120,7 @@ Job time limits: the Quality `fitness-ios-native suite` stops at 20 minutes. In 
 
 The artifact check reads the production Simulator build: exactly the HealthKit and background-delivery entitlements, a Health read purpose string and no write purpose string, no local networking, the fitness-health module linked in, and no seeder files or symbols. Expo leaves out a local module whose minimum iOS version is above the app's, so the module's podspec matches the app's iOS 16.4.
 
-`expo-doctor` runs with `react` excluded from its version check: the workspace uses React 19.3.1, and SDK 58 lists 19.3.0.
+`expo-doctor` runs with `EXPO_OFFLINE=1`, which checks package versions against the installed SDK's `bundledNativeModules.json`, so a new SDK release changes no Quality result. `react` is excluded from its version check: the workspace uses React 19.3.1, and SDK 58 lists 19.3.0. To move to a newer SDK release once it is a day old, run `bunx expo install --check` in this directory and commit the updated versions.
 
 ## EAS
 

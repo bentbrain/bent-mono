@@ -287,7 +287,11 @@ jobs:
         run: |
           APP_VARIANT=development bunx expo config --type public --json > /dev/null
           APP_VARIANT=production bunx expo config --type public --json > /dev/null
-      - run: bunx expo-doctor
+      - name: Check packages against the installed Expo SDK
+        # Offline, expo-doctor checks versions against the installed SDK's
+        # bundledNativeModules.json. Online it checks the newest SDK release,
+        # which bunfig.toml's one-day minimumReleaseAge keeps out of installs.
+        run: EXPO_OFFLINE=1 bunx expo-doctor
       - run: node scripts/fingerprint-check.mjs
   fitness-ios-native-suite:
     name: fitness-ios-native suite

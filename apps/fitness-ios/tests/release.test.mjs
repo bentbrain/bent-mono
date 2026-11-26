@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
 import { replayScope } from "../scripts/native.mjs";
@@ -54,6 +55,7 @@ import {
   checkReadiness,
   checkSignedEntitlements,
   checkXcodeLog,
+  logText,
   effectiveIosProfile,
   parseEnvList,
   projectIdFrom,
@@ -181,6 +183,20 @@ describe("committed release settings", () => {
     expect(scripts["eas-build-post-install"]).toBe("node scripts/native.mjs xcode 26.6");
     expect(() => checkXcodeLog(["Verified Xcode 26.5."])).toThrow("Xcode 26.6");
     expect(() => checkXcodeLog(["...", "Verified Xcode 26.6.\n"])).not.toThrow();
+  });
+
+  test("reads build logs that EAS serves compressed", () => {
+    const log = "[INSTALL_DEPENDENCIES] Verified Xcode 26.6.\n";
+    expect(logText(brotliCompressSync(Buffer.from(log)))).toBe(log);
+    expect(logText(gzipSync(Buffer.from(log)))).toBe(log);
+    expect(logText(Buffer.from(log))).toBe(log);
+    const banner = "===== Starting build =====\nVerified Xcode 26.6.\n";
+    expect(logText(Buffer.from(banner))).toBe(banner);
+    expect(logText(Buffer.from([0xff, 0xfe, 0x00, 0x80]))).toBe("");
+    const truncated = gzipSync(Buffer.from(log.repeat(100))).subarray(0, 40);
+    expect(logText(truncated)).toBe("");
+    expect(() => checkXcodeLog([logText(truncated), logText(brotliCompressSync(Buffer.from(log)))])).not.toThrow();
+    expect(() => checkXcodeLog([logText(brotliCompressSync(Buffer.from(log)))])).not.toThrow();
   });
 });
 
