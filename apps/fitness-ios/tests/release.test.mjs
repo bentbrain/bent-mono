@@ -190,6 +190,9 @@ describe("committed release settings", () => {
     expect(logText(brotliCompressSync(Buffer.from(log)))).toBe(log);
     expect(logText(gzipSync(Buffer.from(log)))).toBe(log);
     expect(logText(Buffer.from(log))).toBe(log);
+    const banner = "===== Starting build =====\nVerified Xcode 26.6.\n";
+    expect(logText(Buffer.from(banner))).toBe(banner);
+    expect(logText(Buffer.from([0xff, 0xfe, 0x00, 0x80]))).toBe("");
     expect(() => checkXcodeLog([logText(brotliCompressSync(Buffer.from(log)))])).not.toThrow();
   });
 });

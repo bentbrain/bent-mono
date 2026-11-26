@@ -520,14 +520,21 @@ async function checkArchive(archive, directory, oauth) {
 /**
  * The text of a downloaded EAS build log. EAS stores logs Brotli-compressed
  * and serves them with `Content-Encoding: br`, which the runner's curl saves
- * as is, so compressed bytes are decoded here.
+ * as is. A log that is valid UTF-8 is read as text, since a short text prefix
+ * such as `=` is also a complete Brotli stream; gzip and Brotli bytes are
+ * decoded. A log that is none of these contributes no text.
  */
 export function logText(bytes) {
   if (bytes[0] === 0x1f && bytes[1] === 0x8b) return gunzipSync(bytes).toString("utf8");
   try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    // Compressed bytes are not valid UTF-8.
+  }
+  try {
     return brotliDecompressSync(bytes).toString("utf8");
   } catch {
-    return bytes.toString("utf8");
+    return "";
   }
 }
 
