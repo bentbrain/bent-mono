@@ -438,3 +438,66 @@ describe("Device enrollment budget", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 });
+
+describe("Device enrollment readiness for a client", () => {
+  const ready = (query: string, isReady = true) =>
+    devices.handleDeviceReady(
+      new Request(
+        `https://fitness.example.com/api/health/devices/ready${query}`,
+      ),
+      async () => isReady,
+    );
+
+  test("answers enabled without a client, as before", async () => {
+    for (const query of ["", "?ignored=1"]) {
+      const response = await ready(query);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ enrollment: "enabled" });
+    }
+    expect(
+      (await devices.handleDeviceReady(undefined, async () => true)).status,
+    ).toBe(200);
+  });
+
+  test("answers enabled only for a client listed in FITNESS_DEVICE_CLIENT_IDS", async () => {
+    const listed = await ready(`?clientId=${iosClient}`);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({ enrollment: "enabled" });
+    const other = await ready("?clientId=client_stale");
+    expect(other.status).toBe(403);
+    expect(other.headers.get("cache-control")).toBe("no-store");
+    expect(await other.json()).toMatchObject({ code: "client_not_allowed" });
+  });
+
+  test("reports unavailable enrollment before checking the client", async () => {
+    for (const query of [`?clientId=${iosClient}`, "?clientId=client_stale"]) {
+      const response = await ready(query, false);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        code: "enrollment_unavailable",
+      });
+    }
+  });
+
+  test("refuses a malformed or repeated client", async () => {
+    for (const query of [
+      "?clientId=",
+      "?clientId=a%20b",
+      `?clientId=${"a".repeat(129)}`,
+      `?clientId=${iosClient}&clientId=x`,
+    ]) {
+      const response = await ready(query);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "invalid_request" });
+    }
+  });
+
+  test("counts client checks against the readiness budget", async () => {
+    devices.setEnrollmentBudget(10, 1);
+    expect((await ready(`?clientId=${iosClient}`)).status).toBe(200);
+    const limited = await ready(`?clientId=${iosClient}`);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ code: "rate_limited" });
+  });
+});

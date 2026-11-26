@@ -188,7 +188,7 @@ A device connects and disconnects through these routes. They read only the beare
   | `503 enrollment_unavailable` | Enrollment is not enabled or configured                                                                       | Try again later                                                        |
 
 - `DELETE /api/health/devices/current` disconnects the device key that sends it and replies `204`. The key stops importing first, then Clerk revokes it. A key that is not its installation's current key, including one already disconnected, fails with `401 key_invalid`; the app can treat that as disconnected. Other keys fail with `403 not_device_key`. This route works whether or not enrollment is enabled, so a device can always disconnect.
-- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token.
+- `GET /api/health/devices/ready` replies `200 {"enrollment": "enabled"}` when devices can connect, and `503` with `"code": "enrollment_unavailable"` otherwise. `POST /api/health/devices` replies the same way, before it checks any token. With `?clientId=<OAuth application ID>`, the `200` also means that ID is in `FITNESS_DEVICE_CLIENT_IDS`. An ID that is not listed gets `403` with `"code": "client_not_allowed"`, and an empty, malformed or repeated `clientId` gets `400` with `"code": "invalid_request"`. Client IDs are public: the app embeds its own.
 
 #### Enrollment limits and lock ordering
 
