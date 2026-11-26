@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { githubApi, releaseArguments, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
+import { githubApi, needsReview, releaseArguments, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
 import { hasNoPendingMigrations } from "./require-no-pending-migrations.mjs";
 import { requireBrowserSuites } from "./require-browser-suites.mjs";
 import { requireIosNative } from "./require-ios-native.mjs";
@@ -314,6 +314,7 @@ function fixture(change = () => {}) {
       base: { ref: "main", repo: { full_name: repo } }, head: { sha: head, repo: { full_name: repo } } }],
     checks: [{ name: "CodeQL", app: { slug: "github-advanced-security" }, head_sha: head, status: "completed", conclusion: "success" }],
     statuses: [{ context: "Independent review", state: "success", target_url: `https://github.com/${repo}/pull/2#issuecomment-123` }],
+    files: [{ filename: "apps/fitness/src/server/devices.ts" }],
     finalRun: structuredClone(run),
   };
   change(data);
@@ -327,6 +328,7 @@ function fixture(change = () => {}) {
     if (path.includes("/workflows/12/runs?")) return { workflow_runs: ++qualityLists > 1 && data.laterRuns || data.runs };
     if (path.includes("/attempts/2/jobs?")) return { jobs: data.jobs };
     if (path.includes("/check-runs?")) return { check_runs: data.checks };
+    if (path.includes("/pulls/2/files?")) return data.files;
     if (path.includes("/pulls?")) return data.pulls;
     if (path.includes("/statuses?")) return data.statuses;
     if (path.endsWith("/actions/runs/23")) return data.finalRun;
@@ -479,4 +481,24 @@ test("the local GitHub CLI fallback discards the CLI's diagnostics and shows onl
   } finally {
     await rm(bin, { recursive: true, force: true });
   }
+});
+
+test("only pull requests that change application, package or release code need review evidence", async () => {
+  for (const filename of ["apps/fitness/src/routes/privacy.tsx", "packages/ui/src/button.tsx", "products/drive/app.ts",
+    "scripts/release-vercel.mjs", "scripts/require-release-checks.mjs", ".github/workflows/deploy-fitness-ios.yml", "AGENTS.md"]) {
+    assert.equal(needsReview([{ filename: "README.md" }, { filename }]), true, filename);
+  }
+  for (const filename of ["README.md", "docs/setup.md", ".github/workflows/quality.yml", "scripts/ci-scope.mjs", "bunfig.toml"]) {
+    assert.equal(needsReview([{ filename }]), false, filename);
+  }
+  assert.equal(needsReview([{ filename: "docs/moved.md", previous_filename: "apps/fitness/README.md" }]), true);
+  assert.equal(needsReview(Array.from({ length: 3000 }, (_, i) => ({ filename: `docs/${i}.md` }))), true);
+  assert.equal(needsReview(null), true);
+  assert.throws(() => needsReview([{ filename: 7 }]), /malformed pull request file/);
+  const ciOnly = d => { d.files = [{ filename: ".github/workflows/quality.yml" }, { filename: "README.md" }]; d.statuses = []; };
+  assert.equal((await requireReleaseChecks(sha, fixture(ciOnly))).pullRequest, 2);
+  const unreviewedApp = d => { d.statuses = []; };
+  await assert.rejects(requireReleaseChecks(sha, fixture(unreviewedApp)), /independent review evidence/);
+  const ciOnlyFailedCodeQL = d => { ciOnly(d); d.checks[0].conclusion = "failure"; };
+  await assert.rejects(requireReleaseChecks(sha, fixture(ciOnlyFailedCodeQL)), /Native CodeQL/);
 });

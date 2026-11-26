@@ -95,14 +95,33 @@ export async function requireQualityChecks({ sha, branch, event }, api, workflow
   return run;
 }
 
+// Pull requests that change application, server, shared package or release
+// code need an independent review. CI-only and documentation-only pull
+// requests merge on their checks alone.
+const REVIEWED = [/^apps\//, /^packages\//, /^products\//, /^scripts\/[^/]*release[^/]*$/,
+  /^\.github\/workflows\/deploy-[^/]+$/, /^AGENTS\.md$/];
+// GitHub lists at most 3000 files for a pull request; a longer list is treated as reviewed code.
+const FILE_LIMIT = 3000;
+
+export function needsReview(files) {
+  if (!Array.isArray(files) || files.length >= FILE_LIMIT) return true;
+  return files.some(file => {
+    if (typeof file?.filename !== "string") fail("GitHub returned a malformed pull request file.");
+    const names = [file.filename, ...(typeof file.previous_filename === "string" ? [file.previous_filename] : [])];
+    return names.some(name => REVIEWED.some(pattern => pattern.test(name)));
+  });
+}
+
 export async function requireReviewedHead({ sha, pullRequest }, api) {
   if (!isId(pullRequest)) fail("GitHub returned a malformed pull request number.");
   const prefix = `/repos/${REPOSITORY}`;
+  const files = await pages(api, `${prefix}/pulls/${pullRequest}/files`, undefined, "the pull request files");
   const checks = await pages(api, `${prefix}/commits/${sha}/check-runs?filter=latest`, "check_runs", "the check runs");
   const security = checks.filter(check => check.name === "CodeQL" && check.app?.slug === "github-advanced-security");
   if (security.length !== 1 || security[0].head_sha !== sha || security[0].status !== "completed" || security[0].conclusion !== "success") {
     fail("Native CodeQL security analysis has not passed for the reviewed PR head.");
   }
+  if (!needsReview(files)) return;
   const statuses = await pages(api, `${prefix}/commits/${sha}/statuses`, undefined, "the commit statuses");
   const review = statuses.find(status => status.context === "Independent review");
   if (!review || review.state !== "success" || !review.target_url?.startsWith(`https://github.com/${REPOSITORY}/pull/${pullRequest}#`)) {
