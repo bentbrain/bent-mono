@@ -209,7 +209,7 @@ Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth 
 Configure each Clerk instance for device enrollment:
 
 - Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone import Apple Health weigh-ins and runs into Fitness. Imports can match or re-pair runs you've entered, and the app sees your account timezone and the results of each import."
-- Create a public OAuth application named Fitness Sync iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
+- Create a public OAuth application named Fitness iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
 - Issue this application's tokens with the MCP endpoint as their audience.
 - Add the application's ID to `FITNESS_DEVICE_CLIENT_IDS`.
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A Simulator-only app that writes synthetic weigh-ins and runs to Apple
-/// Health. Fitness Sync can see them only when the user allows it to read
+/// Health. bent Fitness can see them only when the user allows it to read
 /// Health data, because another app wrote them.
 @main
 struct HealthSeedApp: App {

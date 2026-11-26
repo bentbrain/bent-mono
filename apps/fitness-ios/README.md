@@ -1,4 +1,4 @@
-# Fitness Sync
+# bent Fitness
 
 An iPhone app that sends Apple Health weigh-ins and running workouts to [Fitness](../fitness/README.md). It reads Health data, sends it to `POST /api/health/import` with an import-only device key, and shows what each sync did. Viewing and editing stay in Fitness on the web.
 
@@ -29,7 +29,7 @@ The app keeps sample UUIDs, positions and per-run counts in `Application Support
 `APP_VARIANT` selects the variant and defaults to `production`. Build settings:
 
 - `FITNESS_OAUTH_ISSUER`: Clerk's OAuth issuer, such as `https://clerk.example.com`. Development builds also accept `http://127.0.0.1`.
-- `FITNESS_OAUTH_CLIENT_ID`: the "Fitness Sync iOS" OAuth application's client ID.
+- `FITNESS_OAUTH_CLIENT_ID`: the "Fitness iOS" OAuth application's client ID.
 - `FITNESS_ORIGIN` (development only): another Fitness origin, HTTPS or `http://127.0.0.1:<port>`.
 
 These are public values. Without the OAuth settings, the app says sign-in is not set up in the build. The native module pins every request to the build's Fitness origin and refuses redirects to another origin.
@@ -56,12 +56,12 @@ Build output goes to `NATIVE_BUILD_DIR`, or `~/Library/Caches/fitness-ios-build`
 
 A Simulator build signed to run locally, with no paid team, carries its HealthKit entitlements in the binary's `__entitlements` section, and HealthKit works with them: the app requests read access and reads samples another app wrote.
 
-`tools/health-seed` is a separate Simulator-only Xcode project. Its Health Seed app (`build.bent.fitness.healthseed`) asks for write access and writes synthetic samples relative to today: weigh-ins over three days, two on one day, and one two days ahead; an outdoor run and a treadmill run with distance; a run without distance; and a run whose distance sample is attached after the workout is saved. Each sample has a sync identifier, so seeding again replaces it. Launch it with `-action seed` or `-action clear` to run without a tap. Fitness Sync can read these samples only when its own read access is allowed, since another app wrote them.
+`tools/health-seed` is a separate Simulator-only Xcode project. Its Health Seed app (`build.bent.fitness.healthseed`) asks for write access and writes synthetic samples relative to today: weigh-ins over three days, two on one day, and one two days ahead; an outdoor run and a treadmill run with distance; a run without distance; and a run whose distance sample is attached after the workout is saved. Each sample has a sync identifier, so seeding again replaces it. Launch it with `-action seed` or `-action clear` to run without a tap. bent Fitness can read these samples only when its own read access is allowed, since another app wrote them.
 
 XCUITest drives the Health access sheet, which appears in the requesting app's window. `SimulatorFlows/HealthSheet.swift` allows or denies with it:
 
 - The "Select All" cell has the identifier `UIA.Health.AuthSheet.AllCategoryButton`, and each type has a switch.
-- The confirming button at the end of the list is Allow. On iOS 27.2, a read-only request such as Fitness Sync's shows Continue instead.
+- The confirming button at the end of the list is Allow. On iOS 27.2, a read-only request, like the one bent Fitness makes, shows Continue instead.
 - On iOS 27.2, a read request then asks how much history to share: "Past 30 Days and Future Data" or "All Recorded Data and Future Data". Allow stays disabled until one is chosen. The Health step shows the earliest weigh-in and run the app can read, so a 30-day choice shows there.
 - Don't Allow is followed by an alert saying categories can be turned on later in the Health app.
 - The read sheet notes that background access follows Settings → General → Background App Refresh.

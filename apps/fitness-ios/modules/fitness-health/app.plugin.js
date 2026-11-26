@@ -4,7 +4,7 @@
 const { withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 
 const shareDescription =
-  "Fitness Sync reads your weigh-ins and running workouts and sends them to your Fitness account.";
+  "bent Fitness reads your weigh-ins and running workouts and sends them to your Fitness account.";
 
 /** @type {import("expo/config-plugins").ConfigPlugin<{ fitnessOrigin: string, allowLocalNetworking?: boolean }>} */
 function withFitnessHealth(config, options) {

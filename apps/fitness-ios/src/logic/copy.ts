@@ -9,10 +9,10 @@ export const fitnessHost = (origin: string) => {
 };
 
 export const copy = {
-  appName: "Fitness Sync",
+  appName: "bent Fitness",
   signIn: {
     title: "Sync Apple Health to Fitness",
-    body: "Fitness Sync sends your weigh-ins and runs from Apple Health to your Fitness account. Sign in with the account you use for Fitness.",
+    body: "bent Fitness sends your weigh-ins and runs from Apple Health to your Fitness account. Sign in with the account you use for Fitness.",
     button: "Sign in to Fitness",
     unconfigured: "Sign-in is not set up in this build.",
     tryLater: (seconds: number) =>
@@ -36,14 +36,14 @@ export const copy = {
   },
   health: {
     title: "Allow Health access",
-    body: "iOS asks which data Fitness Sync can read. Turn on Weight, Workouts and Walking + Running Distance.",
+    body: "iOS asks which data bent Fitness can read. Turn on Weight, Workouts and Walking + Running Distance.",
     allow: "Choose Health access",
     readable: "Readable history",
     none: "None readable",
-    noneHint: "Fitness Sync can't read any samples. Check Settings → Health → Data Access & Devices → Fitness Sync.",
+    noneHint: "bent Fitness can't read any samples. Check Settings → Health → Data Access & Devices → bent Fitness.",
     start: "Start the first sync",
     allowedFrom: "Health shares history from",
-    keepOpen: "Keep Fitness Sync open until the first sync finishes.",
+    keepOpen: "Keep bent Fitness open until the first sync finishes.",
   },
   status: {
     title: "Sync",
@@ -57,7 +57,7 @@ export const copy = {
     waiting: (count: number) => `${count} ${count === 1 ? "sample is" : "samples are"} waiting until they are due.`,
     unreadable: (count: number) => `${count} ${count === 1 ? "item" : "items"} could not be read and stopped waiting.`,
     distanceAccess: (count: number) =>
-      `${count} ${count === 1 ? "run is" : "runs are"} waiting for distance access. Health shows no distance for ${count === 1 ? "this run" : "these runs"}, and Fitness Sync can't tell whether none was recorded or distance isn't shared for ${count === 1 ? "its date" : "their dates"}. To share it, allow Walking + Running Distance with all history in Settings → Health → Data Access & Devices → Fitness Sync. If no distance was recorded, send ${count === 1 ? "the run" : "them"} without one, and Fitness records 0 km.`,
+      `${count} ${count === 1 ? "run is" : "runs are"} waiting for distance access. Health shows no distance for ${count === 1 ? "this run" : "these runs"}, and bent Fitness can't tell whether none was recorded or distance isn't shared for ${count === 1 ? "its date" : "their dates"}. To share it, allow Walking + Running Distance with all history in Settings → Health → Data Access & Devices → bent Fitness. If no distance was recorded, send ${count === 1 ? "the run" : "them"} without one, and Fitness records 0 km.`,
     waitingChanged: "The waiting runs changed, so nothing was sent. Check the count and tap again.",
     sendWithoutDistance: (count: number) => `Send ${count} ${count === 1 ? "run" : "runs"} without distance`,
     manualRevocations: (count: number) =>
@@ -73,7 +73,7 @@ export const copy = {
   },
   locked: {
     title: "Unlock this iPhone",
-    body: "Fitness Sync keeps its connection locked until this iPhone is unlocked after a restart.",
+    body: "bent Fitness keeps its connection locked until this iPhone is unlocked after a restart.",
   },
   reconnect: {
     title: "Connect again",

@@ -9,11 +9,11 @@ const productionOrigin = "https://fitness.bent.build";
 
 const variants = {
   development: {
-    name: "Fitness Sync Dev",
+    name: "bent Fitness Dev",
     bundleIdentifier: "build.bent.fitness.dev",
   },
   production: {
-    name: "Fitness Sync",
+    name: "bent Fitness",
     bundleIdentifier: "build.bent.fitness",
   },
 } as const;
@@ -72,7 +72,7 @@ function issuerFrom(variant: Variant, value: string | undefined) {
 /**
  * The settings for a variant. FITNESS_OAUTH_ISSUER and
  * FITNESS_OAUTH_CLIENT_ID are public values for the Clerk instance and its
- * "Fitness Sync iOS" application. Without them the app explains that sign-in
+ * "Fitness iOS" application. Without them the app explains that sign-in
  * is not configured in this build.
  */
 export function appSettings(variant: Variant, environment: Record<string, string | undefined>): AppSettings {

@@ -9,7 +9,8 @@ const settings = appSettings(variant, process.env);
 
 const config: ExpoConfig = {
   name: settings.name,
-  slug: "fitness-sync",
+  slug: "fitnessbentbuild",
+  owner: "bentbuilds-team",
   version: "1.0.0",
   scheme: settings.scheme,
   orientation: "portrait",

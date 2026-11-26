@@ -1,4 +1,4 @@
-// Native build and test steps for Fitness Sync, shared by CI and local runs.
+// Native build and test steps for bent Fitness, shared by CI and local runs.
 //
 //   node scripts/native.mjs xcode <version>     require this Xcode version
 //   node scripts/native.mjs prebuild            generate ios/ for APP_VARIANT
@@ -232,7 +232,7 @@ const commands = {
     const udid = output("xcrun", [
       "simctl",
       "create",
-      "Fitness Sync flows",
+      "Fitness flows",
       type.identifier,
       runtime.identifier,
     ]).trim();
