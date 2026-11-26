@@ -43,8 +43,35 @@ const fail = (message) => {
 export const isUuid = (value) =>
   typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-/** A short error code from a provider's reply, kept only when it looks like one. */
-const safeCode = (code) => (typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : null);
+/** The codes Fitness's `/api/health/devices/ready` replies with (apps/fitness/src/server/devices.ts). */
+export const readinessCodes = new Set([
+  "enrollment_unavailable",
+  "client_not_allowed",
+  "invalid_request",
+  "rate_limited",
+]);
+
+/** The OAuth 2.0 authorization error codes (RFC 6749, section 4.1.2.1), as Clerk's authorize steps return them. */
+export const oauthErrorCodes = new Set([
+  "invalid_request",
+  "invalid_client",
+  "unauthorized_client",
+  "access_denied",
+  "unsupported_response_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+]);
+
+/** A provider's error code, shown only when it is one of `known`; anything else is left out. */
+export const knownCode = (known, code) => (typeof code === "string" && known.has(code) ? code : null);
+
+/** A CFBundleShortVersionString or CFBundleVersion: one to three period-separated whole numbers. */
+export const isBundleVersion = (value) =>
+  typeof value === "string" && value.length <= 18 && /^\d{1,6}(\.\d{1,6}){0,2}$/.test(value);
+
+/** The statuses a release reports. */
+const releaseStatuses = new Set(["built", "submitted"]);
 
 /** Runs a macOS tool with a hard time limit and returns its output. */
 function tool(command, args, { input, timeout = MINUTE } = {}) {
@@ -69,7 +96,10 @@ export const unlistedClient = "release-check-unlisted-client";
  * for one no deployment lists, which shows the deployment checks client IDs.
  */
 export function checkReadiness(listed, unlisted) {
-  const code = (reply) => (safeCode(reply.body?.code) ? `, ${reply.body.code}` : "");
+  const code = (reply) => {
+    const known = knownCode(readinessCodes, reply.body?.code);
+    return known ? `, ${known}` : "";
+  };
   if (unlisted.status !== 403 || unlisted.body?.code !== "client_not_allowed")
     fail(
       `Fitness production does not check OAuth client IDs for readiness (HTTP ${unlisted.status}${code(unlisted)}). Release Fitness first.`,
@@ -264,11 +294,12 @@ export async function checkClientAtIssuer(
       } catch {
         code = undefined;
       }
-      refused(`HTTP ${response.status}${safeCode(code) ? `, ${code}` : ""}`);
+      const known = knownCode(oauthErrorCodes, code);
+      refused(`HTTP ${Number(response.status)}${known ? `, ${known}` : ""}`);
     }
     await response.body?.cancel();
     if (location.startsWith(redirectUri))
-      refused(safeCode(new URL(location).searchParams.get("error")) ?? "redirected to the app");
+      refused(knownCode(oauthErrorCodes, new URL(location).searchParams.get("error")) ?? "redirected to the app");
     const page = new URL(location, url);
     if (
       !plainHttps(page) ||
@@ -444,6 +475,7 @@ async function checkArchive(archive, directory, oauth) {
   const apps = (await readdir(payload)).filter((name) => name.endsWith(".app"));
   if (apps.length !== 1) fail("The archive must hold exactly one app.");
   const bundle = join(payload, apps[0]);
+  verifySignature(bundle);
   const signed = tool("codesign", ["-d", "--entitlements", "-", "--xml", bundle]);
   const entitlements = JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", "-"], { input: signed }));
   const health = checkSignedEntitlements(entitlements);
@@ -492,8 +524,29 @@ async function getJsonOk(url) {
   return reply.body;
 }
 
-/** What a release reports when it finishes: no URLs and nothing secret. */
-export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
+/**
+ * What a release reports when it finishes, each value checked: a known
+ * status, a UUID build ID, and the version and build number in Apple's
+ * format. It is the only build data a step logs or writes to the summary.
+ */
+export function summary({ status, buildId, version, buildNumber }) {
+  if (!releaseStatuses.has(status) || !isUuid(buildId) || !isBundleVersion(version) || !isBundleVersion(buildNumber))
+    fail("The build summary holds a value that is not a release status, an EAS build ID or an app version.");
+  return { status, buildId, version, buildNumber };
+}
+
+/**
+ * Verifies the app's code signature, including nested code, before anything
+ * inside it is trusted. codesign's output is discarded: a failure shows only
+ * a fixed message.
+ */
+export function verifySignature(bundle, runTool = tool) {
+  try {
+    runTool("codesign", ["--verify", "--strict", "--deep", "--verbose=2", bundle], { timeout: 5 * MINUTE });
+  } catch {
+    fail("The app's code signature did not verify.");
+  }
+}
 
 /**
  * The OAuth issuer and client handed to later workflow steps, as
@@ -581,7 +634,13 @@ export function buildDownloads(builds, { sha, projectId, directory }) {
   return {
     archive: curlConfig(build.artifacts.applicationArchiveUrl, archive),
     logs: (build.logFiles ?? []).map((url, index) => curlConfig(url, join(directory, "logs", `${index + 1}.txt`))),
-    build: { buildId: build.id, version: build.appVersion, buildNumber: build.appBuildVersion },
+    build: {
+      buildId: build.id,
+      version: isBundleVersion(build.appVersion) ? build.appVersion : fail("EAS reported a malformed app version."),
+      buildNumber: isBundleVersion(build.appBuildVersion)
+        ? build.appBuildVersion
+        : fail("EAS reported a malformed build number."),
+    },
   };
 }
 
@@ -647,6 +706,8 @@ async function verifyArchive({ archive, logsDir, build, oauth, workDir }) {
   checkXcodeLog(logs);
   await mkdir(workDir, { recursive: true, mode: 0o700 });
   const artifact = await checkArchive(archive, workDir, oauth);
+  if (!isBundleVersion(artifact.version) || !isBundleVersion(artifact.buildNumber))
+    fail("The archive's version or build number is not in Apple's format.");
   if (artifact.buildNumber !== build.buildNumber || artifact.version !== build.version)
     fail("The archive's version does not match the EAS build.");
   return summary({

@@ -16,7 +16,12 @@ import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
   admit,
+  isBundleVersion,
   isUuid,
+  knownCode,
+  oauthErrorCodes,
+  readinessCodes,
+  verifySignature,
   appConfigMetadata,
   staticEasFiles,
   writeStaticEasDir,
@@ -829,7 +834,8 @@ describe("the Deploy Fitness iOS workflow", () => {
   test("downloads through curl configs, following HTTPS redirects only, and shows only curl's exit code", () => {
     const verify = steps[index(/verify-archive/)];
     expect(verify.run).toContain("check-build");
-    const curl = verify.run.split("\n").find((line) => /\bcurl --/.test(line));
+    const curl = verify.run.split("\n").find((line) => /\bcurl -/.test(line));
+    expect(curl.trim().startsWith("curl -q ")).toBe(true);
     for (const flag of [
       "--fail",
       "--silent",
@@ -1199,14 +1205,186 @@ process.stdout.write(JSON.stringify(result));`,
     );
   });
 
-  test("provider error codes appear in messages only when they look like codes", () => {
+  test("provider error codes appear in messages only from each provider's known codes", () => {
     const refused = { status: 403, body: { code: "client_not_allowed" } };
-    expect(() =>
-      checkReadiness({ status: 503, body: { code: "https://storage.example.invalid/?X-Amz-Signature=x" } }, refused),
-    ).toThrow(/^Fitness production is not ready to enroll devices with this build's OAuth client \(HTTP 503\)\.$/);
+    const notReady =
+      /^Fitness production is not ready to enroll devices with this build's OAuth client \(HTTP 503\)\.$/;
+    for (const code of [
+      "https://storage.example.invalid/?X-Amz-Signature=x",
+      "acct_7f3c2a9e_private",
+      "owner@example.invalid",
+      "invalid_client",
+    ])
+      expect(() => checkReadiness({ status: 503, body: { code } }, refused)).toThrow(notReady);
     expect(() => checkReadiness({ status: 503, body: { code: "enrollment_unavailable" } }, refused)).toThrow(
       "HTTP 503, enrollment_unavailable",
     );
+    expect([...readinessCodes].sort()).toEqual([
+      "client_not_allowed",
+      "enrollment_unavailable",
+      "invalid_request",
+      "rate_limited",
+    ]);
+    expect([...oauthErrorCodes].sort()).toEqual([
+      "access_denied",
+      "invalid_client",
+      "invalid_request",
+      "invalid_scope",
+      "server_error",
+      "temporarily_unavailable",
+      "unauthorized_client",
+      "unsupported_response_type",
+    ]);
+    expect(knownCode(oauthErrorCodes, "invalid_scope")).toBe("invalid_scope");
+    for (const code of ["acct_7f3c2a9e_private", "enrollment_unavailable", ["invalid_scope"], 1, undefined])
+      expect(knownCode(oauthErrorCodes, code)).toBeNull();
+  });
+
+  test("Clerk errors outside the OAuth codes show only the HTTP status", async () => {
+    const issuer = "https://clerk.example.com";
+    const request = {
+      authorizationEndpoint: `${issuer}/oauth/authorize`,
+      issuer,
+      clientId: "client123",
+      redirectUri: "build.bent.fitness://oauth",
+      resource: "https://fitness.bent.build/api/mcp",
+    };
+    const fetchWith = (second) => async (url) => {
+      const target = new URL(url);
+      if (target.pathname === "/v1/environment")
+        return Response.json({ display_config: { sign_in_url: "https://accounts.example.com/sign-in" } });
+      if (target.pathname === "/oauth/authorize")
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: `https://accounts.example.com/sign-in?redirect_url=${encodeURIComponent(`${issuer}/oauth/authorize-with-immediate-redirect?${target.searchParams}`)}`,
+          },
+        });
+      return second();
+    };
+    const failure = await checkClientAtIssuer(
+      request,
+      fetchWith(() => Response.json({ error: "acct_7f3c2a9e_private" }, { status: 401 })),
+    ).catch((error) => error);
+    expect(failure.message).toBe("Clerk does not accept the build's OAuth client for this app (HTTP 401).");
+    const redirected = await checkClientAtIssuer(
+      request,
+      fetchWith(
+        () =>
+          new Response(null, {
+            status: 303,
+            headers: { location: "build.bent.fitness://oauth/?error=acct_7f3c2a9e_private" },
+          }),
+      ),
+    ).catch((error) => error);
+    expect(redirected.message).toBe(
+      "Clerk does not accept the build's OAuth client for this app (redirected to the app).",
+    );
+    const known = await checkClientAtIssuer(
+      request,
+      fetchWith(() => Response.json({ error: "invalid_client" }, { status: 401 })),
+    ).catch((error) => error);
+    expect(known.message).toBe(
+      "Clerk does not accept the build's OAuth client for this app (HTTP 401, invalid_client).",
+    );
+  });
+
+  test("version and build number must be Apple's format before they reach a log or the summary", () => {
+    for (const value of ["1.0.0", "7", "1", "26.6", "99999.99999.9999", "0.0.1"])
+      expect(isBundleVersion(value)).toBe(true);
+    for (const value of [
+      "1.0.0.0",
+      "v1.0",
+      "+1",
+      "-1",
+      "1.0-beta",
+      "1..0",
+      "1.",
+      "1234567",
+      "999999.999999.999999",
+      "1.0.0\n| injected | row |",
+      "**bold**",
+      "<img src=x onerror=alert(1)>",
+      "owner@example.invalid",
+      "https://storage.example.invalid/?X-Amz-Signature=x",
+      " 1.0",
+      7,
+      ["1.0.0"],
+      null,
+    ])
+      expect(isBundleVersion(value)).toBe(false);
+    const good = { status: "submitted", buildId: build.id, version: "1.0.0", buildNumber: "7" };
+    expect(summary(good)).toEqual(good);
+    for (const change of [
+      { version: "<b>1</b>" },
+      { buildNumber: "7 | owner@example.invalid" },
+      { version: "1.0.0".repeat(5) },
+      { status: "**done**" },
+      { buildId: "-".repeat(36) },
+    ])
+      expect(() => summary({ ...good, ...change })).toThrow("not a release status, an EAS build ID or an app version");
+    expect(() =>
+      buildDownloads([{ ...build, appVersion: "<b>1</b>", appBuildVersion: "7" }], {
+        sha,
+        projectId,
+        directory: "/tmp/x",
+      }),
+    ).toThrow("malformed app version");
+    expect(() =>
+      buildDownloads([{ ...build, appVersion: "1.0.0", appBuildVersion: "7\n| x |" }], {
+        sha,
+        projectId,
+        directory: "/tmp/x",
+      }),
+    ).toThrow("malformed build number");
+    // The summary refuses a summary file holding an injected value.
+    const directory = mkdtempSync(join(tmpdir(), "release-summary-version-"));
+    try {
+      const file = join(directory, "verified.json");
+      writeFileSync(file, JSON.stringify({ ...good, version: "1.0.0 | <script>x</script>" }));
+      const refused = run("summary", "--file", file, "--sha", sha, "--status", "submitted");
+      expect(refused.status).not.toBe(0);
+      expect(refused.stdout).toBe("");
+      expect(refused.stderr).not.toContain("<script>");
+      writeFileSync(file, JSON.stringify(good));
+      expect(run("summary", "--file", file, "--sha", sha, "--status", "**hacked**").stderr).toContain(
+        "not a release status",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("the app's code signature is verified, nested code included, before anything in it is trusted", () => {
+    const calls = [];
+    verifySignature("/tmp/Payload/bentFitness.app", (command, args, options) => {
+      calls.push({ command, args, options });
+      return "";
+    });
+    expect(calls).toEqual([
+      {
+        command: "codesign",
+        args: ["--verify", "--strict", "--deep", "--verbose=2", "/tmp/Payload/bentFitness.app"],
+        options: { timeout: 300_000 },
+      },
+    ]);
+    const failure = (() => {
+      try {
+        verifySignature("/tmp/Payload/bentFitness.app", () => {
+          throw new Error(
+            "a sealed resource is missing or invalid: https://storage.example.invalid/?X-Amz-Signature=x",
+          );
+        });
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect(failure.message).toBe("The app's code signature did not verify.");
+    // The check runs on the archive before its entitlements are read.
+    const source = readFileSync(new URL("../scripts/release-ios.mjs", import.meta.url), "utf8");
+    const archive = source.slice(source.indexOf("async function checkArchive"));
+    expect(archive.indexOf("verifySignature(bundle);")).toBeGreaterThan(0);
+    expect(archive.indexOf("verifySignature(bundle);")).toBeLessThan(archive.indexOf('"--entitlements"'));
   });
 
   test("both qualifications must name the same Quality run", () => {

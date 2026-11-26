@@ -191,7 +191,7 @@ jobs:
           # curl follows at most five HTTPS redirects, and only its exit code is shown.
           download() {
             local status=0
-            curl --fail --silent --location --max-redirs 5 --proto '=https' --proto-redir '=https' --globoff \
+            curl -q --fail --silent --location --max-redirs 5 --proto '=https' --proto-redir '=https' --globoff \
               --max-time "$2" --config "$1" 2>/dev/null || status=$?
             return "$status"
           }
