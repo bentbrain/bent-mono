@@ -9,7 +9,8 @@
 // access, for the one-time signing and submission key setup.
 import { spawn, spawnSync } from "node:child_process";
 import { constants, createWriteStream, existsSync } from "node:fs";
-import { mkdir, open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -207,86 +208,180 @@ export function redactingWriter(write, secrets) {
 /** Secrets the release has read, for redaction. */
 const secrets = [];
 
+/** Failure output for display: redacted first, then cut to its last `limit` characters. */
+export function failureDetail(text, hidden, limit = 4000) {
+  return redact(text, hidden).slice(-limit);
+}
+
+/** The process IDs below `pid`, from `ps`. */
+function descendants(pid) {
+  const listing = spawnSync("ps", ["-A", "-o", "pid=,ppid="], {
+    encoding: "utf8",
+    timeout: 10_000,
+    killSignal: "SIGKILL",
+  });
+  const children = new Map();
+  for (const line of (listing.stdout ?? "").split("\n")) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number);
+    if (!child || !parent) continue;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(child);
+  }
+  const found = [];
+  const queue = [pid];
+  while (queue.length)
+    for (const child of children.get(queue.shift()) ?? []) {
+      found.push(child);
+      queue.push(child);
+    }
+  return found;
+}
+
+/**
+ * Signals a child and everything below it: its process group, when it has
+ * one, and each descendant. `known` collects the descendants found, so a
+ * later signal still reaches one whose parent has already exited.
+ */
+function signalTree(child, signal, grouped, known = new Set()) {
+  for (const pid of descendants(child.pid)) known.add(pid);
+  if (grouped)
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // The group is gone already.
+    }
+  for (const pid of [...known, child.pid])
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // The process is gone already.
+    }
+}
+
+/** Children still running, so an interrupted release stops them too. */
+const running = new Set();
+function stopChildrenOnInterrupt() {
+  for (const signal of ["SIGINT", "SIGTERM"])
+    process.on(signal, () => {
+      for (const { child, grouped } of running) signalTree(child, "SIGKILL", grouped);
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    });
+}
+
 /**
  * Runs a command with a hard time limit and the allowlisted environment.
- * Output is returned, and shown only redacted, when the command fails.
+ *
+ * A non-interactive command runs in its own process group. At the limit the
+ * whole tree gets SIGTERM, then SIGKILL after `grace`, its pipes are closed
+ * and the run fails at once, even if a descendant kept the pipes open. An
+ * interactive command stays in the terminal's foreground group, so prompts
+ * and Ctrl-C reach it, and its descendants are found with `ps` instead.
+ *
+ * With `show`, output is written redacted as it arrives. Otherwise it is
+ * returned, and shown redacted only when the command fails.
  */
-function run(command, args, { cwd, env = childEnvironment(process.env), timeout, input }) {
-  const result = spawnSync(command, args, {
-    cwd,
-    env,
-    input,
-    timeout,
-    killSignal: "SIGKILL",
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (result.error?.code === "ETIMEDOUT")
-    fail(`${command} ${args[0]} ran past its ${Math.round(timeout / MINUTE)}-minute limit.`);
-  if (result.error) throw result.error;
-  if (result.status !== 0)
-    fail(
-      `${command} ${args.slice(0, 2).join(" ")} failed with exit code ${result.status}.\n${redact(
-        `${result.stdout ?? ""}\n${result.stderr ?? ""}`.slice(-4000),
-        secrets,
-      )}`,
-    );
-  return result;
-}
-
-/**
- * Runs a command with a hard time limit, showing its output redacted as it
- * arrives. `interactive` passes this terminal's input through.
- */
-export function stream(
+export function execute(
   command,
   args,
-  { cwd, env, timeout, interactive = false, hidden = secrets, output = process.stdout, errors = process.stderr },
+  {
+    cwd,
+    env = childEnvironment(process.env),
+    timeout,
+    input,
+    interactive = false,
+    show = interactive,
+    hidden = secrets,
+    output = process.stdout,
+    errors = process.stderr,
+    grace = 2000,
+  },
 ) {
   return new Promise((done, failed) => {
-    const child = spawn(command, args, { cwd, env, stdio: [interactive ? "inherit" : "ignore", "pipe", "pipe"] });
+    const grouped = !interactive;
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      detached: grouped,
+      stdio: [interactive ? "inherit" : input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    const entry = { child, grouped };
+    running.add(entry);
+    let stdout = "";
+    let stderr = "";
     const out = redactingWriter((text) => output.write(text), hidden);
     const err = redactingWriter((text) => errors.write(text), hidden);
-    child.stdout.setEncoding("utf8").on("data", (chunk) => out.push(chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk) => err.push(chunk));
+    child.stdout.setEncoding("utf8").on("data", (chunk) => (show ? out.push(chunk) : (stdout += chunk)));
+    child.stderr.setEncoding("utf8").on("data", (chunk) => (show ? err.push(chunk) : (stderr += chunk)));
+    if (input !== undefined) child.stdin.end(input);
+    const timers = [];
+    const known = new Set();
+    let settled = false;
     let expired = false;
-    const timer = setTimeout(() => {
-      expired = true;
-      child.kill("SIGKILL");
-    }, timeout);
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      failed(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
+    const label = `${command} ${args.slice(0, 2).join(" ")}`;
+    const limit =
+      timeout >= MINUTE
+        ? `${Math.round(timeout / MINUTE)}-minute`
+        : `${Math.max(1, Math.round(timeout / 1000))}-second`;
+    const settle = (error, code) => {
+      if (settled) return;
+      settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      running.delete(entry);
+      // Descendants still running, or left holding the pipes, stop with the command.
+      signalTree(child, "SIGKILL", grouped, known);
+      child.stdout.destroy();
+      child.stderr.destroy();
       out.end();
       err.end();
-      if (expired)
-        failed(new Error(`${command} ${args[0]} ran past its ${Math.round(timeout / MINUTE)}-minute limit.`));
-      else if (code !== 0) failed(new Error(`${command} ${args.slice(0, 2).join(" ")} failed with exit code ${code}.`));
-      else done();
-    });
+      const reject = (message) => failed(new Error(redact(message, hidden)));
+      if (expired) reject(`${label} ran past its ${limit} limit.`);
+      else if (error) failed(error);
+      else if (code !== 0)
+        reject(
+          `${label} failed with exit code ${code}.${show ? "" : `\n${failureDetail(`${stdout}\n${stderr}`, hidden)}`}`,
+        );
+      else done({ stdout, stderr });
+    };
+    timers.push(
+      setTimeout(() => {
+        expired = true;
+        signalTree(child, "SIGTERM", grouped, known);
+        // Settles even while a descendant keeps the pipes open.
+        timers.push(setTimeout(() => settle(), grace));
+      }, timeout),
+    );
+    child.on("error", (error) => settle(error));
+    // Output can still be arriving when the command exits; a descendant that
+    // keeps the pipes open past `grace` does not hold the run.
+    child.on("exit", (code, signal) => timers.push(setTimeout(() => settle(null, code ?? (signal ? 1 : 0)), grace)));
+    child.on("close", (code, signal) => settle(null, code ?? (signal ? 1 : 0)));
   });
 }
 
+/** Runs a command and returns its output; see `execute`. */
+const run = (command, args, options) => execute(command, args, { ...options, show: false });
+
 /** EAS CLI at the version eas.json pins, installed once into the work directory. */
-function easCli(workDir, version) {
+async function easCli(workDir, version) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) fail("eas.json must pin an exact EAS CLI version.");
   const prefix = join(workDir, `eas-cli-${version}`);
   const bin = join(prefix, "node_modules/eas-cli/bin/run");
   if (!existsSync(bin))
-    run("npm", ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--ignore-scripts", `eas-cli@${version}`], {
-      cwd: workDir,
-      timeout: 10 * MINUTE,
-    });
+    await run(
+      "npm",
+      ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--ignore-scripts", `eas-cli@${version}`],
+      {
+        cwd: workDir,
+        timeout: 10 * MINUTE,
+      },
+    );
   const installed = JSON.parse(
-    run("node", ["-p", "JSON.stringify(require('eas-cli/package.json'))"], { cwd: prefix, timeout: MINUTE }).stdout,
+    (await run("node", ["-p", "JSON.stringify(require('eas-cli/package.json'))"], { cwd: prefix, timeout: MINUTE }))
+      .stdout,
   );
   if (installed.version !== version) fail(`Expected EAS CLI ${version}, found ${installed.version}.`);
   const eas = (args, options) => run("node", [bin, ...args], options);
-  eas.stream = (args, options) => stream("node", [bin, ...args], options);
+  eas.show = (args, options) => execute("node", [bin, ...args], { ...options, show: true });
   return eas;
 }
 
@@ -387,6 +482,69 @@ export function checkAuthorizationServer(metadata, issuer) {
   if (!metadata.code_challenge_methods_supported?.includes("S256")) fail("The OAuth issuer does not offer PKCE S256.");
 }
 
+/**
+ * Clerk must know the build's OAuth client with its redirect URI and scope.
+ * This starts an authorization request the way the app does, without
+ * following redirects or signing in, so it grants nothing. Clerk sends a
+ * request it has not checked yet through its sign-in page back to its own
+ * authorize step; that step answers an unknown client with `invalid_client`,
+ * a wrong redirect URI with `invalid_request`, and a scope the client may not
+ * request with an `invalid_scope` redirect to the app. A known client goes on
+ * to the consent page.
+ */
+export async function checkClientAtIssuer(
+  { authorizationEndpoint, issuer, clientId, redirectUri, resource, scope = "fitness:health:enroll openid" },
+  fetchImpl = fetch,
+) {
+  const origin = new URL(issuer).origin;
+  const endpoint = new URL(authorizationEndpoint ?? "", issuer);
+  if (endpoint.origin !== origin) fail("The OAuth issuer's authorization endpoint is on another origin.");
+  const verifier = randomBytes(48).toString("base64url");
+  endpoint.search = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope,
+    resource,
+    state: randomBytes(16).toString("base64url"),
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+  }).toString();
+  const refused = (detail) => fail(`Clerk does not accept the build's OAuth client for this app (${detail}).`);
+  let url = endpoint.href;
+  for (let hop = 0; hop < 4; hop++) {
+    const response = await fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) });
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status > 399 || !location) {
+      let code;
+      try {
+        code = (await response.json())?.error;
+      } catch {
+        code = undefined;
+      }
+      refused(`HTTP ${response.status}${code ? `, ${code}` : ""}`);
+    }
+    await response.body?.cancel();
+    if (location.startsWith(redirectUri))
+      refused(new URL(location).searchParams.get("error") ?? "redirected to the app");
+    const next = new URL(location, url);
+    if (next.origin === origin) {
+      url = next.href;
+      continue;
+    }
+    const back = next.searchParams.get("redirect_url");
+    const returning = back ? new URL(back) : null;
+    if (returning?.origin === origin) {
+      url = returning.href;
+      continue;
+    }
+    if (next.protocol !== "https:" || next.searchParams.has("error") || returning?.searchParams.has("error"))
+      refused("an unexpected redirect");
+    return;
+  }
+  refused("too many redirects");
+}
+
 /** The EAS project ID that app.config.ts commits. */
 export function projectIdFrom(appConfigSource) {
   const match = /projectId:\s*"([0-9a-f-]{36})"/.exec(appConfigSource);
@@ -394,37 +552,63 @@ export function projectIdFrom(appConfigSource) {
   return match[1];
 }
 
-/**
- * A build profile with its `extends` chain applied, as EAS merges it: the
- * profile's settings over its base's, with `ios` and `env` merged key by key.
- */
-export function resolveProfile(profiles, name, seen = []) {
+/** Merges two build profiles as eas-json does: `env`, `ios` and `android` merge key by key. */
+function mergeProfiles(base, update) {
+  const result = { ...base, ...update };
+  if (base.env && update.env) result.env = { ...base.env, ...update.env };
+  if (base.android && update.android) result.android = mergeProfiles(base.android, update.android);
+  if (base.ios && update.ios) result.ios = mergeProfiles(base.ios, update.ios);
+  return result;
+}
+
+/** A build profile with its `extends` chain applied, as eas-json 27.11.0 resolves it. */
+export function resolveProfile(profiles, name, depth = 0) {
+  if (depth >= 5) fail("eas.json has too long a chain of profile extensions, or a cycle.");
   const profile = profiles?.[name];
-  if (!profile || typeof profile !== "object" || seen.includes(name)) fail(`eas.json has no usable "${name}" profile.`);
-  if (profile.extends === undefined) return profile;
-  const base = resolveProfile(profiles, profile.extends, [...seen, name]);
+  if (!profile || typeof profile !== "object") fail(`eas.json has no usable "${name}" profile.`);
   const own = { ...profile };
   delete own.extends;
-  return {
-    ...base,
-    ...own,
-    ios: { ...base.ios, ...own.ios },
-    env: { ...base.env, ...own.env },
-  };
+  return profile.extends === undefined ? own : mergeProfiles(resolveProfile(profiles, profile.extends, depth + 1), own);
 }
+
+/**
+ * The settings an iOS build of `name` uses, as EAS resolves them: the
+ * resolved profile, then its `ios` settings over the common ones, then
+ * EAS's defaults under both.
+ */
+export function effectiveIosProfile(profiles, name) {
+  const resolved = resolveProfile(profiles, name);
+  const common = { ...resolved };
+  delete common.ios;
+  delete common.android;
+  return mergeProfiles(
+    { credentialsSource: "remote", distribution: "store" },
+    mergeProfiles(common, resolved.ios ?? {}),
+  );
+}
+
+/** Settings that change what kind of app a profile builds, which the release does not allow. */
+const buildKindSettings = ["config", "prebuildCommand", "scheme", "enterpriseProvisioning", "withoutCredentials"];
 
 /** The release settings eas.json must keep. Returns the pinned EAS CLI version. */
 export function checkEasJson(easJson) {
   if (easJson.cli?.requireCommit !== true) fail("eas.json must require a committed tree.");
-  const production = resolveProfile(easJson.build, "production");
-  if (production.ios?.image !== IMAGE) fail(`The production profile must build on ${IMAGE}.`);
+  const production = effectiveIosProfile(easJson.build, "production");
+  if (production.image !== IMAGE) fail(`The production iOS build must use ${IMAGE}.`);
   if (
     production.distribution !== "store" ||
     production.environment !== "production" ||
     production.env?.APP_VARIANT !== "production" ||
-    production.developmentClient === true
+    production.credentialsSource !== "remote" ||
+    production.autoIncrement !== true ||
+    production.simulator === true ||
+    production.developmentClient === true ||
+    (production.buildConfiguration !== undefined && production.buildConfiguration !== "Release") ||
+    buildKindSettings.some((setting) => production[setting] !== undefined)
   )
-    fail("The production profile must build the production variant for the store.");
+    fail(
+      "The production iOS build must be a Release store build of the production variant, in the production environment, with remote credentials and an incrementing build number.",
+    );
   if (!/^\d+$/.test(easJson.submit?.production?.ios?.ascAppId ?? ""))
     fail("eas.json must name the App Store Connect app for production submissions.");
   return easJson.cli.version;
@@ -494,18 +678,18 @@ async function checkArchive(build, directory, oauth) {
   if (!response.ok || !response.body) fail(`The build archive download failed with HTTP ${response.status}.`);
   await pipeline(Readable.fromWeb(response.body), createWriteStream(archive, { flags: "wx", mode: 0o600 }));
   const extracted = join(directory, "extracted");
-  run("ditto", ["-x", "-k", archive, extracted], { timeout: 5 * MINUTE });
+  await run("ditto", ["-x", "-k", archive, extracted], { timeout: 5 * MINUTE });
   const payload = join(extracted, "Payload");
   const apps = (await readdir(payload)).filter((name) => name.endsWith(".app"));
   if (apps.length !== 1) fail("The archive must hold exactly one app.");
   const bundle = join(payload, apps[0]);
-  const signed = run("codesign", ["-d", "--entitlements", "-", "--xml", bundle], { timeout: MINUTE }).stdout;
+  const signed = (await run("codesign", ["-d", "--entitlements", "-", "--xml", bundle], { timeout: MINUTE })).stdout;
   const entitlements = JSON.parse(
-    run("plutil", ["-convert", "json", "-o", "-", "-"], { input: signed, timeout: MINUTE }).stdout,
+    (await run("plutil", ["-convert", "json", "-o", "-", "-"], { input: signed, timeout: MINUTE })).stdout,
   );
   const health = checkSignedEntitlements(entitlements);
   const plist = JSON.parse(
-    run("plutil", ["-convert", "json", "-o", "-", join(bundle, "Info.plist")], { timeout: MINUTE }).stdout,
+    (await run("plutil", ["-convert", "json", "-o", "-", join(bundle, "Info.plist")], { timeout: MINUTE })).stdout,
   );
   checkInfoPlist(plist, "production");
   const binary = join(bundle, plist.CFBundleExecutable);
@@ -536,25 +720,20 @@ async function buildLogs(build) {
 // ---------------------------------------------------------------- release
 
 /** A fresh clone of the canonical repository at exactly `sha`. */
-function pristineCheckout(sha, directory) {
+async function pristineCheckout(sha, directory) {
   if (existsSync(directory)) fail(`${directory} already exists; each release uses a fresh clone.`);
-  run("git", ["clone", "--quiet", "--no-checkout", REPOSITORY_URL, directory], { timeout: 10 * MINUTE });
-  run("git", ["checkout", "--quiet", "--detach", sha], { cwd: directory, timeout: 5 * MINUTE });
-  verifyCheckout(sha, directory);
+  await run("git", ["clone", "--quiet", "--no-checkout", REPOSITORY_URL, directory], { timeout: 10 * MINUTE });
+  await run("git", ["checkout", "--quiet", "--detach", sha], { cwd: directory, timeout: 5 * MINUTE });
+  await verifyCheckout(sha, directory);
 }
 
-function verifyCheckout(sha, directory) {
-  const head = run("git", ["rev-parse", "HEAD"], { cwd: directory, timeout: MINUTE }).stdout.trim();
-  const status = run("git", ["status", "--porcelain", "--untracked-files=normal"], {
-    cwd: directory,
-    timeout: MINUTE,
-  }).stdout.trim();
+async function verifyCheckout(sha, directory) {
+  const git = async (args) => (await run("git", args, { cwd: directory, timeout: MINUTE })).stdout.trim();
+  const head = await git(["rev-parse", "HEAD"]);
+  const status = await git(["status", "--porcelain", "--untracked-files=normal"]);
   if (head !== sha || status) fail("The release checkout must be clean and at the exact source commit.");
-  const ignores = run("git", ["ls-files", "--cached", "--others", "--", "*.easignore", ".easignore"], {
-    cwd: directory,
-    timeout: MINUTE,
-  }).stdout.trim();
-  if (ignores) fail("The release checkout must not contain an .easignore file.");
+  if (await git(["ls-files", "--cached", "--others", "--", "*.easignore", ".easignore"]))
+    fail("The release checkout must not contain an .easignore file.");
 }
 
 async function journal(path, record) {
@@ -598,25 +777,62 @@ export function checkPriorAttempts(records, sha) {
     );
 }
 
+/**
+ * Claims a commit's build for this run. The claim is a file created only if
+ * it does not exist, so of two runs that pass the journal check together,
+ * one gets it. It stays once the build is requested, so every later run
+ * refuses; `release` removes it only when the request never went out.
+ */
+export async function claimBuild(path, record) {
+  let handle;
+  try {
+    handle = await open(path, "wx", 0o600);
+  } catch (error) {
+    if (error.code === "EEXIST")
+      fail(
+        `A run already claimed this commit's build (${path}). Check its EAS build and releases.jsonl before releasing it again.`,
+      );
+    throw error;
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify(record)}\n`);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  return { release: () => rm(path, { force: true }) };
+}
+
 /** The OAuth settings the production EAS environment gives the build. */
-const productionOAuth = (project) =>
+const productionOAuth = async (project) =>
   checkOAuthSettings(
     parseEnvList(
-      project.eas(["env:list", "--environment", "production", "--format", "short"], project.options(2 * MINUTE)).stdout,
+      (await project.eas(["env:list", "--environment", "production", "--format", "short"], project.options(2 * MINUTE)))
+        .stdout,
     ),
   );
 
 /**
- * Admission: the commit's qualification, and production's acceptance of the
- * OAuth issuer and client the build uses, which must stay the same.
+ * Admission: the commit's qualification, and acceptance of the build's OAuth
+ * issuer and client by Fitness production and by the issuer, which must stay
+ * the same through the release.
  */
 async function admit(sha, project, expected) {
   const quality = await requireReleaseChecks(sha, githubApi);
-  const oauth = productionOAuth(project);
+  const oauth = await productionOAuth(project);
   if (expected && (oauth.issuer !== expected.issuer || oauth.clientId !== expected.clientId))
     fail("The production EAS environment's OAuth settings changed during the release.");
   checkProtectedResource(await getJsonOk(`${FITNESS_ORIGIN}/.well-known/oauth-protected-resource`), oauth.issuer);
   await readiness(oauth.clientId);
+  const metadata = await getJsonOk(`${oauth.issuer}/.well-known/oauth-authorization-server`);
+  checkAuthorizationServer(metadata, oauth.issuer);
+  await checkClientAtIssuer({
+    authorizationEndpoint: metadata.authorization_endpoint,
+    issuer: oauth.issuer,
+    clientId: oauth.clientId,
+    redirectUri: `${bundleIds.production}://oauth`,
+    resource: `${FITNESS_ORIGIN}/api/mcp`,
+  });
   return { quality, oauth };
 }
 
@@ -632,7 +848,12 @@ async function build({ sha, config }) {
   secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
   const env = easEnvironment(process.env, config, expoToken);
   const journalPath = join(workDir, "releases.jsonl");
+  const claimPath = join(workDir, sha, "build.claim");
   checkPriorAttempts(await journalRecords(journalPath), sha);
+  if (existsSync(claimPath))
+    fail(
+      `A run already claimed this commit's build (${claimPath}). Check its EAS build and releases.jsonl before releasing it again.`,
+    );
 
   const quality = await requireReleaseChecks(sha, githubApi);
   // Each attempt has its own directory, so a stopped attempt's files stay.
@@ -640,26 +861,34 @@ async function build({ sha, config }) {
   await mkdir(release, { recursive: true, mode: 0o700 });
   await journal(journalPath, { sha, status: "attempt-started", directory: release });
   const checkout = join(release, "source");
-  pristineCheckout(sha, checkout);
+  await pristineCheckout(sha, checkout);
   const appDir = join(checkout, APP_DIRECTORY);
   const easJson = JSON.parse(await readFile(join(appDir, "eas.json"), "utf8"));
-  const eas = easCli(workDir, checkEasJson(easJson));
+  const eas = await easCli(workDir, checkEasJson(easJson));
   const projectId = projectIdFrom(await readFile(join(appDir, "app.config.ts"), "utf8"));
-  run("bun", ["install", "--frozen-lockfile"], { cwd: checkout, timeout: 20 * MINUTE });
-  verifyCheckout(sha, checkout);
+  await run("bun", ["install", "--frozen-lockfile"], { cwd: checkout, timeout: 20 * MINUTE });
+  await verifyCheckout(sha, checkout);
 
   const project = { eas, options: (timeout) => ({ cwd: appDir, env, timeout }) };
   const { oauth } = await admit(sha, project);
-  checkAuthorizationServer(await getJsonOk(`${oauth.issuer}/.well-known/oauth-authorization-server`), oauth.issuer);
 
   // Admission again, immediately before the first change: the EAS build.
   const admitted = await admit(sha, project, oauth);
   if (admitted.quality.qualityRunId !== quality.qualityRunId) fail("Quality qualification changed during the release.");
-  await journal(journalPath, { sha, status: "build-requested", quality });
+  checkEasJson(JSON.parse(await readFile(join(appDir, "eas.json"), "utf8")));
+  const claim = await claimBuild(claimPath, { sha, attempt: release, at: new Date().toISOString() });
+  try {
+    await journal(journalPath, { sha, status: "build-requested", quality });
+  } catch (error) {
+    await claim.release();
+    throw error;
+  }
   const builds = JSON.parse(
-    eas(
-      ["build", "--profile", "production", "--platform", "ios", "--non-interactive", "--json", "--wait"],
-      project.options(150 * MINUTE),
+    (
+      await eas(
+        ["build", "--profile", "production", "--platform", "ios", "--non-interactive", "--json", "--wait"],
+        project.options(150 * MINUTE),
+      )
     ).stdout,
   );
   const finished = checkBuild(builds, { sha, projectId });
@@ -674,11 +903,11 @@ async function build({ sha, config }) {
   if (final.quality.qualityRunId !== quality.qualityRunId) fail("Quality qualification changed during the release.");
   await privacyPage();
   await journal(journalPath, { sha, status: "submit-requested", buildId: finished.id });
-  await eas.stream(
+  await eas.show(
     ["submit", "--profile", "production", "--platform", "ios", "--id", finished.id, "--non-interactive", "--wait"],
     project.options(60 * MINUTE),
   );
-  const record = {
+  const receipt = {
     sha,
     status: "submitted",
     buildId: finished.id,
@@ -690,17 +919,21 @@ async function build({ sha, config }) {
     oauthClientId: oauth.clientId,
     quality,
   };
-  await journal(journalPath, record);
-  return record;
+  // The full receipt stays in the private journal.
+  await journal(journalPath, receipt);
+  return receipt;
 }
+
+/** What the release prints when it finishes; the rest is in the journal. */
+export const summary = ({ status, buildId, version, buildNumber }) => ({ status, buildId, version, buildNumber });
 
 async function credentials({ config }) {
   const expoToken = await privateText(config.expoTokenPath);
   secrets.push(...secretsFrom(expoToken, await privateText(config.ascKeyPath)));
   const env = easEnvironment(process.env, config, expoToken);
   const version = checkEasJson(JSON.parse(await readFile(join(app, "eas.json"), "utf8")));
-  const eas = easCli(await privateDirectory(config.workDir), version);
-  await eas.stream(["credentials", "--platform", "ios"], { cwd: app, env, timeout: 30 * MINUTE, interactive: true });
+  const eas = await easCli(await privateDirectory(config.workDir), version);
+  await eas.show(["credentials", "--platform", "ios"], { cwd: app, env, timeout: 30 * MINUTE, interactive: true });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -708,6 +941,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (unsafe.length) fail(`Unset ${unsafe.join(", ")} first: debug output can include the Expo token.`);
   const { action, sha, configPath } = parseArgs(process.argv.slice(2));
   const config = validateConfig(await protectedJson(configPath));
+  stopChildrenOnInterrupt();
   if (action === "credentials") await credentials({ config });
-  else console.log(JSON.stringify(await build({ sha, config })));
+  else console.log(JSON.stringify(summary(await build({ sha, config }))));
 }

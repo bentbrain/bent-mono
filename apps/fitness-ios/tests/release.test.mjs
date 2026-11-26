@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
   checkAuthorizationServer,
   checkBuild,
+  checkClientAtIssuer,
+  claimBuild,
   checkEasJson,
   checkEmbeddedConfig,
   checkOAuthSettings,
@@ -15,6 +19,9 @@ import {
   checkXcodeLog,
   childEnvironment,
   easEnvironment,
+  effectiveIosProfile,
+  execute,
+  failureDetail,
   parseArgs,
   parseEnvList,
   projectIdFrom,
@@ -22,7 +29,7 @@ import {
   redactingWriter,
   resolveProfile,
   secretsFrom,
-  stream,
+  summary,
   unsafeDebugVariables,
   validateConfig,
 } from "../scripts/release-ios.mjs";
@@ -106,44 +113,97 @@ describe("release arguments and configuration", () => {
     expect(childEnvironment(shell)).toEqual({ PATH: "/bin", HOME: "/home/example", NO_COLOR: "1" });
   });
 
-  test("streamed child output is redacted, and a child past its limit is stopped", async () => {
+  const sink = () => {
+    const parts = [];
+    return { parts, write: (text) => parts.push(text) };
+  };
+  const quiet = { env: childEnvironment(process.env), hidden: [], output: sink(), errors: sink() };
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** Whether `pid` has exited within two seconds; a killed process can take a moment to go. */
+  const exits = async (pid) => {
+    for (let wait = 0; wait < 40 && alive(pid); wait++) await new Promise((wake) => setTimeout(wake, 50));
+    return !alive(pid);
+  };
+
+  test("shown child output is redacted as it arrives", async () => {
     const token = "expo_token_0123456789";
-    const sink = () => {
-      const parts = [];
-      return { parts, write: (text) => parts.push(text) };
-    };
     const output = sink();
     const errors = sink();
-    await stream(
+    await execute(
       process.execPath,
       [
         "-e",
         `process.stdout.write("token ${token.slice(0, 6)}"); setTimeout(() => { process.stdout.write("${token.slice(6)}!"); console.error("${token}"); }, 20);`,
       ],
-      { env: childEnvironment(process.env), timeout: 30_000, hidden: [token], output, errors },
+      { env: childEnvironment(process.env), timeout: 30_000, show: true, hidden: [token], output, errors },
     );
     expect(output.parts.join("")).toBe("token [redacted]!");
     expect(errors.parts.join("")).toBe("[redacted]\n");
+    await expect(execute(process.execPath, ["-e", "process.exit(3)"], { ...quiet, timeout: 30_000 })).rejects.toThrow(
+      "exit code 3",
+    );
+    expect(
+      (await execute(process.execPath, ["-e", "process.stdout.write('ok')"], { ...quiet, timeout: 30_000 })).stdout,
+    ).toBe("ok");
+  });
+
+  test("failure output is redacted before it is cut, so no part of a secret shows", async () => {
+    const token = "expo_token_0123456789";
+    // The token straddles the 4000-character cut.
+    const text = `${token}${"x".repeat(3995)}`;
+    expect(failureDetail(text, [token])).not.toContain("0123456789".slice(-5));
+    expect(failureDetail(text, [token])).toBe(`[redacted]${"x".repeat(3995)}`.slice(-4000));
+    const shown = `${"y".repeat(3990)}${token}`;
+    const script = `process.stderr.write(${JSON.stringify(shown)}); process.exit(1)`;
+    const failure = await execute(process.execPath, ["-e", script], {
+      ...quiet,
+      hidden: [token],
+      timeout: 30_000,
+    }).catch((error) => error);
+    expect(failure.message).toContain("[redacted]");
+    expect(failure.message).not.toMatch(/_token|56789/);
+  });
+
+  for (const interactive of [false, true])
+    test(`a command past its limit is stopped with its descendants${interactive ? ", interactive" : ""}`, async () => {
+      // The child starts a grandchild that inherits the pipes, then both wait.
+      const script =
+        "const { spawn } = require('node:child_process');" +
+        "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
+        "console.log(grandchild.pid); setTimeout(() => {}, 60000);";
+      const output = sink();
+      const started = Date.now();
+      const failure = await execute(process.execPath, ["-e", script], {
+        ...quiet,
+        timeout: 400,
+        grace: 200,
+        interactive,
+        show: true,
+        output,
+      }).catch((error) => error);
+      expect(failure.message).toContain("limit");
+      expect(Date.now() - started).toBeLessThan(5_000);
+      const grandchild = Number(output.parts.join("").trim());
+      expect(grandchild).toBeGreaterThan(0);
+      expect(await exits(grandchild)).toBe(true);
+    });
+
+  test("a descendant left holding the pipes does not hold a finished command", async () => {
+    const script =
+      "const { spawn } = require('node:child_process');" +
+      "const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' });" +
+      "console.log(grandchild.pid); grandchild.unref(); process.exit(0);";
     const started = Date.now();
-    await expect(
-      stream(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {
-        env: childEnvironment(process.env),
-        timeout: 300,
-        hidden: [],
-        output: sink(),
-        errors: sink(),
-      }),
-    ).rejects.toThrow("limit");
-    expect(Date.now() - started).toBeLessThan(10_000);
-    await expect(
-      stream(process.execPath, ["-e", "process.exit(3)"], {
-        env: childEnvironment(process.env),
-        timeout: 30_000,
-        hidden: [],
-        output: sink(),
-        errors: sink(),
-      }),
-    ).rejects.toThrow("exit code 3");
+    const { stdout } = await execute(process.execPath, ["-e", script], { ...quiet, timeout: 30_000, grace: 200 });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(await exits(Number(stdout.trim()))).toBe(true);
   });
 
   test("debug settings that can print the Expo token stop the release", () => {
@@ -187,16 +247,46 @@ describe("committed release settings", () => {
     const other = structuredClone(easJson);
     other.build.base.ios.image = "latest";
     expect(() => checkEasJson(other)).toThrow("macos-tahoe-26.5-xcode-26.6");
-    // An override on the production profile itself counts too.
-    const override = structuredClone(easJson);
-    override.build.production.ios = { image: "latest" };
-    expect(() => checkEasJson(override)).toThrow("macos-tahoe-26.5-xcode-26.6");
-    const development = structuredClone(easJson);
-    development.build.production.env.APP_VARIANT = "development";
-    expect(() => checkEasJson(development)).toThrow("production variant");
   });
 
-  test("build profiles resolve through extends as EAS merges them", () => {
+  test("the effective iOS build, with the production profile's ios settings applied, must be the store build", () => {
+    const withIos = (ios, common = {}) => {
+      const changed = structuredClone(easJson);
+      changed.build.production = {
+        ...changed.build.production,
+        ...common,
+        ios: { ...changed.build.production.ios, ...ios },
+      };
+      return changed;
+    };
+    expect(() => checkEasJson(withIos({}))).not.toThrow();
+    expect(() => checkEasJson(withIos({ image: "latest" }))).toThrow("macos-tahoe-26.5-xcode-26.6");
+    for (const ios of [
+      { environment: "development" },
+      { distribution: "internal" },
+      { env: { APP_VARIANT: "development" } },
+      { simulator: true },
+      { developmentClient: true },
+      { buildConfiguration: "Debug" },
+      { autoIncrement: false },
+      { credentialsSource: "local" },
+      { withoutCredentials: true },
+      { enterpriseProvisioning: "adhoc" },
+      { scheme: "Other" },
+      { prebuildCommand: "echo" },
+      { config: "custom.yml" },
+    ])
+      expect(() => checkEasJson(withIos(ios))).toThrow("Release store build");
+    expect(() => checkEasJson(withIos({}, { autoIncrement: undefined }))).toThrow("Release store build");
+    expect(() => checkEasJson(withIos({ buildConfiguration: "Release" }))).not.toThrow();
+    // ios env merges with the common env, as in EAS.
+    expect(effectiveIosProfile(withIos({ env: { EXTRA: "1" } }).build, "production").env).toEqual({
+      APP_VARIANT: "production",
+      EXTRA: "1",
+    });
+  });
+
+  test("build profiles resolve through extends as eas-json merges them", () => {
     const profiles = {
       root: { node: "24", ios: { image: "a", resourceClass: "m" }, env: { A: "1" } },
       base: { extends: "root", ios: { image: "b" }, env: { B: "2" } },
@@ -209,7 +299,15 @@ describe("committed release settings", () => {
       ios: { image: "b", resourceClass: "m" },
       env: { A: "3", B: "2" },
     });
-    expect(() => resolveProfile(profiles, "loop")).toThrow('"loop"');
+    expect(effectiveIosProfile(profiles, "production")).toEqual({
+      node: "24",
+      distribution: "store",
+      credentialsSource: "remote",
+      image: "b",
+      resourceClass: "m",
+      env: { A: "3", B: "2" },
+    });
+    expect(() => resolveProfile(profiles, "loop")).toThrow("cycle");
     expect(() => resolveProfile(profiles, "missing")).toThrow('"missing"');
   });
 
@@ -272,6 +370,108 @@ describe("release admission", () => {
     expect(() => checkPriorAttempts(records, sha)).not.toThrow();
     for (const status of ["build-requested", "built", "submit-requested", "submitted"])
       expect(() => checkPriorAttempts([...records, { sha, status }], sha)).toThrow(status);
+  });
+
+  test("of two runs claiming a commit's build at once, one gets it, and the claim stays", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "release-claim-"));
+    try {
+      const path = join(directory, "build.claim");
+      const results = await Promise.allSettled([claimBuild(path, { run: 1 }), claimBuild(path, { run: 2 })]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const refused = results.find((result) => result.status === "rejected");
+      expect(refused.reason.message).toContain("already claimed");
+      expect(JSON.parse(readFileSync(path, "utf8")).run).toBeGreaterThan(0);
+      await expect(claimBuild(path, { run: 3 })).rejects.toThrow("already claimed");
+      // A run that stops before the build request releases its claim.
+      await results.find((result) => result.status === "fulfilled").value.release();
+      const again = await claimBuild(path, { run: 4 });
+      expect(JSON.parse(readFileSync(path, "utf8")).run).toBe(4);
+      await again.release();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("Clerk must know the client with its redirect URI and scope", async () => {
+    const issuer = "https://clerk.example.com";
+    const accounts = "https://accounts.example.com";
+    const redirectUri = "build.bent.fitness://oauth";
+    const request = {
+      authorizationEndpoint: `${issuer}/oauth/authorize`,
+      issuer,
+      clientId: "client123",
+      redirectUri,
+      resource: "https://fitness.bent.build/api/mcp",
+    };
+    // Clerk's replies, as its development instance gives them.
+    const clerk = (second) => {
+      const seen = [];
+      const fetchImpl = async (url, init) => {
+        seen.push({ url: new URL(url), redirect: init.redirect });
+        const path = new URL(url).pathname;
+        if (path === "/oauth/authorize") {
+          const back = `${issuer}/oauth/authorize-with-immediate-redirect?${new URL(url).searchParams}`;
+          return new Response(null, {
+            status: 302,
+            headers: { location: `${accounts}/sign-in?redirect_url=${encodeURIComponent(back)}` },
+          });
+        }
+        return second();
+      };
+      return { seen, fetchImpl };
+    };
+    const known = clerk(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: {
+            location: `${accounts}/sign-in?redirect_url=${encodeURIComponent(`${accounts}/oauth-consent?client_id=client123`)}`,
+          },
+        }),
+    );
+    await checkClientAtIssuer(request, known.fetchImpl);
+    expect(known.seen).toHaveLength(2);
+    expect(known.seen.every((call) => call.redirect === "manual")).toBe(true);
+    const first = known.seen[0].url.searchParams;
+    expect(Object.fromEntries([...first].filter(([key]) => !["state", "code_challenge"].includes(key)))).toEqual({
+      response_type: "code",
+      client_id: "client123",
+      redirect_uri: redirectUri,
+      scope: "fitness:health:enroll openid",
+      resource: "https://fitness.bent.build/api/mcp",
+      code_challenge_method: "S256",
+    });
+    expect(first.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.get("state")).toMatch(/^[A-Za-z0-9_-]{22}$/);
+
+    const unknown = clerk(() => Response.json({ error: "invalid_client" }, { status: 401 }));
+    await expect(checkClientAtIssuer(request, unknown.fetchImpl)).rejects.toThrow("HTTP 401, invalid_client");
+    const wrongRedirect = clerk(() => Response.json({ error: "invalid_request" }, { status: 400 }));
+    await expect(checkClientAtIssuer(request, wrongRedirect.fetchImpl)).rejects.toThrow("invalid_request");
+    const scope = clerk(
+      () => new Response(null, { status: 303, headers: { location: `${redirectUri}/?error=invalid_scope` } }),
+    );
+    await expect(checkClientAtIssuer(request, scope.fetchImpl)).rejects.toThrow("invalid_scope");
+    await expect(
+      checkClientAtIssuer(
+        { ...request, authorizationEndpoint: "https://other.example.com/authorize" },
+        known.fetchImpl,
+      ),
+    ).rejects.toThrow("another origin");
+  });
+
+  test("the release prints only its status, build, version and build number", () => {
+    expect(
+      summary({
+        sha,
+        status: "submitted",
+        buildId: build.id,
+        version: "1.0.0",
+        buildNumber: "7",
+        oauthClientId: "c",
+        quality: {},
+      }),
+    ).toEqual({ status: "submitted", buildId: build.id, version: "1.0.0", buildNumber: "7" });
   });
 
   test("the production EAS environment carries the OAuth issuer and client", () => {
