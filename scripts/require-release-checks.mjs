@@ -10,11 +10,11 @@ const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", 
   "public-source", "secret-scan", "dependencies", "CodeQL", "Release qualification"];
 class QualificationError extends Error {}
 const fail = message => { throw new QualificationError(message); };
-// A request's endpoint with its commit SHAs and numeric IDs left out, so a message never quotes GitHub's data.
-const endpointName = path => path.split("?")[0].replace(/[a-f0-9]{40}/g, ":sha").replace(/\/\d+(?=\/|$)/g, "/:id");
-const parseReply = (text, path) => {
-  try { return JSON.parse(text); } catch { return fail(`GitHub returned an unreadable response for ${endpointName(path)}.`); }
+// Each request has a fixed label; messages name only the label, never a path built from GitHub's data.
+const parseReply = (text, label) => {
+  try { return JSON.parse(text); } catch { return fail(`GitHub returned an unreadable response for ${label}.`); }
 };
+const isId = value => Number.isSafeInteger(value) && value > 0;
 
 export function validateReleaseEvent(env, event, sha) {
   if (!SHA.test(sha)) fail("Release source must be a full commit SHA.");
@@ -34,10 +34,10 @@ export function validateReleaseEvent(env, event, sha) {
   }
 }
 
-async function pages(api, path, field) {
+async function pages(api, path, field, label) {
   const items = [];
   for (let page = 1; page <= 100; page++) {
-    const result = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
+    const result = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`, label);
     const batch = field ? result[field] : result;
     if (!Array.isArray(batch)) fail("Malformed release qualification API response.");
     items.push(...batch);
@@ -51,18 +51,21 @@ export async function requireQualityChecks({ sha, branch, event }, api) {
     fail("Quality admission requires an exact source, branch and supported event.");
   }
   const prefix = `/repos/${REPOSITORY}`;
-  const workflow = await api(`${prefix}/actions/workflows/quality.yml`);
+  const workflow = await api(`${prefix}/actions/workflows/quality.yml`, "the Quality workflow");
   if (workflow.path !== WORKFLOW || workflow.state !== "active") fail("Canonical Quality workflow is unavailable.");
-  const runs = await pages(api, `${prefix}/actions/workflows/${workflow.id}/runs?branch=${encodeURIComponent(branch)}&event=${event}&head_sha=${sha}`, "workflow_runs");
+  if (!isId(workflow.id)) fail("GitHub returned a malformed Quality workflow ID.");
+  const runs = await pages(api, `${prefix}/actions/workflows/${workflow.id}/runs?branch=${encodeURIComponent(branch)}&event=${event}&head_sha=${sha}`,
+    "workflow_runs", "the Quality runs");
   const candidates = runs.filter(run => run.head_sha === sha && run.head_branch === branch &&
     run.event === event && run.path === WORKFLOW && run.workflow_id === workflow.id &&
     run.repository?.full_name === REPOSITORY && run.head_repository?.full_name === REPOSITORY);
+  if (candidates.some(run => !isId(run.id))) fail("GitHub returned a malformed Quality run ID.");
   candidates.sort((a, b) => b.id - a.id);
   const run = candidates[0];
   if (!run || run.status !== "completed" || run.conclusion !== "success" || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
     fail("The latest canonical Quality run has not passed.");
   }
-  const jobs = await pages(api, `${prefix}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs");
+  const jobs = await pages(api, `${prefix}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs", "the Quality run's jobs");
   for (const name of JOBS) {
     const matches = jobs.filter(job => job.name === name);
     if (matches.length !== 1 || matches[0].head_sha !== sha || matches[0].status !== "completed" || matches[0].conclusion !== "success") {
@@ -74,12 +77,12 @@ export async function requireQualityChecks({ sha, branch, event }, api) {
 
 export async function requireReviewedHead({ sha, pullRequest }, api) {
   const prefix = `/repos/${REPOSITORY}`;
-  const checks = await pages(api, `${prefix}/commits/${sha}/check-runs?filter=latest`, "check_runs");
+  const checks = await pages(api, `${prefix}/commits/${sha}/check-runs?filter=latest`, "check_runs", "the check runs");
   const security = checks.filter(check => check.name === "CodeQL" && check.app?.slug === "github-advanced-security");
   if (security.length !== 1 || security[0].head_sha !== sha || security[0].status !== "completed" || security[0].conclusion !== "success") {
     fail("Native CodeQL security analysis has not passed for the reviewed PR head.");
   }
-  const statuses = await pages(api, `${prefix}/commits/${sha}/statuses`);
+  const statuses = await pages(api, `${prefix}/commits/${sha}/statuses`, undefined, "the commit statuses");
   const review = statuses.find(status => status.context === "Independent review");
   if (!review || review.state !== "success" || !review.target_url?.startsWith(`https://github.com/${REPOSITORY}/pull/${pullRequest}#`)) {
     fail("The pull request lacks its exact-head independent review evidence.");
@@ -89,10 +92,10 @@ export async function requireReviewedHead({ sha, pullRequest }, api) {
 export async function requireReleaseChecks(sha, api) {
   if (!SHA.test(sha)) fail("Release source must be a full commit SHA.");
   const prefix = `/repos/${REPOSITORY}`;
-  const main = await api(`${prefix}/git/ref/heads/main`);
+  const main = await api(`${prefix}/git/ref/heads/main`, "the main branch");
   if (main.object?.sha !== sha) fail("Release source is no longer current main.");
   const run = await requireQualityChecks({ sha, branch: "main", event: "push" }, api);
-  const pulls = await pages(api, `${prefix}/commits/${sha}/pulls`);
+  const pulls = await pages(api, `${prefix}/commits/${sha}/pulls`, undefined, "the pull requests");
   const merged = pulls.filter(pr => pr.merged_at && pr.merge_commit_sha === sha && pr.base?.ref === "main" &&
     pr.base.repo?.full_name === REPOSITORY && pr.head?.repo?.full_name === REPOSITORY && SHA.test(pr.head.sha));
   if (merged.length !== 1) fail("Release source must be a reviewed pull request merged into canonical main.");
@@ -101,24 +104,32 @@ export async function requireReleaseChecks(sha, api) {
   // the merged PR must also have passed the native security check.
   await requireReviewedHead({ sha: merged[0].head.sha, pullRequest: merged[0].number }, api);
   // A new merge or rerun during qualification must not release stale source.
-  const finalMain = await api(`${prefix}/git/ref/heads/main`);
-  const finalRun = await api(`${prefix}/actions/runs/${run.id}`);
+  const finalMain = await api(`${prefix}/git/ref/heads/main`, "the main branch");
+  const finalRun = await api(`${prefix}/actions/runs/${run.id}`, "the Quality run");
   if (finalMain.object?.sha !== sha || finalRun.run_attempt !== run.run_attempt ||
       finalRun.status !== "completed" || finalRun.conclusion !== "success") fail("Release qualification changed during inspection.");
   return { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
 }
 
-export async function githubApi(path) {
+export async function githubApi(path, label = "a GitHub endpoint") {
   if (!process.env.GH_TOKEN) {
     if (process.env.GITHUB_ACTIONS === "true") fail("GH_TOKEN is required for CI release qualification.");
-    return parseReply(execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }), path);
+    let text;
+    try {
+      // The CLI's own diagnostics are captured and discarded, since they can quote GitHub's reply.
+      text = execFileSync("gh", ["api", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"], timeout: 60_000, killSignal: "SIGKILL" });
+    } catch (error) {
+      fail(`GitHub CLI request for ${label} failed${Number.isSafeInteger(error?.status) ? ` (exit ${error.status})` : ""}.`);
+    }
+    return parseReply(text, label);
   }
   const response = await fetch(`https://api.github.com${path}`, {
     headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
     redirect: "error", signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) fail(`Release qualification API failed with HTTP ${response.status}.`);
-  return parseReply(await response.text(), path);
+  if (!response.ok) fail(`Release qualification API failed with HTTP ${response.status} for ${label}.`);
+  return parseReply(await response.text(), label);
 }
 
 async function main() {

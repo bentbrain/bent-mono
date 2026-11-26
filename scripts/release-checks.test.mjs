@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { githubApi, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
@@ -164,20 +164,17 @@ test("validates actual main release events without accepting fabricated push or 
   assert.throws(() => validateReleaseEvent({ ...env, GITHUB_EVENT_NAME: "workflow_run" }, { workflow_run: { ...run, head_sha: head } }, sha));
   assert.throws(() => validateReleaseEvent({ GITHUB_REPOSITORY: "fork/repo" }, {}, sha));
 });
-test("an unreadable GitHub reply fails with a fixed message that quotes none of it", async () => {
-  const body = "<html>contact jane.doe@example.com {";
-  const original = { fetch: globalThis.fetch, token: process.env.GH_TOKEN };
-  globalThis.fetch = async () => new Response(body, { status: 200 });
-  process.env.GH_TOKEN = "test-token";
-  try {
-    await assert.rejects(githubApi(`/repos/${repo}/actions/runs/23/attempts/2/jobs?per_page=100`), error =>
-      error.message === "GitHub returned an unreadable response for /repos/bentbrain/bent-mono/actions/runs/:id/attempts/:id/jobs.");
-  } finally {
-    globalThis.fetch = original.fetch;
-    if (original.token === undefined) delete process.env.GH_TOKEN;
-    else process.env.GH_TOKEN = original.token;
+const email = "jane.doe@example.com";
+test("provider IDs used in request paths must be positive safe integers, and a bad one is never shown", async () => {
+  const bad = [email, "12/../../users", 12.5, 0, -1, null];
+  for (const id of bad) {
+    for (const mutate of [d => { d.workflow.id = id; d.runs[0].workflow_id = id; }, d => { d.runs[0].id = id; }]) {
+      await assert.rejects(requireReleaseChecks(sha, fixture(mutate)), error =>
+        /^GitHub returned a malformed Quality (workflow|run) ID\.$/.test(error.message) && !error.message.includes(String(id)));
+    }
   }
-  // The command prints that message alone, with no stack.
+});
+async function qualify(env, preload = []) {
   const checkout = await mkdtemp(join(tmpdir(), "release-checks-"));
   try {
     const git = args => execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", ...args],
@@ -185,13 +182,47 @@ test("an unreadable GitHub reply fails with a fixed message that quotes none of 
     git(["init", "--quiet"]);
     git(["commit", "--quiet", "--allow-empty", "-m", "test"]);
     const commit = git(["rev-parse", "HEAD"]).trim();
-    const mock = `data:text/javascript,globalThis.fetch=async()=>new Response(${encodeURIComponent(JSON.stringify(body))},{status:200})`;
-    const result = spawnSync(process.execPath, ["--import", mock, new URL("./require-release-checks.mjs", import.meta.url).pathname,
-      "--sha", commit], { cwd: checkout, encoding: "utf8", timeout: 30_000, env: { PATH: process.env.PATH, GH_TOKEN: "test-token" } });
-    assert.equal(result.status, 1);
-    assert.equal(result.stdout, "");
-    assert.equal(result.stderr, "GitHub returned an unreadable response for /repos/bentbrain/bent-mono/git/ref/heads/main.\n");
+    return spawnSync(process.execPath, [...preload, new URL("./require-release-checks.mjs", import.meta.url).pathname,
+      "--sha", commit], { cwd: checkout, encoding: "utf8", timeout: 30_000, env });
   } finally {
     await rm(checkout, { recursive: true, force: true });
+  }
+}
+test("an unreadable GitHub reply fails with a message naming only the request's label", async () => {
+  const body = `<html>contact ${email} {`;
+  const original = { fetch: globalThis.fetch, token: process.env.GH_TOKEN };
+  globalThis.fetch = async () => new Response(body, { status: 200 });
+  process.env.GH_TOKEN = "test-token";
+  try {
+    await assert.rejects(githubApi(`/repos/${repo}/actions/workflows/${email}/runs?per_page=100`, "the Quality runs"), error =>
+      error.message === "GitHub returned an unreadable response for the Quality runs.");
+  } finally {
+    globalThis.fetch = original.fetch;
+    if (original.token === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = original.token;
+  }
+  // The command prints that message alone, with no stack.
+  const mock = `data:text/javascript,globalThis.fetch=async()=>new Response(${encodeURIComponent(JSON.stringify(body))},{status:200})`;
+  const result = await qualify({ PATH: process.env.PATH, GH_TOKEN: "test-token" }, ["--import", mock]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "GitHub returned an unreadable response for the main branch.\n");
+});
+test("the local GitHub CLI fallback discards the CLI's diagnostics and shows only a fixed message", async () => {
+  const bin = await mkdtemp(join(tmpdir(), "release-checks-gh-"));
+  const secret = `${email} https://private.example.invalid/x?token=1`;
+  try {
+    for (const [script, message] of [
+      [`echo '${secret}' >&2\nexit 1`, "GitHub CLI request for the main branch failed (exit 1).\n"],
+      [`echo '{${secret}'\necho '${secret}' >&2`, "GitHub returned an unreadable response for the main branch.\n"],
+    ]) {
+      await writeFile(join(bin, "gh"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+      const result = await qualify({ PATH: `${bin}:${process.env.PATH}` });
+      assert.equal(result.status, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, message);
+    }
+  } finally {
+    await rm(bin, { recursive: true, force: true });
   }
 });
