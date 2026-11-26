@@ -380,6 +380,17 @@ public actor DeviceLifecycle {
     return latest.pending.count
   }
 
+  /// Clears the count of keys Fitness would not revoke, once the user has
+  /// seen the notice to revoke them under Manage account → API keys. The
+  /// count outlives a disconnect, so the signed-out screen shows it too.
+  public func dismissManualRevocations() throws {
+    var document = try credentials.load()
+    guard document.manualRevocations > 0 else { return }
+    document.manualRevocations = 0
+    try credentials.save(document)
+    generation += 1
+  }
+
   /// Resync from the earliest cutoff: a fresh backfill with a new snapshot.
   public func resyncFromEarliest() throws {
     guard let storage = storage(), let state = try storage.load() else { return }

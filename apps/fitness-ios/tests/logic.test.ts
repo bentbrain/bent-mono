@@ -3,7 +3,7 @@ import type { EnrollOutcome, SyncStatus } from "../modules/fitness-health";
 import { SignInCancelled, connect } from "../src/logic/connect";
 import { copy, countLines, enrollMessage, fitnessHost, guidance } from "../src/logic/copy";
 import { cutoffFor } from "../src/logic/cutoff";
-import { screenFor } from "../src/logic/screens";
+import { manualRevocationNotice, screenFor } from "../src/logic/screens";
 
 const base: SyncStatus = {
   state: "signedOut",
@@ -28,6 +28,23 @@ describe("screens", () => {
     // The wait is stored natively, so a relaunch returns to the step.
     expect(screenFor({ ...active, backfillStarted: true })).toBe("health");
     expect(screenFor({ ...active, awaitingHealthStep: false })).toBe("status");
+  });
+});
+
+describe("manual revocations", () => {
+  test("keys Fitness would not revoke stay on the notice after a disconnect, until dismissed", () => {
+    expect(manualRevocationNotice(null)).toBeNull();
+    expect(manualRevocationNotice(base)).toBeNull();
+    expect(manualRevocationNotice({ ...base, manualRevocations: 0 })).toBeNull();
+    // Signed out after a disconnect: the sign-in screen shows it.
+    expect(screenFor({ ...base, manualRevocations: 1 })).toBe("signIn");
+    expect(manualRevocationNotice({ ...base, manualRevocations: 1 })).toBe(
+      "1 earlier key could not be revoked from this iPhone. Revoke it under Manage account → API keys in Fitness.",
+    );
+    expect(manualRevocationNotice({ ...base, state: "invalid", manualRevocations: 2 })).toContain("2 earlier keys");
+    expect(manualRevocationNotice({ ...base, state: "active", manualRevocations: 2 })).toContain("2 earlier keys");
+    // Before the first unlock the count is unknown.
+    expect(manualRevocationNotice({ ...base, state: "locked", manualRevocations: 2 })).toBeNull();
   });
 });
 

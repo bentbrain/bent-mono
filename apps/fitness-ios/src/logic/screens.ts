@@ -1,4 +1,5 @@
 import type { SyncStatus } from "../../modules/fitness-health";
+import { copy } from "./copy";
 
 export type Screen = "loading" | "locked" | "signIn" | "consent" | "health" | "status" | "reconnect";
 
@@ -21,4 +22,15 @@ export function screenFor(status: SyncStatus | null): Screen {
     case "active":
       return status.awaitingHealthStep ? "health" : "status";
   }
+}
+
+/**
+ * The notice for keys Fitness would not revoke from the iPhone, on the
+ * sign-in, reconnect and status screens. A
+ * disconnect clears the key but keeps the count, so the notice stays until
+ * the user dismisses it.
+ */
+export function manualRevocationNotice(status: SyncStatus | null): string | null {
+  if (!status || status.state === "locked" || !status.manualRevocations) return null;
+  return copy.status.manualRevocations(status.manualRevocations);
 }

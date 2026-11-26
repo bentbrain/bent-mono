@@ -488,6 +488,16 @@ final class ReviewRegressionTests: XCTestCase {
     let left = await device.revokePending()
     XCTAssertEqual(left, 0)
     XCTAssertEqual(try credentials.load().manualRevocations, 1)
+    // The count outlives the disconnect, so the signed-out screen can show it.
+    XCTAssertNil(try credentials.load().active)
+    XCTAssertFalse(try credentials.load().keyInvalid)
+    // Signing in again keeps it; only dismissing the notice clears it.
+    _ = try await device.enroll(token: "b", revokeLater: false)
+    XCTAssertEqual(try credentials.load().manualRevocations, 1)
+    try await device.dismissManualRevocations()
+    XCTAssertEqual(try credentials.load().manualRevocations, 0)
+    try await device.dismissManualRevocations()
+    XCTAssertEqual(try credentials.load().manualRevocations, 0)
   }
 }
 

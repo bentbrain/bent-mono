@@ -36,7 +36,10 @@ export type SyncStatus = {
   distanceWaitingRuns?: string[];
   /** After `sendRunsWithoutDistance`: whether the runs shown were approved, or had changed. */
   approval?: "approved" | "changed";
-  /** Keys Fitness would not revoke from the iPhone; revoke them in Fitness. */
+  /**
+   * Keys Fitness would not revoke from the iPhone; revoke them in Fitness.
+   * Reported in every state but `locked`, until dismissed.
+   */
   manualRevocations?: number;
 };
 
@@ -75,6 +78,8 @@ type FitnessHealthNative = {
   syncNow(): Promise<SyncStatus>;
   disconnect(): Promise<number>;
   retryRevocations(): Promise<number>;
+  /** Clears the count of keys to revoke in Fitness, once the user has seen the notice. */
+  dismissManualRevocations(): Promise<void>;
   setCutoff(cutoffMs: number): Promise<void>;
   resyncFromEarliest(): Promise<void>;
   addListener(event: "onStatus", listener: (status: SyncStatus) => void): EventSubscription;

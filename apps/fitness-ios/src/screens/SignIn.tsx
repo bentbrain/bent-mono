@@ -1,17 +1,21 @@
 import { useState } from "react";
+import type { SyncStatus } from "../../modules/fitness-health";
 import { FitnessHealth } from "../../modules/fitness-health";
 import { authorize, oauthSettings } from "../auth";
 import { connect } from "../logic/connect";
 import { copy, enrollMessage } from "../logic/copy";
 import { Body, Button, Notice, Page } from "../ui/parts";
+import { ManualRevocations } from "./ManualRevocations";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function SignIn({
+  status,
   onChange,
   title = copy.signIn.title,
   body = copy.signIn.body,
 }: {
+  status: SyncStatus;
   onChange: () => void;
   title?: string;
   body?: string;
@@ -49,6 +53,7 @@ export function SignIn({
       <Body>{body}</Body>
       {settings ? null : <Notice testID="sign-in-unconfigured">{copy.signIn.unconfigured}</Notice>}
       {message ? <Notice testID="sign-in-message">{message}</Notice> : null}
+      <ManualRevocations status={status} onChange={onChange} />
       <Button
         label={copy.signIn.button}
         onPress={() => start(false)}

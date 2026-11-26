@@ -62,6 +62,7 @@ export const copy = {
     sendWithoutDistance: (count: number) => `Send ${count} ${count === 1 ? "run" : "runs"} without distance`,
     manualRevocations: (count: number) =>
       `${count} earlier ${count === 1 ? "key" : "keys"} could not be revoked from this iPhone. Revoke ${count === 1 ? "it" : "them"} under Manage account → API keys in Fitness.`,
+    dismissManualRevocations: "Dismiss",
   },
   settings: {
     title: "Settings",
