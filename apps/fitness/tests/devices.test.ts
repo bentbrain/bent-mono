@@ -480,7 +480,7 @@ describe("Device enrollment readiness for a client", () => {
     }
   });
 
-  test("refuses a malformed or repeated client", async () => {
+  test("refuses a malformed or repeated client once enrollment is ready", async () => {
     for (const query of [
       "?clientId=",
       "?clientId=a%20b",
@@ -490,6 +490,12 @@ describe("Device enrollment readiness for a client", () => {
       const response = await ready(query);
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ code: "invalid_request" });
+      // Unavailable enrollment answers first, whatever the query.
+      const unavailable = await ready(query, false);
+      expect(unavailable.status).toBe(503);
+      expect(await unavailable.json()).toMatchObject({
+        code: "enrollment_unavailable",
+      });
     }
   });
 

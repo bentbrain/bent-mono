@@ -285,6 +285,7 @@ export async function handleDeviceReady(
 ) {
   const wait = takeAttempt();
   if (wait > 0) return rateLimited(wait);
+  if (!(await ready())) return unavailable();
   const query = request ? new URL(request.url).searchParams : null;
   const clientId = query?.get("clientId") ?? null;
   if (
@@ -297,7 +298,6 @@ export async function handleDeviceReady(
       "invalid_request",
       "Send at most one clientId, of up to 128 letters, digits, hyphens or underscores.",
     );
-  if (!(await ready())) return unavailable();
   if (clientId !== null && !deviceClientIds().has(clientId))
     return failure(
       403,
