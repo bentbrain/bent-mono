@@ -25,6 +25,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { bundleIds, checkAppContents, checkHealthEntitlements, checkInfoPlist } from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -516,6 +517,20 @@ async function checkArchive(archive, directory, oauth) {
   return { health, version: plist.CFBundleShortVersionString, buildNumber: plist.CFBundleVersion };
 }
 
+/**
+ * The text of a downloaded EAS build log. EAS stores logs Brotli-compressed
+ * and serves them with `Content-Encoding: br`, which the runner's curl saves
+ * as is, so compressed bytes are decoded here.
+ */
+export function logText(bytes) {
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) return gunzipSync(bytes).toString("utf8");
+  try {
+    return brotliDecompressSync(bytes).toString("utf8");
+  } catch {
+    return bytes.toString("utf8");
+  }
+}
+
 /** The build hook prints this line after checking the image's Xcode. */
 export function checkXcodeLog(logs) {
   if (!logs.some((text) => text.includes(`Verified Xcode ${XCODE}.`)))
@@ -753,7 +768,7 @@ export function submissionStatus(reply, buildId) {
 /** Checks the downloaded archive and logs against the build, and returns the build's safe summary. */
 async function verifyArchive({ archive, logsDir, build, oauth, workDir }) {
   const logs = [];
-  for (const name of (await readdir(logsDir)).sort()) logs.push(await readFile(join(logsDir, name), "utf8"));
+  for (const name of (await readdir(logsDir)).sort()) logs.push(logText(await readFile(join(logsDir, name))));
   checkXcodeLog(logs);
   await mkdir(workDir, { recursive: true, mode: 0o700 });
   const artifact = await checkArchive(archive, workDir, oauth);
