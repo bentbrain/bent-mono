@@ -180,8 +180,10 @@ const iosNativeWorkspaces = [
 ];
 
 // Main pushes leave the native iPhone job to the Fitness iOS Verification
-// workflow, which runs it for main pushes that touch the app or its
-// dependencies, and daily.
+// workflow, which runs it for main pushes that touch the app, its
+// dependencies or any file outside the workspaces, and daily.
+// ci-scope.test.mjs keeps that workflow's push paths in step with the
+// root-file rule above.
 export function mainPush(environment) {
   return (
     environment.GITHUB_EVENT_NAME === "push" &&

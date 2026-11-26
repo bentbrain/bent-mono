@@ -10,8 +10,9 @@ const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", 
   "public-source", "secret-scan", "dependencies", "CodeQL", "fitness-ios", "fitness-ios-native", "Release qualification"];
 const IOS_VERIFY_WORKFLOW = ".github/workflows/fitness-ios-verify.yml";
 const IOS_VERIFY_EVENTS = ["push", "workflow_dispatch", "schedule"];
-const IOS_VERIFY_JOBS = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (seeder)", "CodeQL Swift (core)",
-  "Simulator flow (denied)", "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
+// The native suite runs inside the Simulator flow shards.
+const IOS_VERIFY_JOBS = ["CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
+  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 class QualificationError extends Error {}
 const fail = message => { throw new QualificationError(message); };
 // Each request has a fixed label; messages name only the label, never a path built from GitHub's data.

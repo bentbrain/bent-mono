@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   browserMatrix,
   comparison,
@@ -479,3 +480,123 @@ test("main pushes leave the native iPhone suite to Fitness iOS Verification", ()
       rmSync(directory, { recursive: true, force: true });
     }
   }));
+
+// GitHub's push path filter: `*` stays within one path segment, `**` crosses
+// segments, and the last pattern that matches a path decides it.
+function pathFilter(patterns) {
+  const expressions = patterns.map((pattern) => {
+    const negated = pattern.startsWith("!");
+    const glob = negated ? pattern.slice(1) : pattern;
+    const source = glob
+      .split(/(\*\*|\*|\?)/)
+      .map((part) =>
+        part === "**"
+          ? ".*"
+          : part === "*"
+            ? "[^/]*"
+            : part === "?"
+              ? "[^/]"
+              : part.replace(/[.+^${}()|[\]\\]/g, "\\$&"),
+      )
+      .join("");
+    return { negated, expression: new RegExp(`^${source}$`) };
+  });
+  return (file) =>
+    expressions.reduce(
+      (included, { negated, expression }) =>
+        expression.test(file) ? !negated : included,
+      false,
+    );
+}
+
+test("every root file that selects the native iPhone suite on a pull request starts Fitness iOS Verification on main", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const tracked = execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  })
+    .split("\0")
+    .filter(Boolean);
+  // The workspaces Turbo lists: each tracked package.json directory that a
+  // root workspace pattern names.
+  const patterns = JSON.parse(
+    readFileSync(join(root, "package.json"), "utf8"),
+  ).workspaces.map(
+    (pattern) => new RegExp(`^${pattern.replaceAll("*", "[^/]+")}$`),
+  );
+  const workspaces = tracked
+    .filter((file) => file.endsWith("/package.json"))
+    .map((file) => file.slice(0, -"/package.json".length))
+    .filter((path) => patterns.some((pattern) => pattern.test(path)))
+    .map((path) => ({ name: path, path }));
+  assert.ok(workspaces.some((item) => item.path === "apps/fitness-ios"));
+  const workflow = readFileSync(
+    join(root, ".github/workflows/fitness-ios-verify.yml"),
+    "utf8",
+  );
+  const block = workflow.match(
+    /^  push:\n    branches: \[main\]\n    paths:\n((?:      .*\n)+)/m,
+  )?.[1];
+  assert.ok(block, "Fitness iOS Verification lists its push paths");
+  const verified = pathFilter(
+    [...block.matchAll(/^      - "?([^"\n]+)"?$/gm)].map((match) => match[1]),
+  );
+  const execute = (file) => (command, args) =>
+    command === "git"
+      ? `${file}\0`
+      : JSON.stringify({
+          packages: { items: args.includes("--affected") ? [] : workspaces },
+        });
+  // Tracked files, and new files in a new root directory or at the root.
+  const candidates = [
+    ...tracked,
+    "docs/guide.md",
+    "tools/release.mjs",
+    ".github/actions/new/action.yml",
+    "new-config.json",
+  ];
+  fixture((env) => {
+    // Quality's root-file rule: a change outside every workspace selects
+    // every workspace, and with it the native iPhone suite.
+    const selected = candidates.filter((file) =>
+      iosNativeSelected(workspaceScope(env, execute(file)), env),
+    );
+    assert.ok(selected.length > 30, `${selected.length} root files`);
+    for (const file of [
+      "bunfig.toml",
+      "package.json",
+      "turbo.json",
+      ".github/actions/setup/action.yml",
+      ".github/workflows/fitness-ios-verify.yml",
+      ".github/workflows/quality.yml",
+      "scripts/check-sarif.mjs",
+      "scripts/ci-scope.mjs",
+      "scripts/require-ios-native.mjs",
+      "docs/guide.md",
+    ])
+      assert.ok(selected.includes(file), file);
+    const missing = selected.filter((file) => !verified(file));
+    assert.deepEqual(
+      missing,
+      [],
+      `Add these root files to the Fitness iOS Verification push paths: ${missing.join(", ")}`,
+    );
+  });
+  // The lockfile reaches the native build through every workspace's dependencies.
+  assert.ok(verified("bun.lock"));
+  // The filter still leaves out other products.
+  for (const file of [
+    "apps/jp/src/content/post.md",
+    "apps/toolbar/src/index.ts",
+    "packages/ui/src/button.tsx",
+    "products/drive/apps/web/src/page.tsx",
+  ])
+    assert.equal(verified(file), false, file);
+  for (const file of [
+    "apps/fitness-ios/src/app.tsx",
+    "apps/fitness/tests/ios-roundtrip.test.ts",
+    "apps/fitness/src/server/db.ts",
+    "packages/fitness-contracts/src/index.ts",
+  ])
+    assert.equal(verified(file), true, file);
+});
