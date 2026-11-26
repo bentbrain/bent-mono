@@ -102,7 +102,7 @@ export async function requireQualityChecks({ sha, branch, event }, api, workflow
 const REVIEWED = [/^apps\//, /^packages\//, /^products\//, /^scripts\/[^/]*release[^/]*$/,
   /^scripts\/require-no-pending-migrations\.mjs$/, /^scripts\/vercel-[^/]+$/,
   /^\.github\/workflows\/deploy-[^/]+$/, /^\.github\/actions\//,
-  /^package\.json$/, /^bun\.lock$/, /^bunfig\.toml$/, /^AGENTS\.md$/];
+  /^package\.json$/, /^bun\.lock$/, /^bunfig\.toml$/, /^deployments\.json$/, /^AGENTS\.md$/];
 // GitHub lists at most 3000 files for a pull request; a longer list is treated as reviewed code.
 const FILE_LIMIT = 3000;
 

@@ -487,7 +487,7 @@ test("only pull requests that change application, package or release code need r
   for (const filename of ["apps/fitness/src/routes/privacy.tsx", "packages/ui/src/button.tsx", "products/drive/app.ts",
     "scripts/release-vercel.mjs", "scripts/require-release-checks.mjs", ".github/workflows/deploy-fitness-ios.yml", "AGENTS.md",
     "package.json", "bun.lock", "bunfig.toml", ".github/actions/setup/action.yml", "scripts/vercel-bun.mjs",
-    "scripts/vercel-ignore-build.mjs", "scripts/require-no-pending-migrations.mjs"]) {
+    "scripts/vercel-ignore-build.mjs", "scripts/require-no-pending-migrations.mjs", "deployments.json"]) {
     assert.equal(needsReview([{ filename: "README.md" }, { filename }]), true, filename);
     assert.equal(needsReview([{ filename }]), true, `${filename} alone`);
   }
