@@ -130,10 +130,11 @@ jobs:
             echo "EAS lists no earlier build of the commit."
             exit 0
           fi
-          # The token goes to curl on stdin, never on the command line.
+          # The token goes to curl on stdin as a header line, never on the command line or as curl config;
+          # -q keeps curl from reading any .curlrc.
           status=0
-          printf 'header = "Authorization: Bearer %s"\n' "$EXPO_TOKEN" | curl --fail --silent --proto '=https' \
-            --max-time 60 --config - --header 'Content-Type: application/json' \
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
             --data "@$RUNNER_TEMP/eas-existing-query.json" https://api.expo.dev/graphql \
             > "$RUNNER_TEMP/eas-existing-submissions.json" 2>/dev/null || status=$?
           if [[ "$status" -ne 0 ]]; then
@@ -210,7 +211,8 @@ jobs:
           done
           node "$checks" verify-archive --archive "$downloads/app.ipa" --logs-dir "$downloads/logs" \
             --build "$RUNNER_TEMP/build.json" --work-dir "$downloads/work" --out "$RUNNER_TEMP/verified.json"
-          echo "build_id=$(node -p 'require(process.argv[1]).buildId' "$RUNNER_TEMP/verified.json")" >> "$GITHUB_OUTPUT"
+          build_id="$(node "$checks" build-id --file "$RUNNER_TEMP/verified.json")"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
       - name: Read the production EAS environment again
         timeout-minutes: 5
         working-directory: ${{ runner.temp }}/eas-static
@@ -249,8 +251,8 @@ jobs:
           set -euo pipefail
           umask 077
           status=0
-          printf 'header = "Authorization: Bearer %s"\n' "$EXPO_TOKEN" | curl --fail --silent --proto '=https' \
-            --max-time 60 --config - --header 'Content-Type: application/json' \
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
             --data "@$RUNNER_TEMP/eas-build-query.json" https://api.expo.dev/graphql \
             > "$RUNNER_TEMP/eas-build-submissions.json" 2>/dev/null || status=$?
           if [[ "$status" -ne 0 ]]; then
@@ -300,8 +302,8 @@ jobs:
           set -euo pipefail
           umask 077
           status=0
-          printf 'header = "Authorization: Bearer %s"\n' "$EXPO_TOKEN" | curl --fail --silent --proto '=https' \
-            --max-time 60 --config - --header 'Content-Type: application/json' \
+          printf 'Authorization: Bearer %s\n' "$EXPO_TOKEN" | curl -q --fail --silent --proto '=https' \
+            --max-time 60 --header @- --header 'Content-Type: application/json' \
             --data "@$RUNNER_TEMP/eas-build-query.json" https://api.expo.dev/graphql \
             > "$RUNNER_TEMP/eas-submitted.json" 2>/dev/null || status=$?
           if [[ "$status" -ne 0 ]]; then

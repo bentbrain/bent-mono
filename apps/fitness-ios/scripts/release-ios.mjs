@@ -33,9 +33,18 @@ const XCODE = "26.6";
 const IMAGE = "macos-tahoe-26.5-xcode-26.6";
 const SHA = /^[a-f0-9]{40}$/;
 const MINUTE = 60_000;
+/** A check's own failure. Its message is fixed text and validated values only, never response content. */
+export class ReleaseError extends Error {}
 const fail = (message) => {
-  throw new Error(message);
+  throw new ReleaseError(message);
 };
+
+/** An EAS build or submission ID: a string in UUID form. */
+export const isUuid = (value) =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+/** A short error code from a provider's reply, kept only when it looks like one. */
+const safeCode = (code) => (typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : null);
 
 /** Runs a macOS tool with a hard time limit and returns its output. */
 function tool(command, args, { input, timeout = MINUTE } = {}) {
@@ -60,7 +69,7 @@ export const unlistedClient = "release-check-unlisted-client";
  * for one no deployment lists, which shows the deployment checks client IDs.
  */
 export function checkReadiness(listed, unlisted) {
-  const code = (reply) => (reply.body?.code ? `, ${reply.body.code}` : "");
+  const code = (reply) => (safeCode(reply.body?.code) ? `, ${reply.body.code}` : "");
   if (unlisted.status !== 403 || unlisted.body?.code !== "client_not_allowed")
     fail(
       `Fitness production does not check OAuth client IDs for readiness (HTTP ${unlisted.status}${code(unlisted)}). Release Fitness first.`,
@@ -255,11 +264,11 @@ export async function checkClientAtIssuer(
       } catch {
         code = undefined;
       }
-      refused(`HTTP ${response.status}${code ? `, ${code}` : ""}`);
+      refused(`HTTP ${response.status}${safeCode(code) ? `, ${code}` : ""}`);
     }
     await response.body?.cancel();
     if (location.startsWith(redirectUri))
-      refused(new URL(location).searchParams.get("error") ?? "redirected to the app");
+      refused(safeCode(new URL(location).searchParams.get("error")) ?? "redirected to the app");
     const page = new URL(location, url);
     if (
       !plainHttps(page) ||
@@ -275,7 +284,7 @@ export async function checkClientAtIssuer(
       refused("a sign-in redirect without a return address");
     }
     if (!plainHttps(returning) || returning.origin !== back.origin || returning.pathname !== back.pathname)
-      refused(`a sign-in redirect returning to ${returning.origin}${returning.pathname}`);
+      refused(`a sign-in redirect returning to another page than ${back.pathname}`);
     if (!carriesParameters(returning, expected)) refused("a sign-in redirect with changed authorization parameters");
     return returning;
   };
@@ -383,7 +392,7 @@ export function checkBuild(builds, { sha, projectId }) {
     build.appIdentifier !== bundleIds.production ||
     build.gitCommitHash !== sha ||
     build.app?.id !== projectId ||
-    !/^[0-9a-f-]{36}$/.test(build.id ?? "") ||
+    !isUuid(build.id) ||
     !build.artifacts?.applicationArchiveUrl?.startsWith("https://")
   )
     fail("The EAS build is not the finished production build of the qualified commit.");
@@ -455,8 +464,6 @@ export function checkXcodeLog(logs) {
     fail(`The EAS build log does not show the Xcode ${XCODE} check.`);
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 /** At most this many builds of one commit are checked; `eas build:list` is asked for this many. */
 export const buildListLimit = 50;
 
@@ -470,7 +477,7 @@ export function commitBuildIds(builds, sha) {
   if (builds.length >= buildListLimit) fail(`EAS lists ${buildListLimit} or more builds of ${sha}; check them in EAS.`);
   for (const build of builds)
     if (
-      !UUID.test(build?.id ?? "") ||
+      !isUuid(build?.id) ||
       build.gitCommitHash !== sha ||
       build.buildProfile !== "production" ||
       build.platform !== "IOS"
@@ -585,7 +592,7 @@ export function buildDownloads(builds, { sha, projectId, directory }) {
 export function submissionsQuery(buildIds) {
   if (!Array.isArray(buildIds) || !buildIds.length || buildIds.length >= buildListLimit)
     fail("Pass between one and 49 EAS build IDs.");
-  for (const id of buildIds) if (!UUID.test(id ?? "")) fail("Pass EAS build IDs as UUIDs.");
+  for (const id of buildIds) if (!isUuid(id)) fail("Pass EAS build IDs as UUIDs.");
   const names = buildIds.map((_, index) => `b${index}`);
   return {
     query: `query BuildSubmissions(${names.map((name) => `$${name}: ID!`).join(", ")}) { ${names
@@ -628,7 +635,7 @@ export function submissionStatus(reply, buildId) {
   const [submissions] = submissionsOf(reply, [buildId]);
   if (submissions.length !== 1) fail("EAS does not list exactly one submission of the build.");
   const [submission] = submissions;
-  if (!UUID.test(submission?.id ?? "") || !submissionStatuses.has(submission.status))
+  if (!isUuid(submission?.id) || !submissionStatuses.has(submission.status))
     fail("EAS reported a malformed submission.");
   return { submissionId: submission.id, status: submission.status };
 }
@@ -675,15 +682,29 @@ export function options(argv, { values = [], flags = [] }) {
   return found;
 }
 
-const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
+/**
+ * Reads a JSON file another step wrote, often a provider's reply. A parse
+ * error would quote the input, which can hold signed URLs or emails, so it
+ * becomes a fixed message naming only the file's role.
+ */
+export async function readResponse(path, role) {
+  const text = await readFile(path, "utf8");
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fail(`${role} was not valid JSON.`);
+  }
+}
+const readJson = (path) => readResponse(path, "The input file");
 const writeJson = (path, value) => writeFile(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
 const requireSha = (sha) => (SHA.test(sha ?? "") ? sha : fail("Pass the full 40-character commit SHA."));
 const required = (found, name) => found[name] ?? fail(`Pass ${name}.`);
 
 /** The builds to check: every listed production build of the commit, or the one build this run made. */
 async function buildIdsFrom(found) {
-  if (found["--build-list"]) return commitBuildIds(await readJson(found["--build-list"]), requireSha(found["--sha"]));
-  if (UUID.test(found["--build-id"] ?? "")) return [found["--build-id"]];
+  if (found["--build-list"])
+    return commitBuildIds(await readResponse(found["--build-list"], "The EAS build list"), requireSha(found["--sha"]));
+  if (isUuid(found["--build-id"])) return [found["--build-id"]];
   return fail("Pass --build-list and --sha, or --build-id.");
 }
 
@@ -775,13 +796,16 @@ const commands = {
   },
   async "same-quality"(argv) {
     const found = options(argv, { values: ["--initial", "--current"] });
-    checkSameQuality(await readJson(required(found, "--initial")), await readJson(required(found, "--current")));
+    checkSameQuality(
+      await readResponse(required(found, "--initial"), "The first release qualification"),
+      await readResponse(required(found, "--current"), "The latest release qualification"),
+    );
     console.log("Quality qualification is unchanged.");
   },
   async "check-build"(argv) {
     const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });
     const directory = resolve(required(found, "--downloads-dir"));
-    const downloads = buildDownloads(await readJson(required(found, "--build-file")), {
+    const downloads = buildDownloads(await readResponse(required(found, "--build-file"), "The EAS build response"), {
       sha: requireSha(found["--sha"]),
       projectId: (await configSummary()).projectId,
       directory,
@@ -804,15 +828,19 @@ const commands = {
   async "check-no-submissions"(argv) {
     const found = options(argv, { values: ["--build-list", "--sha", "--build-id", "--file"] });
     const ids = await buildIdsFrom(found);
-    if (ids.length) checkNoSubmissions(await readJson(required(found, "--file")), ids);
+    if (ids.length)
+      checkNoSubmissions(await readResponse(required(found, "--file"), "The EAS submissions response"), ids);
     console.log(
       ids.length ? `None of the ${ids.length} builds checked has a submission.` : "No earlier build to check.",
     );
   },
   async "submission-status"(argv) {
     const found = options(argv, { values: ["--build-id", "--file"] });
-    const buildId = UUID.test(found["--build-id"] ?? "") ? found["--build-id"] : fail("Pass the EAS build ID.");
-    const { submissionId, status } = submissionStatus(await readJson(required(found, "--file")), buildId);
+    const buildId = isUuid(found["--build-id"]) ? found["--build-id"] : fail("Pass the EAS build ID.");
+    const { submissionId, status } = submissionStatus(
+      await readResponse(required(found, "--file"), "The EAS submissions response"),
+      buildId,
+    );
     console.log(`EAS submission ${submissionId} of build ${buildId}: ${status}.`);
     if (status !== "FINISHED") fail(`The submission is ${status}.`);
   },
@@ -821,16 +849,22 @@ const commands = {
     const result = await verifyArchive({
       archive: resolve(required(found, "--archive")),
       logsDir: resolve(required(found, "--logs-dir")),
-      build: await readJson(required(found, "--build")),
+      build: await readResponse(required(found, "--build"), "The build summary"),
       oauth: oauthFromEnvironment(),
       workDir: resolve(required(found, "--work-dir")),
     });
     await writeJson(required(found, "--out"), result);
     console.log(JSON.stringify(result));
   },
+  async "build-id"(argv) {
+    const found = options(argv, { values: ["--file"] });
+    const { buildId } = await readResponse(required(found, "--file"), "The verified build summary");
+    if (!isUuid(buildId)) fail("The verified build summary has no EAS build ID.");
+    process.stdout.write(`${buildId}\n`);
+  },
   async summary(argv) {
     const found = options(argv, { values: ["--file", "--sha", "--status"] });
-    const result = await readJson(required(found, "--file"));
+    const result = await readResponse(required(found, "--file"), "The verified build summary");
     if (found["--status"]) result.status = found["--status"];
     process.stdout.write(summaryMarkdown(result, requireSha(found["--sha"])));
   },
@@ -838,6 +872,16 @@ const commands = {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [name, ...argv] = process.argv.slice(2);
-  const command = commands[name] ?? fail(`Run one of: ${Object.keys(commands).join(", ")}.`);
-  await command(argv);
+  try {
+    const command = commands[name] ?? fail(`Run one of: ${Object.keys(commands).join(", ")}.`);
+    await command(argv);
+  } catch (error) {
+    // Only this script's own messages are shown; anything else could quote a provider's reply.
+    if (error instanceof ReleaseError) console.error(error.message);
+    else {
+      const code = /^E[A-Z]+$/.test(error?.code ?? "") ? ` (${error.code})` : "";
+      console.error(`release-ios ${commands[name] ? name : "command"} failed unexpectedly${code}.`);
+    }
+    process.exitCode = 1;
+  }
 }

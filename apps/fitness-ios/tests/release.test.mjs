@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
 import {
   admit,
+  isUuid,
   appConfigMetadata,
   staticEasFiles,
   writeStaticEasDir,
@@ -662,14 +663,14 @@ describe("the Deploy Fitness iOS workflow", () => {
         expect(step.run).not.toMatch(/release-ios\.mjs|bun |npm /);
       }
     }
-    // The GraphQL lookups read the token from stdin, not the command line.
+    // The GraphQL lookups read the token from stdin as a header line, never as curl config or an argument.
     const lookups = steps.filter(callsExpo);
     expect(lookups).toHaveLength(3);
     for (const lookup of lookups) {
-      expect(lookup.run).toContain(`printf 'header = "Authorization: Bearer %s"\\n' "$EXPO_TOKEN" | curl`);
-      expect(lookup.run).toContain("--config -");
+      expect(lookup.run).toContain(`printf 'Authorization: Bearer %s\\n' "$EXPO_TOKEN" | curl -q --fail`);
+      expect(lookup.run).toContain("--header @-");
       expect(lookup.run).toContain("2>/dev/null || status=$?");
-      expect(lookup.run).not.toMatch(/-H "Authorization|--header "Authorization/);
+      expect(lookup.run).not.toMatch(/--config|-K |-H "Authorization|--header "Authorization|header = /);
     }
     // Installs and checks never see the token.
     for (const pattern of [
@@ -754,6 +755,46 @@ describe("the Deploy Fitness iOS workflow", () => {
     }
   });
 
+  test("a malformed EAS response goes from its capture to a parser that quotes none of it", () => {
+    const root = mkdtempSync(join(tmpdir(), "release-capture-"));
+    try {
+      const bin = join(root, "eas-cli/node_modules/eas-cli/bin");
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(join(root, "eas-static"));
+      const signed = "https://storage.example.invalid/archive.tar.gz?X-Amz-Signature=deadbeefcafe";
+      const email = "owner@example.invalid";
+      // Valid enough to look like JSON, but cut off: a parse error would quote it.
+      writeFileSync(
+        join(bin, "run"),
+        `process.stdout.write(${JSON.stringify(`[{"id": "${signed}", "email": "${email}",`)}); process.exit(0);`,
+      );
+      const repo = new URL("../../../", import.meta.url).pathname;
+      const env = { PATH: process.env.PATH, RUNNER_TEMP: root, RELEASE_SHA: sha, EXPO_TOKEN: "expo_synthetic_token" };
+      const runStep = (step, cwd) =>
+        spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+          cwd,
+          env,
+          encoding: "utf8",
+          timeout: 60_000,
+        });
+      for (const [capture, parse, message] of [
+        [/ build:list --platform ios/, /submissions-query --build-list/, "The EAS build list was not valid JSON."],
+        [/ build --profile production/, /verify-archive/, "The EAS build response was not valid JSON."],
+      ]) {
+        const captured = runStep(steps[index(capture)], join(root, "eas-static"));
+        expect(captured.status).toBe(0);
+        const parsed = runStep(steps[index(parse)], repo);
+        const shown = `${captured.stdout}${captured.stderr}${parsed.stdout}${parsed.stderr}`;
+        expect(parsed.status).not.toBe(0);
+        expect(parsed.stderr.trim()).toBe(message);
+        for (const secret of ["X-Amz-Signature", "storage.example.invalid", email, "expo_synthetic_token"])
+          expect(shown).not.toContain(secret);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("pins every action to a commit and never keeps checkout credentials", () => {
     for (const step of steps.filter((item) => item.uses)) {
       expect(step.uses).toMatch(/^(\.\/\.github\/actions\/[a-z-]+|[\w-]+\/[\w-]+@[0-9a-f]{40})$/);
@@ -776,7 +817,11 @@ describe("the Deploy Fitness iOS workflow", () => {
       expect(cleanup.run).toContain(`"$RUNNER_TEMP/${path}"`);
     // Only the build ID leaves a step as an output, and only the checked OAuth settings as env.
     expect(source.match(/GITHUB_OUTPUT/g)).toHaveLength(1);
-    expect(steps[index(/verify-archive/)].run).toContain("build_id=");
+    // The build ID is checked as a UUID before it is written.
+    const verify = steps[index(/verify-archive/)].run;
+    expect(verify).toContain('build_id="$(node "$checks" build-id --file "$RUNNER_TEMP/verified.json")"');
+    expect(verify).toContain('echo "build_id=$build_id" >> "$GITHUB_OUTPUT"');
+    expect(verify).not.toContain("node -p");
     expect(source.match(/GITHUB_ENV/g)).toHaveLength(1);
     expect(steps[index(/oauth-env/)].run).toContain('>> "$GITHUB_ENV"');
   });
@@ -1047,6 +1092,122 @@ process.stdout.write(JSON.stringify(result));`,
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
+
+  test("a malformed or hostile capture is refused without quoting it", () => {
+    const signed = "https://storage.example.invalid/app.ipa?X-Amz-Signature=deadbeefcafe";
+    const email = "owner@example.invalid";
+    const directory = mkdtempSync(join(tmpdir(), "release-malformed-"));
+    try {
+      const file = (name, text) => {
+        const path = join(directory, name);
+        writeFileSync(path, text);
+        return path;
+      };
+      const cut = file("cut.json", `{"url": "${signed}", "email": "${email}", `);
+      // Valid JSON whose values are hostile: no message may echo them.
+      const hostileBuild = file(
+        "hostile-build.json",
+        JSON.stringify([{ ...build, id: signed, gitCommitHash: email, artifacts: { applicationArchiveUrl: signed } }]),
+      );
+      const hostileList = file("hostile-list.json", JSON.stringify([{ ...build, id: signed, platform: email }]));
+      const hostileReply = file(
+        "hostile-reply.json",
+        JSON.stringify({ errors: [{ message: `${signed} ${email}` }], data: { b0: { byId: { id: signed } } } }),
+      );
+      const hostileSubmission = file(
+        "hostile-submission.json",
+        JSON.stringify({ data: { b0: { byId: { id: build.id, submissions: [{ id: email, status: signed }] } } } }),
+      );
+      const out = join(directory, "out");
+      const cases = [
+        [
+          ["check-build", "--sha", sha, "--build-file", cut, "--downloads-dir", out, "--out", out],
+          "The EAS build response was not valid JSON.",
+        ],
+        [
+          ["check-build", "--sha", sha, "--build-file", hostileBuild, "--downloads-dir", out, "--out", out],
+          "not the finished production build",
+        ],
+        [
+          ["submissions-query", "--build-list", cut, "--sha", sha, "--out", out],
+          "The EAS build list was not valid JSON.",
+        ],
+        [["submissions-query", "--build-list", hostileList, "--sha", sha, "--out", out], "not a production iOS build"],
+        [
+          ["check-no-submissions", "--build-list", cut, "--sha", sha, "--file", cut],
+          "The EAS build list was not valid JSON.",
+        ],
+        [
+          ["check-no-submissions", "--build-id", build.id, "--file", cut],
+          "The EAS submissions response was not valid JSON.",
+        ],
+        [["check-no-submissions", "--build-id", build.id, "--file", hostileReply], "could not list"],
+        [
+          ["submission-status", "--build-id", build.id, "--file", cut],
+          "The EAS submissions response was not valid JSON.",
+        ],
+        [["submission-status", "--build-id", build.id, "--file", hostileSubmission], "malformed submission"],
+        [["oauth-env", "--env-file", cut], "FITNESS_OAUTH_ISSUER"],
+        [["build-id", "--file", cut], "The verified build summary was not valid JSON."],
+        [["build-id", "--file", hostileList], "has no EAS build ID"],
+        [
+          ["summary", "--file", join(directory, "missing.json"), "--sha", sha],
+          "release-ios summary failed unexpectedly (ENOENT).",
+        ],
+      ];
+      for (const [args, message] of cases) {
+        const result = run(...args);
+        const shown = `${result.stdout}${result.stderr}`;
+        expect({ args: args[0], failed: result.status !== 0 }).toEqual({ args: args[0], failed: true });
+        expect(result.stderr).toContain(message);
+        for (const secret of ["X-Amz-Signature", "storage.example.invalid", email, "at JSON.parse", "SyntaxError"])
+          expect(shown).not.toContain(secret);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("build and submission IDs are strict UUID strings", () => {
+    expect(isUuid(build.id)).toBe(true);
+    expect(isUuid(build.id.toUpperCase())).toBe(true);
+    for (const value of [
+      "-".repeat(36),
+      [build.id],
+      `${build.id}\n`,
+      ` ${build.id}`,
+      build.id.slice(1),
+      123,
+      null,
+      undefined,
+    ])
+      expect(isUuid(value)).toBe(false);
+    expect(() => checkBuild([{ ...build, id: "-".repeat(36) }], { sha, projectId })).toThrow(
+      "not the finished production build",
+    );
+    expect(() => checkBuild([{ ...build, id: [build.id] }], { sha, projectId })).toThrow(
+      "not the finished production build",
+    );
+    expect(checkBuild([{ ...build, id: build.id.toUpperCase() }], { sha, projectId }).id).toBe(build.id.toUpperCase());
+    expect(() => commitBuildIds([{ ...build, id: [build.id] }], sha)).toThrow("not a production iOS build");
+    expect(() => submissionsQuery(["-".repeat(36)])).toThrow("UUIDs");
+    const reply = (id) => ({ data: { b0: { byId: { id: build.id, submissions: [{ id, status: "FINISHED" }] } } } });
+    expect(() => submissionStatus(reply([build.id]), build.id)).toThrow("malformed");
+    expect(() => submissionStatus(reply("-".repeat(36)), build.id)).toThrow("malformed");
+    expect(run("submission-status", "--build-id", "-".repeat(36), "--file", "/nonexistent").stderr).toContain(
+      "Pass the EAS build ID.",
+    );
+  });
+
+  test("provider error codes appear in messages only when they look like codes", () => {
+    const refused = { status: 403, body: { code: "client_not_allowed" } };
+    expect(() =>
+      checkReadiness({ status: 503, body: { code: "https://storage.example.invalid/?X-Amz-Signature=x" } }, refused),
+    ).toThrow(/^Fitness production is not ready to enroll devices with this build's OAuth client \(HTTP 503\)\.$/);
+    expect(() => checkReadiness({ status: 503, body: { code: "enrollment_unavailable" } }, refused)).toThrow(
+      "HTTP 503, enrollment_unavailable",
+    );
+  });
 
   test("both qualifications must name the same Quality run", () => {
     const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };
