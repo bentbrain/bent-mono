@@ -97,33 +97,55 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     if (script) assert.ok(!script.includes("${{"), block);
   }
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  assert.deepEqual(declared, ["fitness-ios-native", "codeql-swift-app", "codeql-swift-tools", "simulator-flow", "verification"]);
+  assert.deepEqual(declared,
+    ["fitness-ios-native", "codeql-swift-app", "codeql-swift-seeder", "codeql-swift-core", "simulator-flow", "verification"]);
   const job = name => qualityJob(source, name);
-  for (const [name, scope] of [["codeql-swift-app", "app"], ["codeql-swift-tools", "tools"]]) {
+  // The core analysis and the native suite start when the seeder's CodeQL job finishes.
+  const second = "    # The second wave: it starts when the seeder's CodeQL job leaves a runner.\n" +
+    "    needs: [codeql-swift-seeder]\n    if: ${{ !cancelled() }}\n";
+  for (const [name, scope, minutes, trace] of [["codeql-swift-app", "app", 30, "native.mjs replay-swift app"],
+    ["codeql-swift-seeder", "seeder", 25, "native.mjs replay-swift seeder"], ["codeql-swift-core", "core", 20, "native.mjs core-build"]]) {
     const codeql = job(name);
-    assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 30\n`));
+    assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n${scope === "core" ? second : ""}    runs-on: macos-26\n    timeout-minutes: ${minutes}\n`));
     assert.match(codeql, /^    permissions:\n      contents: read\n(      #.*\n)?      security-events: read\n    steps:\n/m);
     assert.ok(codeql.includes("CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'"));
     assert.ok(codeql.includes("CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'"));
     assert.ok(codeql.includes("languages: swift\n          build-mode: manual\n          queries: security-extended,security-and-quality\n"));
     assert.ok(codeql.includes("--install-rosetta"));
-    assert.ok(codeql.includes(`category: fitness-codeql-swift-${scope}\n          output: \${{ runner.temp }}/codeql-swift-results\n          upload: never\n`));
+    assert.ok(codeql.includes(`category: fitness-codeql-swift-${scope}\n          output: \${{ runner.temp }}/codeql-swift-results\n          upload: never\n          upload-database: false\n`));
     assert.ok(codeql.includes("CODEQL_LANGUAGES: swift\n        run: node scripts/check-sarif.mjs\n"));
     assert.ok(codeql.includes(`node scripts/codeql-coverage.mjs --scope ${scope} "$RUNNER_TEMP/codeql_databases/swift"`));
     assert.ok(codeql.includes(`        if: always()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        with:\n          name: codeql-swift-${scope}-original-sarif\n          path: \${{ runner.temp }}/codeql-swift-results/*.sarif\n          if-no-files-found: error\n          retention-days: 90\n`));
     assert.ok(codeql.includes(`name: codeql-swift-${scope}-extractor-logs`));
-    assert.ok(codeql.indexOf("codeql-action/init@") < codeql.indexOf(`replay-swift ${scope === "app" ? "app" : "seeder"}`));
+    assert.ok(codeql.includes(`run: time node scripts/${trace}\n`));
+    assert.ok(codeql.indexOf("codeql-action/init@") < codeql.indexOf(trace));
+  }
+  // The CodeQL builds compile one unoptimised arm64 Simulator slice without a dSYM.
+  for (const name of ["codeql-swift-app", "codeql-swift-seeder"]) {
+    assert.ok(job(name).includes("          XCODEBUILD_SETTINGS: >-\n" +
+      "            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO\n" +
+      "            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n" +
+      "            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO\n" +
+      "            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0\n" +
+      "            DEBUG_INFORMATION_FORMAT=dwarf\n"), name);
   }
   assert.ok(job("codeql-swift-app").includes("SKIP_BUNDLING: '1'"));
-  assert.ok(job("codeql-swift-app").includes("SWIFT_PRECOMPILE_BRIDGING_HEADER=NO"));
-  assert.ok(!job("codeql-swift-tools").includes("./.github/actions/setup"));
-  assert.ok(job("codeql-swift-tools").includes("node scripts/native.mjs core-build"));
+  assert.ok(job("codeql-swift-app").includes("run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n"));
+  assert.ok(job("codeql-swift-seeder").includes("run: node scripts/native.mjs seeder\n"));
+  for (const name of ["codeql-swift-seeder", "codeql-swift-core"]) {
+    assert.ok(!job(name).includes("./.github/actions/setup"), name);
+    assert.ok(job(name).includes("uses: actions/setup-node@"), name);
+  }
+  assert.ok(!job("codeql-swift-core").includes("native.mjs seeder"));
+  assert.ok(!job("codeql-swift-core").includes("replay-swift"));
+  assert.ok(!job("codeql-swift-seeder").includes("core-build"));
   const native = job("fitness-ios-native");
-  assert.ok(native.includes("    name: fitness-ios-native\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
+  assert.ok(native.includes(`    name: fitness-ios-native\n${second}    runs-on: macos-26\n    timeout-minutes: 20\n`));
   for (const step of ["lint", "prebuild", "build", "artifact", "seeder", "core-test"]) assert.ok(native.includes(`run: node scripts/native.mjs ${step}\n`));
   assert.ok(native.includes("run: node scripts/roundtrip.mjs"));
   const flows = job("simulator-flow");
-  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    runs-on: macos-26\n    timeout-minutes: 25\n    strategy:\n      fail-fast: false\n"));
+  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    runs-on: macos-26\n    timeout-minutes: 25\n"));
+  assert.match(flows, /^    env:\n(      #.*\n)*      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n    strategy:\n      fail-fast: false\n/m);
   for (const [label, flow] of [["denied", "testDeniedHealthAccessSendsNothing"],
     ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory"], ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance"]]) {
     assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
@@ -132,7 +154,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   const aggregate = job("verification");
   assert.ok(aggregate.includes("    name: Fitness iOS verification\n    if: always()\n"));
   assert.deepEqual(jobDependencies(aggregate), declared.filter(name => name !== "verification"));
-  assert.ok(aggregate.includes('const expected = ["fitness-ios-native", "codeql-swift-app", "codeql-swift-tools", "simulator-flow"];'));
+  assert.ok(aggregate.includes('const expected = ["fitness-ios-native", "codeql-swift-app", "codeql-swift-seeder", "codeql-swift-core", "simulator-flow"];'));
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
 });
 
@@ -143,14 +165,16 @@ test("Fitness iOS Verification never uploads to Code Scanning and keeps each ori
   assert.ok(!source.includes("codeql-action/upload-sarif"));
   assert.ok(!/^\s*upload: (?!never$)/m.test(source));
   const analyses = [...source.matchAll(/uses: github\/codeql-action\/analyze@\S+\n        with:\n((?:          .*\n)+)/g)];
-  assert.equal(analyses.length, 2);
+  assert.equal(analyses.length, 3);
   for (const [, inputs] of analyses) {
     assert.match(inputs, /^          upload: never$/m);
+    assert.match(inputs, /^          upload-database: false$/m);
     assert.match(inputs, /^          output: \$\{\{ runner\.temp \}\}\/codeql-swift-results$/m);
   }
-  assert.equal(source.match(/uses: github\/codeql-action\/analyze@/g).length, 2);
-  assert.equal(source.match(/run: node scripts\/check-sarif\.mjs\n/g).length, 2);
-  assert.equal(source.match(/name: codeql-swift-(app|tools)-original-sarif\n/g).length, 2);
+  assert.ok(!/^\s*upload-database: (?!false$)/m.test(source));
+  assert.equal(source.match(/uses: github\/codeql-action\/analyze@/g).length, 3);
+  assert.equal(source.match(/run: node scripts\/check-sarif\.mjs\n/g).length, 3);
+  assert.equal(source.match(/name: codeql-swift-(app|seeder|core)-original-sarif\n/g).length, 3);
 });
 
 const timeouts = (source, name) => {
@@ -243,8 +267,8 @@ test("JP rejects untrusted workflow-run heads before checkout in the protected j
 });
 const iosWorkflow = { id: 31, path: ".github/workflows/fitness-ios-verify.yml", state: "active" };
 const iosRun = { ...run, id: 41, event: "push", path: iosWorkflow.path, workflow_id: iosWorkflow.id, run_attempt: 1 };
-const iosNames = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
-  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
+const iosNames = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (seeder)", "CodeQL Swift (core)",
+  "Simulator flow (denied)", "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 function fixture(change = () => {}) {
   const data = {
     main: { object: { sha } }, workflow: structuredClone(workflow), runs: [structuredClone(run)],
@@ -328,8 +352,10 @@ test("with ios, fails closed for any missing, stale, foreign or unsuccessful ver
     d => { d.iosJobs.push(d.iosJobs[0]); },
     d => { d.iosJobs[1].conclusion = "skipped"; },
     d => { d.iosJobs[3].conclusion = "failure"; },
-    d => { d.iosJobs[6].status = "in_progress"; },
+    d => { d.iosJobs[7].status = "in_progress"; },
     d => { d.iosJobs[2].head_sha = head; },
+    d => { d.iosJobs[3].conclusion = "cancelled"; },
+    d => { d.iosJobs[3].name = "CodeQL Swift (tools)"; },
     d => { d.finalIosRun.run_attempt = 2; },
     d => { d.finalIosRun.conclusion = "failure"; },
     d => { d.finalIosRun.status = "in_progress"; },

@@ -1724,22 +1724,28 @@ describe("the CodeQL Swift scopes", () => {
     "",
   ];
 
-  test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
+  test("split the tracked Swift into the app, the seeder and the core, with the module's Core in app and core", () => {
     expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 4));
-    expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(4, 7)]);
+    expect(swiftFilesFor("seeder", tracked)).toEqual(tracked.slice(5, 7));
+    expect(swiftFilesFor("core", tracked)).toEqual([tracked[1], tracked[4]]);
     expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 7));
+    // Together the three jobs' scopes cover every tracked Swift source.
+    const covered = new Set(["app", "seeder", "core"].flatMap((scope) => swiftFilesFor(scope, tracked)));
+    expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
   });
 
-  test("fail closed for a tracked Swift file outside both scopes", () => {
+  test("fail closed for a tracked Swift file outside every scope", () => {
     for (const outside of [
       "apps/fitness-ios/modules/fitness-health/ios/Extra/New.swift",
       "apps/fitness-ios/ios/Generated.swift",
       "apps/other/Tool.swift",
       "Root.swift",
     ])
-      for (const scope of ["all", "app", "tools"])
+      for (const scope of ["all", "app", "seeder", "core"])
         expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
     expect(() => swiftFilesFor("app", tracked.slice(4))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("seeder", tracked.slice(0, 5))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("core", tracked.slice(2, 4))).toThrow("No tracked Swift files");
   });
 
   test("every tracked Swift file in the repository is in a scope", () => {
@@ -1748,6 +1754,7 @@ describe("the CodeQL Swift scopes", () => {
       encoding: "utf8",
     }).stdout.split("\0");
     expect(swiftFilesFor("all", listed).length).toBeGreaterThan(20);
+    for (const scope of ["app", "seeder", "core"]) expect(swiftFilesFor(scope, listed).length).toBeGreaterThan(0);
   });
 
   test("read a scope and require derived data for the app and all scopes only", () => {
@@ -1757,17 +1764,18 @@ describe("the CodeQL Swift scopes", () => {
       database: "db",
       derived: "derived",
     });
-    expect(coverageArguments(["--scope", "tools", "db"])).toEqual({
-      scope: "tools",
-      database: "db",
-      derived: undefined,
-    });
+    for (const scope of ["seeder", "core"])
+      expect(coverageArguments(["--scope", scope, "db"])).toEqual({ scope, database: "db", derived: undefined });
     for (const args of [
       [],
       ["db"],
       ["--scope", "app", "db"],
+      ["--scope", "all", "db"],
+      ["--scope", "seeder", "db", "derived"],
+      ["--scope", "core", "db", "derived"],
+      ["--scope", "tools", "db"],
       ["--scope", "tools", "db", "derived"],
-      ["--scope", "seeder", "db"],
+      ["--scope", "Core", "db"],
       ["--scope"],
       ["db", "derived", "extra"],
     ])

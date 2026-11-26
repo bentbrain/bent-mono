@@ -359,7 +359,10 @@ function iosExecute(files, affected, fail = false) {
   };
 }
 const iosSelected = (env, files, affected, fail) =>
-  iosNativeSelected(workspaceScope(env, iosExecute(files, affected, fail)));
+  iosNativeSelected(
+    workspaceScope(env, iosExecute(files, affected, fail)),
+    env,
+  );
 
 test("the native iPhone suite runs for changes that reach the app, its contracts or Fitness", () =>
   fixture((env) => {
@@ -379,11 +382,50 @@ test("the native iPhone suite runs for changes that reach the app, its contracts
       assert.equal(iosSelected(env, files, affected), true, files.join());
     assert.equal(iosSelected(env, [], [], true), true, "missing history");
     for (const event of ["schedule", "workflow_dispatch"])
-      assert.equal(
-        iosSelected({ ...env, GITHUB_EVENT_NAME: event }, [], []),
-        true,
-        event,
-      );
+      for (const ref of [undefined, "refs/heads/main"])
+        assert.equal(
+          iosSelected(
+            { ...env, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
+            [],
+            [],
+          ),
+          true,
+          event,
+        );
+  }));
+
+test("merge queue and branch pushes scope the native iPhone suite to their diff", () =>
+  fixture((env) => {
+    const directory = mkdtempSync(join(tmpdir(), "ci-scope-queue-"));
+    const eventPath = join(directory, "event.json");
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ before: base, merge_group: { base_sha: base } }),
+    );
+    try {
+      for (const event of [
+        { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF: "refs/heads/main" },
+        { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/feature" },
+        { GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/heads/main" },
+      ]) {
+        const current = { ...env, ...event, GITHUB_EVENT_PATH: eventPath };
+        if (event.GITHUB_EVENT_NAME === "pull_request")
+          current.GITHUB_EVENT_PATH = env.GITHUB_EVENT_PATH;
+        const name = JSON.stringify(event);
+        assert.equal(
+          iosSelected(current, ["apps/fitness-ios/src/app.tsx"], [fitnessIos]),
+          true,
+          name,
+        );
+        assert.equal(
+          iosSelected(current, ["apps/jp/src/content/post.md"], [blog]),
+          false,
+          name,
+        );
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }));
 
 test("the native iPhone suite is left out for changes to other products", () =>
@@ -398,7 +440,7 @@ test("the native iPhone suite is left out for changes to other products", () =>
       assert.equal(iosSelected(env, files, affected), false, files.join());
   }));
 
-test("a main push scopes the native iPhone suite to its diff", () =>
+test("main pushes leave the native iPhone suite to Fitness iOS Verification", () =>
   fixture((env) => {
     const directory = mkdtempSync(join(tmpdir(), "ci-scope-push-"));
     const eventPath = join(directory, "event.json");
@@ -410,18 +452,29 @@ test("a main push scopes the native iPhone suite to its diff", () =>
         GITHUB_REF: "refs/heads/main",
         GITHUB_EVENT_PATH: eventPath,
       };
+      for (const [files, affected, fail] of [
+        [["apps/jp/src/content/post.md"], [blog]],
+        [["apps/fitness-ios/src/app.tsx"], [fitnessIos]],
+        [["packages/fitness-contracts/src/index.ts"], [contracts, fitnessIos]],
+        [["apps/fitness/src/server/db.ts"], [fitness]],
+        [["scripts/ci-scope.mjs"], []],
+        [[".github/workflows/quality.yml"], []],
+        [[], [], true],
+      ])
+        assert.equal(
+          iosSelected(push, files, affected, fail),
+          false,
+          fail ? "missing history" : files.join(),
+        );
+      // A full scope still leaves the suite out of a main push.
       assert.equal(
-        iosSelected(push, ["apps/jp/src/content/post.md"], [blog]),
+        iosNativeSelected({ full: true, packages: iosPackages }, push),
         false,
       );
-      assert.equal(
-        iosSelected(push, ["apps/fitness-ios/src/app.tsx"], [fitnessIos]),
-        true,
-      );
-      assert.equal(
-        workspaceScope(push, iosExecute([], []), browserOptions).full,
-        true,
-      );
+      // Main pushes still run every browser suite.
+      const browser = workspaceScope(push, iosExecute([], []), browserOptions);
+      assert.equal(browser.full, true);
+      assert.ok(browserMatrix(browser).length > 0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -30,15 +30,25 @@ permissions:
 concurrency:
   group: fitness-ios-verify-${{ github.ref }}
   cancel-in-progress: true
-# Time budget: every job stops within 30 minutes. The native suite stops at 20,
-# each Simulator flow at 25 and each CodeQL Swift job at 30.
-# The CodeQL Swift reports stay out of Code Scanning: pull requests never run
-# these categories, so an upload from main would leave GitHub's CodeQL check on
-# every pull request neutral. check-sarif.mjs enforces zero raw findings here,
-# and each original report is kept as a workflow artifact.
+# Time budget: every job stops within 30 minutes, and a run is expected to
+# take about 25 in total. The first wave fills the repository's five macOS
+# runners: CodeQL Swift (app), which stops at 30, CodeQL Swift (seeder), at 25,
+# and the three Simulator flows, at 25 each. CodeQL Swift (core) and the native
+# suite, each stopping at 20, wait for the seeder job and start on the next
+# free runners.
+# The CodeQL and Simulator flow builds compile only the arm64 Simulator slice,
+# and the CodeQL builds skip optimisation and dSYM generation.
+# The CodeQL Swift reports and databases stay out of Code Scanning: pull
+# requests never run these categories, so an upload from main would leave
+# GitHub's CodeQL check on every pull request neutral. check-sarif.mjs enforces
+# zero raw findings here, and each original report is kept as a workflow
+# artifact.
 jobs:
   fitness-ios-native:
     name: fitness-ios-native
+    # The second wave: it starts when the seeder's CodeQL job leaves a runner.
+    needs: [codeql-swift-seeder]
+    if: ${{ !cancelled() }}
     runs-on: macos-26
     timeout-minutes: 20
     defaults:
@@ -129,10 +139,15 @@ jobs:
         env:
           # Whole-module compiles, and the bridging header read as source: the
           # extractor stops without recording anything when the app target
-          # imports the header precompiled by Xcode's clang.
+          # imports the header precompiled by Xcode's clang. The replay
+          # compiles the arm64 slice, so the build makes only that slice,
+          # unoptimised and without a dSYM.
           XCODEBUILD_SETTINGS: >-
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
             SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
+            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0
+            DEBUG_INFORMATION_FORMAT=dwarf
         run: |
           node scripts/native.mjs prebuild
           node scripts/native.mjs build
@@ -166,6 +181,7 @@ jobs:
           category: fitness-codeql-swift-app
           output: ${{ runner.temp }}/codeql-swift-results
           upload: never
+          upload-database: false
       - name: Require clean analysis
         env:
           SARIF_DIRECTORY: ${{ runner.temp }}/codeql-swift-results
@@ -193,10 +209,10 @@ jobs:
           path: ${{ runner.temp }}/codeql-swift-results/*.sarif
           if-no-files-found: error
           retention-days: 90
-  codeql-swift-tools:
-    name: CodeQL Swift (tools)
+  codeql-swift-seeder:
+    name: CodeQL Swift (seeder)
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
       # The raw-flow gate requires both complete suites.
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
@@ -211,7 +227,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      # The seeder and the module's Swift package build without the workspace's packages.
+      # The seeder builds without the workspace's packages.
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 24.18.0
@@ -227,7 +243,10 @@ jobs:
         env:
           XCODEBUILD_SETTINGS: >-
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
             SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
+            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0
+            DEBUG_INFORMATION_FORMAT=dwarf
         run: node scripts/native.mjs seeder
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
@@ -249,17 +268,16 @@ jobs:
           build-mode: manual
           queries: security-extended,security-and-quality
       # The trace covers Xcode's logged compile commands for Health Seed and
-      # its UI tests, and the module's Swift package with its XCTest targets.
-      - name: Compile the tools' first-party Swift for extraction
+      # its UI tests.
+      - name: Compile the seeder's Swift for extraction
         working-directory: apps/fitness-ios
-        run: |
-          time node scripts/native.mjs replay-swift seeder
-          time node scripts/native.mjs core-build
+        run: time node scripts/native.mjs replay-swift seeder
       - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
         with:
-          category: fitness-codeql-swift-tools
+          category: fitness-codeql-swift-seeder
           output: ${{ runner.temp }}/codeql-swift-results
           upload: never
+          upload-database: false
       - name: Require clean analysis
         env:
           SARIF_DIRECTORY: ${{ runner.temp }}/codeql-swift-results
@@ -267,12 +285,12 @@ jobs:
         run: node scripts/check-sarif.mjs
       - name: Require complete extraction
         working-directory: apps/fitness-ios
-        run: node scripts/codeql-coverage.mjs --scope tools "$RUNNER_TEMP/codeql_databases/swift"
+        run: node scripts/codeql-coverage.mjs --scope seeder "$RUNNER_TEMP/codeql_databases/swift"
       - name: Retain the CodeQL extractor logs
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: codeql-swift-tools-extractor-logs
+          name: codeql-swift-seeder-extractor-logs
           path: |
             ${{ runner.temp }}/codeql_databases/swift/log
             ${{ runner.temp }}/codeql_databases/swift/diagnostic
@@ -283,7 +301,95 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: codeql-swift-tools-original-sarif
+          name: codeql-swift-seeder-original-sarif
+          path: ${{ runner.temp }}/codeql-swift-results/*.sarif
+          if-no-files-found: error
+          retention-days: 90
+  codeql-swift-core:
+    name: CodeQL Swift (core)
+    # The second wave: it starts when the seeder's CodeQL job leaves a runner.
+    needs: [codeql-swift-seeder]
+    if: ${{ !cancelled() }}
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      # The raw-flow gate requires both complete suites.
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
+      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
+    permissions:
+      contents: read
+      # The CodeQL Action reads its API endpoints with this; it uploads nothing.
+      security-events: read
+    steps:
+      - name: Keep native build output outside the checkout
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # The module's Swift package builds without the workspace's packages.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24.18.0
+      - name: Install Rosetta for the CodeQL Swift tracer
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+      - name: Select Xcode 26.6
+        working-directory: apps/fitness-ios
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          node scripts/native.mjs xcode 26.6
+      - name: Download verified CodeQL bundle
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # CodeQL v2.27.4, Swift macOS release asset.
+          archive="$RUNNER_TEMP/codeql-bundle-swift-osx64.tar.zst"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 3 --retry-max-time 300 --connect-timeout 10 --max-time 300 \
+            --header "Authorization: Bearer ${GH_TOKEN:?GitHub token is required}" \
+            --header 'Accept: application/octet-stream' --output "$archive" \
+            https://api.github.com/repos/github/codeql-action/releases/assets/692239631
+          printf '%s  %s\n' '52e3f0ea756787f0ceb2e5b2553d2560ba1d83573e3f77002f31833b307fbebc' "$archive" | shasum -a 256 --check
+      - uses: github/codeql-action/init@f3c49fd1ef3281abc41069b3dd22807a60c963f6
+        with:
+          tools: ${{ runner.temp }}/codeql-bundle-swift-osx64.tar.zst
+          languages: swift
+          build-mode: manual
+          queries: security-extended,security-and-quality
+      # The trace covers the module's Swift package with its XCTest targets.
+      - name: Compile the module's Swift package for extraction
+        working-directory: apps/fitness-ios
+        run: time node scripts/native.mjs core-build
+      - uses: github/codeql-action/analyze@f3c49fd1ef3281abc41069b3dd22807a60c963f6
+        with:
+          category: fitness-codeql-swift-core
+          output: ${{ runner.temp }}/codeql-swift-results
+          upload: never
+          upload-database: false
+      - name: Require clean analysis
+        env:
+          SARIF_DIRECTORY: ${{ runner.temp }}/codeql-swift-results
+          CODEQL_LANGUAGES: swift
+        run: node scripts/check-sarif.mjs
+      - name: Require complete extraction
+        working-directory: apps/fitness-ios
+        run: node scripts/codeql-coverage.mjs --scope core "$RUNNER_TEMP/codeql_databases/swift"
+      - name: Retain the CodeQL extractor logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codeql-swift-core-extractor-logs
+          path: |
+            ${{ runner.temp }}/codeql_databases/swift/log
+            ${{ runner.temp }}/codeql_databases/swift/diagnostic
+            ${{ runner.temp }}/codeql_databases/diagnostic
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Retain original CodeQL report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codeql-swift-core-original-sarif
           path: ${{ runner.temp }}/codeql-swift-results/*.sarif
           if-no-files-found: error
           retention-days: 90
@@ -291,6 +397,10 @@ jobs:
     name: Simulator flow (${{ matrix.label }})
     runs-on: macos-26
     timeout-minutes: 25
+    env:
+      # The flows run on an Apple silicon Simulator, so the builds make only
+      # the arm64 slice.
+      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
     strategy:
       fail-fast: false
       matrix:
@@ -349,7 +459,7 @@ jobs:
     # The Deploy Fitness iOS release qualification requires this job and each job above.
     name: Fitness iOS verification
     if: always()
-    needs: [fitness-ios-native, codeql-swift-app, codeql-swift-tools, simulator-flow]
+    needs: [fitness-ios-native, codeql-swift-app, codeql-swift-seeder, codeql-swift-core, simulator-flow]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -359,7 +469,7 @@ jobs:
         run: |
           node --input-type=module -e '
             const jobs = JSON.parse(process.env.VERIFY_RESULTS);
-            const expected = ["fitness-ios-native", "codeql-swift-app", "codeql-swift-tools", "simulator-flow"];
+            const expected = ["fitness-ios-native", "codeql-swift-app", "codeql-swift-seeder", "codeql-swift-core", "simulator-flow"];
             if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
                 Object.values(jobs).some(job => job.result !== "success")) {
               throw new Error("Every Fitness iOS Verification job must succeed");

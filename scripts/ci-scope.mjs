@@ -179,7 +179,18 @@ const iosNativeWorkspaces = [
   "apps/fitness",
 ];
 
-export function iosNativeSelected(scope) {
+// Main pushes leave the native iPhone job to the Fitness iOS Verification
+// workflow, which runs it for main pushes that touch the app or its
+// dependencies, and daily.
+export function mainPush(environment) {
+  return (
+    environment.GITHUB_EVENT_NAME === "push" &&
+    environment.GITHUB_REF === "refs/heads/main"
+  );
+}
+
+export function iosNativeSelected(scope, environment = {}) {
+  if (mainPush(environment)) return false;
   return (
     scope.full ||
     iosNativeWorkspaces.some((directory) => includesPath(scope, directory))
@@ -192,10 +203,11 @@ if (
 ) {
   const scope = workspaceScope(process.env, execFileSync, { browser: true });
   const include = browserMatrix(scope);
-  // Main pushes check every browser suite, and the native iPhone job only
-  // for changes that reach it.
-  const ios = workspaceScope(process.env, execFileSync);
-  const iosNative = iosNativeSelected(ios);
+  // Main pushes check every browser suite. Other events run the native
+  // iPhone job for changes that reach it.
+  const iosNative =
+    !mainPush(process.env) &&
+    iosNativeSelected(workspaceScope(process.env, execFileSync), process.env);
   console.log(JSON.stringify({ browser: scope, iosNative }));
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(

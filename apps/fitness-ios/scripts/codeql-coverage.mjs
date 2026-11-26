@@ -1,20 +1,21 @@
 // Checks that a Swift CodeQL database extracted every Swift source its
 // analysis must cover. Every tracked Swift file in the repository belongs to
-// the app scope, the tools scope or both, and a file in neither fails the
-// check:
+// at least one of the app, seeder and core scopes, and a file in none of them
+// fails the check:
 //
 // - app: the fitness-health module's Core, Platform and Module sources, and
 //   each Swift file the production app target compiles, including the ones
 //   prebuild generates.
-// - tools: the module's Core sources and XCTest suite, and the seeder with
-//   its UI tests.
-// - all: both.
+// - seeder: the seeder with its UI tests.
+// - core: the module's Core sources and XCTest suite.
+// - all: every scope.
 //
-//   node scripts/codeql-coverage.mjs [--scope all|app|tools] <database> [<derived data>]
+//   node scripts/codeql-coverage.mjs [--scope all|app|seeder|core] <database> [<derived data>]
 //
-// The app and all scopes read the app target's Swift file lists from the
-// derived data. Package.swift manifests are build descriptions, not compiled
-// sources, so they are left out.
+// The app and all scopes require the derived data, and read the app target's
+// Swift file lists from it. The seeder and core scopes take no derived data.
+// Package.swift manifests are build descriptions, not compiled sources, so
+// they are left out.
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -24,9 +25,11 @@ const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const healthModule = "apps/fitness-ios/modules/fitness-health/ios";
 const partition = {
   app: [`${healthModule}/Core/`, `${healthModule}/Platform/`, `${healthModule}/Module/`],
-  tools: [`${healthModule}/Core/`, `${healthModule}/Tests/`, "apps/fitness-ios/tools/health-seed/"],
+  seeder: ["apps/fitness-ios/tools/health-seed/"],
+  core: [`${healthModule}/Core/`, `${healthModule}/Tests/`],
 };
-const usage = "Usage: node scripts/codeql-coverage.mjs [--scope all|app|tools] <database> [<derived data>]";
+const scopes = ["all", ...Object.keys(partition)];
+const usage = "Usage: node scripts/codeql-coverage.mjs [--scope all|app|seeder|core] <database> [<derived data>]";
 
 /** The scope, database and derived data the arguments name. */
 export function coverageArguments(args) {
@@ -36,23 +39,23 @@ export function coverageArguments(args) {
     scope = rest[1];
     rest = rest.slice(2);
   }
-  if (!["all", "app", "tools"].includes(scope)) throw new Error(usage);
+  if (!scopes.includes(scope)) throw new Error(usage);
   const [database, derived, ...extra] = rest;
-  const needsDerived = scope !== "tools";
+  const needsDerived = scope === "all" || scope === "app";
   if (!database || extra.length || needsDerived !== Boolean(derived)) throw new Error(usage);
   return { scope, database, derived };
 }
 
 /**
  * The repository-relative tracked Swift files that the scope covers. Throws
- * when a tracked Swift file is in neither scope.
+ * when a tracked Swift file is in none of the scopes.
  */
 export function swiftFilesFor(scope, files) {
   const sources = files.filter((file) => file && !file.endsWith("/Package.swift") && file !== "Package.swift");
   const inScope = (file, name) => partition[name].some((prefix) => file.startsWith(prefix));
-  const outside = sources.filter((file) => !inScope(file, "app") && !inScope(file, "tools"));
+  const outside = sources.filter((file) => !Object.keys(partition).some((name) => inScope(file, name)));
   if (outside.length)
-    throw new Error(`Tracked Swift files outside the CodeQL app and tools scopes:\n${outside.join("\n")}`);
+    throw new Error(`Tracked Swift files outside the CodeQL app, seeder and core scopes:\n${outside.join("\n")}`);
   const selected = sources.filter((file) => scope === "all" || inScope(file, scope));
   if (!selected.length) throw new Error(`No tracked Swift files were found for the ${scope} scope.`);
   return selected;
