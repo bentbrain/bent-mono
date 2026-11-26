@@ -14,4 +14,4 @@ Run affected application checks and the public-source audit before publishing. S
 
 Use pull requests, conventional commits and independent Sol review of the final head against the current base. Never bypass protections or fabricate review statuses. Preserve original source attribution through SOURCE_PROVENANCE.json.
 
-Require zero raw CodeQL findings across the repository. Keep every query and the original SARIF report.
+Require zero raw CodeQL findings across the repository. Keep every query and the original SARIF report. Swift analysis of the iPhone app runs in the Fitness iOS Verification workflow after merge and nightly, and TestFlight builds don't wait for it.

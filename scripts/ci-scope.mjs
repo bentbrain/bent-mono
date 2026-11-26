@@ -21,6 +21,61 @@ const browserDocumentation = new Set([
   "apps/toolbar/LICENSE",
 ]);
 
+// The inputs of the native iPhone checks: Quality's fitness-ios-native suite
+// and the Fitness iOS Verification workflow, whose push paths are this list.
+// Root files: the dependency install and the Turbo graph that selects the
+// suite, the shared setup action, the reviewed CodeQL flows, the two workflows
+// and the root scripts they run. Workspace files: the iPhone app and the
+// workspace code it builds and tests against. ci-scope.test.mjs keeps the
+// workflow's push paths equal to this list.
+export const iosNativeInputs = [
+  "package.json",
+  "bun.lock",
+  "bunfig.toml",
+  "turbo.json",
+  ".github/actions/setup/**",
+  ".github/codeql/**",
+  ".github/workflows/quality.yml",
+  ".github/workflows/fitness-ios-verify.yml",
+  "scripts/ci-scope.mjs",
+  "scripts/require-ios-native.mjs",
+  "scripts/check-sarif.mjs",
+  "apps/fitness-ios/**",
+  "packages/fitness-contracts/**",
+  "packages/design-tokens/**",
+  "apps/fitness/schema.sql",
+  "apps/fitness/package.json",
+  "apps/fitness/bunfig.toml",
+  "apps/fitness/src/**",
+  "apps/fitness/tests/ios-*",
+  "apps/fitness/tests/clerk-fake.ts",
+  "apps/fitness/tests/isolated-schema.ts",
+  "apps/fitness/tests/deadline.ts",
+  "apps/fitness/tests/preload.ts",
+  "apps/fitness/tests/fixtures/wire/**",
+];
+
+// GitHub's path filter syntax: `*` stays within one path segment and `**`
+// crosses segments.
+export function pathFilter(patterns) {
+  const expressions = patterns.map(
+    (pattern) =>
+      new RegExp(
+        `^${pattern
+          .split(/(\*\*|\*)/)
+          .map((part) =>
+            part === "**"
+              ? ".*"
+              : part === "*"
+                ? "[^/]*"
+                : part.replace(/[.?+^${}()|[\]\\]/g, "\\$&"),
+          )
+          .join("")}$`,
+      ),
+  );
+  return (file) => expressions.some((expression) => expression.test(file));
+}
+
 function documentationOnly(files, readDiff) {
   if (!files.length || !files.every((path) => browserDocumentation.has(path)))
     return false;
@@ -58,10 +113,12 @@ export function comparison(eventName, event, head) {
 
 // Turbo owns lockfile resolution and the transitive workspace dependency graph.
 // Missing history or an unrecognised event must widen checks, never skip them.
+// With `rootInputs`, only root files that match those patterns select every
+// workspace. Other root files, such as documentation, select nothing.
 export function workspaceScope(
   environment = process.env,
   execute = execFileSync,
-  { browser = false } = {},
+  { browser = false, rootInputs } = {},
 ) {
   const full =
     environment.GITHUB_EVENT_NAME === "schedule" ||
@@ -119,17 +176,37 @@ export function workspaceScope(
       ) {
         return { full, packages: [], reason: "app documentation only" };
       }
-      // Root automation/configuration affects every product.
-      const rootChanged = files.some(
-        (file) =>
-          file !== "bun.lock" &&
-          !all.some((item) => file.startsWith(`${item.path}/`)),
-      );
+      const owner = (file) =>
+        all
+          .filter((item) => file.startsWith(`${item.path}/`))
+          .sort((a, b) => b.path.length - a.path.length)[0];
+      const rootFiles = files.filter((file) => !owner(file));
+      const rootInput = rootInputs && pathFilter(rootInputs);
+      // Root automation/configuration affects every product. Without
+      // `rootInputs`, Turbo resolves a lockfile change on its own.
+      const rootChanged = rootInput
+        ? rootFiles.some(rootInput)
+        : rootFiles.some((file) => file !== "bun.lock");
       if (!rootChanged) {
-        selected = inventory(["--affected"], {
-          TURBO_SCM_BASE: range.base,
-          TURBO_SCM_HEAD: range.head,
-        });
+        // Turbo's --affected leaves out workspace changes made beside a root
+        // file. When `rootInputs` leaves root files out, select the changed
+        // workspaces and their consumers by name instead.
+        const changed = [
+          ...new Set(
+            files
+              .map(owner)
+              .filter(Boolean)
+              .map((item) => item.name),
+          ),
+        ];
+        selected = !(rootInput && rootFiles.length)
+          ? inventory(["--affected"], {
+              TURBO_SCM_BASE: range.base,
+              TURBO_SCM_HEAD: range.head,
+            })
+          : changed.length
+            ? inventory(changed.map((name) => `--filter=...${name}`))
+            : [];
         // Product-root automation is not a dependency of each nested package.
         // Include those children when their containing workspace is affected.
         const parents = selected;
@@ -180,10 +257,8 @@ const iosNativeWorkspaces = [
 ];
 
 // Main pushes leave the native iPhone job to the Fitness iOS Verification
-// workflow, which runs it for main pushes that touch the app, its
-// dependencies or any file outside the workspaces, and daily.
-// ci-scope.test.mjs keeps that workflow's push paths in step with the
-// root-file rule above.
+// workflow, which runs it for main pushes that touch `iosNativeInputs`, and
+// daily.
 export function mainPush(environment) {
   return (
     environment.GITHUB_EVENT_NAME === "push" &&
@@ -209,7 +284,12 @@ if (
   // iPhone job for changes that reach it.
   const iosNative =
     !mainPush(process.env) &&
-    iosNativeSelected(workspaceScope(process.env, execFileSync), process.env);
+    iosNativeSelected(
+      workspaceScope(process.env, execFileSync, {
+        rootInputs: iosNativeInputs,
+      }),
+      process.env,
+    );
   console.log(JSON.stringify({ browser: scope, iosNative }));
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(

@@ -124,16 +124,13 @@ async function releaseJournal(path) {
   return open(path, "wx", 0o600);
 }
 
-/** Fitness web releases also require Fitness iOS Verification on the exact commit. */
-export const qualificationOptions = app => ({ ios: app.name === "fitness" });
-
 export async function releaseVercel({ action, app, config, deploymentId, receipt, journalPath, sha }, { vercel, qualify, checkout }) {
   if (!["inspect", "stage", "promote"].includes(action) || app.platform !== "vercel" || !id(config.projectId, "prj") ||
       !id(config.teamId, "team") || !validProductionAnchor(config) || !id(config.requiredCheckId, "chk") ||
       (action !== "stage" && !id(deploymentId, "dpl")) ||
       (action !== "inspect" && (typeof journalPath !== "string" || !isAbsolute(journalPath)))) fail("Unsupported release target, journal or action.");
   await checkout(sha);
-  const quality = await qualify(sha, qualificationOptions(app));
+  const quality = await qualify(sha);
   const project = await vercel(`/v9/projects/${config.projectId}`);
   if (action === "stage") {
     if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
@@ -162,7 +159,7 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   // page is checked again below, so a build created while paging is not missed.
   const inventory = await deploymentInventory(vercel, config.projectId);
   await checkout(sha);
-  const finalQuality = await qualify(sha, qualificationOptions(app));
+  const finalQuality = await qualify(sha);
   if (canonical(finalQuality) !== canonical(quality)) fail("Quality qualification changed during admission.");
   // GitHub admission performs several asynchronous reads. Refresh provider
   // admission afterwards, so changes during qualification cannot use an old
@@ -252,5 +249,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   };
   console.log(JSON.stringify(await releaseVercel({ action, app, config, sha, deploymentId: options["--deployment"],
     receipt: options["--qualification"] ? await protectedJson(options["--qualification"]) : undefined,
-    journalPath: options["--journal"] }, { vercel: vercelApi, qualify: (sha, admission) => requireReleaseChecks(sha, githubApi, admission), checkout })));
+    journalPath: options["--journal"] }, { vercel: vercelApi, qualify: sha => requireReleaseChecks(sha, githubApi), checkout })));
 }

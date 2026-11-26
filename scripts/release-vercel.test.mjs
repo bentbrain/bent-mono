@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, readFile, rm, writeFile, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configurationHash, protectedJson, qualificationOptions, releaseVercel, validateRuntime, vercelApi } from "./release-vercel.mjs";
+import { configurationHash, protectedJson, releaseVercel, validateRuntime, vercelApi } from "./release-vercel.mjs";
 
 const sha = "a".repeat(40);
 const app = { name: "stay", directory: "apps/stay", project: "synthetic-guide", platform: "vercel" };
@@ -300,29 +300,6 @@ test("stage sends Git source only and never uploads source files, environment ov
     assert.deepEqual(f.state.posts, [{ path: "/v13/deployments", body: { name: app.project, project: config.projectId,
       target: "production", gitSource: { type: "github", repoId: 123, ref: "main", sha } } }]);
   });
-});
-test("a Fitness web release also requires Fitness iOS Verification on the exact commit; other apps do not", async () => {
-  for (const [name, ios] of [["fitness", true], ["www", false], ["stay", false], ["collage", false], ["drive", false],
-    ["trackmap", false], ["jp", false], ["toolbar", false], ["fitness-ios", false]]) {
-    assert.deepEqual(qualificationOptions({ name }), { ios }, name);
-    for (const action of ["inspect", "stage"]) await trial(action, () => {}, async (f, options) => {
-      options.app = { ...app, name };
-      const calls = [];
-      await releaseVercel(options, { ...f, qualify: async (...args) => { calls.push(args); return f.qualify(...args); } });
-      // Staging qualifies again just before its single mutation, with the same options.
-      assert.deepEqual(calls, Array(action === "inspect" ? 1 : 2).fill([sha, { ios }]), `${name} ${action}`);
-    });
-  }
-  // A failed Fitness iOS Verification stops the Fitness release before any mutation.
-  await trial("stage", () => {}, async (f, options) => {
-    options.app = { ...app, name: "fitness" };
-    const qualify = async (_, { ios }) => { if (ios) throw new Error("Fitness iOS Verification has not passed"); return f.qualify(); };
-    await assert.rejects(releaseVercel(options, { ...f, qualify }), /Fitness iOS Verification/);
-    assert.deepEqual(f.state.posts, []);
-  });
-  // The command line hands these options to the GitHub release qualification.
-  const source = await readFile(new URL("./release-vercel.mjs", import.meta.url), "utf8");
-  assert.ok(source.includes("qualify: (sha, admission) => requireReleaseChecks(sha, githubApi, admission), checkout"));
 });
 test("stage rejects changed workspace access, Node, native gate or automatic assignment", async () => {
   for (const mutate of [s => { s.project.nodeVersion = "22.x"; }, s => { s.project.sourceFilesOutsideRootDirectory = false; },

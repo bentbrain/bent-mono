@@ -6,13 +6,19 @@ on:
   push:
     branches: [main]
     paths:
-      # Every file outside the workspaces. On pull requests, Quality's
-      # root-file rule runs the native suite for each of them.
-      - "**"
-      - "!apps/**"
-      - "!packages/**"
-      - "!products/**"
-      # The iPhone app and the workspace code it builds and tests against.
+      # The inputs of the native iPhone checks: iosNativeInputs in
+      # scripts/ci-scope.mjs, which also selects Quality's native suite.
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - turbo.json
+      - ".github/actions/setup/**"
+      - ".github/codeql/**"
+      - ".github/workflows/quality.yml"
+      - ".github/workflows/fitness-ios-verify.yml"
+      - scripts/ci-scope.mjs
+      - scripts/require-ios-native.mjs
+      - scripts/check-sarif.mjs
       - apps/fitness-ios/**
       - packages/fitness-contracts/**
       - packages/design-tokens/**
@@ -31,11 +37,14 @@ permissions:
 concurrency:
   group: fitness-ios-verify-${{ github.ref }}
   cancel-in-progress: true
+# This workflow reports on main after merges that touch the native iPhone
+# inputs, daily at 17:00 UTC and on dispatch. Releases do not wait for it.
 # Time budget: the five macOS jobs run at the same time, one on each of the
 # repository's five macOS runners, and none waits for another. CodeQL Swift
 # (app) and CodeQL Swift (tools) stop at 27 minutes, Simulator flow (denied)
 # at 27 and the other two flows at 25. The aggregate starts when they finish
-# and stops at 2, so a run ends within 29 minutes. Expected, until measured:
+# and stops at 2, so once runners are available a run executes within 29
+# minutes. Expected, until measured:
 # app about 24, tools about 24, denied about 21, allowed about 18 and partial
 # about 18.
 # The Simulator flow builds and the CodeQL builds compile only the arm64

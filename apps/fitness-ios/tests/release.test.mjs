@@ -913,16 +913,19 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(steps.at(-1).run).toContain('"$RUNNER_TEMP/eas-static"');
   });
 
-  test("every qualification also requires Fitness iOS Verification on the exact commit", () => {
+  test("every qualification requires Quality on the exact main commit and nothing else", () => {
     const calls = steps.filter((step) => /require-release-checks\.mjs/.test(step.run ?? ""));
     expect(calls).toHaveLength(3);
     for (const [position, output] of ["quality-initial", "quality-build", "quality-submit"].entries()) {
       expect(calls[position].run).toContain(
-        `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" --ios > "$RUNNER_TEMP/${output}.json"`,
+        `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/${output}.json"`,
       );
       expect(calls[position].env).toEqual({ GH_TOKEN: "${{ github.token }}" });
     }
     expect(source.match(/require-release-checks\.mjs/g)).toHaveLength(3);
+    // TestFlight releases do not wait for Fitness iOS Verification.
+    expect(source).not.toContain("--ios");
+    expect(source).not.toContain("fitness-ios-verify");
     expect(workflow.permissions.actions).toBe("read");
   });
 
@@ -1432,28 +1435,13 @@ process.stdout.write(JSON.stringify(result));`,
     expect(archive.indexOf("verifySignature(bundle);")).toBeLessThan(archive.indexOf('"--entitlements"'));
   });
 
-  test("both qualifications must name the same Quality and Fitness iOS Verification runs", () => {
-    const quality = {
-      sha,
-      qualityRunId: 23,
-      qualityAttempt: 2,
-      pullRequest: 2,
-      iosVerificationRunId: 41,
-      iosVerificationAttempt: 1,
-    };
+  test("both qualifications must name the same Quality run at the same attempt", () => {
+    const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };
     expect(() => checkSameQuality(quality, { ...quality })).not.toThrow();
-    for (const change of [
-      { qualityRunId: 24 },
-      { qualityAttempt: 3 },
-      { sha: "b".repeat(40) },
-      { iosVerificationRunId: 42 },
-      { iosVerificationAttempt: 2 },
-      { iosVerificationRunId: undefined },
-      { iosVerificationAttempt: undefined },
-    ])
+    for (const change of [{ qualityRunId: 24 }, { qualityAttempt: 3 }, { sha: "b".repeat(40) }])
       expect(() => checkSameQuality(quality, { ...quality, ...change })).toThrow("changed");
-    // A qualification without the iOS verification, or with a malformed ID, never matches.
-    for (const id of ["qualityRunId", "qualityAttempt", "iosVerificationRunId", "iosVerificationAttempt"])
+    // A qualification with a missing or malformed Quality ID never matches.
+    for (const id of ["qualityRunId", "qualityAttempt"])
       for (const value of [undefined, 0, -1, 1.5, "41", null, 2 ** 53]) {
         const bad = { ...quality, [id]: value };
         expect(() => checkSameQuality(bad, { ...bad })).toThrow("changed");

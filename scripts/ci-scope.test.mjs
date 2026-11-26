@@ -12,11 +12,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 import {
   browserMatrix,
   comparison,
   includesPath,
+  iosNativeInputs,
   iosNativeSelected,
+  pathFilter,
   workspaceScope,
 } from "./ci-scope.mjs";
 
@@ -312,7 +315,43 @@ test("real Turbo scopes dependency/lockfile updates and shared consumers", (cont
     );
     head = commit();
     assert.deepEqual(affected(head), ["activity", "other", "tokens"]);
-    base = head;
+    // Beside a root documentation change, the native selection names the
+    // changed workspace, and Turbo adds its consumers.
+    writeFileSync(join(cwd, "README.md"), "# Fixture\n");
+    writeFileSync(
+      join(cwd, "packages/tokens/index.css"),
+      ":root { color: red }",
+    );
+    const documented = commit();
+    const eventPath = join(cwd, "..", `${cwd.split("/").at(-1)}-event.json`);
+    writeFileSync(
+      eventPath,
+      JSON.stringify({ pull_request: { base: { sha: head } } }),
+    );
+    try {
+      const scope = workspaceScope(
+        {
+          ...process.env,
+          GITHUB_EVENT_NAME: "pull_request",
+          GITHUB_SHA: documented,
+          GITHUB_EVENT_PATH: eventPath,
+        },
+        (command, args, options) =>
+          execFileSync(command === "git" ? command : turbo, args, {
+            ...options,
+            cwd,
+          }),
+        { rootInputs: ["package.json"] },
+      );
+      assert.deepEqual(scope.packages.map((item) => item.name).sort(), [
+        "activity",
+        "other",
+        "tokens",
+      ]);
+    } finally {
+      rmSync(eventPath, { force: true });
+    }
+    base = documented;
     put("package.json", {
       name: "fixture",
       private: true,
@@ -347,21 +386,28 @@ const contracts = {
 };
 const fitness = { name: "@bent/fitness", path: "apps/fitness" };
 const iosPackages = [...packages, fitnessIos, contracts, fitness];
-function iosExecute(files, affected, fail = false) {
+// Turbo answers --affected and --filter=...<name> with `affected`: the
+// changed workspaces and their consumers.
+function iosExecute(files, affected, fail = false, calls = []) {
   return (command, args, options) => {
     if (command === "git") {
       assert.deepEqual(args.slice(-2), [base, head]);
       if (fail) throw new Error("Missing base history");
       return files.join("\0") + "\0";
     }
+    calls.push(args);
+    const scoped =
+      args.includes("--affected") ||
+      args.some((arg) => arg.startsWith("--filter="));
     return JSON.stringify({
-      packages: { items: args.includes("--affected") ? affected : iosPackages },
+      packages: { items: scoped ? affected : iosPackages },
     });
   };
 }
-const iosSelected = (env, files, affected, fail) =>
+const iosOptions = { rootInputs: iosNativeInputs };
+const iosSelected = (env, files, affected, fail, calls) =>
   iosNativeSelected(
-    workspaceScope(env, iosExecute(files, affected, fail)),
+    workspaceScope(env, iosExecute(files, affected, fail, calls), iosOptions),
     env,
   );
 
@@ -436,7 +482,6 @@ test("the native iPhone suite is left out for changes to other products", () =>
       [["apps/toolbar/src/index.ts"], [toolbar]],
       [["apps/trackmap/src/main.ts"], [packages[0]]],
       [["products/drive/apps/web/src/app.tsx"], [packages[3]]],
-      [["apps/trackmap/package.json", "bun.lock"], [packages[0]]],
     ])
       assert.equal(iosSelected(env, files, affected), false, files.join());
   }));
@@ -481,118 +526,81 @@ test("main pushes leave the native iPhone suite to Fitness iOS Verification", ()
     }
   }));
 
-// GitHub's push path filter: `*` stays within one path segment, `**` crosses
-// segments, and the last pattern that matches a path decides it.
-function pathFilter(patterns) {
-  const expressions = patterns.map((pattern) => {
-    const negated = pattern.startsWith("!");
-    const glob = negated ? pattern.slice(1) : pattern;
-    const source = glob
-      .split(/(\*\*|\*|\?)/)
-      .map((part) =>
-        part === "**"
-          ? ".*"
-          : part === "*"
-            ? "[^/]*"
-            : part === "?"
-              ? "[^/]"
-              : part.replace(/[.+^${}()|[\]\\]/g, "\\$&"),
-      )
-      .join("");
-    return { negated, expression: new RegExp(`^${source}$`) };
-  });
-  return (file) =>
-    expressions.reduce(
-      (included, { negated, expression }) =>
-        expression.test(file) ? !negated : included,
-      false,
-    );
-}
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+const tracked = execFileSync("git", ["ls-files", "-z"], {
+  cwd: repositoryRoot,
+  encoding: "utf8",
+})
+  .split("\0")
+  .filter(Boolean);
+// The workspaces Turbo lists: each tracked package.json directory that a root
+// workspace pattern names.
+const workspacePatterns = JSON.parse(
+  readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+).workspaces.map(
+  (pattern) => new RegExp(`^${pattern.replaceAll("*", "[^/]+")}$`),
+);
+const workspaces = tracked
+  .filter((file) => file.endsWith("/package.json"))
+  .map((file) => file.slice(0, -"/package.json".length))
+  .filter((path) => workspacePatterns.some((pattern) => pattern.test(path)))
+  .map((path) => ({ name: path, path }));
+const insideWorkspace = (file) =>
+  workspaces.some((item) => file.startsWith(`${item.path}/`));
+// One example path for each root input pattern.
+const rootInputs = iosNativeInputs
+  .filter((pattern) => !insideWorkspace(pattern))
+  .map((pattern) =>
+    pattern.replace("/**", "/nested/example.yml").replace("*", "example"),
+  );
+// Documentation and root files that no native iPhone check reads.
+const unrelatedRootFiles = [
+  "README.md",
+  "AGENTS.md",
+  "LICENSE",
+  ".gitignore",
+  "docs/guide.md",
+  "docs/ci/runners.md",
+  "SOURCE_PROVENANCE.json",
+  "deployments.json",
+  "assets/icon.svg",
+  ".github/workflows/deploy-jp.yml",
+  ".github/workflows/deploy-toolbar.yml",
+  ".github/workflows/deploy-fitness-ios.yml",
+  "scripts/release-vercel.mjs",
+  "scripts/check-public-source.mjs",
+  "scripts/ci-scope.test.mjs",
+];
 
-test("every root file that selects the native iPhone suite on a pull request starts Fitness iOS Verification on main", () => {
-  const root = fileURLToPath(new URL("..", import.meta.url));
-  const tracked = execFileSync("git", ["ls-files", "-z"], {
-    cwd: root,
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean);
-  // The workspaces Turbo lists: each tracked package.json directory that a
-  // root workspace pattern names.
-  const patterns = JSON.parse(
-    readFileSync(join(root, "package.json"), "utf8"),
-  ).workspaces.map(
-    (pattern) => new RegExp(`^${pattern.replaceAll("*", "[^/]+")}$`),
+test("the Fitness iOS Verification push paths are the shared native iPhone inputs", () => {
+  const workflow = parse(
+    readFileSync(
+      join(repositoryRoot, ".github/workflows/fitness-ios-verify.yml"),
+      "utf8",
+    ),
   );
-  const workspaces = tracked
-    .filter((file) => file.endsWith("/package.json"))
-    .map((file) => file.slice(0, -"/package.json".length))
-    .filter((path) => patterns.some((pattern) => pattern.test(path)))
-    .map((path) => ({ name: path, path }));
-  assert.ok(workspaces.some((item) => item.path === "apps/fitness-ios"));
-  const workflow = readFileSync(
-    join(root, ".github/workflows/fitness-ios-verify.yml"),
-    "utf8",
-  );
-  const block = workflow.match(
-    /^  push:\n    branches: \[main\]\n    paths:\n((?:      .*\n)+)/m,
-  )?.[1];
-  assert.ok(block, "Fitness iOS Verification lists its push paths");
-  const verified = pathFilter(
-    [...block.matchAll(/^      - "?([^"\n]+)"?$/gm)].map((match) => match[1]),
-  );
-  const execute = (file) => (command, args) =>
-    command === "git"
-      ? `${file}\0`
-      : JSON.stringify({
-          packages: { items: args.includes("--affected") ? [] : workspaces },
-        });
-  // Tracked files, and new files in a new root directory or at the root.
-  const candidates = [
-    ...tracked,
-    "docs/guide.md",
-    "tools/release.mjs",
-    ".github/actions/new/action.yml",
-    "new-config.json",
-  ];
-  fixture((env) => {
-    // Quality's root-file rule: a change outside every workspace selects
-    // every workspace, and with it the native iPhone suite.
-    const selected = candidates.filter((file) =>
-      iosNativeSelected(workspaceScope(env, execute(file)), env),
-    );
-    assert.ok(selected.length > 30, `${selected.length} root files`);
-    for (const file of [
-      "bunfig.toml",
-      "package.json",
-      "turbo.json",
-      ".github/actions/setup/action.yml",
-      ".github/workflows/fitness-ios-verify.yml",
-      ".github/workflows/quality.yml",
-      "scripts/check-sarif.mjs",
-      "scripts/ci-scope.mjs",
-      "scripts/require-ios-native.mjs",
-      "docs/guide.md",
-    ])
-      assert.ok(selected.includes(file), file);
-    const missing = selected.filter((file) => !verified(file));
-    assert.deepEqual(
-      missing,
-      [],
-      `Add these root files to the Fitness iOS Verification push paths: ${missing.join(", ")}`,
-    );
+  assert.deepEqual(workflow.on.push, {
+    branches: ["main"],
+    paths: iosNativeInputs,
   });
-  // The lockfile reaches the native build through every workspace's dependencies.
-  assert.ok(verified("bun.lock"));
-  // The filter still leaves out other products.
+  assert.ok(workspaces.some((item) => item.path === "apps/fitness-ios"));
+  // Each root input names a tracked file, or a directory with tracked files.
+  for (const pattern of iosNativeInputs.filter((p) => !insideWorkspace(p))) {
+    const matches = pathFilter([pattern]);
+    assert.ok(tracked.some(matches), `${pattern} matches no tracked file`);
+  }
+  const verified = pathFilter(iosNativeInputs);
   for (const file of [
+    ...unrelatedRootFiles,
     "apps/jp/src/content/post.md",
     "apps/toolbar/src/index.ts",
     "packages/ui/src/button.tsx",
     "products/drive/apps/web/src/page.tsx",
+    "apps/fitness/tests/x/ios-flow.ts",
   ])
     assert.equal(verified(file), false, file);
   for (const file of [
+    ...rootInputs,
     "apps/fitness-ios/src/app.tsx",
     "apps/fitness/tests/ios-roundtrip.test.ts",
     "apps/fitness/src/server/db.ts",
@@ -600,3 +608,65 @@ test("every root file that selects the native iPhone suite on a pull request sta
   ])
     assert.equal(verified(file), true, file);
 });
+
+test("a pull request selects the native iPhone suite for each native root input, and never for documentation alone", () =>
+  fixture((env) => {
+    const blogOnly = [{ name: blog.name, path: blog.path }];
+    for (const file of unrelatedRootFiles) {
+      const calls = [];
+      assert.equal(iosSelected(env, [file], [], false, calls), false, file);
+      // Documentation alone needs no workspace inventory beyond the list.
+      assert.ok(!calls.some((args) => args.includes("--affected")), file);
+      assert.equal(
+        iosSelected(env, [file, "apps/jp/src/content/post.md"], blogOnly),
+        false,
+        `${file} with a JP change`,
+      );
+    }
+    assert.equal(iosSelected(env, unrelatedRootFiles, []), false, "together");
+    for (const file of rootInputs) {
+      assert.equal(iosSelected(env, [file], []), true, file);
+      assert.equal(
+        iosSelected(env, ["README.md", file], []),
+        true,
+        `README.md with ${file}`,
+      );
+    }
+    // Beside documentation, a workspace change still selects the suite
+    // through the changed workspace and its consumers.
+    const calls = [];
+    assert.equal(
+      iosSelected(
+        env,
+        ["README.md", "packages/design-tokens/src/index.css"],
+        [packages[1], fitnessIos],
+        false,
+        calls,
+      ),
+      true,
+    );
+    assert.deepEqual(calls.at(-1), [
+      "ls",
+      "--filter=...@bent/design-tokens",
+      "--output=json",
+    ]);
+    assert.equal(
+      iosSelected(
+        env,
+        ["AGENTS.md", "apps/fitness-ios/src/app.tsx"],
+        [fitnessIos],
+      ),
+      true,
+    );
+    // Every tracked root file selects the suite exactly when it is a native input.
+    const native = pathFilter(iosNativeInputs);
+    for (const file of tracked.filter((file) => !insideWorkspace(file)))
+      assert.equal(iosSelected(env, [file], []), native(file), file);
+    // Quality's other checks still select every workspace for a root change.
+    for (const file of ["README.md", "docs/guide.md", "AGENTS.md"])
+      assert.deepEqual(
+        workspaceScope(env, iosExecute([file], []), browserOptions).packages,
+        iosPackages,
+        file,
+      );
+  }));

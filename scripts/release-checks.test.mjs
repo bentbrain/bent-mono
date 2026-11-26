@@ -306,10 +306,6 @@ test("JP rejects untrusted workflow-run heads before checkout in the protected j
   assert.ok(condition?.includes("github.event.workflow_run.event == 'push'"));
   assert.ok(condition?.includes("github.event.workflow_run.head_repository.full_name == 'bentbrain/bent-mono'"));
 });
-const iosWorkflow = { id: 31, path: ".github/workflows/fitness-ios-verify.yml", state: "active" };
-const iosRun = { ...run, id: 41, event: "push", path: iosWorkflow.path, workflow_id: iosWorkflow.id, run_attempt: 1 };
-const iosNames = ["CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
-  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 function fixture(change = () => {}) {
   const data = {
     main: { object: { sha } }, workflow: structuredClone(workflow), runs: [structuredClone(run)],
@@ -319,24 +315,15 @@ function fixture(change = () => {}) {
     checks: [{ name: "CodeQL", app: { slug: "github-advanced-security" }, head_sha: head, status: "completed", conclusion: "success" }],
     statuses: [{ context: "Independent review", state: "success", target_url: `https://github.com/${repo}/pull/2#issuecomment-123` }],
     finalRun: structuredClone(run),
-    iosWorkflow: structuredClone(iosWorkflow),
-    iosRuns: [structuredClone(iosRun)],
-    iosJobs: iosNames.map(name => ({ name, head_sha: sha, status: "completed", conclusion: "success" })),
-    finalIosRun: structuredClone(iosRun),
   };
   change(data);
   let mainCalls = 0;
   let qualityLists = 0;
-  let iosLists = 0;
   const api = async path => {
     api.paths.push(path);
-    if (path.endsWith("/workflows/fitness-ios-verify.yml")) return data.iosWorkflow;
-    // A later listing answers with the runs that appeared while qualification was under way.
-    if (path.includes("/workflows/31/runs?")) return { workflow_runs: ++iosLists > 1 && data.laterIosRuns || data.iosRuns };
-    if (path.includes("/runs/41/attempts/1/jobs?")) return { jobs: data.iosJobs };
-    if (path.endsWith("/actions/runs/41")) return data.finalIosRun;
     if (path.endsWith("/git/ref/heads/main")) return data.changedMain && ++mainCalls > 1 ? data.changedMain : data.main;
     if (path.endsWith("/workflows/quality.yml")) return data.workflow;
+    // A later listing answers with the runs that appeared while qualification was under way.
     if (path.includes("/workflows/12/runs?")) return { workflow_runs: ++qualityLists > 1 && data.laterRuns || data.runs };
     if (path.includes("/attempts/2/jobs?")) return { jobs: data.jobs };
     if (path.includes("/check-runs?")) return { check_runs: data.checks };
@@ -351,81 +338,15 @@ function fixture(change = () => {}) {
 test("qualifies exact successful main and reviewed merged PR using the latest run attempt", async () => {
   const api = fixture();
   assert.deepEqual(await requireReleaseChecks(sha, api), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
-  assert.ok(!api.paths.some(path => path.includes("fitness-ios-verify") || path.includes("/workflows/31/")),
-    "Without --ios no Fitness iOS Verification request is sent.");
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(), { ios: false }), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
-});
-test("with ios, also requires the latest exact-commit Fitness iOS Verification run to pass every job", async () => {
-  const expected = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2, iosVerificationRunId: 41, iosVerificationAttempt: 1 };
-  for (const event of ["push", "workflow_dispatch", "schedule"]) {
-    assert.deepEqual(await requireReleaseChecks(sha, fixture(d => { d.iosRuns[0].event = event; }), { ios: true }), expected);
-  }
-  const api = fixture();
-  await requireReleaseChecks(sha, api, { ios: true });
-  // Both runs are read and listed again after every other inspection, and main is read last.
-  const runs = index => `/repos/bentbrain/bent-mono/actions/workflows/${index}/runs?`;
-  assert.deepEqual(api.paths.slice(-5).map(path => path.replace(/runs\?.*$/, "runs?")), [
-    "/repos/bentbrain/bent-mono/actions/runs/23", runs(12),
-    "/repos/bentbrain/bent-mono/actions/runs/41", runs(31),
+  // The Quality run is read and listed again after every other inspection, and main is read last.
+  assert.deepEqual(api.paths.slice(-3).map(path => path.replace(/runs\?.*$/, "runs?")), [
+    "/repos/bentbrain/bent-mono/actions/runs/23", "/repos/bentbrain/bent-mono/actions/workflows/12/runs?",
     "/repos/bentbrain/bent-mono/git/ref/heads/main"]);
-  assert.ok(api.paths.includes("/repos/bentbrain/bent-mono/actions/workflows/31/runs?branch=main&head_sha=" + sha + "&per_page=100&page=1"));
-  // An older failed run does not block a newer passing one.
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(d => { d.iosRuns.push({ ...iosRun, id: 40, conclusion: "failure" }); }),
-    { ios: true }), expected);
-});
-test("with ios, fails closed for any missing, stale, foreign or unsuccessful verification", async () => {
-  const mutations = [
-    d => { d.iosRuns = []; },
-    d => { d.iosRuns[0].event = "pull_request"; },
-    d => { d.iosRuns[0].event = "workflow_run"; },
-    d => { d.iosRuns[0].head_branch = "topic"; },
-    d => { d.iosRuns[0].head_sha = head; },
-    d => { d.iosRuns[0].repository.full_name = "elsewhere/repo"; },
-    d => { d.iosRuns[0].head_repository.full_name = "fork/repo"; },
-    d => { d.iosRuns[0].path = ".github/workflows/quality.yml"; },
-    d => { d.iosRuns[0].workflow_id = 12; },
-    d => { d.iosRuns[0].status = "in_progress"; d.iosRuns[0].conclusion = null; },
-    d => { d.iosRuns[0].conclusion = "cancelled"; },
-    d => { d.iosRuns.push({ ...iosRun, id: 42, event: "schedule", conclusion: "failure" }); },
-    d => { d.iosWorkflow.state = "disabled_manually"; },
-    d => { d.iosWorkflow.path = ".github/workflows/quality.yml"; },
-    d => { d.iosJobs.pop(); },
-    d => { d.iosJobs.push(d.iosJobs[0]); },
-    d => { d.iosJobs[1].conclusion = "skipped"; },
-    d => { d.iosJobs[3].conclusion = "failure"; },
-    d => { d.iosJobs[5].status = "in_progress"; },
-    d => { d.iosJobs[2].head_sha = head; },
-    d => { d.iosJobs[3].conclusion = "cancelled"; },
-    d => { d.iosJobs[1].name = "CodeQL Swift (seeder)"; },
-    d => { d.iosJobs[2].name = "fitness-ios-native"; },
-    d => { d.finalIosRun.run_attempt = 2; },
-    d => { d.finalIosRun.conclusion = "failure"; },
-    d => { d.finalIosRun.status = "in_progress"; },
-  ];
-  for (const mutate of mutations) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }));
-    // Quality qualification alone does not read the verification workflow.
-    await assert.doesNotReject(requireReleaseChecks(sha, fixture(mutate)));
-  }
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.iosJobs.pop(); }), { ios: true }),
-    { message: "Required Fitness iOS Verification job is missing, ambiguous or unsuccessful: Fitness iOS verification" });
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.finalIosRun.run_attempt = 2; }), { ios: true }),
-    { message: "Release qualification changed during inspection." });
+  // Release qualification reads only the Quality workflow's runs.
+  assert.ok(!api.paths.some(path => path.includes("fitness-ios-verify")));
 });
 test("a newer run or a new attempt that appears during qualification supersedes the selected run", async () => {
   const changed = { message: "Release qualification changed during inspection." };
-  const iosSuperseded = [
-    // Run 42 for the exact commit starts, or even passes, while run 41 is being checked.
-    d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "workflow_dispatch", status: "in_progress", conclusion: null }]; },
-    d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "schedule" }]; },
-    // Run 41 gets a new attempt, seen in the listing before the direct read catches up.
-    d => { d.laterIosRuns = [{ ...iosRun, run_attempt: 2, status: "queued", conclusion: null }]; },
-    d => { d.laterIosRuns = [{ ...iosRun, run_attempt: 2 }]; },
-    d => { d.laterIosRuns = [{ ...iosRun, conclusion: "failure" }]; },
-  ];
-  for (const mutate of iosSuperseded) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), changed);
-  }
   const qualitySuperseded = [
     d => { d.laterRuns = [d.runs[0], { ...run, id: 24, status: "in_progress", conclusion: null, run_attempt: 1 }]; },
     d => { d.laterRuns = [d.runs[0], { ...run, id: 24, run_attempt: 1 }]; },
@@ -434,21 +355,13 @@ test("a newer run or a new attempt that appears during qualification supersedes 
     // The selected run disappears from the listing.
     d => { d.laterRuns = [{ ...run, id: 7 }]; },
   ];
-  for (const mutate of qualitySuperseded) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate)), changed);
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), changed);
-  }
+  for (const mutate of qualitySuperseded) await assert.rejects(requireReleaseChecks(sha, fixture(mutate)), changed);
   // A newer run outside the eligible set does not supersede the selected one.
   const ignored = d => {
-    d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "pull_request" }, { ...iosRun, id: 43, head_branch: "topic" },
-      { ...iosRun, id: 44, head_repository: { full_name: "fork/repo" } }, { ...iosRun, id: 45, workflow_id: 12 }];
-    d.laterRuns = [d.runs[0], { ...run, id: 24, head_sha: head }];
+    d.laterRuns = [d.runs[0], { ...run, id: 24, head_sha: head }, { ...run, id: 25, event: "pull_request" },
+      { ...run, id: 26, head_branch: "topic" }, { ...run, id: 27, head_repository: { full_name: "fork/repo" } }];
   };
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(ignored), { ios: true }),
-    { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2, iosVerificationRunId: 41, iosVerificationAttempt: 1 });
-  // A malformed ID in the later listing fails closed without being shown.
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: "42x" }]; }),
-    { ios: true }), { message: "GitHub returned a malformed Fitness iOS Verification run ID." });
+  assert.deepEqual(await requireReleaseChecks(sha, fixture(ignored)), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
 });
 test("fails closed for stale source, newer failed runs, skipped/missing/duplicate jobs and foreign workflows", async () => {
   const mutations = [
@@ -500,25 +413,11 @@ test("provider IDs used in request paths must be positive safe integers, and a b
     }
   }
 });
-test("Fitness iOS Verification IDs must be positive safe integers, and a bad one is never shown", async () => {
-  for (const id of [email, "31/../../users", 12.5, 0, -1, null]) {
-    for (const [mutate, kind] of [
-      [d => { d.iosWorkflow.id = id; d.iosRuns[0].workflow_id = id; }, "workflow ID"],
-      [d => { d.iosRuns[0].id = id; }, "run ID"],
-      [d => { d.iosRuns[0].run_attempt = id; }, "run attempt"],
-    ]) {
-      await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), error =>
-        error.message === `GitHub returned a malformed Fitness iOS Verification ${kind}.` && !error.message.includes(String(id)));
-    }
-  }
-});
-test("the command takes one --sha and at most one --ios", () => {
-  assert.deepEqual(releaseArguments(["--sha", sha]), { sha, ios: false });
-  assert.deepEqual(releaseArguments(["--sha", sha, "--ios"]), { sha, ios: true });
-  assert.deepEqual(releaseArguments(["--ios", "--sha", sha]), { sha, ios: true });
-  for (const args of [[], ["--sha"], [sha], ["--sha", sha, "--ios", "--ios"], ["--sha", sha, "--sha", sha],
-    ["--sha", sha, "--IOS"], ["--sha", sha, "--ios=true"], ["--sha", sha, "extra"], ["--ios"]]) {
-    assert.throws(() => releaseArguments(args), { message: "Usage: node scripts/require-release-checks.mjs --sha <full-sha> [--ios]" });
+test("the command takes exactly one --sha", () => {
+  assert.deepEqual(releaseArguments(["--sha", sha]), { sha });
+  for (const args of [[], ["--sha"], [sha], ["--sha", sha, "--ios"], ["--ios", "--sha", sha], ["--sha", sha, "--sha", sha],
+    ["--sha", sha, "extra"], ["--SHA", sha]]) {
+    assert.throws(() => releaseArguments(args), { message: "Usage: node scripts/require-release-checks.mjs --sha <full-sha>" });
   }
 });
 test("the merged pull request number must be a positive safe integer, and a bad one is never shown", async () => {

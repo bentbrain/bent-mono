@@ -620,12 +620,9 @@ export async function admit(oauth, current) {
 
 const isId = (value) => Number.isSafeInteger(value) && value > 0;
 
-/**
- * The qualifications of one release must name the same Quality run and the
- * same Fitness iOS Verification run, each at the same attempt.
- */
+/** The qualifications of one release must name the same Quality run at the same attempt. */
 export function checkSameQuality(initial, current) {
-  const ids = ["qualityRunId", "qualityAttempt", "iosVerificationRunId", "iosVerificationAttempt"];
+  const ids = ["qualityRunId", "qualityAttempt"];
   if (
     !ids.every((id) => isId(initial?.[id])) ||
     initial.sha !== current?.sha ||
@@ -902,7 +899,7 @@ const commands = {
       await readResponse(required(found, "--initial"), "The first release qualification"),
       await readResponse(required(found, "--current"), "The latest release qualification"),
     );
-    console.log("The Quality and Fitness iOS Verification runs are unchanged.");
+    console.log("The Quality run is unchanged.");
   },
   async "check-build"(argv) {
     const found = options(argv, { values: ["--sha", "--build-file", "--downloads-dir", "--out"] });
