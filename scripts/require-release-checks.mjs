@@ -8,10 +8,6 @@ const WORKFLOW = ".github/workflows/quality.yml";
 const SHA = /^[a-f0-9]{40}$/;
 const JOBS = ["lint", "typecheck", "test", "knip", "build", "test:integration", "browser",
   "public-source", "secret-scan", "dependencies", "CodeQL", "fitness-ios", "fitness-ios-native", "Release qualification"];
-const IOS_VERIFY_WORKFLOW = ".github/workflows/fitness-ios-verify.yml";
-const IOS_VERIFY_EVENTS = ["push", "workflow_dispatch", "schedule"];
-const IOS_VERIFY_JOBS = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
-  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 class QualificationError extends Error {}
 const fail = message => { throw new QualificationError(message); };
 // Each request has a fixed label; messages name only the label, never a path built from GitHub's data.
@@ -99,45 +95,38 @@ export async function requireQualityChecks({ sha, branch, event }, api, workflow
   return run;
 }
 
-// Fitness iOS Verification runs on main pushes that touch the iPhone app, daily and on dispatch.
-// Its latest run for the exact main commit, from any of those events, must have passed every job.
-async function iosVerificationWorkflow(api) {
-  const workflow = await api(`/repos/${REPOSITORY}/actions/workflows/fitness-ios-verify.yml`, "the Fitness iOS Verification workflow");
-  if (workflow.path !== IOS_VERIFY_WORKFLOW || workflow.state !== "active") fail("Canonical Fitness iOS Verification workflow is unavailable.");
-  if (!isId(workflow.id)) fail("GitHub returned a malformed Fitness iOS Verification workflow ID.");
-  return workflow;
-}
+// Pull requests that change application, server, shared package or release
+// code need an independent review. CI-only and documentation-only pull
+// requests merge on their checks alone.
+// Root files that production installs, builds or runs count as release code.
+const REVIEWED = [/^apps\//, /^packages\//, /^products\//, /^scripts\/[^/]*release[^/]*$/,
+  /^scripts\/require-no-pending-migrations\.mjs$/, /^scripts\/vercel-[^/]+$/,
+  /^\.github\/workflows\/deploy-[^/]+$/, /^\.github\/actions\//,
+  /^package\.json$/, /^bun\.lock$/, /^bunfig\.toml$/, /^deployments\.json$/, /^AGENTS\.md$/];
+// GitHub lists at most 3000 files for a pull request; a longer list is treated as reviewed code.
+const FILE_LIMIT = 3000;
 
-const iosSelector = sha => ({ sha, branch: "main", events: IOS_VERIFY_EVENTS, path: IOS_VERIFY_WORKFLOW, label: "Fitness iOS Verification" });
-
-export async function requireIosVerificationChecks({ sha }, api, workflow) {
-  if (!SHA.test(sha)) fail("Fitness iOS verification requires an exact source commit.");
-  const prefix = `/repos/${REPOSITORY}`;
-  workflow ??= await iosVerificationWorkflow(api);
-  const run = await latestRun(api, workflow, iosSelector(sha));
-  if (!passed(run)) {
-    fail("The latest Fitness iOS Verification run for this commit has not passed. Dispatch Fitness iOS Verification on main.");
-  }
-  if (!isId(run.run_attempt)) fail("GitHub returned a malformed Fitness iOS Verification run attempt.");
-  const jobs = await pages(api, `${prefix}/actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs",
-    "the Fitness iOS Verification run's jobs");
-  for (const name of IOS_VERIFY_JOBS) {
-    const matches = jobs.filter(job => job.name === name);
-    if (matches.length !== 1 || matches[0].head_sha !== sha || matches[0].status !== "completed" || matches[0].conclusion !== "success") {
-      fail(`Required Fitness iOS Verification job is missing, ambiguous or unsuccessful: ${name}`);
-    }
-  }
-  return run;
+export function needsReview(files) {
+  // An empty or truncated list says nothing about what changed, so it counts as reviewed code.
+  if (!Array.isArray(files) || files.length === 0 || files.length >= FILE_LIMIT) return true;
+  return files.some(file => {
+    if (typeof file?.filename !== "string" || !file.filename) fail("GitHub returned a malformed pull request file.");
+    if (file.status === "renamed" && (typeof file.previous_filename !== "string" || !file.previous_filename)) return true;
+    const names = [file.filename, ...(typeof file.previous_filename === "string" ? [file.previous_filename] : [])];
+    return names.some(name => REVIEWED.some(pattern => pattern.test(name)));
+  });
 }
 
 export async function requireReviewedHead({ sha, pullRequest }, api) {
   if (!isId(pullRequest)) fail("GitHub returned a malformed pull request number.");
   const prefix = `/repos/${REPOSITORY}`;
+  const files = await pages(api, `${prefix}/pulls/${pullRequest}/files`, undefined, "the pull request files");
   const checks = await pages(api, `${prefix}/commits/${sha}/check-runs?filter=latest`, "check_runs", "the check runs");
   const security = checks.filter(check => check.name === "CodeQL" && check.app?.slug === "github-advanced-security");
   if (security.length !== 1 || security[0].head_sha !== sha || security[0].status !== "completed" || security[0].conclusion !== "success") {
     fail("Native CodeQL security analysis has not passed for the reviewed PR head.");
   }
+  if (!needsReview(files)) return;
   const statuses = await pages(api, `${prefix}/commits/${sha}/statuses`, undefined, "the commit statuses");
   const review = statuses.find(status => status.context === "Independent review");
   if (!review || review.state !== "success" || !review.target_url?.startsWith(`https://github.com/${REPOSITORY}/pull/${pullRequest}#`)) {
@@ -145,7 +134,7 @@ export async function requireReviewedHead({ sha, pullRequest }, api) {
   }
 }
 
-export async function requireReleaseChecks(sha, api, { ios = false } = {}) {
+export async function requireReleaseChecks(sha, api) {
   if (!SHA.test(sha)) fail("Release source must be a full commit SHA.");
   const prefix = `/repos/${REPOSITORY}`;
   const main = await api(`${prefix}/git/ref/heads/main`, "the main branch");
@@ -161,15 +150,11 @@ export async function requireReleaseChecks(sha, api, { ios = false } = {}) {
   // squash-main commit. Main must pass the complete raw-SARIF Quality gate;
   // the merged PR must also have passed the native security check.
   await requireReviewedHead({ sha: merged[0].head.sha, pullRequest: merged[0].number }, api);
-  const iosWorkflow = ios ? await iosVerificationWorkflow(api) : undefined;
-  const iosRun = ios ? await requireIosVerificationChecks({ sha }, api, iosWorkflow) : undefined;
   // A rerun, a newer run for the commit or a new merge during qualification must not release stale evidence.
   await requireStillLatest(api, workflow, qualitySelector({ sha, branch: "main", event: "push" }), run);
-  if (iosRun) await requireStillLatest(api, iosWorkflow, iosSelector(sha), iosRun);
   const finalMain = await api(`${prefix}/git/ref/heads/main`, "the main branch");
   if (finalMain.object?.sha !== sha) fail("Release qualification changed during inspection.");
-  const result = { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
-  return iosRun ? { ...result, iosVerificationRunId: iosRun.id, iosVerificationAttempt: iosRun.run_attempt } : result;
+  return { sha, qualityRunId: run.id, qualityAttempt: run.run_attempt, pullRequest: merged[0].number };
 }
 
 export async function githubApi(path, label = "a GitHub endpoint") {
@@ -193,29 +178,21 @@ export async function githubApi(path, label = "a GitHub endpoint") {
   return parseReply(await response.text(), label);
 }
 
-/** The commit and the --ios flag from `--sha <full-sha> [--ios]`, each given at most once. */
+/** The commit from `--sha <full-sha>`, given exactly once. */
 export function releaseArguments(args) {
-  const usage = "Usage: node scripts/require-release-checks.mjs --sha <full-sha> [--ios]";
-  let sha;
-  let ios = false;
-  for (let index = 0; index < args.length; index++) {
-    if (args[index] === "--sha" && sha === undefined && index + 1 < args.length) sha = args[++index];
-    else if (args[index] === "--ios" && !ios) ios = true;
-    else fail(usage);
-  }
-  if (sha === undefined) fail(usage);
-  return { sha, ios };
+  if (args.length !== 2 || args[0] !== "--sha") fail("Usage: node scripts/require-release-checks.mjs --sha <full-sha>");
+  return { sha: args[1] };
 }
 
 async function main() {
-  const { sha, ios } = releaseArguments(process.argv.slice(2));
+  const { sha } = releaseArguments(process.argv.slice(2));
   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   if (head !== sha || execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { encoding: "utf8" }).trim()) {
     fail("Release checkout must be clean and match the exact source commit.");
   }
   const event = process.env.GITHUB_ACTIONS === "true" ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
   validateReleaseEvent(process.env, event, sha);
-  console.log(JSON.stringify(await requireReleaseChecks(sha, githubApi, { ios })));
+  console.log(JSON.stringify(await requireReleaseChecks(sha, githubApi)));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

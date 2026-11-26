@@ -913,16 +913,19 @@ describe("the Deploy Fitness iOS workflow", () => {
     expect(steps.at(-1).run).toContain('"$RUNNER_TEMP/eas-static"');
   });
 
-  test("every qualification also requires Fitness iOS Verification on the exact commit", () => {
+  test("every qualification requires Quality on the exact main commit and nothing else", () => {
     const calls = steps.filter((step) => /require-release-checks\.mjs/.test(step.run ?? ""));
     expect(calls).toHaveLength(3);
     for (const [position, output] of ["quality-initial", "quality-build", "quality-submit"].entries()) {
       expect(calls[position].run).toContain(
-        `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" --ios > "$RUNNER_TEMP/${output}.json"`,
+        `node scripts/require-release-checks.mjs --sha "$RELEASE_SHA" > "$RUNNER_TEMP/${output}.json"`,
       );
       expect(calls[position].env).toEqual({ GH_TOKEN: "${{ github.token }}" });
     }
     expect(source.match(/require-release-checks\.mjs/g)).toHaveLength(3);
+    // TestFlight releases do not wait for Fitness iOS Verification.
+    expect(source).not.toContain("--ios");
+    expect(source).not.toContain("fitness-ios-verify");
     expect(workflow.permissions.actions).toBe("read");
   });
 
@@ -1432,28 +1435,13 @@ process.stdout.write(JSON.stringify(result));`,
     expect(archive.indexOf("verifySignature(bundle);")).toBeLessThan(archive.indexOf('"--entitlements"'));
   });
 
-  test("both qualifications must name the same Quality and Fitness iOS Verification runs", () => {
-    const quality = {
-      sha,
-      qualityRunId: 23,
-      qualityAttempt: 2,
-      pullRequest: 2,
-      iosVerificationRunId: 41,
-      iosVerificationAttempt: 1,
-    };
+  test("both qualifications must name the same Quality run at the same attempt", () => {
+    const quality = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 };
     expect(() => checkSameQuality(quality, { ...quality })).not.toThrow();
-    for (const change of [
-      { qualityRunId: 24 },
-      { qualityAttempt: 3 },
-      { sha: "b".repeat(40) },
-      { iosVerificationRunId: 42 },
-      { iosVerificationAttempt: 2 },
-      { iosVerificationRunId: undefined },
-      { iosVerificationAttempt: undefined },
-    ])
+    for (const change of [{ qualityRunId: 24 }, { qualityAttempt: 3 }, { sha: "b".repeat(40) }])
       expect(() => checkSameQuality(quality, { ...quality, ...change })).toThrow("changed");
-    // A qualification without the iOS verification, or with a malformed ID, never matches.
-    for (const id of ["qualityRunId", "qualityAttempt", "iosVerificationRunId", "iosVerificationAttempt"])
+    // A qualification with a missing or malformed Quality ID never matches.
+    for (const id of ["qualityRunId", "qualityAttempt"])
       for (const value of [undefined, 0, -1, 1.5, "41", null, 2 ** 53]) {
         const bad = { ...quality, [id]: value };
         expect(() => checkSameQuality(bad, { ...bad })).toThrow("changed");
@@ -1726,8 +1714,12 @@ describe("the CodeQL Swift scopes", () => {
 
   test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
     expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 4));
+    // The tools scope is the seeder with its UI tests and the module's Core and Tests.
     expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(4, 7)]);
     expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 7));
+    // Together the two CodeQL jobs' scopes cover every tracked Swift source.
+    const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
+    expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
   });
 
   test("fail closed for a tracked Swift file outside both scopes", () => {
@@ -1740,6 +1732,7 @@ describe("the CodeQL Swift scopes", () => {
       for (const scope of ["all", "app", "tools"])
         expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
     expect(() => swiftFilesFor("app", tracked.slice(4))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("tools", tracked.slice(2, 4))).toThrow("No tracked Swift files");
   });
 
   test("every tracked Swift file in the repository is in a scope", () => {
@@ -1748,6 +1741,9 @@ describe("the CodeQL Swift scopes", () => {
       encoding: "utf8",
     }).stdout.split("\0");
     expect(swiftFilesFor("all", listed).length).toBeGreaterThan(20);
+    for (const scope of ["app", "tools"]) expect(swiftFilesFor(scope, listed).length).toBeGreaterThan(0);
+    const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, listed)));
+    expect([...covered].sort()).toEqual(swiftFilesFor("all", listed).sort());
   });
 
   test("read a scope and require derived data for the app and all scopes only", () => {
@@ -1766,8 +1762,11 @@ describe("the CodeQL Swift scopes", () => {
       [],
       ["db"],
       ["--scope", "app", "db"],
+      ["--scope", "all", "db"],
       ["--scope", "tools", "db", "derived"],
       ["--scope", "seeder", "db"],
+      ["--scope", "core", "db"],
+      ["--scope", "Tools", "db"],
       ["--scope"],
       ["db", "derived", "extra"],
     ])

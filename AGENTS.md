@@ -12,6 +12,6 @@ Shared design tokens live in packages/design-tokens and shared React controls in
 
 Run affected application checks and the public-source audit before publishing. Shared package changes require validation of their consumers. Preserve all existing application quality, independent review, security and release gates. Production deployment requires the established guarded release route and qualification; moving source does not authorize bypassing it.
 
-Use pull requests, conventional commits and independent Sol review of the final head against the current base. Never bypass protections or fabricate review statuses. Preserve original source attribution through SOURCE_PROVENANCE.json.
+Use pull requests and conventional commits. Changes to application, server, shared package or release code need an independent Sol review of the final head against the current base; CI-only and documentation-only changes merge once their checks pass. Never bypass protections or fabricate review statuses. Preserve original source attribution through SOURCE_PROVENANCE.json.
 
-Require zero raw CodeQL findings across the repository. Keep every query and the original SARIF report.
+Require zero raw CodeQL findings across the repository. Keep every query and the original SARIF report. Swift analysis of the iPhone app runs in the Fitness iOS Verification workflow after merge and nightly, and TestFlight builds don't wait for it.

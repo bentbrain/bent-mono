@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { githubApi, releaseArguments, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
+import { githubApi, needsReview, releaseArguments, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
 import { hasNoPendingMigrations } from "./require-no-pending-migrations.mjs";
 import { requireBrowserSuites } from "./require-browser-suites.mjs";
 import { requireIosNative } from "./require-ios-native.mjs";
@@ -97,42 +97,86 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     if (script) assert.ok(!script.includes("${{"), block);
   }
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  assert.deepEqual(declared, ["fitness-ios-native", "codeql-swift-app", "codeql-swift-tools", "simulator-flow", "verification"]);
+  assert.deepEqual(declared, ["codeql-swift-app", "codeql-swift-tools", "simulator-flow", "verification"]);
   const job = name => qualityJob(source, name);
-  for (const [name, scope] of [["codeql-swift-app", "app"], ["codeql-swift-tools", "tools"]]) {
+  for (const [name, scope, traces] of [["codeql-swift-app", "app", ["native.mjs replay-swift app"]],
+    ["codeql-swift-tools", "tools", ["native.mjs replay-swift seeder", "native.mjs core-build"]]]) {
     const codeql = job(name);
-    assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 30\n`));
+    assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 27\n`));
     assert.match(codeql, /^    permissions:\n      contents: read\n(      #.*\n)?      security-events: read\n    steps:\n/m);
     assert.ok(codeql.includes("CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'"));
     assert.ok(codeql.includes("CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'"));
     assert.ok(codeql.includes("languages: swift\n          build-mode: manual\n          queries: security-extended,security-and-quality\n"));
     assert.ok(codeql.includes("--install-rosetta"));
-    assert.ok(codeql.includes(`category: fitness-codeql-swift-${scope}\n          output: \${{ runner.temp }}/codeql-swift-results\n          upload: never\n`));
+    assert.ok(codeql.includes(`category: fitness-codeql-swift-${scope}\n          output: \${{ runner.temp }}/codeql-swift-results\n          upload: never\n          upload-database: false\n`));
     assert.ok(codeql.includes("CODEQL_LANGUAGES: swift\n        run: node scripts/check-sarif.mjs\n"));
     assert.ok(codeql.includes(`node scripts/codeql-coverage.mjs --scope ${scope} "$RUNNER_TEMP/codeql_databases/swift"`));
     assert.ok(codeql.includes(`        if: always()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        with:\n          name: codeql-swift-${scope}-original-sarif\n          path: \${{ runner.temp }}/codeql-swift-results/*.sarif\n          if-no-files-found: error\n          retention-days: 90\n`));
     assert.ok(codeql.includes(`name: codeql-swift-${scope}-extractor-logs`));
-    assert.ok(codeql.indexOf("codeql-action/init@") < codeql.indexOf(`replay-swift ${scope === "app" ? "app" : "seeder"}`));
+    // Every trace runs after init and before the single analysis, in order.
+    const positions = traces.map(trace => codeql.indexOf(`run: time node scripts/${trace}\n`));
+    assert.ok(positions.every(position => position > codeql.indexOf("codeql-action/init@")), name);
+    assert.deepEqual([...positions].sort((x, y) => x - y), positions, name);
+    assert.ok(positions.at(-1) < codeql.indexOf("codeql-action/analyze@"), name);
+    assert.equal(codeql.match(/codeql-action\/(init|analyze)@/g).length, 2, name);
+    // The CodeQL builds compile one unoptimised arm64 Simulator slice without a dSYM.
+    assert.ok(codeql.includes("          XCODEBUILD_SETTINGS: >-\n" +
+      "            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO\n" +
+      "            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n" +
+      "            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO\n" +
+      "            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0\n" +
+      "            DEBUG_INFORMATION_FORMAT=dwarf\n"), name);
   }
   assert.ok(job("codeql-swift-app").includes("SKIP_BUNDLING: '1'"));
-  assert.ok(job("codeql-swift-app").includes("SWIFT_PRECOMPILE_BRIDGING_HEADER=NO"));
-  assert.ok(!job("codeql-swift-tools").includes("./.github/actions/setup"));
-  assert.ok(job("codeql-swift-tools").includes("node scripts/native.mjs core-build"));
-  const native = job("fitness-ios-native");
-  assert.ok(native.includes("    name: fitness-ios-native\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
-  for (const step of ["lint", "prebuild", "build", "artifact", "seeder", "core-test"]) assert.ok(native.includes(`run: node scripts/native.mjs ${step}\n`));
-  assert.ok(native.includes("run: node scripts/roundtrip.mjs"));
+  assert.ok(job("codeql-swift-app").includes("run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n"));
+  // The tools job builds the seeder untraced, then traces it and the module's package into one database.
+  const tools = job("codeql-swift-tools");
+  assert.ok(tools.indexOf("run: node scripts/native.mjs seeder\n") < tools.indexOf("codeql-action/init@"));
+  assert.ok(!tools.includes("./.github/actions/setup"));
+  assert.ok(tools.includes("uses: actions/setup-node@"));
   const flows = job("simulator-flow");
-  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    runs-on: macos-26\n    timeout-minutes: 25\n    strategy:\n      fail-fast: false\n"));
-  for (const [label, flow] of [["denied", "testDeniedHealthAccessSendsNothing"],
-    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory"], ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance"]]) {
-    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
+  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    runs-on: macos-26\n    timeout-minutes: ${{ matrix.timeout }}\n"));
+  assert.match(flows, /^    env:\n(      #.*\n)*      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n    strategy:\n      fail-fast: false\n/m);
+  for (const [label, flow, native, minutes] of [["denied", "testDeniedHealthAccessSendsNothing", "production", 27],
+    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory", "module", 25],
+    ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance", "none", 25]]) {
+    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n            native: ${native}\n            timeout: ${minutes}\n`));
   }
   assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n        run: node scripts/flows.mjs \"$FLOW\"\n"));
+  // The native suite runs in the flow shards: each check once, in its own named step, before the flow.
+  const steps = flows.split("\n      - ").slice(1).map(body => `${body}\n`);
+  const step = run => {
+    const found = steps.filter(body => body.includes(`run: ${run}\n`));
+    assert.equal(found.length, 1, run);
+    return found[0];
+  };
+  const flowStep = steps.indexOf(step('node scripts/flows.mjs "$FLOW"'));
+  for (const [run, native] of [
+    ["node scripts/native.mjs lint", "module"],
+    ["node scripts/native.mjs core-test", "module"],
+    ["node scripts/roundtrip.mjs", "module"],
+    ["node scripts/native.mjs prebuild", "production"],
+    ['NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs build', "production"],
+    ['NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs artifact', "production"],
+  ]) {
+    const body = step(run);
+    assert.match(body, /^name: \S/, run);
+    assert.ok(body.includes(`\n        if: matrix.native == '${native}'\n`), run);
+    assert.ok(steps.indexOf(body) < flowStep, run);
+    if (native === "production") assert.ok(body.includes("        env:\n          APP_VARIANT: production\n"), run);
+  }
+  assert.ok(step("node scripts/native.mjs lint").includes("name: Lint the Swift sources\n"));
+  assert.ok(steps.findIndex(body => body.startsWith("name: Install verified SwiftLint\n        if: matrix.native == 'module'\n")) <
+    steps.indexOf(step("node scripts/native.mjs lint")));
+  // The production build is checked before the flow's development prebuild replaces ios/.
+  const production = ["prebuild", "build", "artifact"].map(name =>
+    steps.findIndex(body => body.includes(`node scripts/native.mjs ${name}\n`)));
+  assert.deepEqual([...production].sort((x, y) => x - y), production);
+  assert.ok(steps.findIndex(body => body.startsWith("name: Start a temporary Postgres\n")) < steps.indexOf(step("node scripts/roundtrip.mjs")));
   const aggregate = job("verification");
   assert.ok(aggregate.includes("    name: Fitness iOS verification\n    if: always()\n"));
   assert.deepEqual(jobDependencies(aggregate), declared.filter(name => name !== "verification"));
-  assert.ok(aggregate.includes('const expected = ["fitness-ios-native", "codeql-swift-app", "codeql-swift-tools", "simulator-flow"];'));
+  assert.ok(aggregate.includes('const expected = ["codeql-swift-app", "codeql-swift-tools", "simulator-flow"];'));
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
 });
 
@@ -146,8 +190,10 @@ test("Fitness iOS Verification never uploads to Code Scanning and keeps each ori
   assert.equal(analyses.length, 2);
   for (const [, inputs] of analyses) {
     assert.match(inputs, /^          upload: never$/m);
+    assert.match(inputs, /^          upload-database: false$/m);
     assert.match(inputs, /^          output: \$\{\{ runner\.temp \}\}\/codeql-swift-results$/m);
   }
+  assert.ok(!/^\s*upload-database: (?!false$)/m.test(source));
   assert.equal(source.match(/uses: github\/codeql-action\/analyze@/g).length, 2);
   assert.equal(source.match(/run: node scripts\/check-sarif\.mjs\n/g).length, 2);
   assert.equal(source.match(/name: codeql-swift-(app|tools)-original-sarif\n/g).length, 2);
@@ -169,13 +215,32 @@ test("every Quality job stops within 20 minutes and the longest job chain stays 
   const longest = name => limits[name].minutes + Math.max(0, ...needs(limits[name].body).map(longest));
   assert.ok(longest("release-qualification") < 30, `The longest Quality chain takes ${longest("release-qualification")} minutes`);
 });
-test("every Fitness iOS Verification job stops within 30 minutes", async () => {
+test("Fitness iOS Verification runs at most five macOS jobs side by side and finishes within 30 minutes", async () => {
   const source = await verifySource();
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  for (const name of declared) {
-    const { minutes } = timeouts(source, name);
-    assert.ok(Number.isInteger(minutes) && minutes > 0 && minutes <= 30, `${name} needs a job timeout of at most 30 minutes`);
-  }
+  const needs = body => body.match(/^    needs: (?:\[([^\]]+)\]|(\S+))$/m)?.slice(1).find(Boolean)?.split(",").map(value => value.trim()) ?? [];
+  // Each job, with a matrix expanded to one entry per shard and its own time limit.
+  const jobs = Object.fromEntries(declared.map(name => {
+    const body = qualityJob(source, name);
+    const shards = [...(body.split("\n        include:\n")[1] ?? "").matchAll(/^          - label: (\S+)\n((?:            .*\n)*)/gm)]
+      .map(([, label, fields]) => ({ label, timeout: Number(fields.match(/^            timeout: (\d+)$/m)?.[1]) }));
+    const limit = body.match(/^    timeout-minutes: (.+)$/m)?.[1];
+    const minutes = limit === "${{ matrix.timeout }}" ? shards.map(shard => shard.timeout) : [Number(limit)];
+    if (limit === "${{ matrix.timeout }}") assert.ok(shards.length > 0, name);
+    for (const value of minutes) assert.ok(Number.isInteger(value) && value > 0 && value <= 27, `${name} needs a job timeout of at most 27 minutes`);
+    return [name, { macos: /^    runs-on: macos-/m.test(body), runners: Math.max(1, shards.length), minutes, needs: needs(body) }];
+  }));
+  // The repository runs at most five macOS jobs at a time, so every macOS job starts at once and none waits for another.
+  const macos = declared.filter(name => jobs[name].macos);
+  assert.equal(macos.reduce((total, name) => total + jobs[name].runners, 0), 5);
+  for (const name of macos) assert.deepEqual(jobs[name].needs, [], `${name} must not wait for another job`);
+  assert.ok(!source.includes("max-parallel"));
+  // The worst case follows the dependency graph with every job running to its time limit.
+  const worst = name => Math.max(...jobs[name].minutes) + Math.max(0, ...jobs[name].needs.map(worst));
+  assert.deepEqual(jobs.verification.needs, macos);
+  assert.equal(jobs.verification.macos, false);
+  assert.ok(Math.max(...declared.map(worst)) < 30, `A Fitness iOS Verification run can take ${Math.max(...declared.map(worst))} minutes`);
+  assert.equal(worst("verification"), 29);
 });
 
 test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {
@@ -241,10 +306,6 @@ test("JP rejects untrusted workflow-run heads before checkout in the protected j
   assert.ok(condition?.includes("github.event.workflow_run.event == 'push'"));
   assert.ok(condition?.includes("github.event.workflow_run.head_repository.full_name == 'bentbrain/bent-mono'"));
 });
-const iosWorkflow = { id: 31, path: ".github/workflows/fitness-ios-verify.yml", state: "active" };
-const iosRun = { ...run, id: 41, event: "push", path: iosWorkflow.path, workflow_id: iosWorkflow.id, run_attempt: 1 };
-const iosNames = ["fitness-ios-native", "CodeQL Swift (app)", "CodeQL Swift (tools)", "Simulator flow (denied)",
-  "Simulator flow (allowed)", "Simulator flow (partial)", "Fitness iOS verification"];
 function fixture(change = () => {}) {
   const data = {
     main: { object: { sha } }, workflow: structuredClone(workflow), runs: [structuredClone(run)],
@@ -253,28 +314,21 @@ function fixture(change = () => {}) {
       base: { ref: "main", repo: { full_name: repo } }, head: { sha: head, repo: { full_name: repo } } }],
     checks: [{ name: "CodeQL", app: { slug: "github-advanced-security" }, head_sha: head, status: "completed", conclusion: "success" }],
     statuses: [{ context: "Independent review", state: "success", target_url: `https://github.com/${repo}/pull/2#issuecomment-123` }],
+    files: [{ filename: "apps/fitness/src/server/devices.ts" }],
     finalRun: structuredClone(run),
-    iosWorkflow: structuredClone(iosWorkflow),
-    iosRuns: [structuredClone(iosRun)],
-    iosJobs: iosNames.map(name => ({ name, head_sha: sha, status: "completed", conclusion: "success" })),
-    finalIosRun: structuredClone(iosRun),
   };
   change(data);
   let mainCalls = 0;
   let qualityLists = 0;
-  let iosLists = 0;
   const api = async path => {
     api.paths.push(path);
-    if (path.endsWith("/workflows/fitness-ios-verify.yml")) return data.iosWorkflow;
-    // A later listing answers with the runs that appeared while qualification was under way.
-    if (path.includes("/workflows/31/runs?")) return { workflow_runs: ++iosLists > 1 && data.laterIosRuns || data.iosRuns };
-    if (path.includes("/runs/41/attempts/1/jobs?")) return { jobs: data.iosJobs };
-    if (path.endsWith("/actions/runs/41")) return data.finalIosRun;
     if (path.endsWith("/git/ref/heads/main")) return data.changedMain && ++mainCalls > 1 ? data.changedMain : data.main;
     if (path.endsWith("/workflows/quality.yml")) return data.workflow;
+    // A later listing answers with the runs that appeared while qualification was under way.
     if (path.includes("/workflows/12/runs?")) return { workflow_runs: ++qualityLists > 1 && data.laterRuns || data.runs };
     if (path.includes("/attempts/2/jobs?")) return { jobs: data.jobs };
     if (path.includes("/check-runs?")) return { check_runs: data.checks };
+    if (path.includes("/pulls/2/files?")) return data.files;
     if (path.includes("/pulls?")) return data.pulls;
     if (path.includes("/statuses?")) return data.statuses;
     if (path.endsWith("/actions/runs/23")) return data.finalRun;
@@ -286,78 +340,15 @@ function fixture(change = () => {}) {
 test("qualifies exact successful main and reviewed merged PR using the latest run attempt", async () => {
   const api = fixture();
   assert.deepEqual(await requireReleaseChecks(sha, api), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
-  assert.ok(!api.paths.some(path => path.includes("fitness-ios-verify") || path.includes("/workflows/31/")),
-    "Without --ios no Fitness iOS Verification request is sent.");
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(), { ios: false }), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
-});
-test("with ios, also requires the latest exact-commit Fitness iOS Verification run to pass every job", async () => {
-  const expected = { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2, iosVerificationRunId: 41, iosVerificationAttempt: 1 };
-  for (const event of ["push", "workflow_dispatch", "schedule"]) {
-    assert.deepEqual(await requireReleaseChecks(sha, fixture(d => { d.iosRuns[0].event = event; }), { ios: true }), expected);
-  }
-  const api = fixture();
-  await requireReleaseChecks(sha, api, { ios: true });
-  // Both runs are read and listed again after every other inspection, and main is read last.
-  const runs = index => `/repos/bentbrain/bent-mono/actions/workflows/${index}/runs?`;
-  assert.deepEqual(api.paths.slice(-5).map(path => path.replace(/runs\?.*$/, "runs?")), [
-    "/repos/bentbrain/bent-mono/actions/runs/23", runs(12),
-    "/repos/bentbrain/bent-mono/actions/runs/41", runs(31),
+  // The Quality run is read and listed again after every other inspection, and main is read last.
+  assert.deepEqual(api.paths.slice(-3).map(path => path.replace(/runs\?.*$/, "runs?")), [
+    "/repos/bentbrain/bent-mono/actions/runs/23", "/repos/bentbrain/bent-mono/actions/workflows/12/runs?",
     "/repos/bentbrain/bent-mono/git/ref/heads/main"]);
-  assert.ok(api.paths.includes("/repos/bentbrain/bent-mono/actions/workflows/31/runs?branch=main&head_sha=" + sha + "&per_page=100&page=1"));
-  // An older failed run does not block a newer passing one.
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(d => { d.iosRuns.push({ ...iosRun, id: 40, conclusion: "failure" }); }),
-    { ios: true }), expected);
-});
-test("with ios, fails closed for any missing, stale, foreign or unsuccessful verification", async () => {
-  const mutations = [
-    d => { d.iosRuns = []; },
-    d => { d.iosRuns[0].event = "pull_request"; },
-    d => { d.iosRuns[0].event = "workflow_run"; },
-    d => { d.iosRuns[0].head_branch = "topic"; },
-    d => { d.iosRuns[0].head_sha = head; },
-    d => { d.iosRuns[0].repository.full_name = "elsewhere/repo"; },
-    d => { d.iosRuns[0].head_repository.full_name = "fork/repo"; },
-    d => { d.iosRuns[0].path = ".github/workflows/quality.yml"; },
-    d => { d.iosRuns[0].workflow_id = 12; },
-    d => { d.iosRuns[0].status = "in_progress"; d.iosRuns[0].conclusion = null; },
-    d => { d.iosRuns[0].conclusion = "cancelled"; },
-    d => { d.iosRuns.push({ ...iosRun, id: 42, event: "schedule", conclusion: "failure" }); },
-    d => { d.iosWorkflow.state = "disabled_manually"; },
-    d => { d.iosWorkflow.path = ".github/workflows/quality.yml"; },
-    d => { d.iosJobs.pop(); },
-    d => { d.iosJobs.push(d.iosJobs[0]); },
-    d => { d.iosJobs[1].conclusion = "skipped"; },
-    d => { d.iosJobs[3].conclusion = "failure"; },
-    d => { d.iosJobs[6].status = "in_progress"; },
-    d => { d.iosJobs[2].head_sha = head; },
-    d => { d.finalIosRun.run_attempt = 2; },
-    d => { d.finalIosRun.conclusion = "failure"; },
-    d => { d.finalIosRun.status = "in_progress"; },
-  ];
-  for (const mutate of mutations) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }));
-    // Quality qualification alone does not read the verification workflow.
-    await assert.doesNotReject(requireReleaseChecks(sha, fixture(mutate)));
-  }
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.iosJobs.pop(); }), { ios: true }),
-    { message: "Required Fitness iOS Verification job is missing, ambiguous or unsuccessful: Fitness iOS verification" });
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.finalIosRun.run_attempt = 2; }), { ios: true }),
-    { message: "Release qualification changed during inspection." });
+  // Release qualification reads only the Quality workflow's runs.
+  assert.ok(!api.paths.some(path => path.includes("fitness-ios-verify")));
 });
 test("a newer run or a new attempt that appears during qualification supersedes the selected run", async () => {
   const changed = { message: "Release qualification changed during inspection." };
-  const iosSuperseded = [
-    // Run 42 for the exact commit starts, or even passes, while run 41 is being checked.
-    d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "workflow_dispatch", status: "in_progress", conclusion: null }]; },
-    d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "schedule" }]; },
-    // Run 41 gets a new attempt, seen in the listing before the direct read catches up.
-    d => { d.laterIosRuns = [{ ...iosRun, run_attempt: 2, status: "queued", conclusion: null }]; },
-    d => { d.laterIosRuns = [{ ...iosRun, run_attempt: 2 }]; },
-    d => { d.laterIosRuns = [{ ...iosRun, conclusion: "failure" }]; },
-  ];
-  for (const mutate of iosSuperseded) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), changed);
-  }
   const qualitySuperseded = [
     d => { d.laterRuns = [d.runs[0], { ...run, id: 24, status: "in_progress", conclusion: null, run_attempt: 1 }]; },
     d => { d.laterRuns = [d.runs[0], { ...run, id: 24, run_attempt: 1 }]; },
@@ -366,21 +357,13 @@ test("a newer run or a new attempt that appears during qualification supersedes 
     // The selected run disappears from the listing.
     d => { d.laterRuns = [{ ...run, id: 7 }]; },
   ];
-  for (const mutate of qualitySuperseded) {
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate)), changed);
-    await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), changed);
-  }
+  for (const mutate of qualitySuperseded) await assert.rejects(requireReleaseChecks(sha, fixture(mutate)), changed);
   // A newer run outside the eligible set does not supersede the selected one.
   const ignored = d => {
-    d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: 42, event: "pull_request" }, { ...iosRun, id: 43, head_branch: "topic" },
-      { ...iosRun, id: 44, head_repository: { full_name: "fork/repo" } }, { ...iosRun, id: 45, workflow_id: 12 }];
-    d.laterRuns = [d.runs[0], { ...run, id: 24, head_sha: head }];
+    d.laterRuns = [d.runs[0], { ...run, id: 24, head_sha: head }, { ...run, id: 25, event: "pull_request" },
+      { ...run, id: 26, head_branch: "topic" }, { ...run, id: 27, head_repository: { full_name: "fork/repo" } }];
   };
-  assert.deepEqual(await requireReleaseChecks(sha, fixture(ignored), { ios: true }),
-    { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2, iosVerificationRunId: 41, iosVerificationAttempt: 1 });
-  // A malformed ID in the later listing fails closed without being shown.
-  await assert.rejects(requireReleaseChecks(sha, fixture(d => { d.laterIosRuns = [d.iosRuns[0], { ...iosRun, id: "42x" }]; }),
-    { ios: true }), { message: "GitHub returned a malformed Fitness iOS Verification run ID." });
+  assert.deepEqual(await requireReleaseChecks(sha, fixture(ignored)), { sha, qualityRunId: 23, qualityAttempt: 2, pullRequest: 2 });
 });
 test("fails closed for stale source, newer failed runs, skipped/missing/duplicate jobs and foreign workflows", async () => {
   const mutations = [
@@ -432,25 +415,11 @@ test("provider IDs used in request paths must be positive safe integers, and a b
     }
   }
 });
-test("Fitness iOS Verification IDs must be positive safe integers, and a bad one is never shown", async () => {
-  for (const id of [email, "31/../../users", 12.5, 0, -1, null]) {
-    for (const [mutate, kind] of [
-      [d => { d.iosWorkflow.id = id; d.iosRuns[0].workflow_id = id; }, "workflow ID"],
-      [d => { d.iosRuns[0].id = id; }, "run ID"],
-      [d => { d.iosRuns[0].run_attempt = id; }, "run attempt"],
-    ]) {
-      await assert.rejects(requireReleaseChecks(sha, fixture(mutate), { ios: true }), error =>
-        error.message === `GitHub returned a malformed Fitness iOS Verification ${kind}.` && !error.message.includes(String(id)));
-    }
-  }
-});
-test("the command takes one --sha and at most one --ios", () => {
-  assert.deepEqual(releaseArguments(["--sha", sha]), { sha, ios: false });
-  assert.deepEqual(releaseArguments(["--sha", sha, "--ios"]), { sha, ios: true });
-  assert.deepEqual(releaseArguments(["--ios", "--sha", sha]), { sha, ios: true });
-  for (const args of [[], ["--sha"], [sha], ["--sha", sha, "--ios", "--ios"], ["--sha", sha, "--sha", sha],
-    ["--sha", sha, "--IOS"], ["--sha", sha, "--ios=true"], ["--sha", sha, "extra"], ["--ios"]]) {
-    assert.throws(() => releaseArguments(args), { message: "Usage: node scripts/require-release-checks.mjs --sha <full-sha> [--ios]" });
+test("the command takes exactly one --sha", () => {
+  assert.deepEqual(releaseArguments(["--sha", sha]), { sha });
+  for (const args of [[], ["--sha"], [sha], ["--sha", sha, "--ios"], ["--ios", "--sha", sha], ["--sha", sha, "--sha", sha],
+    ["--sha", sha, "extra"], ["--SHA", sha]]) {
+    assert.throws(() => releaseArguments(args), { message: "Usage: node scripts/require-release-checks.mjs --sha <full-sha>" });
   }
 });
 test("the merged pull request number must be a positive safe integer, and a bad one is never shown", async () => {
@@ -512,4 +481,30 @@ test("the local GitHub CLI fallback discards the CLI's diagnostics and shows onl
   } finally {
     await rm(bin, { recursive: true, force: true });
   }
+});
+
+test("only pull requests that change application, package or release code need review evidence", async () => {
+  for (const filename of ["apps/fitness/src/routes/privacy.tsx", "packages/ui/src/button.tsx", "products/drive/app.ts",
+    "scripts/release-vercel.mjs", "scripts/require-release-checks.mjs", ".github/workflows/deploy-fitness-ios.yml", "AGENTS.md",
+    "package.json", "bun.lock", "bunfig.toml", ".github/actions/setup/action.yml", "scripts/vercel-bun.mjs",
+    "scripts/vercel-ignore-build.mjs", "scripts/require-no-pending-migrations.mjs", "deployments.json"]) {
+    assert.equal(needsReview([{ filename: "README.md" }, { filename }]), true, filename);
+    assert.equal(needsReview([{ filename }]), true, `${filename} alone`);
+  }
+  assert.equal(needsReview([]), true);
+  assert.equal(needsReview([{ filename: "docs/new.md", status: "renamed" }]), true);
+  assert.throws(() => needsReview([{ filename: "" }]), /malformed pull request file/);
+  for (const filename of ["README.md", "docs/setup.md", ".github/workflows/quality.yml", "scripts/ci-scope.mjs", "turbo.json"]) {
+    assert.equal(needsReview([{ filename }]), false, filename);
+  }
+  assert.equal(needsReview([{ filename: "docs/moved.md", previous_filename: "apps/fitness/README.md" }]), true);
+  assert.equal(needsReview(Array.from({ length: 3000 }, (_, i) => ({ filename: `docs/${i}.md` }))), true);
+  assert.equal(needsReview(null), true);
+  assert.throws(() => needsReview([{ filename: 7 }]), /malformed pull request file/);
+  const ciOnly = d => { d.files = [{ filename: ".github/workflows/quality.yml" }, { filename: "README.md" }]; d.statuses = []; };
+  assert.equal((await requireReleaseChecks(sha, fixture(ciOnly))).pullRequest, 2);
+  const unreviewedApp = d => { d.statuses = []; };
+  await assert.rejects(requireReleaseChecks(sha, fixture(unreviewedApp)), /independent review evidence/);
+  const ciOnlyFailedCodeQL = d => { ciOnly(d); d.checks[0].conclusion = "failure"; };
+  await assert.rejects(requireReleaseChecks(sha, fixture(ciOnlyFailedCodeQL)), /Native CodeQL/);
 });
