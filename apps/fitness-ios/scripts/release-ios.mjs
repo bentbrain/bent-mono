@@ -248,16 +248,17 @@ export function signInPage(environment) {
  * following redirects or signing in, so it grants nothing. Clerk's flow is
  * checked step by step, with every redirect exact:
  *
- * 1. The issuer's `/oauth/authorize` sends the browser to the instance's
- *    sign-in page, returning to the issuer's own
- *    `/oauth/authorize-with-immediate-redirect`.
+ * 1. The issuer's `/oauth/authorize` either redirects to its own
+ *    `/oauth/authorize/continue`, or sends the browser to the instance's
+ *    sign-in page returning to its own `/oauth/authorize-with-immediate-redirect`.
+ *    Clerk instances use one flow or the other.
  * 2. That step checks the client. It answers an unknown client with
  *    `invalid_client`, a redirect URI the client does not have with
  *    `invalid_request`, and a scope the client may not request with an
  *    `invalid_scope` redirect to the app. A known client goes to the sign-in
  *    page again, returning to `/oauth-consent` on the accounts host.
  *
- * Both returns must carry the request's eight authorization parameters
+ * Every hop must carry the request's eight authorization parameters
  * exactly. Anything else stops the release.
  */
 export async function checkClientAtIssuer(
@@ -288,9 +289,8 @@ export async function checkClientAtIssuer(
   }).toString();
   const expected = endpoint.searchParams;
 
-  /** One step: a redirect to the sign-in page that returns to `back` with the parameters. */
-  const step = async (url, back) => {
-    const response = await get(url);
+  /** The redirect target of `response`, or a refusal naming Clerk's answer. */
+  const redirectOf = async (response, url) => {
     const location = response.headers.get("location");
     if (!redirectStatuses.has(response.status) || !location) {
       let code;
@@ -305,7 +305,12 @@ export async function checkClientAtIssuer(
     await response.body?.cancel();
     if (location.startsWith(redirectUri))
       refused(knownCode(oauthErrorCodes, new URL(location).searchParams.get("error")) ?? "redirected to the app");
-    const page = new URL(location, url);
+    return new URL(location, url);
+  };
+
+  /** One step: a redirect to the sign-in page that returns to `back` with the parameters. */
+  const step = async (url, back, response) => {
+    const page = await redirectOf(response ?? (await get(url)), url);
     if (
       !plainHttps(page) ||
       page.origin !== signIn.origin ||
@@ -325,7 +330,23 @@ export async function checkClientAtIssuer(
     return returning;
   };
 
-  const check = await step(endpoint.href, new URL("/oauth/authorize-with-immediate-redirect", origin));
+  const first = await get(endpoint.href);
+  const target = first.headers.get("location");
+  const direct = target && !target.startsWith(redirectUri) ? new URL(target, endpoint) : null;
+  let check;
+  if (
+    direct &&
+    redirectStatuses.has(first.status) &&
+    direct.origin === origin &&
+    direct.pathname === "/oauth/authorize/continue"
+  ) {
+    await first.body?.cancel();
+    if (!plainHttps(direct) || !carriesParameters(direct, expected))
+      refused("a continuation with changed authorization parameters");
+    check = direct;
+  } else {
+    check = await step(endpoint.href, new URL("/oauth/authorize-with-immediate-redirect", origin), first);
+  }
   await step(check.href, new URL("/oauth-consent", signIn.origin));
 }
 
