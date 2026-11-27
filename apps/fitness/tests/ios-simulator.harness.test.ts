@@ -5,16 +5,20 @@
  * sign-in. The authorize endpoint signs in the synthetic owner at once and
  * redirects to the app with a code; the token endpoint checks the PKCE
  * verifier and redirect URI and issues an access token for the requested
- * resource.
+ * resource, with a refresh token that issues new ones. The app API under
+ * `/api/app` serves the account's records, photos and export.
  *
  * It runs only when FITNESS_IOS_SIM_PORT is set, until `POST /__stop`.
  * `GET /__state` lists the records the account holds and how many
  * imports and enrollments the harness received. `POST /__reset` starts
- * the next flow from an empty account and zero counts. Start it with
+ * the next flow from an empty account and zero counts. `POST /__seed`
+ * fills the account with three weeks of synthetic training, food and
+ * weigh-ins for screenshots. Start it with
  * `apps/fitness-ios/scripts/flows.mjs`.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import type { Entity, RecordEntry } from "@bent/fitness-contracts/domain";
 import {
   configure,
   installClerkFake,
@@ -33,14 +37,95 @@ if (configured) {
   process.env.FITNESS_MCP_URL = `${origin}/api/mcp`;
 }
 const devices = await import("../src/server/devices");
+const app = await import("../src/server/app-api");
 const { handleHealthImport } = await import("../src/server/health");
 const { loadRecords, saveRecord } = await import("../src/server/store");
-const { defaultSettings, settingsId } =
+const { addDays, createWorkout, defaultSettings, localDate, settingsId } =
   await import("@bent/fitness-contracts/domain");
 
 const redirectUri = "build.bent.fitness.dev://oauth";
 
 /** A fresh schema, Clerk fake and account settings for one flow. */
+/**
+ * Three weeks of synthetic history: settings that started then, finished
+ * workouts on alternating routines, easy runs, daily weigh-ins and meals.
+ */
+async function seed() {
+  const owner = syntheticOwner.id;
+  const timezone = process.env.FITNESS_IOS_SIM_TIMEZONE ?? "UTC";
+  const today = localDate(timezone);
+  const start = addDays(today, -21);
+  const settings = {
+    ...defaultSettings(start, timezone),
+    goal: "Get stronger and run 5 km",
+  };
+  const history: RecordEntry[] = [];
+  const put = async (id: string, revision: number, data: Entity) => {
+    const result = await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id,
+      revision,
+      data,
+    });
+    if (result.status === "saved" && result.record) history.push(result.record);
+  };
+  await put(settingsId, 1, settings);
+  const regulars = [
+    { name: "Greek yoghurt and berries", calories: 320, protein: 24 },
+    { name: "Chicken rice bowl", calories: 640, protein: 48 },
+  ];
+  for (const meal of regulars)
+    await put(crypto.randomUUID(), 0, { kind: "regular", ...meal });
+  for (let offset = -21; offset <= 0; offset++) {
+    const date = addDays(today, offset);
+    const day = offset + 21;
+    await put(crypto.randomUUID(), 0, {
+      kind: "weight",
+      date,
+      kg: Math.round((82.4 - day * 0.06 + (day % 3) * 0.2) * 10) / 10,
+    });
+    for (const meal of [
+      ...regulars,
+      { name: "Toast with peanut butter", calories: 410, protein: 16 },
+    ].slice(0, offset === 0 ? 2 : 3))
+      await put(crypto.randomUUID(), 0, { kind: "meal", date, ...meal });
+    if (offset === 0) continue;
+    if (day % 7 === 2 || day % 7 === 5) {
+      await put(crypto.randomUUID(), 0, {
+        kind: "run",
+        date,
+        minutes: 28 + (day % 4),
+        distanceKm: 4.2 + (day % 3) * 0.4,
+        notes: "",
+      });
+    } else if (day % 7 === 0 || day % 7 === 3) {
+      const routine =
+        settings.routines[Math.floor(day / 3) % settings.routines.length];
+      if (!routine) continue;
+      const workout = createWorkout(settings, routine, date, day < 7, history);
+      const startedAt = new Date(`${date}T07:00:00Z`).toISOString();
+      await put(crypto.randomUUID(), 0, {
+        ...workout,
+        startedAt,
+        finishedAt: new Date(`${date}T07:45:00Z`).toISOString(),
+        exercises: workout.exercises.map((exercise) => ({
+          ...exercise,
+          sets: exercise.sets.map((set) => ({
+            ...set,
+            loadKg: set.loadKg || 8 + (day % 5) * 2,
+            value: exercise.prescription.max,
+            right: exercise.prescription.side
+              ? exercise.prescription.max
+              : null,
+            done: true,
+            rir: 2,
+          })),
+        })),
+      });
+    }
+  }
+}
+
 async function prepare() {
   await isolated.create();
   await isolated
@@ -65,12 +150,21 @@ afterAll(async () => {
   if (configured) await isolated.drop();
 });
 
-type Grant = { challenge: string; redirect: string; resource: string };
+type Grant = {
+  challenge: string;
+  redirect: string;
+  resource: string;
+  scopes: string[];
+};
 
 test.skipIf(!configured)(
   "serves the Simulator flows until stopped",
   async () => {
     const grants = new Map<string, Grant>();
+    const refreshTokens = new Map<
+      string,
+      { resource: string; scopes: string[] }
+    >();
     const requests: Record<string, number> = {};
     let tokens = 0;
     let stop = () => undefined as void;
@@ -123,12 +217,41 @@ test.skipIf(!configured)(
             challenge,
             redirect: redirectUri,
             resource: q.get("resource") ?? "",
+            scopes,
           });
           const location = `${redirectUri}?code=${code}&state=${encodeURIComponent(state)}`;
           return new Response(null, { status: 302, headers: { location } });
         }
         if (request.method === "POST" && path === "/oauth/token") {
           const form = new URLSearchParams(await request.text());
+          if (form.get("client_id") !== iosClient)
+            return fail(400, "invalid_client");
+          const issue = (resource: string, scopes: string[]) => {
+            const token = `oat_sim_${++tokens}`;
+            fake.oauth.set(token, {
+              userId: syntheticOwner.id,
+              clientId: iosClient,
+              scopes,
+              aud: resource,
+            });
+            const refresh = scopes.includes("offline_access")
+              ? `ort_sim_${crypto.randomUUID()}`
+              : undefined;
+            if (refresh) refreshTokens.set(refresh, { resource, scopes });
+            return Response.json({
+              access_token: token,
+              token_type: "Bearer",
+              expires_in: 3600,
+              ...(refresh ? { refresh_token: refresh } : {}),
+              scope: scopes.join(" "),
+            });
+          };
+          if (form.get("grant_type") === "refresh_token") {
+            const saved = refreshTokens.get(form.get("refresh_token") ?? "");
+            if (!saved) return fail(400, "invalid_grant");
+            refreshTokens.delete(form.get("refresh_token") ?? "");
+            return issue(form.get("resource") || saved.resource, saved.scopes);
+          }
           const grant = grants.get(form.get("code") ?? "");
           grants.delete(form.get("code") ?? "");
           if (!grant) return fail(400, "invalid_grant");
@@ -140,21 +263,29 @@ test.skipIf(!configured)(
             return fail(400, "invalid_grant: PKCE");
           if (form.get("redirect_uri") !== grant.redirect)
             return fail(400, "invalid_grant: redirect URI");
-          if (form.get("client_id") !== iosClient)
-            return fail(400, "invalid_client");
-          const token = `oat_sim_${++tokens}`;
-          fake.oauth.set(token, {
-            userId: syntheticOwner.id,
-            clientId: iosClient,
-            scopes: ["openid", "fitness:health:enroll"],
-            aud: form.get("resource") || grant.resource,
-          });
-          return Response.json({
-            access_token: token,
-            token_type: "Bearer",
-            expires_in: 3600,
-          });
+          return issue(form.get("resource") || grant.resource, grant.scopes);
         }
+        if (request.method === "POST" && path === "/oauth/token/revoke") {
+          const form = new URLSearchParams(await request.text());
+          refreshTokens.delete(form.get("token") ?? "");
+          return new Response(null, { status: 200 });
+        }
+        if (path === "/api/app/records")
+          return request.method === "POST"
+            ? app.handleRecordSave(request)
+            : app.handleRecordsLoad(request);
+        if (path === "/api/app/photos")
+          return request.method === "POST"
+            ? app.handlePhotoUpload(request)
+            : app.handlePhotoList(request);
+        if (path.startsWith("/api/app/photos/")) {
+          const id = path.slice("/api/app/photos/".length);
+          return request.method === "DELETE"
+            ? app.handlePhotoDelete(request, id)
+            : app.handlePhotoRead(request, id);
+        }
+        if (request.method === "GET" && path === "/api/app/export")
+          return app.handleExport(request);
         if (request.method === "POST" && path === "/api/health/devices")
           return devices.handleDeviceEnroll(request);
         if (
@@ -185,7 +316,22 @@ test.skipIf(!configured)(
           await isolated.drop();
           await prepare();
           grants.clear();
+          refreshTokens.clear();
           for (const key of Object.keys(requests)) delete requests[key];
+          return new Response(null, { status: 204 });
+        }
+        // The exercise illustrations, as fitness.bent.build serves them.
+        if (
+          request.method === "GET" &&
+          /^\/exercise-guides\/(thumbs\/)?[a-z]+\.(png|jpg)$/.test(path)
+        ) {
+          const file = Bun.file(new URL(`../public${path}`, import.meta.url));
+          return (await file.exists())
+            ? new Response(file)
+            : fail(404, "not found");
+        }
+        if (request.method === "POST" && path === "/__seed") {
+          await seed();
           return new Response(null, { status: 204 });
         }
         if (request.method === "POST" && path === "/__stop") {

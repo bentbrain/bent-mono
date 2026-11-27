@@ -16,7 +16,7 @@ A Bun monorepo for bent.build and its subdomains. The apps share design tokens, 
 
 `deployments.json` lists the apps and their deployment settings. Drive keeps its internal packages and services under `products/`.
 
-`apps/fitness-ios` is bent Fitness, an Expo iPhone app that sends Apple Health weigh-ins and runs to Fitness. Its README covers setup, the Simulator workflow and its tests.
+`apps/fitness-ios` is bent Fitness, the native Expo iPhone app for Fitness: training, food, progress and settings, with Apple Health weigh-ins and runs syncing in the background. Its README covers setup, the Simulator workflow and its tests.
 
 ## Development
 

@@ -98,7 +98,7 @@ export function appSettings(variant: Variant, environment: Record<string, string
       clientId: environment.FITNESS_OAUTH_CLIENT_ID?.trim() ?? "",
       redirectUri: `${scheme}://oauth`,
       resource: `${fitnessOrigin}/api/mcp`,
-      scopes: ["fitness:health:enroll", "openid"],
+      scopes: ["openid", "offline_access", "fitness:read", "fitness:write", "fitness:health:enroll"],
     },
   };
 }

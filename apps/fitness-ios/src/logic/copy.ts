@@ -12,11 +12,10 @@ export const copy = {
   appName: "bent Fitness",
   signIn: {
     title: "Sync Apple Health to Fitness",
-    body: "bent Fitness sends your weigh-ins and runs from Apple Health to your Fitness account. Sign in with the account you use for Fitness.",
-    button: "Sign in to Fitness",
+    body: "bent Fitness sends your weigh-ins and runs from Apple Health to your Fitness account, in the background as Health records them.",
+    button: "Connect Apple Health",
     unconfigured: "Sign-in is not set up in this build.",
-    tryLater: (seconds: number) =>
-      `Fitness asked to wait ${seconds} seconds, longer than this sign-in lasts. Sign in again after that.`,
+    tryLater: (seconds: number) => `Fitness asked to wait ${seconds} seconds. Try connecting again after that.`,
   },
   consent: {
     title: "Confirm what syncs",
@@ -78,7 +77,7 @@ export const copy = {
   },
   reconnect: {
     title: "Connect again",
-    body: "Fitness no longer accepts this iPhone's key. It may have been revoked under Manage account → API keys. Sign in again to keep syncing.",
+    body: "Fitness no longer accepts this iPhone's key. It may have been revoked under Manage account → API keys. Connect again to keep syncing.",
   },
 };
 
@@ -111,21 +110,21 @@ export function guidance(code: string | null | undefined): string | null {
 export function enrollMessage(outcome: EnrollOutcome): string {
   if (outcome.kind === "pendingRevocations")
     return `${outcome.count} earlier ${outcome.count === 1 ? "key" : "keys"} from this iPhone could not be revoked yet. Try again when online, or continue and revoke later under Manage account → API keys.`;
-  if (outcome.kind === "superseded") return "That sign-in was replaced by a newer one. Sign in again.";
+  if (outcome.kind === "superseded") return "That connection was replaced by a newer one. Connect again.";
   if (outcome.kind !== "failed") return "";
   switch (outcome.action) {
     case "deviceLimit":
-      return "Up to 3 iPhones can sync. Revoke one under Manage account → API keys in Fitness, then sign in again.";
+      return "Up to 3 iPhones can sync. Revoke one under Manage account → API keys in Fitness, then connect again.";
     case "bug":
       return `The app sent a request Fitness could not read: ${outcome.message}`;
     case "reauthorize":
-      return "The connection did not finish. Sign in again.";
+      return "The connection did not finish. Connect again.";
     case "retrySameToken":
       return "Fitness is busy. Try again in a moment.";
     case "refused":
       switch (outcome.code) {
         case "insufficient_scope":
-          return "Approve iPhone sync access when you sign in.";
+          return "Sign out, then sign in again and approve iPhone sync access.";
         case "client_not_allowed":
           return "This build of the app is not allowed to connect. Install the current version.";
         case "not_invited":

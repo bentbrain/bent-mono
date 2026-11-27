@@ -7,7 +7,7 @@ export const Route = createFileRoute("/privacy")({
       {
         name: "description",
         content:
-          "How the bent Fitness iPhone app reads Apple Health weigh-ins and runs, where it sends them and how to disconnect or delete them.",
+          "What the bent Fitness iPhone app reads and keeps, including Apple Health weigh-ins and runs, where it sends data and how to disconnect, sign out or delete it.",
       },
     ],
   }),
@@ -22,13 +22,32 @@ function Privacy() {
       </div>
       <h1>bent Fitness privacy</h1>
       <p>
-        bent Fitness is an iPhone app that sends your Apple Health weigh-ins and
-        runs to your Fitness account at fitness.bent.build. This page covers
-        what it reads, where that data goes, how it is kept and how to remove
-        it.
+        bent Fitness is the iPhone app for your Fitness account at
+        fitness.bent.build. You use it to plan and log training, food and
+        bodyweight, and it can send your Apple Health weigh-ins and runs to the
+        same account. This page covers what it reads, where that data goes, how
+        it is kept and how to remove it.
       </p>
 
-      <h2>What the app reads</h2>
+      <h2>Your Fitness account in the app</h2>
+      <p>
+        When you sign in, you approve the app to read and change your Fitness
+        account: workouts, runs, meals, saved meals, weigh-ins, settings and
+        equipment photos. Everything you enter in the app is saved to your
+        account at fitness.bent.build. The app keeps its sign-in in the Keychain
+        on that iPhone only.
+      </p>
+      <p>
+        So the app opens without a connection, it keeps a copy of your account
+        on the iPhone: your entries and settings, changes waiting to be saved,
+        workout values you have typed but not saved yet, and equipment photos it
+        has shown. The app asks iOS to leave this copy out of iCloud and
+        computer backups. Signing out deletes the sign-in, that copy and the
+        photos from the iPhone. Changes and typed values that were still waiting
+        are deleted too; the app warns you first and offers to export them.
+      </p>
+
+      <h2>What Apple Health sync reads</h2>
       <ul>
         <li>
           Weigh-ins: each body mass sample, with its time and weight in
@@ -49,14 +68,18 @@ function Privacy() {
 
       <h2>Where it goes</h2>
       <p>
-        The app sends samples over HTTPS to fitness.bent.build and nowhere else.
-        It contains no analytics, advertising or crash-reporting services. Its
-        logs on the iPhone hold status codes and counts, not Health values.
+        The app sends your entries and Health samples over HTTPS to
+        fitness.bent.build and nowhere else. Exercise illustrations also load
+        from fitness.bent.build, and an exercise's tutorial opens on YouTube
+        when you choose it. The app contains no analytics, advertising or
+        crash-reporting services. Its logs on the iPhone hold status codes and
+        counts, not Health values or entries.
       </p>
       <p>
-        When you connect, you sign in to Fitness with your invited account and
-        approve iPhone sync. Fitness then gives the app a device key. That key
-        can import weigh-ins and runs into your account and do nothing else:
+        When you connect Apple Health in the app's Settings, the app uses your
+        sign-in, which includes approval for iPhone sync, to get a device key
+        from Fitness. That key can import weigh-ins and runs into your account
+        and do nothing else:
       </p>
       <ul>
         <li>
@@ -91,23 +114,23 @@ function Privacy() {
         import, Fitness deletes it the next time any iPhone connects.
       </p>
       <p>
-        On the iPhone, the app keeps its device key in the Keychain on that
-        device only. Its sync progress file holds Health query positions, the
-        IDs of samples waiting to be sent and counts from recent syncs, and is
-        excluded from backups.
+        On the iPhone, the app keeps the Health sync device key in the Keychain
+        on that device only. Its sync progress file holds Health query
+        positions, the IDs of samples waiting to be sent and counts from recent
+        syncs, and is excluded from backups.
       </p>
 
       <h2>Disconnect or delete</h2>
       <ul>
         <li>
-          Disconnect in the app's Settings stops syncing and clears the app's
-          sync progress on the iPhone straight away, then asks Fitness to revoke
-          the device key. If that request does not go through, for example while
-          the iPhone is offline, the app asks again when it next opens, comes to
-          the foreground or is unlocked, after any wait Fitness asked for. If
-          Fitness replies that the key is not an iPhone sync key, the app stops
-          asking and shows a notice to revoke it yourself in Fitness under
-          Manage account → API keys.
+          Disconnect under Settings → Apple Health stops syncing and clears the
+          app's sync progress on the iPhone straight away, then asks Fitness to
+          revoke the device key. If that request does not go through, for
+          example while the iPhone is offline, the app asks again when it next
+          opens, comes to the foreground or is unlocked, after any wait Fitness
+          asked for. If Fitness replies that the key is not an iPhone sync key,
+          the app stops asking and shows a notice to revoke it yourself in
+          Fitness under Manage account → API keys.
         </li>
         <li>
           You can also revoke the key in Fitness under Manage account → API
@@ -123,6 +146,11 @@ function Privacy() {
           disconnect. Remove them in Fitness from Progress → Bodyweight and
           Progress → Sessions. Settings → Export account data and photos
           downloads everything your account holds.
+        </li>
+        <li>
+          Sign out in the app's Settings to remove your account from the iPhone.
+          Signing out does not disconnect Apple Health sync; disconnect it first
+          if you want it to stop too.
         </li>
         <li>
           To delete your Fitness account and all of its data, contact the app
