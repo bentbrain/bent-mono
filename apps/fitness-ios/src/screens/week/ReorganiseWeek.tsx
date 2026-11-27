@@ -195,7 +195,7 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
                 {error}
               </Notice>
             ) : null}
-            <AppText textRole="footnote" weight="medium" className="px-1" numberOfLines={2} testID="move-preview">
+            <AppText textRole="footnote" weight="medium" className="px-1" testID="move-preview">
               {preview || "No changes yet."}
             </AppText>
             <Button label="Save week" disabled={!preview} onPress={save} testID="reorganise-save" />
