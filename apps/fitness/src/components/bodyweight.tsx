@@ -6,8 +6,8 @@ import {
   formatShortDate,
   toKg,
   weightSchema,
-} from "../domain";
-import type { Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";

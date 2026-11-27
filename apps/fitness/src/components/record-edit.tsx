@@ -1,6 +1,6 @@
 import { Button } from "@bent/ui/button";
-import { sameData } from "../domain";
-import type { Entity } from "../domain";
+import { sameData } from "@bent/fitness-contracts/domain";
+import type { Entity } from "@bent/fitness-contracts/domain";
 
 /** The version of a record an editor opened. Saving checks it is still current. */
 export type Opened<T extends Entity> = {

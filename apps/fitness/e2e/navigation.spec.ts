@@ -14,7 +14,7 @@ import {
   localDate,
   scheduled,
   recordSchema,
-} from "../src/domain";
+} from "@bent/fitness-contracts/domain";
 import { settleWrites, trackWrites } from "./quiescence";
 const email = "fitness-a+clerk_test@example.com";
 const exportSchema = z.object({ records: z.array(recordSchema) });

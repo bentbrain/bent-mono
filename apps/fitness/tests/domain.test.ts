@@ -26,15 +26,19 @@ import {
   toKg,
   totals,
   workoutSchema,
-} from "../src/domain";
+} from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
 import {
   dailyWeights,
   strengthSeries,
   weeklySummary,
   weightTrend,
-} from "../src/progress";
-import { elapsedSeconds, formatDuration, remainingRest } from "../src/timing";
+} from "@bent/fitness-contracts/progress";
+import {
+  elapsedSeconds,
+  formatDuration,
+  remainingRest,
+} from "@bent/fitness-contracts/timing";
 import {
   type Buffered,
   applyText,
@@ -46,7 +50,7 @@ import {
   shownText,
 } from "../src/components/workout-inputs";
 import { correctionStatus, editStatus } from "../src/components/record-edit";
-import type { RecordEntry } from "../src/domain";
+import type { RecordEntry } from "@bent/fitness-contracts/domain";
 describe("plan dates and snapshots", () => {
   const settings = defaultSettings("2026-01-05", "Australia/Brisbane");
   test("alternates A/B/A then B/A/B across weeks", () => {

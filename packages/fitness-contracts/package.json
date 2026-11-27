@@ -5,7 +5,11 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./domain": "./src/domain.ts",
+    "./progress": "./src/progress.ts",
+    "./guides": "./src/guides.ts",
+    "./timing": "./src/timing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -23,5 +27,6 @@
     "knip": "6.44.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"
-  }
+  },
+  "description": "Shared Fitness schemas, domain rules, progress summaries, exercise guides and API contracts."
 }

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { mutationSchema } from "../domain";
+import { mutationSchema } from "@bent/fitness-contracts/domain";
 import { requireOwner } from "./auth";
 import { loadRecords, saveRecord } from "./store";
 import { configurationReady } from "./config";

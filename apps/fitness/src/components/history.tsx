@@ -6,8 +6,8 @@ import {
   formatDate,
   setResult,
   trainingRecords,
-} from "../domain";
-import type { RecordEntry, Workout } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { RecordEntry, Workout } from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 import { ExerciseList, InputNotices, NotesField } from "./workout";
 import { useWorkoutInputs } from "./workout-inputs";

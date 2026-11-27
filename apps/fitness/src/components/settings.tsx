@@ -13,8 +13,8 @@ import {
   settingsId,
   settingsSchema,
   toKg,
-} from "../domain";
-import type { Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Settings } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sync } from "../sync";
 import { download, SelectField, TextField } from "./fields";

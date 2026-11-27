@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { mutationSchema, recordSchema, settingsId } from "./domain";
-import type { Entity, Mutation, RecordEntry, SaveResult } from "./domain";
+import {
+  mutationSchema,
+  recordSchema,
+  settingsId,
+} from "@bent/fitness-contracts/domain";
+import type {
+  Entity,
+  Mutation,
+  RecordEntry,
+  SaveResult,
+} from "@bent/fitness-contracts/domain";
 const pendingSchema = z.object({ request: mutationSchema, at: z.number() });
 type Pending = z.infer<typeof pendingSchema>;
 export type Transport = {

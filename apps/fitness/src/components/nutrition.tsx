@@ -9,8 +9,8 @@ import {
   mealSchema,
   regularSchema,
   totals,
-} from "../domain";
-import type { Entity, Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Entity, Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
 import { useAccount } from "./account-context";
 import { DateBar } from "./date-bar";

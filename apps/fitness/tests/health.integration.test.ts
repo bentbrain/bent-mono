@@ -2,8 +2,13 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { database } from "../src/server/db";
 import { importHealth, readImportBody } from "../src/server/health";
 import { healthChange, loadRecords, saveRecord } from "../src/server/store";
-import { addDays, defaultSettings, localDate, settingsId } from "../src/domain";
-import type { Entity } from "../src/domain";
+import {
+  addDays,
+  defaultSettings,
+  localDate,
+  settingsId,
+} from "@bent/fitness-contracts/domain";
+import type { Entity } from "@bent/fitness-contracts/domain";
 
 const configured = Boolean(process.env.FITNESS_TEST_DATABASE_URL);
 if (process.env.CI && !configured)

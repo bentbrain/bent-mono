@@ -8,8 +8,8 @@ import {
   sameData,
   scheduled,
   settingsId,
-} from "../domain";
-import type { Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Settings } from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 import { Icon } from "./icons";
 

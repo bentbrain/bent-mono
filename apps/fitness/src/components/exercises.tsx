@@ -1,9 +1,13 @@
 import { useEffect, useId, useRef } from "react";
 import { Link } from "@tanstack/react-router";
-import { exercises, lastExercise, setResult } from "../domain";
-import type { Exercise } from "../domain";
-import { guides } from "../guides";
-import { formatDuration } from "../timing";
+import {
+  exercises,
+  lastExercise,
+  setResult,
+} from "@bent/fitness-contracts/domain";
+import type { Exercise } from "@bent/fitness-contracts/domain";
+import { guides } from "@bent/fitness-contracts/guides";
+import { formatDuration } from "@bent/fitness-contracts/timing";
 import { useAccount } from "./account-context";
 import { Icon } from "./icons";
 

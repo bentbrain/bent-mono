@@ -35,7 +35,8 @@ const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
 const { saveRecord, setEnrollmentWait } = await import("../src/server/store");
 const { default: postgres } = await import("postgres");
-const { defaultSettings, settingsId } = await import("../src/domain");
+const { defaultSettings, settingsId } =
+  await import("@bent/fitness-contracts/domain");
 
 /** The clock the Swift side uses: midday on 20 November 2026 in Brisbane. */
 const now = new Date("2026-11-20T02:00:00Z");

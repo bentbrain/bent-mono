@@ -1,5 +1,10 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { addDays, dateSearch, formatDate, formatShortDate } from "../domain";
+import {
+  addDays,
+  dateSearch,
+  formatDate,
+  formatShortDate,
+} from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 import { Icon } from "./icons";
 

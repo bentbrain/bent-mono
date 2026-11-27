@@ -14,7 +14,7 @@ import {
   sessionMinutes,
   setResult,
   trainingRecords,
-} from "../domain";
+} from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
 import { Icon } from "./icons";
@@ -25,7 +25,7 @@ import {
   WorkoutEditor,
   workoutInputKey,
 } from "./workout";
-import type { Entity } from "../domain";
+import type { Entity } from "@bent/fitness-contracts/domain";
 import { EditConflict, editStatus } from "./record-edit";
 import type { Opened } from "./record-edit";
 

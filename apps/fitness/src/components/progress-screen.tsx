@@ -6,15 +6,18 @@ import {
   formatShortDate,
   mondayOf,
   trainingRecords,
-} from "../domain";
-import type { Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Settings } from "@bent/fitness-contracts/domain";
 import {
   dailyWeights,
   strengthSeries,
   weeklySummary,
   weightTrend,
-} from "../progress";
-import type { StrengthPoint, StrengthSeries } from "../progress";
+} from "@bent/fitness-contracts/progress";
+import type {
+  StrengthPoint,
+  StrengthSeries,
+} from "@bent/fitness-contracts/progress";
 import { useAccount } from "./account-context";
 
 const sections = [

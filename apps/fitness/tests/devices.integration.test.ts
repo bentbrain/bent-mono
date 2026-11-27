@@ -38,7 +38,8 @@ const { loadRecords, saveRecord } = store;
 const EARLIER_ENROLLMENTS = await Bun.file(
   new URL("./fixtures/schema/enrollments-earlier.sql", import.meta.url),
 ).text();
-const { defaultSettings, settingsId } = await import("../src/domain");
+const { defaultSettings, settingsId } =
+  await import("@bent/fitness-contracts/domain");
 
 const owner = syntheticOwner.id;
 const timezone = "Australia/Brisbane";
