@@ -552,4 +552,29 @@ describe("sync engine", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(engine.getState()).toMatchObject({ online: true, error: "", pending: 0 });
   });
+
+  test("a refusal keeps its message through an offline refresh and the reconcile after it", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      return save(request);
+    };
+    engine.put(meal("Oats"));
+    engine.put(meal("Refused"));
+    await engine.flush();
+    fitness.transport.load = async () => {
+      throw new OfflineError();
+    };
+    await engine.refresh();
+    expect(engine.getState()).toMatchObject({ online: false, rejected: { message: "Refused." } });
+    expect(engine.getState().error).toContain("Refused.");
+    fitness.transport.load = load;
+    await engine.refresh();
+    expect(engine.getState()).toMatchObject({ online: true, pending: 1, rejected: { message: "Refused." } });
+    expect(engine.getState().error).toContain("Refused.");
+  });
 });

@@ -216,7 +216,9 @@ export class SyncEngine {
 
   private fail(error: unknown, fallback: string) {
     if (this.stopped || error instanceof StoppedError) return;
-    if (error instanceof OfflineError) this.emit({ online: false, error: "" });
+    // Going offline keeps a conflict's or a refusal's message; it still applies.
+    if (error instanceof OfflineError)
+      this.emit({ online: false, error: this.base.conflict || this.base.rejected ? this.base.error : "" });
     else if (error instanceof RejectedChange && this.queue[0])
       this.emit({
         rejected: { operationId: this.queue[0].request.operationId, message: error.message },
