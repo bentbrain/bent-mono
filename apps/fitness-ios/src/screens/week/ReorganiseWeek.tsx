@@ -1,43 +1,66 @@
 import { useState } from "react";
 import { Alert, Modal, ScrollView, View } from "react-native";
-import { settingsId } from "@bent/fitness-contracts/domain";
+import { HStack, Host, Image, List, Section, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
+import {
+  accessibilityElement,
+  accessibilityHint,
+  accessibilityLabel,
+  environment,
+  font,
+  foregroundStyle,
+  frame,
+  listRowBackground,
+  listStyle,
+  moveDisabled,
+  scrollContentBackground,
+} from "@expo/ui/swift-ui/modifiers";
+import { useCSSVariable } from "uniwind";
+import { formatDate, formatShortDate, settingsId } from "@bent/fitness-contracts/domain";
 import type { Settings } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { Button, IconButton } from "../../ui/Button";
 import { haptic } from "../../ui/haptics";
 import { Notice } from "../../ui/Layout";
-import { ListRow, ListSection } from "../../ui/List";
 import { AppText } from "../../ui/Text";
 import {
   canReorganise,
   canResetWeek,
-  chooseSource,
-  dayOption,
-  firstMove,
-  moveDestinations,
   movableDays,
-  movePreview,
-  moveSources,
-  planMove,
+  planWeek,
+  reorderPreview,
+  reorderWeek,
   resetWeek,
   saveStatus,
   weekDays,
+  weekSlots,
 } from "./logic";
+import type { WeekSlot } from "./logic";
 import { useWeekNavigation } from "./navigation";
 
 type Origin = { settings: Settings; revision: number };
 
+/** A colour token for SwiftUI, which takes plain colour values. */
+function useColour(name: string) {
+  const value = useCSSVariable(name);
+  return typeof value === "string" ? value : undefined;
+}
+
+/** A foreground colour modifier, left out until the token resolves. */
+function tinted(colour: string | undefined) {
+  return colour ? [foregroundStyle(colour)] : [];
+}
+
 /**
- * Moves a planned session within this week, or resets the week to the
- * repeating plan. The sheet keeps the plan it opened with and refuses a move
- * when another device changed the plan in the meantime.
+ * Rearranges this week's planned sessions by dragging them between days, or
+ * resets the week to the repeating plan. The sheet keeps the plan it opened
+ * with, saves the new arrangement in one change, and refuses it when another
+ * device changed the plan in the meantime.
  */
 export function ReorganiseWeek({ monday }: { monday: string }) {
   const { sync, settings, today } = useConfiguredAccount();
   const navigation = useWeekNavigation();
   const [origin, setOrigin] = useState<Origin | null>(null);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [order, setOrder] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const days = weekDays(monday);
@@ -46,11 +69,8 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
   function open() {
     const latest = sync.latest(settingsId);
     if (latest.data?.kind !== "settings") return;
-    const opened = { settings: latest.data, revision: latest.revision };
-    const move = firstMove(opened.settings, movable);
-    setOrigin(opened);
-    setFrom(move.from);
-    setTo(move.to);
+    setOrigin({ settings: latest.data, revision: latest.revision });
+    setOrder(days);
     setError("");
   }
 
@@ -58,9 +78,21 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
     setOrigin(null);
   }
 
-  function apply() {
+  function move(slots: WeekSlot[], sources: number[], destination: number) {
+    const next = reorderWeek(
+      slots.map((slot) => slot.source),
+      slots.map((slot) => slot.locked),
+      sources,
+      destination,
+    );
+    haptic("selection");
+    setOrder(next);
+    setError("");
+  }
+
+  function save() {
     if (!origin) return;
-    const result = planMove(origin, sync.latest(settingsId), from, to, today, sync.records);
+    const result = planWeek(origin, sync.latest(settingsId), days, order, today, sync.records);
     if ("error" in result) {
       haptic("error");
       setError(result.error);
@@ -102,9 +134,7 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
     );
   }
 
-  const sources = origin ? moveSources(origin.settings, movable) : [];
-  const destinations = origin ? moveDestinations(movable, from) : [];
-  const preview = origin ? movePreview(origin.settings, from, to) : "";
+  const preview = origin ? reorderPreview(origin.settings, days, order) : "";
 
   return (
     <View className="gap-2">
@@ -140,72 +170,33 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
         allowSwipeDismissal
         onRequestClose={close}
       >
-        <View className="flex-1 bg-screen">
+        <View className="flex-1 bg-screen" testID="reorganise-sheet">
           <View className="flex-row items-center justify-between gap-3 px-4 pb-2 pt-4">
             <AppText textRole="headline" weight="bold" accessibilityRole="header" className="flex-1">
-              Move a planned session
+              Reorganise week
             </AppText>
             <IconButton icon="xmark" label="Close reorganisation" tone="secondary" size={32} onPress={close} testID="reorganise-close" />
           </View>
-          <ScrollView
-            className="flex-1"
-            contentContainerClassName="gap-6 px-4 pb-10 pt-2"
-            keyboardShouldPersistTaps="handled"
-            testID="reorganise-sheet"
-          >
-            <View className="gap-2 px-1">
-              <AppText textRole="footnote" tone="secondary">
-                Choose where this session goes. If that day has a session, the two will swap. This changes only this week.
-              </AppText>
-              <AppText textRole="footnote" tone="muted">
-                Past days and recorded or started sessions stay fixed.
-              </AppText>
-            </View>
-            {origin ? (
-              <>
-                <ListSection title="Session to move">
-                  {sources.map((day) => (
-                    <ListRow
-                      key={day}
-                      label={dayOption(origin.settings, day)}
-                      selected={day === from}
-                      onPress={() => {
-                        const next = chooseSource(movable, day, to);
-                        setFrom(next.from);
-                        setTo(next.to);
-                        setError("");
-                      }}
-                      testID={`move-source-${day}`}
-                    />
-                  ))}
-                </ListSection>
-                <ListSection title="Move to">
-                  {destinations.map((day) => (
-                    <ListRow
-                      key={day}
-                      label={dayOption(origin.settings, day)}
-                      selected={day === to}
-                      onPress={() => {
-                        setTo(day);
-                        setError("");
-                      }}
-                      testID={`move-destination-${day}`}
-                    />
-                  ))}
-                </ListSection>
-              </>
-            ) : null}
-            {preview ? (
-              <AppText textRole="footnote" weight="medium" className="px-1" testID="move-preview">
-                {preview}
-              </AppText>
-            ) : null}
+          {origin ? (
+            <WeekOrder
+              slots={weekSlots(origin.settings, days, order, today, sync.records)}
+              title={`${formatShortDate(days[0] ?? monday)} – ${formatShortDate(days[6] ?? monday)}`}
+              onMove={move}
+            />
+          ) : (
+            <View className="flex-1" />
+          )}
+          {/* The actions take at most 45% of the sheet and scroll, so the list keeps room at large text sizes. */}
+          <ScrollView style={{ flexGrow: 0, maxHeight: "45%" }} contentContainerClassName="gap-3 px-4 pb-8 pt-3">
             {error ? (
               <Notice tone="danger" testID="reorganise-error">
                 {error}
               </Notice>
             ) : null}
-            <Button label="Apply move" disabled={!from || !to || from === to} onPress={apply} testID="apply-move" />
+            <AppText textRole="footnote" weight="medium" className="px-1" testID="move-preview">
+              {preview || "No changes yet."}
+            </AppText>
+            <Button label="Save week" disabled={!preview} onPress={save} testID="reorganise-save" />
             <Button
               label="Edit the repeating schedule"
               tone="plain"
@@ -220,5 +211,71 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
         </View>
       </Modal>
     </View>
+  );
+}
+
+/**
+ * The week as a native list in edit mode. Open days show a drag handle;
+ * past days and days with a recorded or started session show a lock and
+ * stay where they are.
+ */
+function WeekOrder({
+  slots,
+  title,
+  onMove,
+}: {
+  slots: WeekSlot[];
+  title: string;
+  onMove: (slots: WeekSlot[], sources: number[], destination: number) => void;
+}) {
+  const row = useColour("--color-grouped-card");
+  const text = useColour("--color-foreground");
+  const muted = useColour("--color-foreground-muted");
+  const icon = useColour("--color-icon");
+  return (
+    <Host style={{ flex: 1 }} testID="reorganise-list">
+      <List modifiers={[listStyle("insetGrouped"), scrollContentBackground("hidden"), environment("editMode", "active")]}>
+        <Section
+          title={title}
+          footer={
+            <SwiftText modifiers={[font({ textStyle: "footnote" }), ...tinted(muted)]}>
+              {
+                "Drag a session by its handle to another day. The sessions in between shift to make room. Past days and recorded or started sessions stay fixed. This changes only this week."
+              }
+            </SwiftText>
+          }
+        >
+          <List.ForEach data={slots} keyExtractor={(slot) => slot.source} recycling={false} onMove={(sources, destination) => onMove(slots, sources, destination)}>
+            {({ item }) => (
+              <HStack
+                spacing={12}
+                modifiers={[
+                  moveDisabled(item.locked),
+                  ...(row ? [listRowBackground(row)] : []),
+                  accessibilityElement("combine"),
+                  accessibilityLabel(`${formatDate(item.day)}: ${item.session}${item.locked ? ", fixed" : ""}`),
+                  accessibilityHint(item.locked ? "This day stays as it is." : "Drag to move this session to another day."),
+                ]}
+              >
+                <SwiftText
+                  modifiers={[
+                    font({ textStyle: "subheadline", weight: "semibold" }),
+                    frame({ minWidth: 60, alignment: "leading" }),
+                    ...tinted(muted),
+                  ]}
+                >
+                  {formatShortDate(item.day).split(" ").slice(0, 2).join(" ")}
+                </SwiftText>
+                <SwiftText modifiers={[font({ textStyle: "body" }), ...tinted(item.locked ? muted : text)]}>
+                  {item.session}
+                </SwiftText>
+                <Spacer />
+                {item.locked ? <Image systemName="lock.fill" size={13} color={icon} /> : null}
+              </HStack>
+            )}
+          </List.ForEach>
+        </Section>
+      </List>
+    </Host>
   );
 }

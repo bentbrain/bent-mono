@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   addDays,
   formatDate,
+  formatShortDate,
   reorganiseDays,
   runSchema,
   sameData,
@@ -133,54 +134,132 @@ export function resetWeek(settings: Settings, days: string[]): Settings {
   };
 }
 
-/** Planned sessions that can move. */
-export function moveSources(settings: Settings, movable: string[]) {
-  return movable.filter((day) => scheduled(settings, day).type !== "rest");
-}
-
-/** Days a session on `from` can move to. */
-export function moveDestinations(movable: string[], from: string) {
-  return movable.filter((day) => day !== from);
-}
-
-/** The move the sheet opens with: the first planned session and the next open day. */
-export function firstMove(settings: Settings, movable: string[]) {
-  const from = moveSources(settings, movable)[0] ?? "";
-  return { from, to: movable.find((day) => day !== from) ?? "" };
-}
-
-/** Choosing a new session keeps the destination unless it is the same day. */
-export function chooseSource(movable: string[], from: string, to: string) {
-  return { from, to: to === from ? (movable.find((day) => day !== from) ?? "") : to };
-}
-
-/** "Fri 27 Nov 2026 · Strength A" */
-export function dayOption(settings: Settings, day: string) {
-  return `${formatDate(day)} · ${sessionName(scheduled(settings, day))}`;
-}
-
-/** What the move does to both days. */
-export function movePreview(settings: Settings, from: string, to: string) {
-  if (!from || !to) return "";
-  return `${sessionName(scheduled(settings, from))} moves to ${formatDate(to)}. ${sessionName(scheduled(settings, to))} moves to ${formatDate(from)}.`;
+/**
+ * Whether two days hold the same session: the same type and, for strength,
+ * the same routine snapshot. A dated plan keeps the routine as it was when
+ * the day was moved, so a renamed or edited routine counts as different.
+ */
+function samePlan(a: Plan, b: Plan) {
+  return a.type === b.type && (a.type !== "strength" || sameData(a.routine ?? null, b.routine ?? null));
 }
 
 /**
- * Applies a move to the settings the sheet opened with. A change saved on
- * another device since then stops the move, so it never overwrites that edit.
+ * The fewest swaps that turn `start` into `goal`, as pairs of positions.
+ * Each value names a session; a week has at most seven open days, so a
+ * breadth-first search over the arrangements stays small.
  */
-export function planMove(
+function fewestSwaps(start: number[], goal: number[]): [number, number][] | undefined {
+  const target = goal.join(",");
+  const paths = new Map<string, [number, number][]>([[start.join(","), []]]);
+  let frontier = [start];
+  while (frontier.length > 0) {
+    const next: number[][] = [];
+    for (const state of frontier) {
+      const path = paths.get(state.join(",")) ?? [];
+      if (state.join(",") === target) return path;
+      state.forEach((key, i) => {
+        if (key === goal[i]) return;
+        for (let j = i + 1; j < state.length; j += 1) {
+          // Days already holding their session stay out of the swaps.
+          if (state[j] === key || state[j] === goal[j]) continue;
+          const swapped = [...state];
+          [swapped[i], swapped[j]] = [state[j] ?? key, key];
+          const id = swapped.join(",");
+          if (paths.has(id)) continue;
+          paths.set(id, [...path, [i, j]]);
+          next.push(swapped);
+        }
+      });
+    }
+    frontier = next;
+  }
+  return undefined;
+}
+
+/**
+ * One row of the reorganise list. `source` is the day whose planned session
+ * sits on `day`; a new arrangement starts with every session on its own day.
+ */
+export type WeekSlot = { day: string; source: string; session: string; locked: boolean };
+
+/** The week as the reorganise list shows it, with `order[i]` placed on the week's day `i`. */
+export function weekSlots(settings: Settings, days: string[], order: string[], today: string, records: RecordEntry[]): WeekSlot[] {
+  return days.map((day, index) => {
+    const source = order[index] ?? day;
+    return { day, source, session: sessionName(scheduled(settings, source)), locked: lockedDay(day, today, records) };
+  });
+}
+
+/**
+ * Applies a drag in the reorganise list. The moved sessions land among the
+ * open days in the order shown, and fixed days keep their sessions. Indices
+ * follow SwiftUI's `onMove`: `destination` counts rows before the moved ones
+ * are taken out.
+ */
+export function reorderWeek(order: string[], locked: boolean[], sources: number[], destination: number) {
+  const moving = sources.filter((index) => !locked[index] && index < order.length);
+  if (moving.length === 0) return order;
+  const stays = (index: number) => !locked[index] && !moving.includes(index);
+  const open = order.filter((_, index) => stays(index));
+  const at = order.slice(0, Math.max(0, destination)).filter((_, index) => stays(index)).length;
+  open.splice(at, 0, ...moving.map((index) => order[index] ?? ""));
+  let next = 0;
+  return order.map((source, index) => (locked[index] ? source : (open[next++] ?? source)));
+}
+
+/**
+ * The days whose session changes, as "2 days change: Sat 28, Sun 29." The
+ * list shows the new sessions, so this names only the days.
+ */
+export function reorderPreview(settings: Settings, days: string[], order: string[]) {
+  const changed = days.filter((day, index) => !samePlan(scheduled(settings, order[index] ?? day), scheduled(settings, day)));
+  if (changed.length === 0) return "";
+  const names = changed.map((day) => formatShortDate(day).split(" ").slice(0, 2).join(" "));
+  return `${changed.length === 1 ? "1 day changes" : `${changed.length} days change`}: ${names.join(", ")}.`;
+}
+
+/**
+ * Turns the arrangement the list shows into settings with the fewest swaps
+ * of the shared reorganise rule, so only days whose session changes gain a
+ * dated plan. A change saved on another device since the sheet opened stops
+ * the save, so it never overwrites that edit.
+ */
+export function planWeek(
   origin: { settings: Settings; revision: number },
   latest: { revision: number; data: Entity | null },
-  from: string,
-  to: string,
+  days: string[],
+  order: string[],
   today: string,
   records: RecordEntry[],
 ): { settings: Settings } | { error: string } {
   if (latest.revision !== origin.revision || !sameData(latest.data, origin.settings))
     return { error: "Your plan changed. Close this sheet and reopen it to use the saved plan." };
+  const sessions: Plan[] = [];
+  const keyOf = (plan: Plan) => {
+    const found = sessions.findIndex((session) => samePlan(session, plan));
+    if (found >= 0) return found;
+    sessions.push(plan);
+    return sessions.length - 1;
+  };
+  const current = days.map((day) => keyOf(scheduled(origin.settings, day)));
+  const wanted = days.map((day, index) => keyOf(scheduled(origin.settings, order[index] ?? day)));
+  const open = days.flatMap((day, index) => (lockedDay(day, today, records) ? [] : [index]));
+  const recorded = "A session was recorded or started on one of these days. Close this sheet and reopen it to see the current week.";
+  if (current.some((key, index) => !open.includes(index) && key !== wanted[index])) return { error: recorded };
+  const swaps = fewestSwaps(
+    open.map((index) => current[index] ?? -1),
+    open.map((index) => wanted[index] ?? -1),
+  );
+  if (!swaps) return { error: recorded };
   try {
-    return { settings: reorganiseDays(origin.settings, from, to, today, records) };
+    let settings = origin.settings;
+    for (const [a, b] of swaps) {
+      const [first, second] = [days[open[a] ?? -1] ?? "", days[open[b] ?? -1] ?? ""];
+      // The shared rule moves a planned session, so a rest day is never the source.
+      const [from, to] = scheduled(settings, first).type === "rest" ? [second, first] : [first, second];
+      settings = reorganiseDays(settings, from, to, today, records);
+    }
+    return { settings };
   } catch (problem) {
     return { error: problem instanceof Error ? problem.message : "Check the selected days." };
   }

@@ -2,6 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { useAccount } from "../account/AccountProvider";
 import type { Sync } from "../account/AccountProvider";
+import { liquidGlass } from "../ui/glass";
 import { haptic } from "../ui/haptics";
 import { Symbol } from "../ui/Symbol";
 import type { SFSymbol } from "../ui/Symbol";
@@ -30,7 +31,11 @@ const surfaces = { done: "bg-card-alt", busy: "bg-card-alt", warning: "bg-missed
 const tints = { done: "accent-done", busy: "accent-icon", warning: "accent-missed", danger: "accent-danger-foreground" };
 const texts = { done: "muted", busy: "muted", warning: "missed", danger: "danger" } as const;
 
-/** A small status chip in each tab's header. Tapping it opens the sync details. */
+/**
+ * A small status chip in each tab's header. Tapping it opens the sync
+ * details. On Liquid Glass the bar draws the chip's surface, and the icon
+ * and label carry its tone.
+ */
 export function SyncStatusButton() {
   const { sync, inputPending } = useAccount();
   const navigation = useNavigation();
@@ -46,7 +51,10 @@ export function SyncStatusButton() {
         haptic("selection");
         navigation.navigate("SyncDetails");
       }}
-      className={cn("h-8 flex-row items-center gap-1.5 rounded-full px-3 active:opacity-70", surfaces[status.tone])}
+      className={cn(
+        "h-8 flex-row items-center gap-1.5 rounded-full active:opacity-70",
+        liquidGlass ? "px-0.5" : ["px-3", surfaces[status.tone]],
+      )}
     >
       <View className="size-3.5 items-center justify-center">
         {status.icon ? (

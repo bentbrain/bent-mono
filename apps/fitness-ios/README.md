@@ -2,7 +2,7 @@
 
 The native iPhone app for [Fitness](../fitness/README.md). It plans and logs dumbbell strength sessions and runs, tracks food and bodyweight, shows progress, and syncs Apple Health weigh-ins and running workouts in the background. It covers everything the Fitness website does, with the same rules, and works offline with changes saved on the iPhone until Fitness can be reached.
 
-- **Week:** the week board with each day's planned, done and missed sessions, the day's plan, starting and resuming workouts, logging runs, moving a session to another day and resetting the week, and weekly totals.
+- **Week:** the week board with each day's planned, done and missed sessions, the day's plan, starting and resuming workouts, logging runs, dragging sessions to other days of the week and resetting the week, and weekly totals.
 - **Workouts:** sets with weight, reps or seconds per side, reps in reserve and control, a rest timer and session timer that keep running across screens, backgrounding and restarts, a hold timer for timed exercises such as planks, typed values kept on the iPhone until saved, notes, finishing and discarding. The screen stays awake during a workout, and a Live Activity on the Lock Screen and in the Dynamic Island shows the current set and counts down each rest and hold.
 - **Exercises:** every guide with its illustration, setup, steps, what to watch for, how to record it, the current prescription, the last result and the YouTube tutorial. Workouts and plans open the guide as a sheet.
 - **Food:** the day's calories and protein against targets, meals with add, edit and remove, saved meals in one tap, and the last seven days as a chart that shows each day's calories, protein and difference from the target.

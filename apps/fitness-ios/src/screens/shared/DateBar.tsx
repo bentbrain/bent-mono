@@ -1,15 +1,17 @@
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { addDays, formatDate, formatShortDate } from "@bent/fitness-contracts/domain";
 import { useAccount } from "../../account/AccountProvider";
 import { IconButton } from "../../ui/Button";
 import { DateField } from "../../ui/Form";
-import { Notice } from "../../ui/Layout";
+import { haptic } from "../../ui/haptics";
 import { AppText } from "../../ui/Text";
 import { cn, shape } from "../../ui/typography";
 
 /**
  * The day a screen shows, with day steps and a date picker. The Week, Food
- * and Bodyweight screens share the chosen day; new entries use it.
+ * and Bodyweight screens share the chosen day; new entries use it. On
+ * another day, the line under the date returns to today. Both lines stay
+ * on one line, so the bar keeps its height whichever day is shown.
  */
 export function DateBar({ step = false }: { step?: boolean }) {
   const { date, today, setDate } = useAccount();
@@ -17,39 +19,48 @@ export function DateBar({ step = false }: { step?: boolean }) {
   const previous = addDays(date, -1);
   const next = addDays(date, 1);
   return (
-    <View className="gap-2">
-      <View
-        className={cn("min-h-14 flex-row items-center gap-2 bg-card px-2 py-2")}
-        style={{ borderRadius: shape.card, borderCurve: "continuous" }}
-        testID="date-bar"
-      >
-        {step ? (
-          <IconButton icon="chevron.left" label={`Previous day, ${formatDate(previous)}`} onPress={() => setDate(previous)} testID="date-previous" />
-        ) : null}
-        <View className="flex-1 px-2" accessible accessibilityLabel={isToday ? `Today, ${formatDate(date)}` : formatDate(date)}>
-          <AppText textRole="headline" weight="bold">
+    <View
+      className={cn("min-h-14 flex-row items-center gap-2 bg-card px-2 py-2")}
+      style={{ borderRadius: shape.card, borderCurve: "continuous" }}
+      testID="date-bar"
+    >
+      {step ? (
+        <IconButton icon="chevron.left" label={`Previous day, ${formatDate(previous)}`} onPress={() => setDate(previous)} testID="date-previous" />
+      ) : null}
+      <View className="flex-1 px-2">
+        <View
+          accessible
+          accessibilityLabel={isToday ? `Today, ${formatDate(date)}` : formatDate(date)}
+          accessibilityHint={isToday ? undefined : "New entries here use this date."}
+        >
+          <AppText textRole="headline" weight="bold" numberOfLines={1}>
             {isToday ? "Today" : formatShortDate(date)}
           </AppText>
-          <AppText textRole="footnote" tone="muted">
-            {isToday ? formatShortDate(date) : date.slice(0, 4)}
-          </AppText>
         </View>
-        <DateField label="Choose date" showLabel={false} value={date} onChange={(value) => setDate(value || today)} testID="date-pick" />
-        {step ? (
-          <IconButton icon="chevron.right" label={`Next day, ${formatDate(next)}`} onPress={() => setDate(next)} testID="date-next" />
-        ) : null}
-      </View>
-      {isToday ? null : (
-        <Notice
-          action={
-            <AppText textRole="footnote" weight="semibold" tone="primary" onPress={() => setDate(today)} accessibilityRole="button" testID="date-today">
-              Return to today
+        {isToday ? (
+          <AppText textRole="footnote" tone="muted" numberOfLines={1} accessibilityElementsHidden importantForAccessibility="no">
+            {formatShortDate(date)}
+          </AppText>
+        ) : (
+          <Pressable
+            onPress={() => {
+              haptic("selection");
+              setDate(today);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Back to today, ${formatDate(today)}`}
+            hitSlop={8}
+            className="self-start active:opacity-70"
+            testID="date-today"
+          >
+            <AppText textRole="footnote" weight="semibold" tone="primary" numberOfLines={1}>
+              Back to today
             </AppText>
-          }
-        >
-          Viewing {formatDate(date)}. New entries here use this date.
-        </Notice>
-      )}
+          </Pressable>
+        )}
+      </View>
+      <DateField label="Choose date" showLabel={false} value={date} onChange={(value) => setDate(value || today)} testID="date-pick" />
+      {step ? <IconButton icon="chevron.right" label={`Next day, ${formatDate(next)}`} onPress={() => setDate(next)} testID="date-next" /> : null}
     </View>
   );
 }
