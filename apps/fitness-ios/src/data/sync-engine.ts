@@ -76,6 +76,9 @@ export class SyncEngine {
   private flushing: Promise<void> | null = null;
   /** Counts saves Fitness acknowledged, so a load that started earlier is not applied. */
   private acknowledged = 0;
+  /** Numbers loads as they start, and records the newest one applied. */
+  private loadsStarted = 0;
+  private newestApplied = 0;
   private stopped = false;
   private conflictId: string | null = null;
   private listeners = new Set<() => void>();
@@ -199,12 +202,23 @@ export class SyncEngine {
   private async reload(): Promise<boolean> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const before = this.acknowledged;
-      const result = await this.transport.load();
+      const sequence = ++this.loadsStarted;
+      let result: Awaited<ReturnType<Transport["load"]>>;
+      try {
+        result = await this.transport.load();
+      } catch (error) {
+        // A newer load already applied; this older one's failure changes nothing.
+        if (sequence < this.newestApplied) return true;
+        throw error;
+      }
       if (this.stopped) return true;
       if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
+      // A load that started later was applied already; this one is older.
+      if (sequence < this.newestApplied) return true;
       if (this.acknowledged !== before) continue;
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
+      this.newestApplied = sequence;
       return true;
     }
     return false;
@@ -243,6 +257,7 @@ export class SyncEngine {
     // a reply that crossed a load. Once the queue is sent, the account is
     // loaded again, so a record removed elsewhere doesn't stay on the iPhone.
     let saved = false;
+    let failure: unknown = null;
     try {
       while (this.queue[0]) {
         const item = this.queue[0];
@@ -271,12 +286,23 @@ export class SyncEngine {
         saved = true;
         this.emit({ online: true, error: "" });
       }
-      if (saved && !this.stopped) {
-        await this.reload();
-        this.emit();
-      }
     } catch (error) {
-      this.fail(error, "Save failed. Your pending changes stay on this iPhone.");
+      failure = error;
+    }
+    try {
+      // Reconcile after any acknowledged save, even when a later change in
+      // the same pass was refused. Skipped when Fitness couldn't be reached.
+      // A failed reconcile load never replaces a refusal, a conflict or an
+      // earlier error; the next load reconciles instead.
+      if (saved && !this.stopped && !(failure instanceof OfflineError)) {
+        try {
+          await this.reload();
+          this.emit();
+        } catch (error) {
+          if (failure === null && !this.base.conflict) failure = error;
+        }
+      }
+      if (failure !== null) this.fail(failure, "Save failed. Your pending changes stay on this iPhone.");
     } finally {
       this.emit({ saving: false });
     }
