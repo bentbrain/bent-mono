@@ -5,6 +5,23 @@
 import { z } from "zod";
 import { recordSchema } from "./domain";
 
+/**
+ * The `/api/app` contract a client understands, sent in the
+ * `X-Fitness-Contract` header. Builds without the header count as 1.
+ *
+ * - 1: the original settings, routines and records.
+ * - 2: catalogue load types on exercises and the planning profile in settings.
+ */
+export const appContract = 2;
+export const appContractHeader = "X-Fitness-Contract";
+/** The contract a request declares, or 1 when it names none or an invalid one. */
+export function requestContract(value: string | null) {
+  const contract = Number(value);
+  return value !== null && Number.isSafeInteger(contract) && contract > 0
+    ? contract
+    : 1;
+}
+
 export const photoTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 
 /** `POST /api/app/photos`: a JPEG, PNG or WebP photo of up to 2 MB. */

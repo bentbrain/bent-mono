@@ -111,7 +111,7 @@ export function PlanScreen({ route }: StaticScreenProps<{ date: string; routineI
         {routine.exercises.map((prescription, index) => {
           const exercise = effectivePrescription(prescription, intro);
           const previous = lastExercise(sync.records, exercise.id);
-          const advice = progression(exercise, previous, settings.dumbbellsKg);
+          const advice = progression(exercise, previous, settings);
           const last = previous
             ? previous.sets.map((set) => setResult(set, previous.prescription, settings.units)).join(" · ")
             : "Your first recorded session";

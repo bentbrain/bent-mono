@@ -90,6 +90,8 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 
 The bent Fitness iPhone app reads and changes the account through `/api/app`. Each request sends an OAuth access token as `Authorization: Bearer <token>`. The token must name the MCP endpoint as its audience, come from an OAuth application listed in `FITNESS_DEVICE_CLIENT_IDS` and belong to an invited account. Reads need `fitness:read`. Saving a record needs `fitness:read` and `fitness:write`, since a conflict reply carries the current record, and photo changes need `fitness:write`. The routes refuse API keys, device keys, tokens from other OAuth applications and browser cookies.
 
+Each request also sends `X-Fitness-Contract` with the highest version of the records it can read. Version 2 adds load types on exercises outside the catalogue and the planning profile in settings: experience, session length, limitations, available equipment, kettlebell sizes and weight increments. A request without the header counts as version 1. Fitness serves requests from the oldest version its stored records allow, currently 1. An older request gets `426` with a message asking to update the app, so an older build stops syncing instead of saving settings without fields it doesn't know.
+
 - `GET /api/app/records` replies `{"owner", "records"}` with every record in the account.
 - `POST /api/app/records` saves one change, with the same body and reply as the web app's saves: `{"id", "revision", "operationId", "data"}`, where `data` is `null` to remove the record. The reply is `{"status": "saved", "record"}`, or `{"status": "conflict", "current"}` when the revision is out of date. A repeated `operationId` replays the first reply.
 - `GET /api/app/photos` lists equipment photos as `{"photos": [{"id", "name", "type"}]}`. `POST /api/app/photos` saves one with `{"id", "name", "type", "base64"}`; a repeated `id` saves once. `GET /api/app/photos/<id>` replies with the photo, and `DELETE /api/app/photos/<id>` removes it.
@@ -104,6 +106,7 @@ The bent Fitness iPhone app reads and changes the account through `/api/app`. Ea
 | `403 not_invited`        | The account's verified primary email is not on the invitation list                                |
 | `413 payload_too_large`  | A record change over 4.5 MB, or a photo upload over 3 MB                                          |
 | `422 invalid_request`    | A record or photo rule refused the change; `error` says which and is safe to show                 |
+| `426` (no code)          | The app build is older than the oldest version Fitness serves. Update the app; queued changes stay on the iPhone |
 | `503 auth_unavailable`   | Clerk did not answer within 10 seconds, or account services need configuration. Try again shortly |
 
 ## Apple Health

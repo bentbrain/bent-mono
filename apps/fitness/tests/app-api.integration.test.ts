@@ -105,7 +105,40 @@ test("app routes take bearer tokens only", () => {
   expect(bearerOnlyPath("/api/apps")).toBe(false);
 });
 
+test("app routes ask builds older than the minimum contract to update", async () => {
+  api.setAppTimingForTests({ minimumContract: 2 });
+  try {
+    for (const contract of [null, "1", "not-a-number"]) {
+      const init: RequestInit =
+        contract === null
+          ? {}
+          : { headers: { "X-Fitness-Contract": contract } };
+      const response = await api.handleRecordsLoad(
+        bearer(token(), init, "/api/app/records"),
+      );
+      expect(response.status).toBe(426);
+      const reply = await body(response);
+      // Builds that predate a code read an unknown one as a failed reply.
+      expect(reply.code).toBeUndefined();
+      expect(reply.error).toContain("Update bent Fitness");
+    }
+  } finally {
+    api.setAppTimingForTests();
+  }
+});
+
 describe.skipIf(!configured)("app API", () => {
+  test("loads the account's records with the current contract", async () => {
+    const response = await api.handleRecordsLoad(
+      bearer(
+        token(),
+        { headers: { "X-Fitness-Contract": "2" } },
+        "/api/app/records",
+      ),
+    );
+    expect(response.status).toBe(200);
+  });
+
   test("loads the account's records with a read token from the app", async () => {
     const response = await api.handleRecordsLoad(
       bearer(token(), {}, "/api/app/records"),

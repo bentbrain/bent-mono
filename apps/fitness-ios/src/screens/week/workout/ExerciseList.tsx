@@ -134,7 +134,7 @@ function ExerciseCard({
   if (!exercise) return null;
   const p = exercise.prescription;
   const previous = history ? lastExercise(history, p.id) : undefined;
-  const advice = history ? progression(p, previous, settings.dumbbellsKg) : undefined;
+  const advice = history ? progression(p, previous, settings) : undefined;
   const fields = setInputs(p, settings.units);
 
   function act(si: number, change: Partial<SetEntry>) {

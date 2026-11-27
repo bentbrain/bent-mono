@@ -1,9 +1,17 @@
 import { z } from "zod";
+import {
+  catalogue,
+  catalogueEntry,
+  equipmentTypes,
+  loadTypes,
+} from "./catalogue";
+import type { LoadType } from "./catalogue";
 
 const finite = z.number().finite().nonnegative();
 const daySchema = z.iso.date();
 const label = z.string().trim().min(1).max(160);
 const identifier = z.string().uuid();
+export const experienceLevels = ["new", "returning", "experienced"] as const;
 const exerciseSchema = z
   .object({
     id: label,
@@ -14,6 +22,8 @@ const exerciseSchema = z
     mode: z.enum(["reps", "seconds"]),
     side: z.boolean(),
     rest: z.number().int().min(15).max(600),
+    /** Set for exercises outside the catalogue; catalogue entries carry their own. */
+    load: z.enum(loadTypes).optional(),
   })
   .strict()
   .refine(
@@ -80,6 +90,32 @@ export const settingsSchema = z
       .max(40),
     dumbbellsKg: z.array(finite.positive().max(200)).max(60),
     routines: z.array(routineSchema).min(1).max(8),
+    /** Training experience, used when planning. */
+    experience: z.enum(experienceLevels).optional(),
+    /** The time available for one strength session, in minutes. */
+    sessionMinutes: z.number().int().min(10).max(240).optional(),
+    /** Injuries, conditions or movements to avoid, in the owner's words. */
+    limitations: z.string().trim().max(1000).optional(),
+    /** The kinds of equipment the account trains with. */
+    availableEquipment: z
+      .array(z.enum(equipmentTypes))
+      .max(equipmentTypes.length)
+      .refine(
+        (items) => new Set(items).size === items.length,
+        "List each kind of equipment once.",
+      )
+      .optional(),
+    kettlebellsKg: z.array(finite.positive().max(100)).max(40).optional(),
+    /** The smallest weight step for barbells, machines and cables. */
+    incrementsKg: z
+      .object({
+        barbell: finite.positive().max(50),
+        machine: finite.positive().max(50),
+        cable: finite.positive().max(50),
+      })
+      .partial()
+      .strict()
+      .optional(),
   })
   .strict();
 export type Settings = z.infer<typeof settingsSchema>;
@@ -252,28 +288,25 @@ export const resultSchema = z.discriminatedUnion("status", [
 ]);
 export type SaveResult = z.infer<typeof resultSchema>;
 export const settingsId = "00000000-0000-4000-8000-000000000001";
-const makeExercise = (
-  id: string,
-  name: string,
-  sets: number,
-  min: number,
-  max: number,
-  side = false,
-  rest = 120,
-  mode: Exercise["mode"] = "reps",
-): Exercise => ({ id, name, sets, min, max, side, rest, mode });
-export const exercises = [
-  makeExercise("squat", "Goblet squat", 3, 8, 12),
-  makeExercise("bench", "Flat dumbbell bench press", 3, 8, 12),
-  makeExercise("row", "Supported one-arm row", 3, 10, 15, true),
-  makeExercise("rdl", "Dumbbell Romanian deadlift", 3, 8, 12),
-  makeExercise("raise", "Lateral raise", 2, 12, 20, false, 75),
-  makeExercise("plank", "Forearm plank", 2, 20, 40, false, 75, "seconds"),
-  makeExercise("split", "Stationary split squat", 3, 8, 12, true),
-  makeExercise("incline", "Low-incline dumbbell press", 3, 8, 12),
-  makeExercise("press", "Seated dumbbell shoulder press", 2, 8, 12),
-  makeExercise("curl", "Hammer curl", 2, 10, 15, false, 75),
-];
+/** Catalogue prescriptions. Their load type comes from the catalogue entry. */
+export const exercises: Exercise[] = catalogue.map(
+  ({ id, name, sets, min, max, side, rest, mode }) => ({
+    id,
+    name,
+    sets,
+    min,
+    max,
+    side,
+    rest,
+    mode,
+  }),
+);
+/** How an exercise's load is recorded. */
+export function loadTypeOf(exercise: Pick<Exercise, "id" | "load">): LoadType {
+  return exercise.load ?? catalogueEntry(exercise.id)?.load ?? "dumbbell";
+}
+/** Default smallest steps, in kg, for loads that add plates or pins. */
+export const defaultIncrementsKg = { barbell: 2.5, machine: 5, cable: 2.5 };
 function selection(ids: string[]) {
   return ids.map((id) => {
     const e = exercises.find((e) => e.id === id);
@@ -501,7 +534,7 @@ export function createWorkout(
     exercises: routine.exercises.map((p) => {
       const prescription = effectivePrescription(p, intro);
       const previous = lastExercise(history, p.id);
-      const suggestion = progression(p, previous, settings.dumbbellsKg);
+      const suggestion = progression(p, previous, settings);
       return {
         prescription,
         sets: Array.from({ length: prescription.sets }, () => ({
@@ -526,10 +559,20 @@ export function lastExercise(history: RecordEntry[], id: string) {
     .flatMap((workout) => workout.exercises)
     .find((e) => e.prescription.id === id && e.sets.some((set) => set.done));
 }
+/** The weights an account can load, from its settings. */
+export type LoadOptions = Pick<Settings, "dumbbellsKg"> &
+  Partial<Pick<Settings, "kettlebellsKg" | "incrementsKg">>;
+const nextAvailable = (available: number[] | undefined, load: number) =>
+  [...new Set(available ?? [])].sort((a, b) => a - b).find((v) => v > load);
+/**
+ * The load and advice for an exercise's next session. A weight increase
+ * needs every prescribed set done with control, at least two reps in
+ * reserve and the top of the range on each side, at one load.
+ */
 export function progression(
   p: Exercise,
   previous: Workout["exercises"][number] | undefined,
-  available: number[],
+  options: LoadOptions,
 ) {
   if (!previous)
     return { text: "Start light. Keep 2–3 reps in reserve.", loadKg: null };
@@ -550,23 +593,50 @@ export function progression(
         (!p.side || (s.right ?? 0) >= p.max) &&
         s.loadKg === load,
     );
+  const type = loadTypeOf(p);
   if (p.mode === "seconds")
     return {
       text: eligible
-        ? "Keep a straight line. Try a slightly harder plank variation."
+        ? p.id === "plank"
+          ? "Keep a straight line. Try a slightly harder plank variation."
+          : "Top of range reached. Try a slightly harder variation."
         : "Build controlled hold time within the range.",
+      loadKg: type === "band" ? 0 : load,
+    };
+  const repeat = {
+    text: "Repeat the load and build controlled reps within the range.",
+    loadKg: load,
+  };
+  if (!eligible) return repeat;
+  const restart = `Return to ${p.min} reps; keep this load if the jump affects form.`;
+  if (type === "dumbbell" || type === "kettlebell") {
+    const item = type === "dumbbell" ? "dumbbell" : "kettlebell";
+    const next = nextAvailable(
+      type === "dumbbell" ? options.dumbbellsKg : options.kettlebellsKg,
+      load,
+    );
+    return next
+      ? { text: `Try the next available ${item}. ${restart}`, loadKg: next }
+      : {
+          text: `Top of range reached. Add an available ${item} size in Settings before increasing.`,
+          loadKg: load,
+        };
+  }
+  if (type === "barbell" || type === "machine" || type === "cable") {
+    const step = options.incrementsKg?.[type] ?? defaultIncrementsKg[type];
+    return {
+      text: `Try the next weight up. ${restart}`,
+      loadKg: Math.round((load + step) * 1000) / 1000,
+    };
+  }
+  if (type === "band")
+    return {
+      text: `Top of range reached. Use a stronger band and return to ${p.min} reps.`,
       loadKg: 0,
     };
-  const next = [...new Set(available)]
-    .sort((a, b) => a - b)
-    .find((v) => v > load);
   return {
-    text: eligible
-      ? next
-        ? `Try the next available dumbbell. Return to ${p.min} reps; keep this load if the jump affects form.`
-        : "Top of range reached. Add an available dumbbell size in Settings before increasing."
-      : "Repeat the load and build controlled reps within the range.",
-    loadKg: eligible && next ? next : load,
+    text: "Top of range reached. Add a little weight or move to a harder variation.",
+    loadKg: load,
   };
 }
 export function displayLoad(kg: number, units: Settings["units"]) {
@@ -671,6 +741,7 @@ const prescriptionKeys = [
   "mode",
   "side",
   "rest",
+  "load",
 ] satisfies (keyof Exercise)[];
 /**
  * A correction can change a completed workout's date, set results and notes.
