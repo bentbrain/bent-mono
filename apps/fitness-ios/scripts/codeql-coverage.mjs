@@ -4,9 +4,9 @@
 // check:
 //
 // - app: the fitness-health module's Core, Platform and Module sources, the
-//   workout-activity module and its Live Activity extension, and each Swift
-//   file the production app target compiles, including the ones prebuild
-//   generates.
+//   fitness-charts and workout-activity modules, the Live Activity extension,
+//   and each Swift file the production app target compiles, including the
+//   ones prebuild generates.
 // - tools: the module's Core sources and XCTest suite, and the seeder with
 //   its UI tests.
 // - all: both.
@@ -23,12 +23,14 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const healthModule = "apps/fitness-ios/modules/fitness-health/ios";
+const chartsModule = "apps/fitness-ios/modules/fitness-charts/ios/";
 const activityModule = "apps/fitness-ios/modules/workout-activity/ios";
 const partition = {
   app: [
     `${healthModule}/Core/`,
     `${healthModule}/Platform/`,
     `${healthModule}/Module/`,
+    chartsModule,
     `${activityModule}/Module/`,
     `${activityModule}/Shared/`,
     `${activityModule}/Extension/`,

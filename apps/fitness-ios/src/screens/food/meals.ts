@@ -125,15 +125,35 @@ function progress(value: number, target: number) {
 
 /** Calories for the seven days ending on `date`, oldest first. */
 export function lastSevenDays(records: RecordEntry[], date: string, target: number) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(date, i - 6)).map((day) => ({
-    day,
-    /** The weekday, such as "Mon"; unique within the seven days. */
-    label: formatShortDate(day).split(" ")[0] ?? day,
-    calories: Math.round(totals(records, day).calories),
-    selected: day === date,
-  }));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(date, i - 6)).map((day) => {
+    const eaten = totals(records, day);
+    return {
+      day,
+      /** The weekday, such as "Mon"; unique within the seven days. */
+      label: formatShortDate(day).split(" ")[0] ?? day,
+      calories: Math.round(eaten.calories),
+      protein: Math.round(eaten.protein),
+      selected: day === date,
+    };
+  });
   const highest = Math.max(target, ...days.map((day) => day.calories));
   return { days, highest };
+}
+
+/** The popover for each day of the seven-day chart: calories, protein and the difference from the target. */
+export function dayLabels(days: { day: string; calories: number; protein: number }[], target: number) {
+  return days.map((day) => {
+    const difference =
+      day.calories === target
+        ? "On target"
+        : day.calories < target
+          ? `${target - day.calories} kcal under target`
+          : `${day.calories - target} kcal over target`;
+    return {
+      title: formatShortDate(day.day),
+      detail: `${day.calories} kcal · ${day.protein} g protein\n${difference}`,
+    };
+  });
 }
 
 /** A sentence for VoiceOver that reads the seven-day chart. */

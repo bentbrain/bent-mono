@@ -691,12 +691,18 @@ describe("the built app", () => {
     ).toThrow("local networking");
     expect(() => checkInfoPlist({ ...plist, NSSupportsLiveActivities: false }, "production")).toThrow("Live");
     const extension = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
-    const code = "FitnessHealthModule WorkoutActivityModule";
+    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule";
     expect(() => checkAppContents({ files: ["Info.plist", extension], code })).not.toThrow();
     expect(() => checkAppContents({ files: [`/tmp/derived/bentFitness.app/${extension}`], code })).not.toThrow();
     expect(() => checkAppContents({ files: ["HealthSeed.bundle", extension], code })).toThrow("seeder");
     expect(() => checkAppContents({ files: [extension], code: "" })).toThrow("fitness-health module is not linked");
-    expect(() => checkAppContents({ files: [extension], code: "FitnessHealthModule" })).toThrow(
+    expect(() => checkAppContents({ files: [extension], code: "FitnessHealthModule WorkoutActivityModule" })).toThrow(
+      "fitness-charts module is not linked",
+    );
+    expect(() => checkAppContents({ files: [extension], code: "FitnessChartsModule WorkoutActivityModule" })).toThrow(
+      "fitness-health module is not linked",
+    );
+    expect(() => checkAppContents({ files: [extension], code: "FitnessHealthModule FitnessChartsModule" })).toThrow(
       "workout-activity module is not linked",
     );
     expect(() => checkAppContents({ files: ["Info.plist"], code })).toThrow("Live Activity extension");
@@ -1794,14 +1800,17 @@ describe("the CodeQL Swift scopes", () => {
     "apps/fitness-ios/modules/fitness-health/ios/Tests/SyncTests.swift",
     "apps/fitness-ios/tools/health-seed/HealthSeed/Seeder.swift",
     "apps/fitness-ios/tools/health-seed/SimulatorFlows/SyncFlowTests.swift",
+    "apps/fitness-ios/modules/fitness-charts/ios/ChartBody.swift",
     "",
   ];
 
   test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
-    expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 5));
+    // The app scope is the health module's Core, Platform and Module, the
+    // Live Activity extension and the charts module.
+    expect(swiftFilesFor("app", tracked)).toEqual([...tracked.slice(1, 5), tracked[8]]);
     // The tools scope is the seeder with its UI tests and the module's Core and Tests.
     expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(5, 8)]);
-    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 8));
+    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 9));
     // Together the two CodeQL jobs' scopes cover every tracked Swift source.
     const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
     expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
@@ -1817,7 +1826,7 @@ describe("the CodeQL Swift scopes", () => {
     ])
       for (const scope of ["all", "app", "tools"])
         expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
-    expect(() => swiftFilesFor("app", tracked.slice(5))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("app", tracked.slice(5, 8))).toThrow("No tracked Swift files");
     expect(() => swiftFilesFor("tools", tracked.slice(2, 5))).toThrow("No tracked Swift files");
   });
 
@@ -1871,7 +1880,7 @@ describe("the CodeQL Swift scopes", () => {
     const replay = source.slice(source.indexOf('"replay-swift"(args)'), source.indexOf('"core-build"()'));
     // The seeder scope reads only the seeder build, so it needs no prebuilt app project.
     expect(replay).toContain(
-      'const appTargets = ["FitnessHealth", "WorkoutActivity", "WorkoutActivityExtension", project()];',
+      'const appTargets = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()];',
     );
     expect(replay).toContain('if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });');
     expect(replay).toContain(

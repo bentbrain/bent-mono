@@ -14,11 +14,11 @@ import {
   weeklySummary,
   weightTrend,
 } from "@bent/fitness-contracts/progress";
-import type {
-  StrengthPoint,
-  StrengthSeries,
-} from "@bent/fitness-contracts/progress";
+import type { StrengthSeries } from "@bent/fitness-contracts/progress";
 import { useAccount } from "./account-context";
+import { pointText, strengthDetail, weighInDetail } from "./chart-details";
+import { ChartPopover } from "./chart-popover";
+import type { ChartDetail } from "./chart-popover";
 
 const sections = [
   { to: "/progress", name: "Overview" },
@@ -45,13 +45,19 @@ export function ProgressTabs() {
   );
 }
 
-/** A single-series line with first and latest values marked. */
+/**
+ * A single-series line with first and latest values marked, and a popover
+ * for each point.
+ */
 function Sparkline({
   values,
   label,
+  name,
 }: {
-  values: { key: string; value: number; title: string }[];
+  values: { key: string; value: number; detail: () => ChartDetail }[];
   label: string;
+  /** What the points are, read as the chart's slider name. */
+  name: string;
 }) {
   const width = 300;
   const height = 72;
@@ -67,11 +73,16 @@ function Sparkline({
       ? height / 2
       : height - 10 - ((value - low) / spread) * (height - 20);
   return (
-    <svg
+    <ChartPopover
       className="sparkline"
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={label}
+      name={name}
+      width={width}
+      height={height}
+      label={label}
+      points={values.map((v, i) => ({ x: x(i), y: y(v.value) }))}
+      detail={(index) =>
+        values[index]?.detail() ?? { title: "", rows: [] }
+      }
     >
       <line
         className="baseline"
@@ -90,24 +101,10 @@ function Sparkline({
           cy={y(v.value)}
           r={i === values.length - 1 ? 4 : 2.5}
           className={i === values.length - 1 ? "is-latest" : undefined}
-        >
-          <title>{v.title}</title>
-        </circle>
+        />
       ))}
-    </svg>
+    </ChartPopover>
   );
-}
-
-function pointText(
-  point: StrengthPoint,
-  series: StrengthSeries,
-  units: Settings["units"],
-) {
-  const amount =
-    series.mode === "seconds"
-      ? `${point.value} s`
-      : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
-  return series.side ? `${amount} each side` : amount;
 }
 
 function StrengthCard({
@@ -159,11 +156,12 @@ function StrengthCard({
             <strong>{change}</strong> since {formatShortDate(first.date)}
           </p>
           <Sparkline
+            name={`${series.name} sessions`}
             label={`${series.name}: ${measure}, ${series.points.length} sessions from ${pointText(first, series, units)} to ${pointText(latest, series, units)}.`}
             values={series.points.map((point, index) => ({
               key: `${point.date}:${index}`,
               value: byLoad ? displayLoad(point.loadKg, units) : point.value,
-              title: `${formatShortDate(point.date)}: ${pointText(point, series, units)}`,
+              detail: () => strengthDetail(series, index, units),
             }))}
           />
           <dl className="compare">
@@ -330,11 +328,13 @@ export function ProgressScreen() {
             </p>
             {daily.length > 1 && (
               <Sparkline
+                name="Weigh-ins"
                 label={`Bodyweight across ${Math.min(daily.length, 30)} recorded dates.`}
-                values={daily.slice(-30).map((point) => ({
+                values={daily.slice(-30).map((point, index, shownDays) => ({
                   key: point.id,
                   value: point.kg,
-                  title: `${formatShortDate(point.date)}: ${shown(point.kg)}`,
+                  detail: () =>
+                    weighInDetail(shownDays, index, settings.units),
                 }))}
               />
             )}

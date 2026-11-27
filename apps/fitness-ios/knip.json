@@ -9,7 +9,8 @@
     "tests/**/*.{ts,mjs}",
     "scripts/*.mjs",
     "modules/fitness-health/*.{ts,js}",
-    "modules/workout-activity/*.{ts,js}"
+    "modules/workout-activity/*.{ts,js}",
+    "modules/fitness-charts/*.ts"
   ],
   "ignoreDependencies": [
     "expo-updates"

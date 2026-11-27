@@ -1031,6 +1031,35 @@ test("food entries can be edited and removed, and the body chart labels recorded
   await expect(page.locator(".list-row")).toContainText(
     "351 kcal · 12g protein",
   );
+  // Hovering a day of the seven-day chart shows its totals, and each day's
+  // link describes them for screen readers.
+  await expect(
+    page.getByRole("link", { name: "Mon 5 Jan 2026: 351 kcal" }),
+  ).toHaveAccessibleDescription(
+    /^Mon 5 Jan 2026: Calories 351 kcal, Target \d+ kcal, (Left|Over) \d+ kcal, Protein 12 g\.$/,
+  );
+  // The totals show below the days, for the day shown until another is
+  // hovered or focused, so they never cover a day.
+  const dayCard = page.locator(".food-side .chart-card");
+  await expect(dayCard).toContainText("Mon 5 Jan 2026");
+  await expect(dayCard).toContainText("351 kcal");
+  await expect(dayCard).toContainText("12 g");
+  const firstDay = page.locator(".day-strip li").first();
+  await firstDay.hover();
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
+  const strip = await page.locator(".day-strip").boundingBox();
+  const card = await dayCard.boundingBox();
+  expect(card && strip && card.y >= strip.y + strip.height).toBe(true);
+  // The totals stay while the pointer moves onto them; Escape returns to the
+  // day shown, and so does moving the pointer off the days.
+  await dayCard.hover();
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
+  await page.keyboard.press("Escape");
+  await expect(dayCard).toContainText("Mon 5 Jan 2026");
+  await firstDay.hover();
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
+  await page.getByLabel("Meal or snack").hover();
+  await expect(dayCard).toContainText("Mon 5 Jan 2026");
   await page.getByLabel("Meal or snack").fill("synthetic oats");
   await page.getByLabel("Calories · kcal").fill("350.5");
   await page.getByLabel("Protein · g", { exact: true }).fill("12");
@@ -1082,6 +1111,34 @@ test("food entries can be edited and removed, and the body chart labels recorded
   await expect(chart).toContainText("Low 70.3 kg");
   await expect(chart).toContainText("Mon 5 Jan");
   await expect(chart).toContainText("Tue 6 Jan");
+  // Hovering shows the nearest weigh-in, and Escape hides it with focus
+  // elsewhere.
+  const weightCard = page.locator(".chart-frame .chart-card");
+  await chart.hover({ position: { x: 2, y: 100 } });
+  await expect(weightCard).toContainText("Mon 5 Jan 2026");
+  await expect(weightCard).toContainText("70.3 kg");
+  await expect(weightCard).toContainText("Average of 1");
+  await page.keyboard.press("Escape");
+  await expect(weightCard).toHaveCount(0);
+  // The chart's slider moves between weigh-ins and reads each one.
+  const weighIns = page.getByRole("slider", { name: "Weigh-ins" });
+  await expect(weighIns).toHaveAttribute("aria-valuetext", "No point selected");
+  await weighIns.focus();
+  await page.keyboard.press("End");
+  await expect(weightCard).toContainText("Tue 6 Jan 2026");
+  await expect(weightCard).toContainText("Average of 2");
+  await expect(weightCard).toContainText("70.7 kg");
+  await expect(weightCard).toContainText("Since Mon 5 Jan");
+  await expect(weightCard).toContainText("+1.0 kg");
+  await expect(weighIns).toHaveAttribute(
+    "aria-valuetext",
+    "Tue 6 Jan 2026: Weigh-in 71.2 kg, Average of 2 70.7 kg, Since Mon 5 Jan +1.0 kg.",
+  );
+  await expect(weighIns).toHaveAttribute("aria-valuenow", "2");
+  await page.keyboard.press("Home");
+  await expect(weightCard).toContainText("Mon 5 Jan 2026");
+  await page.keyboard.press("Escape");
+  await expect(weightCard).toHaveCount(0);
   await page.getByText("All weigh-ins", { exact: true }).click();
   await expect(
     page.locator(".list-row").getByText("70.25 kg", { exact: true }),
@@ -2033,6 +2090,26 @@ test("progress starts empty, then compares sessions, strength and bodyweight fro
     "aria-label",
     /2 sessions from 0 kg × 8 to 2 kg × 8/,
   );
+  // Each session's popover shows its best set and the change from the last.
+  const squatChart = squat.getByRole("img");
+  const squatCard = squat.locator(".chart-card");
+  await squatChart.hover({ position: { x: 1, y: 1 } });
+  await expect(squatCard).toContainText("Mon 5 Jan 2026");
+  await expect(squatCard).toContainText("0 kg × 8");
+  await expect(squatCard).toContainText("First in this chart");
+  await squat.getByRole("slider", { name: "Goblet squat sessions" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(squatCard).toContainText("Wed 7 Jan 2026");
+  await expect(squatCard).toContainText("2 kg × 8");
+  await expect(squatCard).toContainText("+2 kg");
+  // A press on the open card selects the point beneath it, so the card
+  // never blocks another point.
+  const box = await squatChart.boundingBox();
+  if (!box) throw new Error("The squat chart has no box.");
+  await page.mouse.click(box.x + 2, box.y + box.height / 2);
+  await expect(squatCard).toContainText("Mon 5 Jan 2026");
+  await page.keyboard.press("Escape");
+  await expect(squatCard).toHaveCount(0);
   // Timed and sided exercises stay separate and show the weaker side.
   await expect(
     page.locator(".strength-card", { hasText: "Supported one-arm row" }),

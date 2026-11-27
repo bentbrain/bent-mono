@@ -12,7 +12,7 @@
     "config:production": "APP_VARIANT=production expo config --type public --json",
     "prebuild": "EXPO_NO_GIT_STATUS=1 expo prebuild --platform ios --clean",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests scripts modules/fitness-health/index.ts modules/fitness-health/app.plugin.js modules/fitness-health/purpose.js modules/workout-activity/index.ts modules/workout-activity/app.plugin.js index.ts app.config.ts babel.config.js metro.config.js eslint.config.mjs",
+    "lint": "eslint src tests scripts modules/fitness-health/index.ts modules/fitness-health/app.plugin.js modules/fitness-health/purpose.js modules/workout-activity/index.ts modules/workout-activity/app.plugin.js modules/fitness-charts/index.ts index.ts app.config.ts babel.config.js metro.config.js eslint.config.mjs",
     "test": "bun test tests",
     "knip": "knip",
     "doctor": "expo-doctor",

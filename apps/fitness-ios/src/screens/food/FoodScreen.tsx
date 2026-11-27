@@ -1,7 +1,6 @@
 import type { JSX } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Alert, View } from "react-native";
-import { Chart, Host } from "@expo/ui/swift-ui";
 import { formatDate, formatShortDate } from "@bent/fitness-contracts/domain";
 import { useCSSVariable } from "uniwind";
 import { useConfiguredAccount } from "../../account/AccountProvider";
@@ -9,10 +8,11 @@ import { Button, IconButton } from "../../ui/Button";
 import { ListRow, ListSection } from "../../ui/List";
 import { Card, Notice, Screen, SectionTitle } from "../../ui/Layout";
 import { AppText } from "../../ui/Text";
+import { SelectableChart, useSelectionColors } from "../../ui/charts";
 import { haptic } from "../../ui/haptics";
 import { cn } from "../../ui/typography";
 import { DateBar } from "../shared/DateBar";
-import { daySummary, lastSevenDays, mealFromRegular, mealSummary, mealsOn, regulars, weekDescription } from "./meals";
+import { dayLabels, daySummary, lastSevenDays, mealFromRegular, mealSummary, mealsOn, regulars, weekDescription } from "./meals";
 import { useFoodNavigation } from "./navigation";
 import { setFoodNotice, useFoodNotice } from "./notice";
 
@@ -289,22 +289,25 @@ function WeekChart({ week, target }: { week: ReturnType<typeof lastSevenDays>; t
   const bar = colour(useCSSVariable("--color-chart"));
   const chosen = colour(useCSSVariable("--color-primary"));
   const line = colour(useCSSVariable("--color-foreground-muted"));
+  const selection = useSelectionColors();
   return (
     <Card testID="food-week">
       <SectionTitle>Last 7 days</SectionTitle>
-      <View accessible accessibilityRole="image" accessibilityLabel={weekDescription(week.days, target)}>
-        <Host style={{ height: 180, width: "100%" }}>
-          <Chart
-            type="bar"
-            data={week.days.map((day) => ({ x: day.label, y: day.calories, color: day.selected ? chosen : bar }))}
-            referenceLines={[{ x: "Target", y: target }]}
-            ruleStyle={{ color: line, lineWidth: 1.5, dashArray: [4, 4] }}
-            barStyle={{ cornerRadius: 5 }}
-            showGrid
-            animate
-          />
-        </Host>
-      </View>
+      <SelectableChart
+        height={180}
+        label={weekDescription(week.days, target)}
+        testID="food-week-chart"
+        chart={{
+          kind: "bar",
+          bars: week.days.map((day) => ({ x: day.label, y: day.calories, color: day.selected ? chosen : bar })),
+          target,
+          showAxes: true,
+          cornerRadius: 5,
+          animate: true,
+          labels: dayLabels(week.days, target),
+          colors: { ...selection, target: line },
+        }}
+      />
     </Card>
   );
 }

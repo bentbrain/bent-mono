@@ -9,6 +9,8 @@ import {
 } from "@bent/fitness-contracts/domain";
 import type { Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
+import { ChartPopover } from "./chart-popover";
+import { weighInDetail } from "./chart-details";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
 import { ProgressTabs } from "./progress-screen";
@@ -72,11 +74,20 @@ export function Bodyweight({
           <small>{settings.units}</small>
         </strong>
         {points.length ? (
-          <svg
+          <ChartPopover
             className="weight-chart"
-            viewBox="0 0 600 250"
-            role="img"
-            aria-label={`Bodyweight across ${points.length} recorded dates, from ${shown(lowest)} to ${shown(highest)}. All weigh-ins are listed below.`}
+            name="Weigh-ins"
+            width={600}
+            height={250}
+            plot={{ top: 36, bottom: 190 }}
+            label={`Bodyweight across ${points.length} recorded dates, from ${shown(lowest)} to ${shown(highest)}. All weigh-ins are listed below.`}
+            points={points.map((w) => ({ x: x(w.date), y: y(w.kg) }))}
+            detail={(index) =>
+              weighInDetail(points, index, settings.units, {
+                kg: trend[index]?.kg ?? 0,
+                count: Math.min(index + 1, 7),
+              })
+            }
           >
             {[
               { kg: highest, name: "High" },
@@ -135,7 +146,7 @@ export function Bodyweight({
                 ? formatShortDate(last.date)
                 : ""}
             </text>
-          </svg>
+          </ChartPopover>
         ) : (
           <p>Add your first weigh-in to start the chart.</p>
         )}
@@ -144,7 +155,8 @@ export function Bodyweight({
         <p className="chart-legend">
           Blue line: each weigh-in. Dashed black line: average of up to 7
           weigh-ins ending on that date. Dotted lines mark your highest and
-          lowest weigh-ins in this view.
+          lowest weigh-ins in this view. Hover over or tap the chart, or use
+          the arrow keys, to see each date's weigh-in, average and change.
         </p>
       )}
       <form

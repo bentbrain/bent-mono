@@ -45,6 +45,41 @@ final class ScreenTourTests: XCTestCase {
     return true
   }
 
+  /// Taps a chart right of its middle, so the popover for the point there
+  /// shows, checks that the chart's value now reads that point, and
+  /// captures the screen. `id` is a test ID or its prefix.
+  private func captureChart(_ id: String, _ name: String) {
+    let chart = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", id)).firstMatch
+    guard chart.waitForExistence(timeout: 5) else {
+      XCTFail("The chart \(id) is missing.")
+      return
+    }
+    reveal(chart)
+    let before = chart.value as? String ?? ""
+    chart.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)).tap()
+    let selected = NSPredicate(format: "value != %@ AND value != ''", before)
+    let read = XCTNSPredicateExpectation(predicate: selected, object: chart)
+    XCTAssertEqual(XCTWaiter().wait(for: [read], timeout: 3), .completed, "Tapping \(id) selected no point.")
+    capture(name)
+  }
+
+  /// Scrolls in short steps until the element's top is in the upper part of
+  /// the screen, below the navigation bar, so it and what follows it show,
+  /// even with the largest text sizes.
+  private func reveal(_ element: XCUIElement) {
+    let window = app.windows.firstMatch.frame
+    let top = window.minY + 120
+    let bottom = window.minY + window.height * 0.4
+    for _ in 0..<20 {
+      let frame = element.frame
+      if frame.minY >= top && frame.minY <= bottom { return }
+      let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+      let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: frame.minY > bottom ? 0.3 : 0.7))
+      start.press(forDuration: 0.05, thenDragTo: end)
+      sleep(1)
+    }
+  }
+
   private func back() {
     let button = app.navigationBars.buttons.firstMatch
     if button.exists { button.tap() }
@@ -175,6 +210,7 @@ final class ScreenTourTests: XCTestCase {
     capture("08-food")
     app.swipeUp()
     capture("09-food-week")
+    captureChart("food-week-chart", "09-food-week-popover")
     if tap("food-add") {
       capture("10-food-add")
       if !tap("meal-cancel") { dismissSheet() }
@@ -182,8 +218,11 @@ final class ScreenTourTests: XCTestCase {
 
     openTab("Progress")
     capture("11-progress")
+    captureChart("progress-week-chart", "11-progress-weeks-popover")
+    captureChart("progress-weight-chart", "11-progress-weight-popover")
     app.swipeUp()
     capture("12-progress-strength")
+    captureChart("progress-strength-chart-", "12-progress-strength-popover")
     app.swipeDown()
     if tap("progress-open-history") {
       capture("13-history")
@@ -191,6 +230,7 @@ final class ScreenTourTests: XCTestCase {
     }
     if tap("progress-open-body") {
       capture("14-bodyweight")
+      captureChart("body-trend", "14-bodyweight-popover")
       back()
     }
 

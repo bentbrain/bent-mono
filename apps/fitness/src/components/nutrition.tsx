@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
 import {
@@ -13,6 +13,12 @@ import {
 import type { Entity, Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
 import { useAccount } from "./account-context";
+import { foodDayDetail } from "./chart-details";
+import {
+  ChartCard,
+  spokenDetail,
+  useDismiss,
+} from "./chart-popover";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
 import { Icon } from "./icons";
@@ -324,39 +330,18 @@ export function Nutrition({
       )}
       <aside className="food-side">
         <h2 className="section-label">Last 7 days</h2>
-        <ol className="day-strip" aria-label="Calories for the last 7 days">
-          {recentDays.map((day) => {
-            const value = totals(sync.records, day).calories;
-            return (
-              <li key={day}>
-                <Link
-                  to="/food"
-                  search={dateSearch(day, today)}
-                  activeOptions={{ exact: true }}
-                  aria-current={day === date ? "page" : undefined}
-                  aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
-                >
-                  <span className="bar">
-                    <span
-                      className="fill"
-                      style={{ height: `${(value / highest) * 100}%` }}
-                    />
-                    <i
-                      className="target"
-                      style={{
-                        bottom: `${(settings.calories / highest) * 100}%`,
-                      }}
-                    />
-                  </span>
-                  {formatShortDate(day).split(" ")[0]}
-                </Link>
-              </li>
-            );
-          })}
-        </ol>
+        <DayStrip
+          days={recentDays}
+          date={date}
+          today={today}
+          highest={highest}
+          target={settings.calories}
+          records={sync.records}
+        />
         <p className="measure-note">
           Bars show calories logged each day. The dashed line is your{" "}
-          {settings.calories} kcal target.{" "}
+          {settings.calories} kcal target. Hover over or focus a day to see its
+          calories, protein and what is left.{" "}
           <Link to="/settings" search={{}}>
             Change targets
           </Link>
@@ -391,5 +376,92 @@ export function Nutrition({
         )}
       </aside>
     </section>
+  );
+}
+
+/**
+ * Calories for each of the last seven days against the target. Each day
+ * links to its log. Below the days, a space kept for them shows the totals
+ * of the day hovered or focused, else of the day this page shows, so the
+ * page doesn't move and the totals never cover another day.
+ */
+function DayStrip({
+  days,
+  date,
+  today,
+  highest,
+  target,
+  records,
+}: {
+  days: string[];
+  date: string;
+  today: string;
+  highest: number;
+  target: number;
+  records: Sync["records"];
+}) {
+  const [active, setActive] = useState<number | null>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const described = useId();
+  const day = active === null ? undefined : days[active];
+  const shown = day ?? (days.includes(date) ? date : undefined);
+  useDismiss(active !== null, () => setActive(null), frame);
+  return (
+    <div
+      className="chart-frame"
+      ref={frame}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") setActive(null);
+      }}
+    >
+      <ol className="day-strip" aria-label="Calories for the last 7 days">
+        {days.map((day, index) => {
+          const eaten = totals(records, day);
+          const value = eaten.calories;
+          return (
+            <li
+              key={day}
+              onPointerEnter={() => setActive(index)}
+              onFocus={() => setActive(index)}
+              onBlur={() => setActive(null)}
+            >
+              <Link
+                to="/food"
+                search={dateSearch(day, today)}
+                activeOptions={{ exact: true }}
+                aria-current={day === date ? "page" : undefined}
+                aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
+                aria-describedby={`${described}-${index}`}
+              >
+                <span className="bar">
+                  <span
+                    className="fill"
+                    style={{ height: `${(value / highest) * 100}%` }}
+                  />
+                  <i
+                    className="target"
+                    style={{
+                      bottom: `${(target / highest) * 100}%`,
+                    }}
+                  />
+                </span>
+                {formatShortDate(day).split(" ")[0]}
+              </Link>
+              <span id={`${described}-${index}`} className="visually-hidden">
+                {spokenDetail(foodDayDetail(day, eaten, target))}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="chart-detail">
+        {shown && (
+          <ChartCard
+            className="is-flow"
+            detail={foodDayDetail(shown, totals(records, shown), target)}
+          />
+        )}
+      </div>
+    </div>
   );
 }
