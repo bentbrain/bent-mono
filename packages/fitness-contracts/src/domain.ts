@@ -111,9 +111,9 @@ export const settingsSchema = z
     /** The smallest weight step for barbells, machines and cables. */
     incrementsKg: z
       .object({
-        barbell: finite.positive().max(50),
-        machine: finite.positive().max(50),
-        cable: finite.positive().max(50),
+        barbell: finite.min(0.1).max(50),
+        machine: finite.min(0.1).max(50),
+        cable: finite.min(0.1).max(50),
       })
       .partial()
       .strict()
@@ -632,8 +632,9 @@ export function progression(
   }
   if (type === "barbell" || type === "machine" || type === "cable") {
     const step = options.incrementsKg?.[type] ?? defaultIncrementsKg[type];
-    const next = Math.round((load + step) * 1000) / 1000;
-    return next > maximumLoadKg
+    const raw = load + step;
+    const next = Math.round(raw * 1000) / 1000;
+    return raw > maximumLoadKg || next <= load
       ? {
           text: `Top of range reached at the heaviest load Fitness records. Keep ${p.max} reps with control.`,
           loadKg: load,
@@ -703,7 +704,8 @@ export function dateSearch(date: string, today: string) {
 export function sessionMinutes(routine: Routine, intro: boolean) {
   const seconds = routine.exercises.reduce((total, item) => {
     const e = effectivePrescription(item, intro);
-    const work = e.mode === "seconds" ? e.max : e.max * 3 * (e.side ? 2 : 1);
+    // Timed sets hold each side in turn, as reps do.
+    const work = (e.mode === "seconds" ? e.max : e.max * 3) * (e.side ? 2 : 1);
     return total + e.sets * work + Math.max(0, e.sets - 1) * e.rest + 60;
   }, 300);
   return Math.ceil(seconds / 300) * 5;

@@ -172,6 +172,21 @@ describe("progression by load type", () => {
     expect(advice.loadKg).toBe(998);
     expect(advice.text).toContain("heaviest load");
   });
+  test("never suggests a rounded increase that crosses the limit or stays level", () => {
+    const p = prescription("custom-sled", "machine");
+    const nearLimit = progression(p, completed(p, 999.9999), {
+      dumbbellsKg: [],
+      incrementsKg: { machine: 0.1 },
+    });
+    expect(nearLimit.loadKg).toBe(999.9999);
+    expect(nearLimit.text).toContain("heaviest load");
+    expect(
+      settingsSchema.safeParse({
+        ...base(),
+        incrementsKg: { barbell: 0.00001 },
+      }).success,
+    ).toBe(false);
+  });
   test("keeps the load until every set reaches the top of the range", () => {
     const p = prescription("custom-squat", "barbell");
     const short = completed(p, 60);
@@ -314,6 +329,38 @@ describe("plan check", () => {
     expect(result.ok).toBe(false);
     if (!result.ok)
       expect(result.errors[0]?.message).toContain("whole numbers");
+  });
+  test("counts both sides of timed exercises in dated routines against the session length", () => {
+    const settings = base();
+    const routine = settings.routines[0]!;
+    const hold: Exercise = {
+      id: "custom-side-hold",
+      name: "Side plank",
+      sets: 8,
+      min: 200,
+      max: 300,
+      mode: "seconds",
+      side: true,
+      rest: 15,
+      load: "bodyweight",
+    };
+    const result = checkPlan(
+      {
+        ...settings,
+        sessionMinutes: 50,
+        dayPlans: {
+          "2026-12-01": {
+            type: "strength",
+            routine: { ...routine, name: "Holds", exercises: [hold] },
+          },
+        },
+      },
+      [{ id: hold.id, mode: "seconds", side: true, load: "bodyweight" }],
+    );
+    expect(result.ok).toBe(true);
+    expect(result.warnings.map((warning) => warning.path)).toContain(
+      "dayPlans.2026-12-01.routine",
+    );
   });
   test("warns about missing equipment, long sessions and empty weeks", () => {
     const result = checkPlan({

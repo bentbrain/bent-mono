@@ -4,6 +4,11 @@
  * once a build that reads it is available. Until then, saves that need a
  * newer contract are refused, so every stored record stays readable by the
  * builds Fitness serves.
+ *
+ * Before raising it to 2, label weights by load type in both apps (plan
+ * suggestions, workout and correction loggers, VoiceOver hints, guides and
+ * strength charts all say "per dumbbell" today) and leave weight entry out
+ * of band exercises. Contract 1 records hold only dumbbell loads.
  */
 const defaultMinimum = 1;
 let minimum = defaultMinimum;
