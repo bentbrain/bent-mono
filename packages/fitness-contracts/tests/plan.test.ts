@@ -10,7 +10,12 @@ import {
 } from "../src/domain";
 import type { Exercise, Settings, Workout } from "../src/domain";
 import { guides } from "../src/guides";
-import { appContract, requestContract, ApiError } from "../src/index";
+import {
+  appContract,
+  requestContract,
+  requiredContract,
+  ApiError,
+} from "../src/index";
 import { checkPlan } from "../src/plan";
 
 const base = () => defaultSettings("2026-11-30", "Australia/Brisbane");
@@ -56,6 +61,8 @@ describe("exercise catalogue", () => {
     expect(loadTypeOf({ id: "plank" })).toBe("bodyweight");
     expect(loadTypeOf({ id: "custom-sled", load: "machine" })).toBe("machine");
     expect(loadTypeOf({ id: "custom-unknown" })).toBe("dumbbell");
+    // The catalogue decides for its own exercises.
+    expect(loadTypeOf({ id: "squat", load: "barbell" })).toBe("dumbbell");
   });
   test("counts an adjustable bench as a flat bench", () => {
     const bench = catalogueEntry("bench");
@@ -137,6 +144,34 @@ describe("progression by load type", () => {
       progression(band, completed(band, 0), { dumbbellsKg: [] }).text,
     ).toContain("stronger band");
   });
+  test("starts timed exercises at no weight, as the logger records none", () => {
+    const hold: Exercise = {
+      ...prescription("custom-hold", "dumbbell"),
+      mode: "seconds",
+      min: 20,
+      max: 40,
+    };
+    const reps = { ...hold, mode: "reps" as const, max: 12 };
+    // Recorded in reps with a weight, then changed to seconds.
+    expect(
+      progression(hold, completed(reps, 12), { dumbbellsKg: [14] }).loadKg,
+    ).toBe(0);
+  });
+  test("starts afresh when history recorded the weight another way", () => {
+    const machine = prescription("custom-press", "machine");
+    const dumbbell = prescription("custom-press", "dumbbell");
+    const advice = progression(dumbbell, completed(machine, 25), {
+      dumbbellsKg: [30],
+    });
+    expect(advice.loadKg).toBeNull();
+    expect(advice.text).toContain("Start light");
+  });
+  test("keeps suggestions within the heaviest load a set records", () => {
+    const p = prescription("custom-sled", "machine");
+    const advice = progression(p, completed(p, 998), { dumbbellsKg: [] });
+    expect(advice.loadKg).toBe(998);
+    expect(advice.text).toContain("heaviest load");
+  });
   test("keeps the load until every set reaches the top of the range", () => {
     const p = prescription("custom-squat", "barbell");
     const short = completed(p, 60);
@@ -208,6 +243,78 @@ describe("plan check", () => {
     if (!result.ok)
       expect(result.errors[0]?.message).toContain("for each side");
   });
+  test("refuses load types that differ from the catalogue or the account's definition", () => {
+    const settings = base();
+    const routine = settings.routines[0]!;
+    const withExercises = (exercises: Exercise[]) => ({
+      ...settings,
+      routines: [{ ...routine, exercises }, ...settings.routines.slice(1)],
+    });
+    const squat = routine.exercises[0]!;
+    const explicit = checkPlan(withExercises([{ ...squat, load: "dumbbell" }]));
+    expect(explicit.ok).toBe(false);
+    if (!explicit.ok)
+      expect(explicit.errors[0]?.message).toContain("catalogue sets it");
+    const deadlift: Exercise = {
+      id: "custom-deadlift",
+      name: "Trap bar deadlift",
+      sets: 3,
+      min: 5,
+      max: 8,
+      mode: "reps",
+      side: false,
+      rest: 180,
+    };
+    const defined = [
+      {
+        id: "custom-deadlift",
+        mode: "reps" as const,
+        side: false,
+        load: "barbell" as const,
+      },
+    ];
+    expect(checkPlan(withExercises([deadlift]), defined).ok).toBe(false);
+    expect(
+      checkPlan(withExercises([{ ...deadlift, load: "barbell" }]), defined).ok,
+    ).toBe(true);
+  });
+  test("checks dated strength routines", () => {
+    const settings = base();
+    const routine = settings.routines[0]!;
+    const result = checkPlan({
+      ...settings,
+      dayPlans: {
+        "2026-11-28": {
+          type: "strength",
+          routine: {
+            ...routine,
+            exercises: [{ ...routine.exercises[0]!, id: "mystery" }],
+          },
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors[0]?.path).toBe(
+        "dayPlans.2026-11-28.routine.exercises.0.id",
+      );
+  });
+  test("refuses rep ranges that are not whole numbers", () => {
+    const settings = base();
+    const routine = settings.routines[0]!;
+    const result = checkPlan({
+      ...settings,
+      routines: [
+        {
+          ...routine,
+          exercises: [{ ...routine.exercises[0]!, min: 8.5 }],
+        },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.errors[0]?.message).toContain("whole numbers");
+  });
   test("warns about missing equipment, long sessions and empty weeks", () => {
     const result = checkPlan({
       ...base(),
@@ -238,6 +345,37 @@ describe("app contract", () => {
     expect(requestContract("2")).toBe(2);
     expect(requestContract("two")).toBe(1);
     expect(requestContract("-3")).toBe(1);
+  });
+  test("names the oldest contract that can read a record", () => {
+    const settings = base();
+    expect(requiredContract(settings)).toBe(1);
+    expect(requiredContract({ ...settings, sessionMinutes: 45 })).toBe(2);
+    const routine = settings.routines[0]!;
+    const loaded = {
+      ...routine,
+      exercises: [{ ...routine.exercises[0]!, load: "barbell" as const }],
+    };
+    expect(requiredContract({ ...settings, routines: [loaded] })).toBe(2);
+    expect(
+      requiredContract({
+        ...settings,
+        dayPlans: { "2026-12-01": { type: "strength", routine: loaded } },
+      }),
+    ).toBe(2);
+    const workout = createWorkout(settings, routine, "2026-11-30", false, []);
+    expect(requiredContract(workout)).toBe(1);
+    const first = workout.exercises[0]!;
+    expect(
+      requiredContract({
+        ...workout,
+        exercises: [
+          {
+            ...first,
+            prescription: { ...first.prescription, load: "barbell" },
+          },
+        ],
+      }),
+    ).toBe(2);
   });
   test("keeps the message of an error code this build does not know", () => {
     expect(ApiError.parse({ error: "Update", code: "future_code" })).toEqual({

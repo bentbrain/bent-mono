@@ -10,6 +10,7 @@ import { z } from "zod";
 import { invitedEmail, verifyBearer } from "./auth";
 import { readBodyUpTo } from "./body";
 import { deviceClientIds } from "./config";
+import { minimumAppContract } from "./contract";
 import { exportResponse } from "./export";
 import {
   PhotoRuleError,
@@ -36,16 +37,10 @@ const noStore = { "Cache-Control": "no-store" };
  * Vercel function accepts. Photos are at most 2 MB before base64.
  */
 const limits = { record: 4.5 * 1024 * 1024, photo: 3 * 1024 * 1024 };
-/**
- * The time authentication may take in all, Clerk lookups included, and the
- * oldest app contract (`X-Fitness-Contract`) that can read this account
- * data. Raise `minimumContract` when stored data starts using a shape that
- * older builds refuse, so they ask to update instead of failing to sync or
- * saving settings without fields they don't know.
- */
-const timing = { authMs: 10_000, minimumContract: 1 };
+/** The time authentication may take in all, Clerk lookups included. */
+const timing = { authMs: 10_000 };
 const defaultTiming = { ...timing };
-/** Sets the authentication deadline and minimum contract, or restores the defaults, for tests. */
+/** Sets the authentication deadline, or restores the default, for tests. */
 export function setAppTimingForTests(changes: Partial<typeof timing> = {}) {
   Object.assign(timing, defaultTiming, changes);
 }
@@ -88,11 +83,12 @@ async function authenticateApp(
   needs: Need[],
 ): Promise<{ ok: true; owner: string } | { ok: false; response: Response }> {
   const refuse = (response: Response) => ({ ok: false as const, response });
-  // Builds that predate a code read an unknown one as a failed reply, so
-  // this refusal carries only the message they show.
+  // Older builds would fail to read newer records, or save settings without
+  // fields they don't know. Builds that predate a code read an unknown one
+  // as a failed reply, so this refusal carries only the message they show.
   if (
     requestContract(request.headers.get(appContractHeader)) <
-    timing.minimumContract
+    minimumAppContract()
   )
     return refuse(
       json(

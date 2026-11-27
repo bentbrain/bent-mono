@@ -8,6 +8,8 @@ import {
 import type { LoadType } from "./catalogue";
 
 const finite = z.number().finite().nonnegative();
+/** The heaviest load a set records, in kg. */
+export const maximumLoadKg = 1000;
 const daySchema = z.iso.date();
 const label = z.string().trim().min(1).max(160);
 const identifier = z.string().uuid();
@@ -121,7 +123,7 @@ export const settingsSchema = z
 export type Settings = z.infer<typeof settingsSchema>;
 const setSchema = z
   .object({
-    loadKg: finite.max(1000),
+    loadKg: finite.max(maximumLoadKg),
     value: finite.max(600),
     right: finite.max(600).nullable(),
     done: z.boolean(),
@@ -301,9 +303,12 @@ export const exercises: Exercise[] = catalogue.map(
     mode,
   }),
 );
-/** How an exercise's load is recorded. */
+/**
+ * How an exercise's load is recorded. The catalogue decides for its own
+ * exercises; others use their `load`, or dumbbells when it is not set.
+ */
 export function loadTypeOf(exercise: Pick<Exercise, "id" | "load">): LoadType {
-  return exercise.load ?? catalogueEntry(exercise.id)?.load ?? "dumbbell";
+  return catalogueEntry(exercise.id)?.load ?? exercise.load ?? "dumbbell";
 }
 /** Default smallest steps, in kg, for loads that add plates or pins. */
 export const defaultIncrementsKg = { barbell: 2.5, machine: 5, cable: 2.5 };
@@ -574,7 +579,10 @@ export function progression(
   previous: Workout["exercises"][number] | undefined,
   options: LoadOptions,
 ) {
-  if (!previous)
+  const type = loadTypeOf(p);
+  // A weight recorded another way, such as on a machine, says nothing about
+  // the load for this one.
+  if (!previous || loadTypeOf(previous.prescription) !== type)
     return { text: "Start light. Keep 2–3 reps in reserve.", loadKg: null };
   const load =
     previous.sets.find((set) => set.done)?.loadKg ??
@@ -593,7 +601,7 @@ export function progression(
         (!p.side || (s.right ?? 0) >= p.max) &&
         s.loadKg === load,
     );
-  const type = loadTypeOf(p);
+  // Timed sets record no weight: the logger has no weight field for them.
   if (p.mode === "seconds")
     return {
       text: eligible
@@ -601,7 +609,7 @@ export function progression(
           ? "Keep a straight line. Try a slightly harder plank variation."
           : "Top of range reached. Try a slightly harder variation."
         : "Build controlled hold time within the range.",
-      loadKg: type === "band" ? 0 : load,
+      loadKg: 0,
     };
   const repeat = {
     text: "Repeat the load and build controlled reps within the range.",
@@ -624,10 +632,13 @@ export function progression(
   }
   if (type === "barbell" || type === "machine" || type === "cable") {
     const step = options.incrementsKg?.[type] ?? defaultIncrementsKg[type];
-    return {
-      text: `Try the next weight up. ${restart}`,
-      loadKg: Math.round((load + step) * 1000) / 1000,
-    };
+    const next = Math.round((load + step) * 1000) / 1000;
+    return next > maximumLoadKg
+      ? {
+          text: `Top of range reached at the heaviest load Fitness records. Keep ${p.max} reps with control.`,
+          loadKg: load,
+        }
+      : { text: `Try the next weight up. ${restart}`, loadKg: next };
   }
   if (type === "band")
     return {

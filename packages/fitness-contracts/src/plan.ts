@@ -4,8 +4,8 @@
  * stop the plan; warnings describe choices worth confirming with the owner.
  */
 import { catalogueEntry, equipmentNames, missingEquipment } from "./catalogue";
-import { loadTypeOf, sessionMinutes, settingsSchema } from "./domain";
-import type { Exercise, Settings } from "./domain";
+import { sessionMinutes, settingsSchema } from "./domain";
+import type { Exercise, Routine, Settings } from "./domain";
 
 export type PlanIssue = { path: string; message: string };
 export type PlanCheck =
@@ -45,14 +45,7 @@ export function checkPlan(
   const customById = new Map(custom.map((item) => [item.id, item]));
   const routineIds = new Set<string>();
 
-  settings.routines.forEach((routine, r) => {
-    const at = `routines.${r}`;
-    if (routineIds.has(routine.id))
-      errors.push({
-        path: `${at}.id`,
-        message: `${routine.name}: give each routine its own id.`,
-      });
-    routineIds.add(routine.id);
+  const checkRoutine = (routine: Routine, at: string) => {
     const seen = new Set<string>();
     routine.exercises.forEach((exercise, e) => {
       const here = `${at}.exercises.${e}`;
@@ -62,7 +55,9 @@ export function checkPlan(
           message: `${routine.name}: ${exercise.name} appears more than once.`,
         });
       seen.add(exercise.id);
-      const known = catalogueEntry(exercise.id) ?? customById.get(exercise.id);
+      const entry = catalogueEntry(exercise.id);
+      const defined = entry ? undefined : customById.get(exercise.id);
+      const known = entry ?? defined;
       if (!known) {
         errors.push({
           path: `${here}.id`,
@@ -75,13 +70,29 @@ export function checkPlan(
           path: here,
           message: `${routine.name}: record ${exercise.name} ${describe(known)}.`,
         });
-      const knownLoad = known.load ?? loadTypeOf(known);
-      if (exercise.load !== undefined && exercise.load !== knownLoad)
+      if (
+        exercise.mode === "reps" &&
+        !(Number.isInteger(exercise.min) && Number.isInteger(exercise.max))
+      )
+        errors.push({
+          path: here,
+          message: `${routine.name}: use whole numbers for the ${exercise.name} rep range.`,
+        });
+      // Catalogue exercises take their load type from the catalogue; others
+      // name the load type the account defined for them.
+      if (entry && exercise.load !== undefined)
         errors.push({
           path: `${here}.load`,
-          message: `${routine.name}: ${exercise.name} records ${knownLoad} load.`,
+          message: `${routine.name}: leave out the load type for ${exercise.name}; the catalogue sets it.`,
         });
-      const entry = catalogueEntry(exercise.id);
+      if (
+        defined &&
+        (exercise.load ?? "dumbbell") !== (defined.load ?? "dumbbell")
+      )
+        errors.push({
+          path: `${here}.load`,
+          message: `${routine.name}: ${exercise.name} records ${defined.load ?? "dumbbell"} load.`,
+        });
       if (entry && settings.availableEquipment) {
         const missing = missingEquipment(entry, settings.availableEquipment);
         if (missing.length)
@@ -101,7 +112,20 @@ export function checkPlan(
           message: `${routine.name} takes about ${minutes} minutes, longer than the ${settings.sessionMinutes} available.`,
         });
     }
+  };
+
+  settings.routines.forEach((routine, r) => {
+    const at = `routines.${r}`;
+    if (routineIds.has(routine.id))
+      errors.push({
+        path: `${at}.id`,
+        message: `${routine.name}: give each routine its own id.`,
+      });
+    routineIds.add(routine.id);
+    checkRoutine(routine, at);
   });
+  for (const [date, plan] of Object.entries(settings.dayPlans ?? {}))
+    if (plan.routine) checkRoutine(plan.routine, `dayPlans.${date}.routine`);
 
   const strengthDays = settings.schedule.filter(
     (day) => day === "strength",
