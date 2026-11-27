@@ -1,14 +1,13 @@
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { createElement } from "react";
-import { Platform } from "react-native";
+import { liquidGlass } from "../ui/glass";
 import { SyncStatusButton } from "./SyncStatusButton";
 
 /**
  * iOS 26 draws its own scroll edge effect under transparent headers. Earlier
  * versions need a blurred header so content stays legible beneath it.
  */
-const glass = Platform.OS === "ios" && Number.parseInt(String(Platform.Version), 10) >= 26;
-const headerBackground: NativeStackNavigationOptions = glass ? {} : { headerBlurEffect: "systemChromeMaterial" };
+const headerBackground: NativeStackNavigationOptions = liquidGlass ? {} : { headerBlurEffect: "systemChromeMaterial" };
 
 /**
  * Header presets. Screens choose one of these rather than setting

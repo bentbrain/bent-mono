@@ -1,12 +1,13 @@
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { useCSSVariable } from "uniwind";
+import { liquidGlass } from "./glass";
 import { haptic } from "./haptics";
 import { Symbol } from "./Symbol";
 import type { SFSymbol } from "./Symbol";
 import { AppText } from "./Text";
 import { cn } from "./typography";
 
-type Tone = "primary" | "secondary" | "tinted" | "danger" | "plain";
+type Tone = "primary" | "secondary" | "tinted" | "danger" | "plain" | "bare";
 
 const surfaces: Record<Tone, string> = {
   primary: "bg-primary",
@@ -14,6 +15,7 @@ const surfaces: Record<Tone, string> = {
   tinted: "bg-primary-soft",
   danger: "bg-danger-soft",
   plain: "bg-transparent",
+  bare: "bg-transparent",
 };
 const labels: Record<Tone, "inverse" | "default" | "primary" | "danger"> = {
   primary: "inverse",
@@ -21,6 +23,7 @@ const labels: Record<Tone, "inverse" | "default" | "primary" | "danger"> = {
   tinted: "primary",
   danger: "danger",
   plain: "primary",
+  bare: "default",
 };
 const icons: Record<Tone, string> = {
   primary: "accent-primary-foreground",
@@ -28,6 +31,7 @@ const icons: Record<Tone, string> = {
   tinted: "accent-primary",
   danger: "accent-danger-foreground",
   plain: "accent-primary",
+  bare: "accent-foreground",
 };
 
 export type ButtonProps = {
@@ -129,4 +133,12 @@ export function IconButton({
       <Symbol name={icon} size={Math.round(size * 0.45)} weight="semibold" tintColorClassName={icons[tone]} />
     </Pressable>
   );
+}
+
+/**
+ * A round icon button for a navigation bar. On Liquid Glass the bar draws
+ * the button's surface, so the icon sits on it directly.
+ */
+export function HeaderIconButton(props: { icon: SFSymbol; label: string; onPress: () => void; testID?: string }) {
+  return <IconButton {...props} tone={liquidGlass ? "bare" : "secondary"} size={32} />;
 }

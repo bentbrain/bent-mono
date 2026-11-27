@@ -1,7 +1,7 @@
 import { useLayoutEffect } from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { StaticScreenProps } from "@react-navigation/native";
-import { Button, IconButton } from "../../ui/Button";
+import { Button, HeaderIconButton } from "../../ui/Button";
 import { Screen } from "../../ui/Layout";
 import { GuideContent } from "../exercises/GuideContent";
 import { nameFor } from "../shared/exercise";
@@ -17,7 +17,7 @@ export function ExerciseGuide({ route }: StaticScreenProps<{ id: string }>) {
     navigation.setOptions({
       title: nameFor(id),
       headerRight: () => (
-        <IconButton icon="xmark" label="Close guide" tone="secondary" size={32} onPress={() => navigation.goBack()} testID="exercise-guide-close" />
+        <HeaderIconButton icon="xmark" label="Close guide" onPress={() => navigation.goBack()} testID="exercise-guide-close" />
       ),
     });
   }, [id, navigation]);
