@@ -94,6 +94,8 @@ function createFake() {
     /** Makes authenticateRequest itself throw. */
     throws: false,
     usersDown: false,
+    /** Holds each user lookup until it settles. */
+    usersStall: null as Promise<void> | null,
     /**
      * Key creation: fails with a 500, with Clerk's own validation 422, or
      * with a gateway's codeless 403; saves the key and then fails; or fails
@@ -143,6 +145,7 @@ function createFake() {
       fake.failure = null;
       fake.throws = false;
       fake.usersDown = false;
+      fake.usersStall = null;
       fake.create = "ok";
       fake.revokeFails.clear();
       fake.revokeHold = null;
@@ -247,6 +250,7 @@ function createFake() {
     },
     users: {
       async getUser(id: string) {
+        if (fake.usersStall) await fake.usersStall;
         if (fake.usersDown) throw apiError(502);
         const user = fake.users.get(id);
         if (!user) throw apiError(404);

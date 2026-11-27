@@ -174,7 +174,7 @@ describe.skipIf(!configured)("app API", () => {
     const large = await api.handleRecordSave(
       bearer(
         token(),
-        { method: "POST", body: "x".repeat(300 * 1024) },
+        { method: "POST", body: "x".repeat(5 * 1024 * 1024) },
         "/api/app/records",
       ),
     );
@@ -217,6 +217,22 @@ describe.skipIf(!configured)("app API", () => {
       bearer(readOnly, json({}), "/api/app/records"),
     );
     expect(write.status).toBe(403);
+    // A save's conflict reply carries the current record, so saving needs
+    // fitness:read too.
+    const writeOnly = await api.handleRecordSave(
+      bearer(
+        token({ scopes: ["fitness:write"] }),
+        json({
+          id: settingsId,
+          revision: 0,
+          operationId: crypto.randomUUID(),
+          data: defaultSettings("2026-11-01", timezone),
+        }),
+        "/api/app/records",
+      ),
+    );
+    expect(writeOnly.status).toBe(403);
+    expect((await body(writeOnly)).code).toBe("insufficient_scope");
 
     fake.users.set("user_uninvited", {
       email: "someone@example.com",
@@ -233,6 +249,65 @@ describe.skipIf(!configured)("app API", () => {
     fake.usersDown = false;
     fake.throws = true;
     expect((await load(token())).status).toBe(503);
+    fake.throws = false;
+
+    // A user lookup that never answers ends at the authentication deadline.
+    api.setAppTimingForTests({ authMs: 200 });
+    fake.usersStall = new Promise(() => undefined);
+    try {
+      const stalled = await load(token());
+      expect(stalled.status).toBe(503);
+      expect((await body(stalled)).code).toBe("auth_unavailable");
+    } finally {
+      api.setAppTimingForTests();
+    }
+  });
+
+  test("saves a small edit to the largest settings Fitness keeps", async () => {
+    const settings = defaultSettings("2026-11-01", timezone);
+    const routine = settings.routines[0];
+    if (!routine) throw new Error("Default settings have a routine.");
+    const exercise = routine.exercises[0];
+    if (!exercise) throw new Error("Default routines have exercises.");
+    const big = {
+      ...settings,
+      dayPlans: Object.fromEntries(
+        Array.from({ length: 180 }, (_, day) => [
+          new Date(Date.UTC(2026, 0, 1 + day)).toISOString().slice(0, 10),
+          {
+            type: "strength" as const,
+            routine: {
+              ...routine,
+              name: "R".repeat(160),
+              exercises: Array.from({ length: 15 }, (_, n) => ({
+                ...exercise,
+                id: `exercise-${n}-${"x".repeat(140)}`,
+                name: "N".repeat(160),
+              })),
+            },
+          },
+        ]),
+      ),
+    };
+    const first = await saveRecord(owner, {
+      operationId: crypto.randomUUID(),
+      id: settingsId,
+      revision: 1,
+      data: big,
+    });
+    expect(first.status).toBe("saved");
+    const edit = JSON.stringify({
+      id: settingsId,
+      revision: 2,
+      operationId: crypto.randomUUID(),
+      data: { ...big, calories: 2400 },
+    });
+    expect(edit.length).toBeGreaterThan(1024 * 1024);
+    const saved = await api.handleRecordSave(
+      bearer(token(), { method: "POST", body: edit }, "/api/app/records"),
+    );
+    expect(saved.status).toBe(200);
+    expect((await body(saved)).status).toBe("saved");
   });
 
   test("uploads, lists, reads and removes photos", async () => {

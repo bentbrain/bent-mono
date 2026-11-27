@@ -19,12 +19,36 @@ import { StoreRuleError, loadRecords, saveRecord } from "./store";
  * The bent Fitness iPhone app's API under `/api/app`. Each request carries
  * an OAuth access token that Clerk issued to one of the app's OAuth
  * applications (`FITNESS_DEVICE_CLIENT_IDS`) for the MCP endpoint. Reads
- * need `fitness:read` and changes need `fitness:write`. API keys, device
- * keys, other OAuth clients and browser sessions are refused.
+ * need `fitness:read`. Saving a record needs both scopes, since its reply
+ * can carry the current record. Photo changes need `fitness:write`. API
+ * keys, device keys, other OAuth clients and browser sessions are refused.
  */
 type Need = "read" | "write";
 const noStore = { "Cache-Control": "no-store" };
-const limits = { record: 256 * 1024, photo: 3 * 1024 * 1024 };
+/**
+ * Body limits. A record change carries the whole record, and valid settings
+ * can run to several megabytes, so record changes may use the 4.5 MB a
+ * Vercel function accepts. Photos are at most 2 MB before base64.
+ */
+const limits = { record: 4.5 * 1024 * 1024, photo: 3 * 1024 * 1024 };
+/** The time authentication may take in all, Clerk lookups included. */
+const timing = { authMs: 10_000 };
+const defaultTiming = { ...timing };
+/** Sets the authentication deadline, or restores the default, for tests. */
+export function setAppTimingForTests(changes: Partial<typeof timing> = {}) {
+  Object.assign(timing, defaultTiming, changes);
+}
+class AuthTimeout extends Error {}
+/** Waits for `call` until `deadline` on the monotonic clock. */
+function until<T>(call: () => Promise<T>, deadline: number): Promise<T> {
+  const ms = deadline - performance.now();
+  if (ms <= 0) return Promise.reject(new AuthTimeout());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new AuthTimeout()), ms);
+  });
+  return Promise.race([call(), timeout]).finally(() => clearTimeout(timer));
+}
 
 function json(value: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(value, { status, headers: { ...noStore, ...headers } });
@@ -50,11 +74,12 @@ const unavailable = () =>
 /** The invited owner of the request's app token, or the reply that refuses it. */
 async function authenticateApp(
   request: Request,
-  need: Need,
+  needs: Need[],
 ): Promise<{ ok: true; owner: string } | { ok: false; response: Response }> {
   const refuse = (response: Response) => ({ ok: false as const, response });
+  const deadline = performance.now() + timing.authMs;
   const check = await verifyBearer(request, ["oauth_token"], {
-    timeoutMs: 10_000,
+    timeoutMs: timing.authMs,
   });
   if (!check.ok) {
     if (check.failure === "unconfigured" || check.failure === "unavailable")
@@ -78,8 +103,10 @@ async function authenticateApp(
         403,
       ),
     );
-  const scope = need === "read" ? fitnessScopes.read : fitnessScopes.write;
-  if (!bearer.scopes.includes(scope))
+  const scopes = needs.map((need) =>
+    need === "read" ? fitnessScopes.read : fitnessScopes.write,
+  );
+  if (!scopes.every((scope) => bearer.scopes.includes(scope)))
     return refuse(
       failure(
         "Approve Fitness read and write access when you sign in.",
@@ -89,7 +116,8 @@ async function authenticateApp(
     );
   let email: string | null;
   try {
-    email = await invitedEmail(bearer.userId);
+    const userId = bearer.userId;
+    email = await until(() => invitedEmail(userId), deadline);
   } catch {
     return refuse(unavailable());
   }
@@ -158,7 +186,7 @@ async function guarded(work: () => Promise<Response>) {
 
 /** `GET /api/app/records`: the owner and every record. */
 export async function handleRecordsLoad(request: Request) {
-  const auth = await authenticateApp(request, "read");
+  const auth = await authenticateApp(request, ["read"]);
   if (!auth.ok) return auth.response;
   return guarded(async () =>
     json({ owner: auth.owner, records: await loadRecords(auth.owner) }),
@@ -171,7 +199,7 @@ export async function handleRecordsLoad(request: Request) {
  * receives it.
  */
 export async function handleRecordSave(request: Request) {
-  const auth = await authenticateApp(request, "write");
+  const auth = await authenticateApp(request, ["read", "write"]);
   if (!auth.ok) return auth.response;
   const body = await readJson(request, limits.record, mutationSchema);
   if (!body.ok) return body.response;
@@ -180,14 +208,14 @@ export async function handleRecordSave(request: Request) {
 
 /** `GET /api/app/photos`: the owner's equipment photos. */
 export async function handlePhotoList(request: Request) {
-  const auth = await authenticateApp(request, "read");
+  const auth = await authenticateApp(request, ["read"]);
   if (!auth.ok) return auth.response;
   return guarded(async () => json({ photos: await photoList(auth.owner) }));
 }
 
 /** `POST /api/app/photos`: saves one photo; a repeated ID saves once. */
 export async function handlePhotoUpload(request: Request) {
-  const auth = await authenticateApp(request, "write");
+  const auth = await authenticateApp(request, ["write"]);
   if (!auth.ok) return auth.response;
   const body = await readJson(request, limits.photo, PhotoUpload);
   if (!body.ok) return body.response;
@@ -198,7 +226,7 @@ const photoId = z.uuid();
 
 /** `GET /api/app/photos/:id`: the photo's bytes. */
 export async function handlePhotoRead(request: Request, id: string) {
-  const auth = await authenticateApp(request, "read");
+  const auth = await authenticateApp(request, ["read"]);
   if (!auth.ok) return auth.response;
   const parsed = photoId.safeParse(id);
   if (!parsed.success)
@@ -208,7 +236,7 @@ export async function handlePhotoRead(request: Request, id: string) {
 
 /** `DELETE /api/app/photos/:id`: removes the photo. */
 export async function handlePhotoDelete(request: Request, id: string) {
-  const auth = await authenticateApp(request, "write");
+  const auth = await authenticateApp(request, ["write"]);
   if (!auth.ok) return auth.response;
   const parsed = photoId.safeParse(id);
   if (!parsed.success)
@@ -218,7 +246,7 @@ export async function handlePhotoDelete(request: Request, id: string) {
 
 /** `GET /api/app/export`: the `bent-fitness-v1` account export. */
 export async function handleExport(request: Request) {
-  const auth = await authenticateApp(request, "read");
+  const auth = await authenticateApp(request, ["read"]);
   if (!auth.ok) return auth.response;
   return guarded(async () => exportResponse(auth.owner));
 }
