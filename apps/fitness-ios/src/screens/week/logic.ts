@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   addDays,
   formatDate,
+  formatShortDate,
   reorganiseDays,
   runSchema,
   sameData,
@@ -206,15 +207,15 @@ export function reorderWeek(order: string[], locked: boolean[], sources: number[
   return order.map((source, index) => (locked[index] ? source : (open[next++] ?? source)));
 }
 
-/** The days whose session changes, as "Easy run moves to Sun 29 Nov 2026." */
+/**
+ * The days whose session changes, as "2 days change: Sat 28, Sun 29." The
+ * list shows the new sessions, so this names only the days.
+ */
 export function reorderPreview(settings: Settings, days: string[], order: string[]) {
-  return days
-    .flatMap((day, index) => {
-      const source = order[index] ?? day;
-      const plan = scheduled(settings, source);
-      return samePlan(plan, scheduled(settings, day)) ? [] : [`${sessionName(plan)} moves to ${formatDate(day)}.`];
-    })
-    .join(" ");
+  const changed = days.filter((day, index) => !samePlan(scheduled(settings, order[index] ?? day), scheduled(settings, day)));
+  if (changed.length === 0) return "";
+  const names = changed.map((day) => formatShortDate(day).split(" ").slice(0, 2).join(" "));
+  return `${changed.length === 1 ? "1 day changes" : `${changed.length} days change`}: ${names.join(", ")}.`;
 }
 
 /**

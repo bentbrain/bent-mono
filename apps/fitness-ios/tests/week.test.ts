@@ -208,9 +208,7 @@ describe("reorganising a week", () => {
   test("the preview names each day whose session changes", () => {
     expect(reorderPreview(settings, days, days)).toBe("");
     const order = [...days.slice(0, 5), "2026-11-29", "2026-11-28"];
-    expect(reorderPreview(settings, days, order)).toBe(
-      "Rest moves to Sat 28 Nov 2026. Easy run moves to Sun 29 Nov 2026.",
-    );
+    expect(reorderPreview(settings, days, order)).toBe("2 days change: Sat 28, Sun 29.");
     // Swapping two rest days changes nothing.
     expect(reorderPreview(settings, days, [days[0]!, days[1]!, days[2]!, "2026-11-29", days[4]!, days[5]!, "2026-11-26"])).toBe("");
   });
@@ -279,9 +277,7 @@ describe("reorganising a week", () => {
     const older = { ...routineA, name: "Strength A (old)" };
     const moved: Settings = { ...settings, dayPlans: { "2026-11-24": { type: "strength", routine: older } } };
     const order = ["2026-11-23", "2026-11-27", "2026-11-25", "2026-11-26", "2026-11-24", "2026-11-28", "2026-11-29"];
-    expect(reorderPreview(moved, days, order)).toBe(
-      "Strength A moves to Tue 24 Nov 2026. Strength A (old) moves to Fri 27 Nov 2026.",
-    );
+    expect(reorderPreview(moved, days, order)).toBe("2 days change: Tue 24, Fri 27.");
     const result = planWeek({ settings: moved, revision: 1 }, { revision: 1, data: moved }, days, order, today, []);
     if (!("settings" in result)) throw new Error(result.error);
     expect(result.settings.dayPlans?.["2026-11-24"]).toEqual({ type: "strength", routine: routineA });
