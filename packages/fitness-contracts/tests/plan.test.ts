@@ -57,12 +57,16 @@ describe("exercise catalogue", () => {
     expect(Object.keys(settings)).not.toContain("availableEquipment");
   });
   test("reads each exercise's load type", () => {
-    expect(loadTypeOf({ id: "bench" })).toBe("dumbbell");
-    expect(loadTypeOf({ id: "plank" })).toBe("bodyweight");
-    expect(loadTypeOf({ id: "custom-sled", load: "machine" })).toBe("machine");
-    expect(loadTypeOf({ id: "custom-unknown" })).toBe("dumbbell");
+    expect(loadTypeOf({ id: "bench", mode: "reps" })).toBe("dumbbell");
+    expect(loadTypeOf({ id: "plank", mode: "seconds" })).toBe("bodyweight");
+    expect(
+      loadTypeOf({ id: "custom-sled", load: "machine", mode: "reps" }),
+    ).toBe("machine");
+    expect(loadTypeOf({ id: "custom-unknown", mode: "reps" })).toBe("dumbbell");
     // The catalogue decides for its own exercises.
-    expect(loadTypeOf({ id: "squat", load: "barbell" })).toBe("dumbbell");
+    expect(loadTypeOf({ id: "squat", load: "barbell", mode: "reps" })).toBe(
+      "dumbbell",
+    );
   });
   test("counts an adjustable bench as a flat bench", () => {
     const bench = catalogueEntry("bench");
@@ -144,6 +148,17 @@ describe("progression by load type", () => {
       progression(band, completed(band, 0), { dumbbellsKg: [] }).text,
     ).toContain("stronger band");
   });
+  test("keeps dumbbell suggestions for a plank changed to reps", () => {
+    // The routine editors let any exercise change between reps and seconds.
+    const plank = exercises.find((item) => item.id === "plank")!;
+    const reps: Exercise = { ...plank, mode: "reps", min: 8, max: 12 };
+    expect(loadTypeOf(reps)).toBe("dumbbell");
+    const advice = progression(reps, completed(reps, 10), {
+      dumbbellsKg: [10, 12],
+    });
+    expect(advice.loadKg).toBe(12);
+    expect(advice.text).toContain("next available dumbbell");
+  });
   test("starts timed exercises at no weight, as the logger records none", () => {
     const hold: Exercise = {
       ...prescription("custom-hold", "dumbbell"),
@@ -174,12 +189,19 @@ describe("progression by load type", () => {
   });
   test("never suggests a rounded increase that crosses the limit or stays level", () => {
     const p = prescription("custom-sled", "machine");
-    const nearLimit = progression(p, completed(p, 999.9999), {
+    // 999.9001 + 0.1 rounds to the limit but crosses it.
+    const nearLimit = progression(p, completed(p, 999.9001), {
       dumbbellsKg: [],
       incrementsKg: { machine: 0.1 },
     });
-    expect(nearLimit.loadKg).toBe(999.9999);
+    expect(nearLimit.loadKg).toBe(999.9001);
     expect(nearLimit.text).toContain("heaviest load");
+    expect(
+      progression(p, completed(p, 999.9), {
+        dumbbellsKg: [],
+        incrementsKg: { machine: 0.1 },
+      }).loadKg,
+    ).toBe(1000);
     expect(
       settingsSchema.safeParse({
         ...base(),
@@ -387,7 +409,8 @@ describe("plan check", () => {
 
 describe("app contract", () => {
   test("reads the declared contract and treats a missing one as 1", () => {
-    expect(appContract).toBeGreaterThanOrEqual(2);
+    // Builds declare 2 only once their screens handle every load type.
+    expect(appContract).toBe(1);
     expect(requestContract(null)).toBe(1);
     expect(requestContract("2")).toBe(2);
     expect(requestContract("two")).toBe(1);

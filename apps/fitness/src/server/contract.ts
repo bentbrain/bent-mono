@@ -7,8 +7,9 @@
  *
  * Before raising it to 2, label weights by load type in both apps (plan
  * suggestions, workout and correction loggers, VoiceOver hints, guides and
- * strength charts all say "per dumbbell" today) and leave weight entry out
- * of band exercises. Contract 1 records hold only dumbbell loads.
+ * strength charts all say "per dumbbell" today), leave weight entry out of
+ * band exercises, and ship an iPhone build that declares contract 2.
+ * Contract 1 records hold only dumbbell loads.
  */
 const defaultMinimum = 1;
 let minimum = defaultMinimum;

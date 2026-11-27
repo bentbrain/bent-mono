@@ -10,10 +10,14 @@ import type { Entity, Exercise, Routine } from "./domain";
  * The `/api/app` contract a client understands, sent in the
  * `X-Fitness-Contract` header. Builds without the header count as 1.
  *
- * - 1: the original settings, routines and records.
- * - 2: catalogue load types on exercises and the planning profile in settings.
+ * - 1: the original settings, routines and records. Weights are per dumbbell.
+ * - 2: load types on exercises outside the catalogue and the planning profile
+ *   in settings.
+ *
+ * A build declares 2 only once its screens label and enter every load type,
+ * since Fitness serves version 2 records to any build that declares it.
  */
-export const appContract = 2;
+export const appContract = 1;
 export const appContractHeader = "X-Fitness-Contract";
 /** The contract a request declares, or 1 when it names none or an invalid one. */
 export function requestContract(value: string | null) {

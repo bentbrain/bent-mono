@@ -305,10 +305,16 @@ export const exercises: Exercise[] = catalogue.map(
 );
 /**
  * How an exercise's load is recorded. The catalogue decides for its own
- * exercises; others use their `load`, or dumbbells when it is not set.
+ * exercises when they are measured its way. Others, including a catalogue
+ * exercise changed to reps or seconds, use their `load`, or one dumbbell
+ * when it is not set, as every prescription did before load types.
  */
-export function loadTypeOf(exercise: Pick<Exercise, "id" | "load">): LoadType {
-  return catalogueEntry(exercise.id)?.load ?? exercise.load ?? "dumbbell";
+export function loadTypeOf(
+  exercise: Pick<Exercise, "id" | "load" | "mode">,
+): LoadType {
+  const entry = catalogueEntry(exercise.id);
+  if (entry && entry.mode === exercise.mode) return entry.load;
+  return exercise.load ?? "dumbbell";
 }
 /** Default smallest steps, in kg, for loads that add plates or pins. */
 export const defaultIncrementsKg = { barbell: 2.5, machine: 5, cable: 2.5 };
