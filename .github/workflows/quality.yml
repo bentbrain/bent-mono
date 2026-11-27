@@ -304,6 +304,9 @@ jobs:
         working-directory: apps/fitness-ios
     env:
       APP_VARIANT: production
+      # The runner and its Simulator are Apple silicon, so the builds make
+      # only the arm64 slice, which keeps the suite well inside its limit.
+      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
     steps:
       - name: Keep native build output outside the checkout
         working-directory: .

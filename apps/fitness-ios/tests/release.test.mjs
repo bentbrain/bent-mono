@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
-import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "../scripts/artifact.mjs";
+import { checkAppContents, checkHealthEntitlements, checkInfoPlist, otoolSectionBytes } from "../scripts/artifact.mjs";
 import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
 import { replayScope } from "../scripts/native.mjs";
 import {
@@ -667,6 +667,21 @@ describe("the built app", () => {
     expect(() =>
       checkHealthEntitlements({ ...healthKit, "com.apple.developer.healthkit.access": ["health-records"] }),
     ).toThrow("Unexpected HealthKit");
+  });
+
+  test("reads a Simulator binary's entitlements section from either slice", () => {
+    const text = "<?xml version";
+    const bytes = [...Buffer.from(text)];
+    // x86_64: one byte per token.
+    const x86 = `000000010049c6df\t${bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ")} \n`;
+    // arm64: little-endian 32-bit words, the last one shorter.
+    const words = [];
+    for (let i = 0; i < bytes.length; i += 4)
+      words.push(bytes.slice(i, i + 4).reverse().map((b) => b.toString(16).padStart(2, "0")).join(""));
+    const arm = `000000010049247f\t${words.join(" ")} \n`;
+    expect(Buffer.from(otoolSectionBytes(x86)).toString()).toBe(text);
+    expect(Buffer.from(otoolSectionBytes(arm)).toString()).toBe(text);
+    expect(otoolSectionBytes("bentFitness:\nContents of (__TEXT,__entitlements) section\n")).toEqual([]);
   });
 
   test("the Info.plist reads Health data only, and the seeder stays out", () => {

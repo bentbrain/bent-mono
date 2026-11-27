@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkAppContents, checkHealthEntitlements, checkInfoPlist } from "./artifact.mjs";
+import { checkAppContents, checkHealthEntitlements, checkInfoPlist, otoolSectionBytes } from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Build output stays in this user's caches unless NATIVE_BUILD_DIR names another place.
@@ -206,15 +206,10 @@ const commands = {
   artifact() {
     const binary = join(appPath(), project());
     // Simulator builds carry their entitlements in a section of the binary.
+    // otool prints the section as bytes for x86_64 and as words for arm64.
     const section = output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", binary]);
-    const bytes = section
-      .split("\n")
-      .flatMap((line) => line.split("\t").slice(1).join(" ").trim().split(/\s+/))
-      .filter((byte) => /^[0-9a-f]{2}$/.test(byte));
     const entitlements = JSON.parse(
-      output("plutil", ["-convert", "json", "-o", "-", "-"], {
-        input: Buffer.from(bytes.map((b) => parseInt(b, 16))),
-      }),
+      output("plutil", ["-convert", "json", "-o", "-", "-"], { input: Buffer.from(otoolSectionBytes(section)) }),
     );
     const health = checkHealthEntitlements(entitlements);
     const plist = JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "Info.plist")]));
