@@ -8,7 +8,8 @@
     "src/**/*.{ts,tsx}",
     "tests/**/*.{ts,mjs}",
     "scripts/*.mjs",
-    "modules/fitness-health/*.{ts,js}"
+    "modules/fitness-health/*.{ts,js}",
+    "modules/workout-activity/*.{ts,js}"
   ],
   "ignoreDependencies": [
     "expo-updates"

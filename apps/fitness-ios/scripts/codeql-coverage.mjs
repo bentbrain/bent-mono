@@ -3,9 +3,10 @@
 // the app scope, the tools scope or both, and a file in neither fails the
 // check:
 //
-// - app: the fitness-health module's Core, Platform and Module sources, and
-//   each Swift file the production app target compiles, including the ones
-//   prebuild generates.
+// - app: the fitness-health module's Core, Platform and Module sources, the
+//   workout-activity module and its Live Activity extension, and each Swift
+//   file the production app target compiles, including the ones prebuild
+//   generates.
 // - tools: the module's Core sources and XCTest suite, and the seeder with
 //   its UI tests.
 // - all: both.
@@ -22,8 +23,16 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const healthModule = "apps/fitness-ios/modules/fitness-health/ios";
+const activityModule = "apps/fitness-ios/modules/workout-activity/ios";
 const partition = {
-  app: [`${healthModule}/Core/`, `${healthModule}/Platform/`, `${healthModule}/Module/`],
+  app: [
+    `${healthModule}/Core/`,
+    `${healthModule}/Platform/`,
+    `${healthModule}/Module/`,
+    `${activityModule}/Module/`,
+    `${activityModule}/Shared/`,
+    `${activityModule}/Extension/`,
+  ],
   tools: [`${healthModule}/Core/`, `${healthModule}/Tests/`, "apps/fitness-ios/tools/health-seed/"],
 };
 const usage = "Usage: node scripts/codeql-coverage.mjs [--scope all|app|tools] <database> [<derived data>]";

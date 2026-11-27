@@ -14,6 +14,7 @@ import { AppText } from "../../ui/Text";
 import { clearPickerCopies } from "./pickerFiles";
 import { signOutMessage } from "./rules";
 import { shareJson } from "./share";
+import { endAllWorkoutActivities } from "../week/workout/useWorkoutActivity";
 
 const origin = String(Constants.expoConfig?.extra?.fitnessOrigin ?? "https://fitness.bent.build").replace(/\/$/, "");
 
@@ -66,6 +67,7 @@ export function SettingsScreen() {
           sync.stop();
           await session.signOut(async () => {
             forgetAccount(owner);
+            endAllWorkoutActivities();
             clearPickerCopies();
             await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]);
           });

@@ -55,9 +55,13 @@ async function seed() {
   const timezone = process.env.FITNESS_IOS_SIM_TIMEZONE ?? "UTC";
   const today = localDate(timezone);
   const start = addDays(today, -21);
+  const defaults = defaultSettings(start, timezone);
   const settings = {
-    ...defaultSettings(start, timezone),
+    ...defaults,
     goal: "Get stronger and run 5 km",
+    // Today is a strength day with a timed exercise, so the screen tours
+    // reach the workout logger, its hold timer and the Live Activity.
+    dayPlans: { [today]: { type: "strength" as const, routine: defaults.routines[0] ?? null } },
   };
   const history: RecordEntry[] = [];
   const put = async (id: string, revision: number, data: Entity) => {

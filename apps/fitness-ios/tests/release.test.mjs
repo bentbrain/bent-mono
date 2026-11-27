@@ -674,6 +674,7 @@ describe("the built app", () => {
       CFBundleIdentifier: "build.bent.fitness",
       NSHealthShareUsageDescription: shareDescription,
       NSHealthUpdateUsageDescription: updateDescription,
+      NSSupportsLiveActivities: true,
     };
     expect(() => checkInfoPlist(plist, "production")).not.toThrow();
     expect(() => checkInfoPlist({ ...plist, NSHealthUpdateUsageDescription: "Saves workouts." }, "production")).toThrow(
@@ -688,9 +689,17 @@ describe("the built app", () => {
     expect(() =>
       checkInfoPlist({ ...plist, NSAppTransportSecurity: { NSAllowsLocalNetworking: true } }, "production"),
     ).toThrow("local networking");
-    expect(() => checkAppContents({ files: ["Info.plist"], code: "FitnessHealthModule" })).not.toThrow();
-    expect(() => checkAppContents({ files: ["HealthSeed.bundle"], code: "FitnessHealthModule" })).toThrow("seeder");
-    expect(() => checkAppContents({ files: [], code: "" })).toThrow("not linked");
+    expect(() => checkInfoPlist({ ...plist, NSSupportsLiveActivities: false }, "production")).toThrow("Live");
+    const extension = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
+    const code = "FitnessHealthModule WorkoutActivityModule";
+    expect(() => checkAppContents({ files: ["Info.plist", extension], code })).not.toThrow();
+    expect(() => checkAppContents({ files: [`/tmp/derived/bentFitness.app/${extension}`], code })).not.toThrow();
+    expect(() => checkAppContents({ files: ["HealthSeed.bundle", extension], code })).toThrow("seeder");
+    expect(() => checkAppContents({ files: [extension], code: "" })).toThrow("fitness-health module is not linked");
+    expect(() => checkAppContents({ files: [extension], code: "FitnessHealthModule" })).toThrow(
+      "workout-activity module is not linked",
+    );
+    expect(() => checkAppContents({ files: ["Info.plist"], code })).toThrow("Live Activity extension");
   });
 });
 
@@ -1781,6 +1790,7 @@ describe("the CodeQL Swift scopes", () => {
     "apps/fitness-ios/modules/fitness-health/ios/Core/Sync.swift",
     "apps/fitness-ios/modules/fitness-health/ios/Platform/HealthStore.swift",
     "apps/fitness-ios/modules/fitness-health/ios/Module/FitnessHealthModule.swift",
+    "apps/fitness-ios/modules/workout-activity/ios/Extension/WorkoutActivityWidget.swift",
     "apps/fitness-ios/modules/fitness-health/ios/Tests/SyncTests.swift",
     "apps/fitness-ios/tools/health-seed/HealthSeed/Seeder.swift",
     "apps/fitness-ios/tools/health-seed/SimulatorFlows/SyncFlowTests.swift",
@@ -1788,10 +1798,10 @@ describe("the CodeQL Swift scopes", () => {
   ];
 
   test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
-    expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 4));
+    expect(swiftFilesFor("app", tracked)).toEqual(tracked.slice(1, 5));
     // The tools scope is the seeder with its UI tests and the module's Core and Tests.
-    expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(4, 7)]);
-    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 7));
+    expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(5, 8)]);
+    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 8));
     // Together the two CodeQL jobs' scopes cover every tracked Swift source.
     const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
     expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
@@ -1800,14 +1810,15 @@ describe("the CodeQL Swift scopes", () => {
   test("fail closed for a tracked Swift file outside both scopes", () => {
     for (const outside of [
       "apps/fitness-ios/modules/fitness-health/ios/Extra/New.swift",
+      "apps/fitness-ios/modules/workout-activity/ios/Tests/New.swift",
       "apps/fitness-ios/ios/Generated.swift",
       "apps/other/Tool.swift",
       "Root.swift",
     ])
       for (const scope of ["all", "app", "tools"])
         expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
-    expect(() => swiftFilesFor("app", tracked.slice(4))).toThrow("No tracked Swift files");
-    expect(() => swiftFilesFor("tools", tracked.slice(2, 4))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("app", tracked.slice(5))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("tools", tracked.slice(2, 5))).toThrow("No tracked Swift files");
   });
 
   test("every tracked Swift file in the repository is in a scope", () => {
@@ -1860,8 +1871,9 @@ describe("the CodeQL Swift scopes", () => {
     const replay = source.slice(source.indexOf('"replay-swift"(args)'), source.indexOf('"core-build"()'));
     // The seeder scope reads only the seeder build, so it needs no prebuilt app project.
     expect(replay).toContain(
-      'if (scope !== "seeder") builds.push({ log: "app-build.log", targets: ["FitnessHealth", project()] });',
+      'const appTargets = ["FitnessHealth", "WorkoutActivity", "WorkoutActivityExtension", project()];',
     );
+    expect(replay).toContain('if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });');
     expect(replay).toContain(
       'if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });',
     );

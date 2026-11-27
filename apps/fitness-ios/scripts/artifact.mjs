@@ -38,12 +38,14 @@ export function checkInfoPlist(plist, variant) {
     throw new Error(`Expected bundle ID ${bundleIds[variant]}, found ${plist.CFBundleIdentifier}.`);
   if (variant === "production" && plist.NSAppTransportSecurity?.NSAllowsLocalNetworking)
     throw new Error("Production builds must not allow local networking.");
+  if (plist.NSSupportsLiveActivities !== true) throw new Error("NSSupportsLiveActivities must be true.");
 }
 
 /**
- * Throws if the seeder shipped in the app or the fitness-health module is
- * missing. `files` are the app bundle's paths; `code` is text from the main
- * binary, such as its symbol table or its raw bytes.
+ * Throws if the seeder shipped in the app, or the fitness-health module, the
+ * workout-activity module or the Live Activity extension is missing. `files`
+ * are the app bundle's paths; `code` is text from the main binary, such as
+ * its symbol table or its raw bytes.
  */
 export function checkAppContents({ files, code }) {
   // The seeder is its own project and bundle; nothing of it ships in the app.
@@ -51,4 +53,7 @@ export function checkAppContents({ files, code }) {
   if (/HealthSeed|Seeder/.test(code)) throw new Error("Seeder code is linked into the app.");
   // Expo leaves out a local module it cannot link, so check it is there.
   if (!/FitnessHealthModule/.test(code)) throw new Error("The fitness-health module is not linked.");
+  if (!/WorkoutActivityModule/.test(code)) throw new Error("The workout-activity module is not linked.");
+  if (!files.some((file) => /(^|\/)PlugIns\/WorkoutActivityExtension\.appex\/WorkoutActivityExtension$/.test(file)))
+    throw new Error("The Live Activity extension is not in the app.");
 }

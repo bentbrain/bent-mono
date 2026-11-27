@@ -10,6 +10,7 @@ import { useWeekNavigation } from "./navigation";
 import { ReorganiseWeek } from "./ReorganiseWeek";
 import { WeekBoard } from "./WeekBoard";
 import { WeekTotals } from "./WeekTotals";
+import { useEndFinishedActivities } from "./workout/useWorkoutActivity";
 
 /** The week planner: the chosen day's session, the week board and its totals. */
 export function WeekScreen() {
@@ -17,6 +18,8 @@ export function WeekScreen() {
   const navigation = useWeekNavigation();
   const monday = mondayOf(date);
   const [refreshing, setRefreshing] = useState(false);
+  // A workout finished or discarded elsewhere ends its Live Activity.
+  useEndFinishedActivities(sync.records, sync.loaded);
   useLayoutEffect(() => {
     navigation.setOptions({ title: "Your week" });
   }, [navigation]);

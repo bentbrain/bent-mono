@@ -18,6 +18,7 @@
     "src",
     "tests",
     "modules/fitness-health/index.ts",
+    "modules/workout-activity/index.ts",
     "uniwind-types.d.ts",
     "css.d.ts"
   ]

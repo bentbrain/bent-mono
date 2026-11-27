@@ -18,7 +18,7 @@ export default ts.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
-    files: ["*.js", "modules/fitness-health/app.plugin.js"],
+    files: ["*.js", "modules/fitness-health/app.plugin.js", "modules/workout-activity/app.plugin.js"],
     languageOptions: { sourceType: "commonjs" },
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
