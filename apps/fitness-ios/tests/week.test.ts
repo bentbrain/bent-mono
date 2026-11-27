@@ -260,6 +260,34 @@ describe("reorganising a week", () => {
     expect(result.settings.dayPlans?.["2026-11-25"]).toBeUndefined();
   });
 
+  test("planWeek writes dated plans only for days whose session changes", () => {
+    // Friday's Strength A dragged below a weekend of two runs.
+    const weekend: Settings = { ...settings, dayPlans: { "2026-11-29": { type: "run", routine: null } } };
+    const friday = "2026-11-27";
+    const locked = days.map((day) => lockedDay(day, friday, []));
+    const order = reorderWeek(days, locked, [4], 7);
+    const result = planWeek({ settings: weekend, revision: 1 }, { revision: 1, data: weekend }, days, order, friday, []);
+    if (!("settings" in result)) throw new Error(result.error);
+    expect(result.settings.dayPlans).toEqual({
+      "2026-11-27": { type: "run", routine: null },
+      "2026-11-29": { type: "strength", routine: routineA },
+    });
+  });
+
+  test("an edited routine counts as a different session", () => {
+    // Tuesday keeps a dated copy of Strength A from before it was renamed.
+    const older = { ...routineA, name: "Strength A (old)" };
+    const moved: Settings = { ...settings, dayPlans: { "2026-11-24": { type: "strength", routine: older } } };
+    const order = ["2026-11-23", "2026-11-27", "2026-11-25", "2026-11-26", "2026-11-24", "2026-11-28", "2026-11-29"];
+    expect(reorderPreview(moved, days, order)).toBe(
+      "Strength A moves to Tue 24 Nov 2026. Strength A (old) moves to Fri 27 Nov 2026.",
+    );
+    const result = planWeek({ settings: moved, revision: 1 }, { revision: 1, data: moved }, days, order, today, []);
+    if (!("settings" in result)) throw new Error(result.error);
+    expect(result.settings.dayPlans?.["2026-11-24"]).toEqual({ type: "strength", routine: routineA });
+    expect(result.settings.dayPlans?.["2026-11-27"]).toEqual({ type: "strength", routine: older });
+  });
+
   test("planWeek stops when the plan changed on another device", () => {
     const origin = { settings, revision: 3 };
     const changed: Settings = { ...settings, goal: "Run further" };

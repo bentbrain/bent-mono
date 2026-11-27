@@ -133,9 +133,46 @@ export function resetWeek(settings: Settings, days: string[]): Settings {
   };
 }
 
-/** Whether two days hold the same session: the same type and, for strength, the same routine. */
+/**
+ * Whether two days hold the same session: the same type and, for strength,
+ * the same routine snapshot. A dated plan keeps the routine as it was when
+ * the day was moved, so a renamed or edited routine counts as different.
+ */
 function samePlan(a: Plan, b: Plan) {
-  return a.type === b.type && (a.type !== "strength" || a.routine?.id === b.routine?.id);
+  return a.type === b.type && (a.type !== "strength" || sameData(a.routine ?? null, b.routine ?? null));
+}
+
+/**
+ * The fewest swaps that turn `start` into `goal`, as pairs of positions.
+ * Each value names a session; a week has at most seven open days, so a
+ * breadth-first search over the arrangements stays small.
+ */
+function fewestSwaps(start: number[], goal: number[]): [number, number][] | undefined {
+  const target = goal.join(",");
+  const paths = new Map<string, [number, number][]>([[start.join(","), []]]);
+  let frontier = [start];
+  while (frontier.length > 0) {
+    const next: number[][] = [];
+    for (const state of frontier) {
+      const path = paths.get(state.join(",")) ?? [];
+      if (state.join(",") === target) return path;
+      state.forEach((key, i) => {
+        if (key === goal[i]) return;
+        for (let j = i + 1; j < state.length; j += 1) {
+          // Days already holding their session stay out of the swaps.
+          if (state[j] === key || state[j] === goal[j]) continue;
+          const swapped = [...state];
+          [swapped[i], swapped[j]] = [state[j] ?? key, key];
+          const id = swapped.join(",");
+          if (paths.has(id)) continue;
+          paths.set(id, [...path, [i, j]]);
+          next.push(swapped);
+        }
+      });
+    }
+    frontier = next;
+  }
+  return undefined;
 }
 
 /**
@@ -181,9 +218,9 @@ export function reorderPreview(settings: Settings, days: string[], order: string
 }
 
 /**
- * Turns the arrangement the list shows into settings, one swap at a time
- * with the shared reorganise rule. Days that keep the same session are left
- * as they are. A change saved on another device since the sheet opened stops
+ * Turns the arrangement the list shows into settings with the fewest swaps
+ * of the shared reorganise rule, so only days whose session changes gain a
+ * dated plan. A change saved on another device since the sheet opened stops
  * the save, so it never overwrites that edit.
  */
 export function planWeek(
@@ -196,20 +233,31 @@ export function planWeek(
 ): { settings: Settings } | { error: string } {
   if (latest.revision !== origin.revision || !sameData(latest.data, origin.settings))
     return { error: "Your plan changed. Close this sheet and reopen it to use the saved plan." };
+  const sessions: Plan[] = [];
+  const keyOf = (plan: Plan) => {
+    const found = sessions.findIndex((session) => samePlan(session, plan));
+    if (found >= 0) return found;
+    sessions.push(plan);
+    return sessions.length - 1;
+  };
+  const current = days.map((day) => keyOf(scheduled(origin.settings, day)));
+  const wanted = days.map((day, index) => keyOf(scheduled(origin.settings, order[index] ?? day)));
+  const open = days.flatMap((day, index) => (lockedDay(day, today, records) ? [] : [index]));
+  const recorded = "A session was recorded or started on one of these days. Close this sheet and reopen it to see the current week.";
+  if (days.some((day, index) => !open.includes(index) && current[index] !== wanted[index])) return { error: recorded };
+  const swaps = fewestSwaps(
+    open.map((index) => current[index] ?? -1),
+    open.map((index) => wanted[index] ?? -1),
+  );
+  if (!swaps) return { error: recorded };
   try {
     let settings = origin.settings;
-    days.forEach((day, index) => {
-      const wanted = scheduled(origin.settings, order[index] ?? day);
-      if (samePlan(scheduled(settings, day), wanted)) return;
-      const other = days
-        .slice(index + 1)
-        .find((later) => !lockedDay(later, today, records) && samePlan(scheduled(settings, later), wanted));
-      if (!other)
-        throw Error("A session was recorded or started on one of these days. Close this sheet and reopen it to see the current week.");
+    for (const [a, b] of swaps) {
+      const [first, second] = [days[open[a] ?? -1] ?? "", days[open[b] ?? -1] ?? ""];
       // The shared rule moves a planned session, so a rest day is never the source.
-      const [from, to] = wanted.type === "rest" ? [day, other] : [other, day];
+      const [from, to] = scheduled(settings, first).type === "rest" ? [second, first] : [first, second];
       settings = reorganiseDays(settings, from, to, today, records);
-    });
+    }
     return { settings };
   } catch (problem) {
     return { error: problem instanceof Error ? problem.message : "Check the selected days." };

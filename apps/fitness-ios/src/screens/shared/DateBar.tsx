@@ -10,8 +10,8 @@ import { cn, shape } from "../../ui/typography";
 /**
  * The day a screen shows, with day steps and a date picker. The Week, Food
  * and Bodyweight screens share the chosen day; new entries use it. On
- * another day, the line under the date returns to today, so the bar keeps
- * its height whichever day is shown.
+ * another day, the line under the date returns to today. Both lines stay
+ * on one line, so the bar keeps its height whichever day is shown.
  */
 export function DateBar({ step = false }: { step?: boolean }) {
   const { date, today, setDate } = useAccount();
@@ -33,12 +33,12 @@ export function DateBar({ step = false }: { step?: boolean }) {
           accessibilityLabel={isToday ? `Today, ${formatDate(date)}` : formatDate(date)}
           accessibilityHint={isToday ? undefined : "New entries here use this date."}
         >
-          <AppText textRole="headline" weight="bold">
+          <AppText textRole="headline" weight="bold" numberOfLines={1}>
             {isToday ? "Today" : formatShortDate(date)}
           </AppText>
         </View>
         {isToday ? (
-          <AppText textRole="footnote" tone="muted" accessibilityElementsHidden importantForAccessibility="no">
+          <AppText textRole="footnote" tone="muted" numberOfLines={1} accessibilityElementsHidden importantForAccessibility="no">
             {formatShortDate(date)}
           </AppText>
         ) : (
