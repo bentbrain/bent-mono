@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { createWorkout, scheduled } from "../domain";
-import type { Routine } from "../domain";
+import { createWorkout, scheduled } from "@bent/fitness-contracts/domain";
+import type { Routine } from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 
 /** Starts a routine as a recoverable workout draft and opens it. */

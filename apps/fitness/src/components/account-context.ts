@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Settings } from "../domain";
+import type { Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
 export const AccountContext = createContext<
   | {

@@ -23,7 +23,7 @@ import type {
   SampleType,
   WeightUnit,
 } from "@bent/fitness-contracts";
-import { localDate } from "../domain";
+import { localDate } from "@bent/fitness-contracts/domain";
 
 /** The payload is not in a shape this import reads. The message is safe to show. */
 export class HealthImportError extends Error {

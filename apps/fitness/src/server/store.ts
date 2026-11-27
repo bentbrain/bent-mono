@@ -8,8 +8,13 @@ import {
   settingsSchema,
   localDate,
   correctionProblem,
-} from "../domain";
-import type { Mutation, RecordEntry, SaveResult, Workout } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type {
+  Mutation,
+  RecordEntry,
+  SaveResult,
+  Workout,
+} from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sql, TransactionSql } from "postgres";
 const rowSchema = z.object({

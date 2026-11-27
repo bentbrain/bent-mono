@@ -9,7 +9,7 @@ import {
 import { AccountContext, useAccount } from "./account-context";
 import { UserButton, SignInButton, useAuth } from "@clerk/tanstack-react-start";
 import { Button } from "@bent/ui/button";
-import { localDate, settingsId } from "../domain";
+import { localDate, settingsId } from "@bent/fitness-contracts/domain";
 import { load, save } from "../server/functions";
 import { useSync } from "../sync";
 import { download } from "./fields";

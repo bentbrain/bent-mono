@@ -23,7 +23,7 @@ bun run db:migrate
 bun run dev
 ```
 
-[`.env.example`](.env.example) lists the configuration keys. Keep development and production databases and Clerk applications separate. Claim an accountless Clerk development application through Clerk before configuring production. Shared design tokens and controls come from `@bent/design-tokens` and `@bent/ui`; shared schemas live in `@bent/fitness-contracts`.
+[`.env.example`](.env.example) lists the configuration keys. Keep development and production databases and Clerk applications separate. Claim an accountless Clerk development application through Clerk before configuring production. Shared design tokens and controls come from `@bent/design-tokens` and `@bent/ui`; shared schemas, domain rules, progress summaries and exercise guides live in `@bent/fitness-contracts`, which the iPhone app also uses.
 
 The app checks the signed-in account and invitation on every server operation. SQL queries include the authenticated owner ID. Record revisions detect conflicting edits, and per-account request receipts make retries idempotent. Completed workouts retain their exercise prescriptions and results. A correction is a separate record that replaces or hides one completed workout in History, the week view and weight suggestions; the original stays in the account and its export, and removing the correction restores it. Training dates cannot be later than the account's current day in its timezone. Device drafts queue cloud writes and show saving, pending, failure and conflict states. Export pending changes before choosing a cloud version in a conflict.
 
@@ -83,6 +83,26 @@ Access follows the token's scopes. `fitness:read` lists the read tools and `fitn
 - Turn on API keys to create keys for scripts.
 
 `/.well-known/oauth-protected-resource` names the Clerk Frontend API as the authorization server. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients that look it up on the app's origin.
+
+## iPhone app API
+
+The bent Fitness iPhone app reads and changes the account through `/api/app`. Each request sends an OAuth access token as `Authorization: Bearer <token>`. The token must name the MCP endpoint as its audience, come from an OAuth application listed in `FITNESS_DEVICE_CLIENT_IDS` and belong to an invited account. Reads need `fitness:read`. Saving a record needs `fitness:read` and `fitness:write`, since a conflict reply carries the current record, and photo changes need `fitness:write`. The routes refuse API keys, device keys, tokens from other OAuth applications and browser cookies.
+
+- `GET /api/app/records` replies `{"owner", "records"}` with every record in the account.
+- `POST /api/app/records` saves one change, with the same body and reply as the web app's saves: `{"id", "revision", "operationId", "data"}`, where `data` is `null` to remove the record. The reply is `{"status": "saved", "record"}`, or `{"status": "conflict", "current"}` when the revision is out of date. A repeated `operationId` replays the first reply.
+- `GET /api/app/photos` lists equipment photos as `{"photos": [{"id", "name", "type"}]}`. `POST /api/app/photos` saves one with `{"id", "name", "type", "base64"}`; a repeated `id` saves once. `GET /api/app/photos/<id>` replies with the photo, and `DELETE /api/app/photos/<id>` removes it.
+- `GET /api/app/export` replies with the same `bent-fitness-v1` download as Settings → Export.
+
+| Reply                    | Cause                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `400 invalid_request`    | The body is not JSON or fails validation; `error` names the first problem                         |
+| `401 unauthorized`       | The token is missing, unknown, expired or issued for another audience. Refresh it or sign in      |
+| `403 client_not_allowed` | The token's OAuth application is not in `FITNESS_DEVICE_CLIENT_IDS`                               |
+| `403 insufficient_scope` | The token lacks a scope the route needs                                                           |
+| `403 not_invited`        | The account's verified primary email is not on the invitation list                                |
+| `413 payload_too_large`  | A record change over 4.5 MB, or a photo upload over 3 MB                                          |
+| `422 invalid_request`    | A record or photo rule refused the change; `error` says which and is safe to show                 |
+| `503 auth_unavailable`   | Clerk did not answer within 10 seconds, or account services need configuration. Try again shortly |
 
 ## Apple Health
 
@@ -209,7 +229,7 @@ Enrollment needs `FITNESS_DEVICE_ENROLLMENT=enabled`, the comma-separated OAuth 
 Configure each Clerk instance for device enrollment:
 
 - Create the `fitness:health:enroll` custom scope. Describe it on the consent screen as "Let an app on your iPhone import Apple Health weigh-ins and runs into Fitness. Imports can match or re-pair runs you've entered, and the app sees your account timezone and the results of each import."
-- Create a public OAuth application named Fitness iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid` and `fitness:health:enroll`. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
+- Create a public OAuth application named Fitness iOS that uses PKCE. Register one exact redirect URI for each app variant: `build.bent.fitness://oauth` for production and `build.bent.fitness.dev://oauth` for development builds. Give this application `openid`, `offline_access`, `fitness:read`, `fitness:write` and `fitness:health:enroll`, so one sign-in in the app covers the account and Health enrollment. Assign `fitness:health:enroll` to this application only, and leave it out of the dynamic-client and default scopes; `openid` stays available to dynamically registered clients too.
 - Issue this application's tokens with the MCP endpoint as their audience.
 - Add the application's ID to `FITNESS_DEVICE_CLIENT_IDS`.
 

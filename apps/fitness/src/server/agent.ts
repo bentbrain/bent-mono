@@ -19,8 +19,13 @@ import {
   totals,
   trainingRecords,
   weightSchema,
-} from "../domain";
-import type { Entity, Mutation, RecordEntry, Settings } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type {
+  Entity,
+  Mutation,
+  RecordEntry,
+  Settings,
+} from "@bent/fitness-contracts/domain";
 import { BatchConflict, changeOnce, loadRecords } from "./store";
 import type { AccountChange } from "./store";
 import type { AgentAccess } from "./auth";

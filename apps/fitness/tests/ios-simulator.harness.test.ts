@@ -35,7 +35,8 @@ if (configured) {
 const devices = await import("../src/server/devices");
 const { handleHealthImport } = await import("../src/server/health");
 const { loadRecords, saveRecord } = await import("../src/server/store");
-const { defaultSettings, settingsId } = await import("../src/domain");
+const { defaultSettings, settingsId } =
+  await import("@bent/fitness-contracts/domain");
 
 const redirectUri = "build.bent.fitness.dev://oauth";
 

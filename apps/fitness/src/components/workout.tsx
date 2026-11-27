@@ -6,12 +6,20 @@ import {
   lastExercise,
   progression,
   setResult,
-} from "../domain";
-import type { RecordEntry, Settings, Workout } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type {
+  RecordEntry,
+  Settings,
+  Workout,
+} from "@bent/fitness-contracts/domain";
 import { useAccount } from "./account-context";
 import type { Sync } from "../sync";
 import { ExerciseHelp, prescriptionText } from "./exercises";
-import { elapsedSeconds, formatDuration, remainingRest } from "../timing";
+import {
+  elapsedSeconds,
+  formatDuration,
+  remainingRest,
+} from "@bent/fitness-contracts/timing";
 import { fieldKey, setKeys, useWorkoutInputs } from "./workout-inputs";
 import type { NumberField, WorkoutInputs } from "./workout-inputs";
 

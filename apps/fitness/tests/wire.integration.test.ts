@@ -46,7 +46,8 @@ const { handleHealthImport } = await import("../src/server/health");
 const { loadRecords, saveRecord, setEnrollmentWait } =
   await import("../src/server/store");
 const { default: postgres } = await import("postgres");
-const { defaultSettings, settingsId } = await import("../src/domain");
+const { defaultSettings, settingsId } =
+  await import("@bent/fitness-contracts/domain");
 
 const committed = new URL("./fixtures/wire/replies/", import.meta.url).pathname;
 const owner = syntheticOwner.id;

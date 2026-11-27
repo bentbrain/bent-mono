@@ -12,7 +12,12 @@ import {
   loadRecords,
   saveRecord,
 } from "../src/server/store";
-import { addDays, defaultSettings, localDate, settingsId } from "../src/domain";
+import {
+  addDays,
+  defaultSettings,
+  localDate,
+  settingsId,
+} from "@bent/fitness-contracts/domain";
 const configured = Boolean(process.env.FITNESS_TEST_DATABASE_URL);
 if (process.env.CI && !configured)
   throw new Error("FITNESS_TEST_DATABASE_URL is required in CI.");

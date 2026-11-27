@@ -6,8 +6,12 @@ import {
   useState,
 } from "react";
 import { z } from "zod";
-import { displayLoad, toKg, workoutSchema } from "../domain";
-import type { Settings, Workout } from "../domain";
+import {
+  displayLoad,
+  toKg,
+  workoutSchema,
+} from "@bent/fitness-contracts/domain";
+import type { Settings, Workout } from "@bent/fitness-contracts/domain";
 
 type Units = Settings["units"];
 /**

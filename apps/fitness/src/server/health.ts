@@ -15,8 +15,8 @@ import {
   settingsId,
   settingsSchema,
   weightSchema,
-} from "../domain";
-import type { Entity, RecordEntry } from "../domain";
+} from "@bent/fitness-contracts/domain";
+import type { Entity, RecordEntry } from "@bent/fitness-contracts/domain";
 import { agentScopes, authenticateImport } from "./auth";
 import type { AgentAccess } from "./auth";
 import {
@@ -29,6 +29,7 @@ import {
 import type { DeviceEntry } from "./health-export";
 import { checkDeviceReply } from "./device-reply";
 import { BatchConflict, StoreRuleError, changeHealth } from "./store";
+import { readBodyUpTo } from "./body";
 import type { DeviceKeyClaims, HealthChange, HealthLink } from "./store";
 
 type Outcome = { date: string; status: "added" | "kept"; reason?: string };
@@ -443,30 +444,8 @@ function json(value: unknown, status = 200, headers: HeadersInit = {}) {
 }
 
 /** Reads the body up to the size limit, stopping as soon as it is exceeded. */
-export async function readImportBody(request: Request) {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > healthImportLimits.bytes) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > healthImportLimits.bytes) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+export function readImportBody(request: Request) {
+  return readBodyUpTo(request, healthImportLimits.bytes);
 }
 
 const challenge = { "WWW-Authenticate": `Bearer error="invalid_token"` };

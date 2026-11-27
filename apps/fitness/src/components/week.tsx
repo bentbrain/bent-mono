@@ -12,10 +12,14 @@ import {
   scheduled,
   sessionMinutes,
   totals,
-} from "../domain";
-import type { DayActivity, RecordEntry, Settings } from "../domain";
-import { elapsedSeconds, formatDuration } from "../timing";
-import { weeklySummary } from "../progress";
+} from "@bent/fitness-contracts/domain";
+import type {
+  DayActivity,
+  RecordEntry,
+  Settings,
+} from "@bent/fitness-contracts/domain";
+import { elapsedSeconds, formatDuration } from "@bent/fitness-contracts/timing";
+import { weeklySummary } from "@bent/fitness-contracts/progress";
 import { useAccount } from "./account-context";
 import { DateBar } from "./date-bar";
 import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
