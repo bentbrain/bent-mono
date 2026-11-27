@@ -83,9 +83,13 @@ export function workoutProgress(workout: Workout) {
   return { handled, total: sets.length, fraction: sets.length ? handled / sets.length : 0 };
 }
 
-/** Filled pips for a weekly total, at most seven. */
-export function pips(value: { done: number; planned: number }) {
-  return Array.from({ length: Math.min(7, Math.max(value.planned, value.done)) }, (_, index) => index < value.done);
+/**
+ * How far a weekly total is through its plan. The plan is met once every
+ * planned session is done; a total with nothing planned or done has no progress.
+ */
+export function planProgress({ done, planned }: { done: number; planned: number }) {
+  if (planned <= 0 && done <= 0) return null;
+  return { met: done >= planned, fraction: planned > 0 ? Math.min(1, done / planned) : 1 };
 }
 
 /** How strength days choose their routine. */

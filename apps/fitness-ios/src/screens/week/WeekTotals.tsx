@@ -3,16 +3,24 @@ import { formatShortDate, totals } from "@bent/fitness-contracts/domain";
 import { weeklySummary } from "@bent/fitness-contracts/progress";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { ListRow, ListSection } from "../../ui/List";
-import { cn } from "../../ui/typography";
-import { pips, rotationNote } from "./logic";
+import { Symbol } from "../../ui/Symbol";
+import { planProgress, rotationNote } from "./logic";
 import { useWeekNavigation } from "./navigation";
+import { Meter } from "./parts";
 
-function Pips({ value }: { value: { done: number; planned: number } }) {
+/** A check once the week's plan is met, otherwise a bar of the sessions done. */
+function PlanProgress({ value }: { value: { done: number; planned: number } }) {
+  const progress = planProgress(value);
+  if (!progress) return null;
   return (
-    <View className="flex-row gap-1" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      {pips(value).map((on, index) => (
-        <View key={index} className={cn("size-2 rounded-full", on ? "bg-done" : "bg-card-alt")} />
-      ))}
+    <View className="w-14 items-end" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {progress.met ? (
+        <Symbol name="checkmark.circle.fill" size={22} tintColorClassName="accent-done" />
+      ) : (
+        <View className="w-full">
+          <Meter fraction={progress.fraction} fill="bg-done" />
+        </View>
+      )}
     </View>
   );
 }
@@ -37,7 +45,7 @@ export function WeekTotals({ monday }: { monday: string }) {
           icon={icon}
           label={name}
           description={`${value.done} of ${value.planned} planned`}
-          trailing={<Pips value={value} />}
+          trailing={<PlanProgress value={value} />}
         />
       ))}
       <ListRow

@@ -12,7 +12,7 @@ import {
   lockedDay,
   movableDays,
   parseRun,
-  pips,
+  planProgress,
   planWeek,
   planAction,
   planRoutine,
@@ -122,10 +122,12 @@ describe("workouts", () => {
     expect(workoutProgress({ ...workout, exercises: [] }).fraction).toBe(0);
   });
 
-  test("pips show done sessions, capped at seven", () => {
-    expect(pips({ done: 1, planned: 3 })).toEqual([true, false, false]);
-    expect(pips({ done: 4, planned: 2 })).toEqual([true, true, true, true]);
-    expect(pips({ done: 9, planned: 9 })).toHaveLength(7);
+  test("planProgress fills towards the plan and is met once every planned session is done", () => {
+    expect(planProgress({ done: 1, planned: 4 })).toEqual({ met: false, fraction: 0.25 });
+    expect(planProgress({ done: 3, planned: 3 })).toEqual({ met: true, fraction: 1 });
+    expect(planProgress({ done: 3, planned: 2 })).toEqual({ met: true, fraction: 1 });
+    expect(planProgress({ done: 1, planned: 0 })).toEqual({ met: true, fraction: 1 });
+    expect(planProgress({ done: 0, planned: 0 })).toBeNull();
   });
 
   test("rotationNote lists the routines", () => {
