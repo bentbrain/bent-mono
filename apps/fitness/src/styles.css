@@ -2251,6 +2251,18 @@ small,
   font-size: 0.75rem;
   line-height: 1.35;
 }
+/* A card shown below its chart, in the page: one that doesn't fit over a
+   short chart, and the Food days' totals. */
+.chart-card.is-flow {
+  position: static;
+  max-width: none;
+  margin-top: 8px;
+  transform: none;
+  box-shadow: none;
+}
+.chart-detail {
+  min-height: 6.25rem;
+}
 .chart-card-title {
   margin: 0 0 4px;
   font-weight: 650;

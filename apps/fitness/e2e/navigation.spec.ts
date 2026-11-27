@@ -1038,20 +1038,28 @@ test("food entries can be edited and removed, and the body chart labels recorded
   ).toHaveAccessibleDescription(
     /^Mon 5 Jan 2026: Calories 351 kcal, Target \d+ kcal, (Left|Over) \d+ kcal, Protein 12 g\.$/,
   );
-  await page.locator(".day-strip li").last().hover();
+  // The totals show below the days, for the day shown until another is
+  // hovered or focused, so they never cover a day.
   const dayCard = page.locator(".food-side .chart-card");
   await expect(dayCard).toContainText("Mon 5 Jan 2026");
   await expect(dayCard).toContainText("351 kcal");
   await expect(dayCard).toContainText("12 g");
-  // The card stays while the pointer moves onto it, and Escape hides it.
+  const firstDay = page.locator(".day-strip li").first();
+  await firstDay.hover();
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
+  const strip = await page.locator(".day-strip").boundingBox();
+  const card = await dayCard.boundingBox();
+  expect(card && strip && card.y >= strip.y + strip.height).toBe(true);
+  // The totals stay while the pointer moves onto them; Escape returns to the
+  // day shown, and so does moving the pointer off the days.
   await dayCard.hover();
-  await expect(dayCard).toContainText("Mon 5 Jan 2026");
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
   await page.keyboard.press("Escape");
-  await expect(dayCard).toHaveCount(0);
-  await page.locator(".day-strip li").last().hover();
-  await expect(dayCard).toHaveCount(1);
+  await expect(dayCard).toContainText("Mon 5 Jan 2026");
+  await firstDay.hover();
+  await expect(dayCard).toContainText("Tue 30 Dec 2025");
   await page.getByLabel("Meal or snack").hover();
-  await expect(dayCard).toHaveCount(0);
+  await expect(dayCard).toContainText("Mon 5 Jan 2026");
   await page.getByLabel("Meal or snack").fill("synthetic oats");
   await page.getByLabel("Calories · kcal").fill("350.5");
   await page.getByLabel("Protein · g", { exact: true }).fill("12");
@@ -2094,6 +2102,12 @@ test("progress starts empty, then compares sessions, strength and bodyweight fro
   await expect(squatCard).toContainText("Wed 7 Jan 2026");
   await expect(squatCard).toContainText("2 kg × 8");
   await expect(squatCard).toContainText("+2 kg");
+  // A press on the open card selects the point beneath it, so the card
+  // never blocks another point.
+  const box = await squatChart.boundingBox();
+  if (!box) throw new Error("The squat chart has no box.");
+  await page.mouse.click(box.x + 2, box.y + box.height / 2);
+  await expect(squatCard).toContainText("Mon 5 Jan 2026");
   await page.keyboard.press("Escape");
   await expect(squatCard).toHaveCount(0);
   // Timed and sided exercises stay separate and show the weaker side.

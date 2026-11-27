@@ -94,13 +94,27 @@ export function ChartCard({
   detail,
   cardRef,
   style,
+  className,
+  onPointerDown,
+  onPointerUp,
 }: {
   detail: ChartDetail;
   cardRef?: Ref<HTMLDivElement>;
   style?: CSSProperties;
+  className?: string;
+  /** Presses on the card, passed on so they select the point beneath it. */
+  onPointerDown?: (event: PointerEvent<Element>) => void;
+  onPointerUp?: (event: PointerEvent<Element>) => void;
 }) {
   return (
-    <div className="chart-card" ref={cardRef} style={style} aria-hidden="true">
+    <div
+      className={className ? `chart-card ${className}` : "chart-card"}
+      ref={cardRef}
+      style={style}
+      aria-hidden="true"
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+    >
       <p className="chart-card-title">{detail.title}</p>
       <dl>
         {detail.rows.map((row) => (
@@ -128,40 +142,60 @@ export function touchIntent(dx: number, dy: number, slop = 8) {
   return Math.abs(dx) > Math.abs(dy) ? "scrub" : "scroll";
 }
 
+/** Whether a card of this size fits over a chart of this size. */
+export function cardFits(card: { width: number; height: number }, chart: { width: number; height: number }) {
+  return card.width <= chart.width && card.height <= chart.height;
+}
+
 /**
  * Keeps an open card beside its anchor, a point in viewport coordinates,
- * and places it again whenever the chart or the card changes size.
+ * and places it again whenever the chart or the card changes size. A card
+ * that doesn't fit over the chart, such as on a short chart or with larger
+ * text, shows below the chart in the page instead, so it never covers
+ * labels outside the chart. `chart` is the plotted area the card goes over.
  */
-export function useCardPlacement(
+function useCardPlacement(
   frame: RefObject<HTMLElement | null>,
   card: RefObject<HTMLElement | null>,
   anchor: (() => { x: number; y: number } | undefined) | undefined,
+  chart: RefObject<Element | null> = frame,
 ) {
   const latest = useRef(anchor);
   latest.current = anchor;
   const place = useRef(() => {
     const at = latest.current?.();
-    if (!at || !frame.current || !card.current) return;
+    const element = card.current;
+    if (!at || !frame.current || !element || !chart.current) return;
     const box = frame.current.getBoundingClientRect();
+    const plot = chart.current.getBoundingClientRect();
+    // Measured over the chart, so the fit doesn't depend on where it showed last.
+    element.classList.remove("is-flow");
+    element.style.transform = "";
+    const size = { width: element.offsetWidth, height: element.offsetHeight };
+    if (!cardFits(size, plot)) {
+      element.classList.add("is-flow");
+      return;
+    }
     const { left, top } = placeCard({
       anchorX: at.x - box.left,
       anchorY: at.y - box.top,
-      cardWidth: card.current.offsetWidth,
-      cardHeight: card.current.offsetHeight,
-      width: box.width,
-      height: box.height,
+      cardWidth: size.width,
+      cardHeight: size.height,
+      width: plot.width,
+      height: plot.height,
     });
-    card.current.style.transform = `translate(${left}px, ${top}px)`;
+    element.style.transform = `translate(${left + plot.left - box.left}px, ${top + plot.top - box.top}px)`;
   });
   useLayoutEffect(() => place.current());
   const open = Boolean(anchor);
   useEffect(() => {
     if (!open || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => place.current());
-    for (const element of [frame.current, card.current])
+    // The chart, not the frame: a card below the chart makes the frame taller.
+    for (const element of [chart.current, card.current])
       if (element) observer.observe(element);
     return () => observer.disconnect();
-  }, [open, frame, card]);
+  }, [open, chart, card]);
 }
 
 /**
@@ -253,10 +287,11 @@ export function ChartPopover({
             : undefined;
         }
       : undefined,
+    svg,
   );
   useDismiss(selected !== null, () => setSelected(null), frame);
 
-  const nearest = (event: PointerEvent<SVGSVGElement>) => {
+  const nearest = (event: PointerEvent<Element>) => {
     const matrix = svg.current?.getScreenCTM()?.inverse();
     if (!matrix) return selected;
     const at = new DOMPoint(event.clientX, event.clientY).matrixTransform(
@@ -268,12 +303,12 @@ export function ChartPopover({
     );
   };
 
-  const choose = (event: PointerEvent<SVGSVGElement>) => {
+  const choose = (event: PointerEvent<Element>) => {
     byMouse.current = event.pointerType === "mouse";
     setSelected(nearest(event));
   };
 
-  const onPointerDown = (event: PointerEvent<SVGSVGElement>) => {
+  const onPointerDown = (event: PointerEvent<Element>) => {
     if (event.pointerType !== "touch") return choose(event);
     // A touch selects on release, or once it moves sideways.
     touch.current = {
@@ -304,7 +339,7 @@ export function ChartPopover({
     choose(event);
   };
 
-  const onPointerUp = (event: PointerEvent<SVGSVGElement>) => {
+  const onPointerUp = (event: PointerEvent<Element>) => {
     const current = touch.current;
     if (!current || current.id !== event.pointerId) return;
     touch.current = null;
@@ -369,7 +404,16 @@ export function ChartPopover({
       <p id={hint} className="visually-hidden">
         Use the left and right arrow keys to read each point.
       </p>
-      {shown && <ChartCard detail={shown} cardRef={card} />}
+      {/* The card stays while the pointer is over it, and a press on it
+          selects the point beneath, so it never blocks another point. */}
+      {shown && (
+        <ChartCard
+          detail={shown}
+          cardRef={card}
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+        />
+      )}
     </div>
   );
 }

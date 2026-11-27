@@ -17,7 +17,6 @@ import { foodDayDetail } from "./chart-details";
 import {
   ChartCard,
   spokenDetail,
-  useCardPlacement,
   useDismiss,
 } from "./chart-popover";
 import { DateBar } from "./date-bar";
@@ -382,7 +381,9 @@ export function Nutrition({
 
 /**
  * Calories for each of the last seven days against the target. Each day
- * links to its log; hovering or focusing a day shows its totals.
+ * links to its log. Below the days, a space kept for them shows the totals
+ * of the day hovered or focused, else of the day this page shows, so the
+ * page doesn't move and the totals never cover another day.
  */
 function DayStrip({
   days,
@@ -401,23 +402,9 @@ function DayStrip({
 }) {
   const [active, setActive] = useState<number | null>(null);
   const frame = useRef<HTMLDivElement>(null);
-  const strip = useRef<HTMLOListElement>(null);
-  const card = useRef<HTMLDivElement>(null);
   const described = useId();
   const day = active === null ? undefined : days[active];
-  useCardPlacement(
-    frame,
-    card,
-    day
-      ? () => {
-          const bar = strip.current?.querySelectorAll(".bar")[active ?? -1];
-          const at = bar?.getBoundingClientRect();
-          return at
-            ? { x: at.left + at.width / 2, y: at.top + at.height / 2 }
-            : undefined;
-        }
-      : undefined,
-  );
+  const shown = day ?? (days.includes(date) ? date : undefined);
   useDismiss(active !== null, () => setActive(null), frame);
   return (
     <div
@@ -427,11 +414,7 @@ function DayStrip({
         if (event.pointerType === "mouse") setActive(null);
       }}
     >
-      <ol
-        className="day-strip"
-        aria-label="Calories for the last 7 days"
-        ref={strip}
-      >
+      <ol className="day-strip" aria-label="Calories for the last 7 days">
         {days.map((day, index) => {
           const eaten = totals(records, day);
           const value = eaten.calories;
@@ -471,12 +454,14 @@ function DayStrip({
           );
         })}
       </ol>
-      {day && (
-        <ChartCard
-          detail={foodDayDetail(day, totals(records, day), target)}
-          cardRef={card}
-        />
-      )}
+      <div className="chart-detail">
+        {shown && (
+          <ChartCard
+            className="is-flow"
+            detail={foodDayDetail(shown, totals(records, shown), target)}
+          />
+        )}
+      </div>
     </div>
   );
 }
