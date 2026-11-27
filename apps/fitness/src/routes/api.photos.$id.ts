@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { requireOwner } from "../server/auth";
-import { photoResponse } from "../server/photos";
+import { photoResponse } from "../server/photo-store";
 export const Route = createFileRoute("/api/photos/$id")({
   server: {
     handlers: {

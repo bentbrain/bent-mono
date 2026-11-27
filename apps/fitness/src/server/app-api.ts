@@ -12,7 +12,7 @@ import {
   photoRemove,
   photoResponse,
   photoSave,
-} from "./photos";
+} from "./photo-store";
 import { StoreRuleError, loadRecords, saveRecord } from "./store";
 
 /**
