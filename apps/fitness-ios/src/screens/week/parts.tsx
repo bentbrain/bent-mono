@@ -6,6 +6,7 @@ import { elapsedSeconds, formatDuration } from "@bent/fitness-contracts/timing";
 import { Button } from "../../ui/Button";
 import { Badge, Card, EmptyState, Screen } from "../../ui/Layout";
 import { AppText } from "../../ui/Text";
+import { cn } from "../../ui/typography";
 import { nameFor } from "../shared/exercise";
 import type { DayState } from "./logic";
 import { workoutProgress } from "./logic";
@@ -34,10 +35,10 @@ export function ExerciseHelp({ id }: { id: string }) {
 }
 
 /** A thin bar showing a share of the work done. */
-function Meter({ fraction }: { fraction: number }) {
+export function Meter({ fraction, fill = "bg-primary" }: { fraction: number; fill?: "bg-primary" | "bg-done" }) {
   return (
     <View className="h-1.5 overflow-hidden rounded-full bg-card-alt" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <View className="h-full rounded-full bg-primary" style={{ width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }} />
+      <View className={cn("h-full rounded-full", fill)} style={{ width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }} />
     </View>
   );
 }
