@@ -244,7 +244,7 @@ export function planWeek(
   const wanted = days.map((day, index) => keyOf(scheduled(origin.settings, order[index] ?? day)));
   const open = days.flatMap((day, index) => (lockedDay(day, today, records) ? [] : [index]));
   const recorded = "A session was recorded or started on one of these days. Close this sheet and reopen it to see the current week.";
-  if (days.some((day, index) => !open.includes(index) && current[index] !== wanted[index])) return { error: recorded };
+  if (current.some((key, index) => !open.includes(index) && key !== wanted[index])) return { error: recorded };
   const swaps = fewestSwaps(
     open.map((index) => current[index] ?? -1),
     open.map((index) => wanted[index] ?? -1),
