@@ -3,6 +3,7 @@ import type { EnrollOutcome, SyncStatus } from "../modules/fitness-health";
 import { SignInCancelled, connect } from "../src/logic/connect";
 import { copy, countLines, enrollMessage, fitnessHost, guidance } from "../src/logic/copy";
 import { cutoffFor } from "../src/logic/cutoff";
+import { runText } from "../src/logic/format";
 import { manualRevocationNotice, screenFor } from "../src/logic/screens";
 
 const base: SyncStatus = {
@@ -262,7 +263,7 @@ describe("copy", () => {
     expect(enrollMessage({ kind: "failed", action: "deviceLimit", message: "x" })).toContain("API keys");
     expect(enrollMessage({ kind: "pendingRevocations", count: 2 })).toContain("2 earlier keys");
     expect(enrollMessage({ kind: "failed", action: "reauthorize", code: "issuance_failed" })).toContain(
-      "Sign in again",
+      "Connect again",
     );
   });
 
@@ -292,5 +293,12 @@ describe("copy", () => {
     expect(copy.status.sendWithoutDistance(3)).toBe("Send 3 runs without distance");
     expect(copy.status.manualRevocations(1)).toContain("API keys");
     expect(copy.signIn.tryLater(3600)).toContain("3600 seconds");
+  });
+});
+
+describe("run text", () => {
+  test("rounds duration and distance to two decimals", () => {
+    expect(runText({ minutes: 28, distanceKm: 4.2 + 0.4 })).toBe("28 min · 4.6 km");
+    expect(runText({ minutes: 31.256, distanceKm: 5 })).toBe("31.26 min · 5 km");
   });
 });

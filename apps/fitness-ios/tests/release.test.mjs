@@ -36,6 +36,7 @@ import {
   oauthFromEnvironment,
   oauthFromFile,
   oauthSettings,
+  appScope,
   checkAuthorizationServer,
   checkNoEasIgnore,
   checkSameQuality,
@@ -307,7 +308,7 @@ describe("release admission", () => {
         response_type: "code",
         client_id: "client123",
         redirect_uri: redirectUri,
-        scope: "fitness:health:enroll openid",
+        scope: "openid offline_access fitness:read fitness:write fitness:health:enroll",
         resource: "https://fitness.bent.build/api/mcp",
         code_challenge_method: "S256",
       });
@@ -586,16 +587,22 @@ describe("release admission", () => {
     ).toThrow("HTTPS");
   });
 
-  test("the issuer must offer the enrollment scope with PKCE S256", () => {
+  test("the issuer must offer every scope the app requests, with PKCE S256", () => {
     const metadata = {
       issuer: "https://clerk.example.com",
-      scopes_supported: ["openid", "fitness:health:enroll"],
+      scopes_supported: ["openid", "offline_access", "fitness:read", "fitness:write", "fitness:health:enroll"],
       code_challenge_methods_supported: ["S256"],
     };
     expect(() => checkAuthorizationServer(metadata, "https://clerk.example.com")).not.toThrow();
     expect(() =>
       checkAuthorizationServer({ ...metadata, scopes_supported: ["openid"] }, "https://clerk.example.com"),
-    ).toThrow("fitness:health:enroll");
+    ).toThrow("offline_access");
+    expect(() =>
+      checkAuthorizationServer(
+        { ...metadata, scopes_supported: metadata.scopes_supported.filter((s) => s !== "fitness:write") },
+        "https://clerk.example.com",
+      ),
+    ).toThrow("fitness:write");
     expect(() => checkAuthorizationServer(metadata, "https://other.example.com")).toThrow("another issuer");
   });
 });
@@ -629,7 +636,7 @@ describe("the built app", () => {
           ...oauth,
           redirectUri: "build.bent.fitness://oauth",
           resource: "https://fitness.bent.build/api/mcp",
-          scopes: ["fitness:health:enroll", "openid"],
+          scopes: ["openid", "offline_access", "fitness:read", "fitness:write", "fitness:health:enroll"],
         },
       },
     };
@@ -1858,5 +1865,12 @@ describe("the CodeQL Swift scopes", () => {
     expect(replay).toContain(
       'if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });',
     );
+  });
+});
+
+describe("the app's sign-in scopes", () => {
+  test("the release check asks for exactly the scopes the app requests", async () => {
+    const { appSettings } = await import("../src/config/variants.ts");
+    expect(appSettings("production", {}).oauth.scopes.join(" ")).toBe(appScope);
   });
 });

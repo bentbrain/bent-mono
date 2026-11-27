@@ -186,11 +186,17 @@ export function checkOAuthSettings(variables) {
   return { issuer: issuer.replace(/\/$/, ""), clientId };
 }
 
-/** Clerk must offer the enrollment scope with PKCE S256. */
+/**
+ * The scopes the app requests when it signs in. Keep this equal to the
+ * scopes in src/config/variants.ts; tests/release.test.mjs checks it.
+ */
+export const appScope = "openid offline_access fitness:read fitness:write fitness:health:enroll";
+
+/** Clerk must offer every scope the app requests, with PKCE S256. */
 export function checkAuthorizationServer(metadata, issuer) {
   if (metadata?.issuer?.replace(/\/$/, "") !== issuer) fail("The OAuth issuer's metadata names another issuer.");
-  if (!metadata.scopes_supported?.includes("fitness:health:enroll"))
-    fail("The OAuth issuer does not offer the fitness:health:enroll scope.");
+  for (const scope of appScope.split(" "))
+    if (!metadata.scopes_supported?.includes(scope)) fail(`The OAuth issuer does not offer the ${scope} scope.`);
   if (!metadata.code_challenge_methods_supported?.includes("S256")) fail("The OAuth issuer does not offer PKCE S256.");
 }
 
@@ -263,7 +269,7 @@ export function signInPage(environment) {
  * exactly. Anything else stops the release.
  */
 export async function checkClientAtIssuer(
-  { authorizationEndpoint, issuer, clientId, redirectUri, resource, scope = "fitness:health:enroll openid" },
+  { authorizationEndpoint, issuer, clientId, redirectUri, resource, scope = appScope },
   fetchImpl = fetch,
 ) {
   const origin = new URL(issuer).origin;

@@ -7,7 +7,7 @@ export type ConnectResult =
   | EnrollOutcome;
 
 /** A one-time access token and when it stops working, in ms since 1970. */
-export type SignedIn = { token: string; expiresAt: number | null };
+type SignedIn = { token: string; expiresAt: number | null };
 
 export type ConnectDeps = {
   /** Runs the OAuth sign-in and returns the access token. */

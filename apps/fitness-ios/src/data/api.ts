@@ -1,0 +1,95 @@
+import { ApiError as ApiErrorBody, AppRecords, PhotoList } from "@bent/fitness-contracts";
+import type { PhotoSummary, PhotoUpload } from "@bent/fitness-contracts";
+import { resultSchema } from "@bent/fitness-contracts/domain";
+import type { Mutation, SaveResult } from "@bent/fitness-contracts/domain";
+import { OfflineError } from "./sync-engine";
+
+/** A reply from Fitness that was not a success. `message` is safe to show. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export type TokenSource = {
+  token(options?: { fresh?: boolean }): Promise<string>;
+  invalidate(token: string): void;
+};
+
+/**
+ * The Fitness app API under `/api/app`. Each request sends the account's
+ * access token. A `401` refreshes the token once and tries again.
+ */
+export function createApi(origin: string, session: TokenSource, request: typeof fetch = fetch) {
+  async function send(path: string, init: RequestInit = {}, retried = false): Promise<Response> {
+    const token = await session.token();
+    let response: Response;
+    try {
+      response = await request(origin + path, {
+        ...init,
+        headers: { Accept: "application/json", ...init.headers, Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new OfflineError();
+    }
+    if (response.status === 401 && !retried) {
+      session.invalidate(token);
+      return send(path, init, true);
+    }
+    if (!response.ok) {
+      let body: unknown = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+      const parsed = ApiErrorBody.safeParse(body);
+      throw new ApiError(
+        response.status,
+        parsed.success ? (parsed.data.code ?? null) : null,
+        parsed.success ? parsed.data.error : `Fitness replied ${response.status}. Try again shortly.`,
+      );
+    }
+    return response;
+  }
+  const json = (body: unknown): RequestInit => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  return {
+    async loadRecords() {
+      return AppRecords.parse(await (await send("/api/app/records")).json());
+    },
+    async saveRecord(mutation: Mutation): Promise<SaveResult> {
+      return resultSchema.parse(await (await send("/api/app/records", json(mutation))).json());
+    },
+    async listPhotos(): Promise<PhotoSummary[]> {
+      return PhotoList.parse(await (await send("/api/app/photos")).json()).photos;
+    },
+    async uploadPhoto(photo: PhotoUpload) {
+      await send("/api/app/photos", json(photo));
+    },
+    async deletePhoto(id: string) {
+      await send(`/api/app/photos/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
+    /** The photo's URL and the headers that authorize loading it. */
+    async photoSource(id: string) {
+      return {
+        uri: `${origin}/api/app/photos/${encodeURIComponent(id)}`,
+        headers: { Authorization: `Bearer ${await session.token()}` },
+      };
+    },
+    /** The account export as text. */
+    async exportAccount() {
+      return (await send("/api/app/export")).text();
+    },
+  };
+}
+
+export type Api = ReturnType<typeof createApi>;

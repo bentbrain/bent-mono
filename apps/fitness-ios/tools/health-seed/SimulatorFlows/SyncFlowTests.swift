@@ -58,14 +58,16 @@ final class SyncFlowTests: XCTestCase {
     XCTFail("The Health access sheet did not appear.\n\(app.debugDescription)")
   }
 
-  /// Signs in through the synthetic OAuth server and confirms consent.
-  /// Nothing is imported before consent, after a relaunch at the consent
-  /// screen, or after a relaunch at the Health step.
+  /// Signs in through the synthetic OAuth server, connects Apple Health
+  /// from Settings and confirms consent. Nothing is imported before consent,
+  /// after a relaunch at the consent screen, or after a relaunch at the
+  /// Health step; each relaunch returns to the step it left.
   private func connect(_ app: XCUIApplication) async throws {
     app.launch()
     let signIn = element(app, "sign-in")
     XCTAssertTrue(signIn.waitForExistence(timeout: 30), app.debugDescription)
     signIn.tap()
+    openHealth(app)
     let email = element(app, "consent-email")
     XCTAssertTrue(email.waitForExistence(timeout: 120), app.debugDescription)
     XCTAssertTrue(app.staticTexts["fitness-device+clerk_test@example.com"].exists)
@@ -86,6 +88,19 @@ final class SyncFlowTests: XCTestCase {
     XCTAssertTrue(element(app, "health-allow").waitForExistence(timeout: 60), app.debugDescription)
     let atHealthStep = try await serverState()
     XCTAssertEqual(atHealthStep.imports, 0)
+  }
+
+  /// Opens Settings › Apple Health and starts connecting this iPhone.
+  private func openHealth(_ app: XCUIApplication) {
+    let settings = app.tabBars.buttons["Settings"]
+    XCTAssertTrue(settings.waitForExistence(timeout: 90), app.debugDescription)
+    settings.tap()
+    let health = element(app, "open-health")
+    XCTAssertTrue(health.waitForExistence(timeout: 30), app.debugDescription)
+    health.tap()
+    let connect = element(app, "health-connect")
+    XCTAssertTrue(connect.waitForExistence(timeout: 30), app.debugDescription)
+    connect.tap()
   }
 
   private struct ServerState: Decodable {
@@ -132,10 +147,10 @@ final class SyncFlowTests: XCTestCase {
     XCTAssertEqual(state.runs.count, 0)
     XCTAssertEqual(state.imports, 0)
 
-    // Disconnect revokes the key and returns to sign-in.
+    // Disconnect revokes the key and returns to Connect Apple Health.
     element(app, "disconnect").tap()
     app.alerts.buttons["Disconnect"].tap()
-    XCTAssertTrue(element(app, "sign-in").waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertTrue(element(app, "health-connect").waitForExistence(timeout: 30), app.debugDescription)
     let after = try await serverState()
     XCTAssertTrue(after.keys.allSatisfy(\.revoked))
   }

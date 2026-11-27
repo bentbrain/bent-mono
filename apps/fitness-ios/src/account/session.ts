@@ -1,0 +1,152 @@
+/**
+ * The signed-in Fitness account on this iPhone.
+ *
+ * Signing in runs Clerk's OAuth sign-in once and keeps the refresh token in
+ * the Keychain on this iPhone only, readable after the first unlock since
+ * restart, as the Health device key is. Access tokens stay in memory and are refreshed shortly before they
+ * expire. One refresh runs at a time; callers waiting for a token share it.
+ * A refresh Clerk refuses ends the session. A refresh that cannot reach
+ * Clerk keeps the session, so the app works offline with its saved data.
+ */
+export type Tokens = { accessToken: string; refreshToken: string | null; expiresAt: number | null };
+
+export type OAuthClient = {
+  authorize(): Promise<Tokens>;
+  refresh(refreshToken: string): Promise<Tokens>;
+  revoke(refreshToken: string): Promise<void>;
+};
+
+export type SecretStore = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  remove(key: string): Promise<void>;
+};
+
+/** Clerk refused the refresh token, so the user must sign in again. */
+export class SessionExpired extends Error {
+  constructor() {
+    super("Your Fitness sign-in ended. Sign in again to continue.");
+  }
+}
+/** Thrown by `OAuthClient.refresh` when Clerk refused the token. */
+export class RefreshRejected extends Error {}
+
+export type AccountState =
+  | { status: "loading" }
+  | { status: "signedOut"; message?: string }
+  | { status: "signedIn"; owner: string | null };
+
+const keys = { refresh: "fitness.account.refresh.v1", owner: "fitness.account.owner.v1" };
+/** Refresh this long before the access token expires. */
+const marginMs = 60_000;
+
+export class Session {
+  private state: AccountState = { status: "loading" };
+  private listeners = new Set<() => void>();
+  private access: { token: string; expiresAt: number | null } | null = null;
+  private refreshing: Promise<string> | null = null;
+
+  constructor(
+    private readonly oauth: OAuthClient,
+    private readonly secrets: SecretStore,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  getState = () => this.state;
+  private set(state: AccountState) {
+    this.state = state;
+    for (const listener of this.listeners) listener();
+  }
+
+  /** Reads the saved sign-in. */
+  async restore() {
+    const refresh = await this.secrets.get(keys.refresh).catch(() => null);
+    const owner = await this.secrets.get(keys.owner).catch(() => null);
+    this.set(refresh ? { status: "signedIn", owner } : { status: "signedOut" });
+  }
+
+  /** Runs the sign-in and keeps its tokens. Throws when sign-in fails or is cancelled. */
+  async signIn() {
+    const tokens = await this.oauth.authorize();
+    if (!tokens.refreshToken) throw new Error("Clerk did not return a refresh token. Allow offline access when you sign in.");
+    await this.secrets.set(keys.refresh, tokens.refreshToken);
+    await this.secrets.remove(keys.owner);
+    this.access = { token: tokens.accessToken, expiresAt: tokens.expiresAt };
+    this.set({ status: "signedIn", owner: null });
+  }
+
+  /** Records the account Fitness reported for this sign-in. */
+  async setOwner(owner: string) {
+    if (this.state.status !== "signedIn" || this.state.owner === owner) return;
+    await this.secrets.set(keys.owner, owner);
+    this.set({ status: "signedIn", owner });
+  }
+
+  /**
+   * An access token for Fitness. With `fresh`, a new one is issued even
+   * when the current one is still valid, for a request that must not reuse
+   * a token, such as connecting Apple Health.
+   */
+  async token({ fresh = false } = {}): Promise<string> {
+    if (this.state.status !== "signedIn") throw new SessionExpired();
+    const current = this.access;
+    if (!fresh && current && (current.expiresAt === null || current.expiresAt - marginMs > this.now())) return current.token;
+    return this.refresh();
+  }
+
+  /** The access token's expiry, after `token()`; null when unknown. */
+  expiresAt() {
+    return this.access?.expiresAt ?? null;
+  }
+
+  /** Discards the cached access token, after Fitness refused it. */
+  invalidate(token: string) {
+    if (this.access?.token === token) this.access = null;
+  }
+
+  private refresh() {
+    this.refreshing ??= (async () => {
+      try {
+        const saved = await this.secrets.get(keys.refresh);
+        if (!saved) throw new SessionExpired();
+        let tokens: Tokens;
+        try {
+          tokens = await this.oauth.refresh(saved);
+        } catch (error) {
+          if (error instanceof RefreshRejected) {
+            await this.end();
+            throw new SessionExpired();
+          }
+          throw error;
+        }
+        if (tokens.refreshToken && tokens.refreshToken !== saved) await this.secrets.set(keys.refresh, tokens.refreshToken);
+        this.access = { token: tokens.accessToken, expiresAt: tokens.expiresAt };
+        return tokens.accessToken;
+      } finally {
+        this.refreshing = null;
+      }
+    })();
+    return this.refreshing;
+  }
+
+  private async end(message = "Your Fitness sign-in ended. Sign in again to continue.") {
+    this.access = null;
+    await this.secrets.remove(keys.refresh).catch(() => undefined);
+    await this.secrets.remove(keys.owner).catch(() => undefined);
+    this.set({ status: "signedOut", message });
+  }
+
+  /** Revokes the refresh token where possible and forgets the sign-in. */
+  async signOut() {
+    const saved = await this.secrets.get(keys.refresh).catch(() => null);
+    if (saved) await this.oauth.revoke(saved).catch(() => undefined);
+    this.access = null;
+    await this.secrets.remove(keys.refresh).catch(() => undefined);
+    await this.secrets.remove(keys.owner).catch(() => undefined);
+    this.set({ status: "signedOut" });
+  }
+}
