@@ -33,10 +33,15 @@ import {
   sessionDetail,
   shownWeeks,
   shownWeight,
+  strengthChange,
+  strengthLabels,
   strengthSummary,
   trendText,
+  weekBarLabels,
   weekBars,
+  weighInLabels,
   weighInOn,
+  weightChange,
   weightLimits,
 } from "../src/screens/progress/summary";
 
@@ -200,6 +205,95 @@ describe("progress summary", () => {
     expect(parseWeighIn("2026-11-02", "80,5", "kg")).toEqual({ data: { kind: "weight", date: "2026-11-02", kg: 80.5 } });
     const pounds = parseWeighIn("2026-11-02", "176.4", "lb");
     expect("data" in pounds && Math.round(pounds.data.kg * 10) / 10).toBe(80);
+  });
+});
+
+describe("chart popovers", () => {
+  const goblet: StrengthSeries = {
+    key: "squat:reps:0",
+    name: "Goblet squat",
+    mode: "reps",
+    side: false,
+    points: [
+      { date: "2026-11-02", loadKg: 10, value: 8 },
+      { date: "2026-11-04", loadKg: 12, value: 8 },
+      { date: "2026-11-06", loadKg: 12, value: 10 },
+      { date: "2026-11-09", loadKg: 12, value: 9 },
+    ],
+  };
+
+  test("each session shows its best set and the change since the one before", () => {
+    expect(strengthLabels(goblet, "kg")).toEqual([
+      { title: "Mon 2 Nov", detail: "10 kg × 8\nFirst in this chart" },
+      { title: "Wed 4 Nov", detail: "12 kg × 8\n+2 kg since Mon 2 Nov" },
+      { title: "Fri 6 Nov", detail: "12 kg × 10\n+2 reps since Wed 4 Nov" },
+      { title: "Mon 9 Nov", detail: "12 kg × 9\n−1 rep since Fri 6 Nov" },
+    ]);
+    expect(strengthLabels(goblet, "lb")[1]?.detail).toBe("26.46 lb × 8\n+4.41 lb since Mon 2 Nov");
+  });
+
+  test("timed and sided exercises say so, and an unchanged session says no change", () => {
+    const plank: StrengthSeries = {
+      key: "plank:seconds:0",
+      name: "Plank",
+      mode: "seconds",
+      side: false,
+      points: [
+        { date: "2026-11-02", loadKg: 0, value: 30 },
+        { date: "2026-11-04", loadKg: 0, value: 45 },
+        { date: "2026-11-06", loadKg: 0, value: 45 },
+      ],
+    };
+    expect(strengthLabels(plank, "kg").map((label) => label.detail)).toEqual([
+      "30 s\nFirst in this chart",
+      "45 s\n+15 s since Mon 2 Nov",
+      "45 s\nNo change since Wed 4 Nov",
+    ]);
+    expect(strengthLabels({ ...goblet, side: true }, "kg")[0]?.detail).toBe("10 kg × 8 each side\nFirst in this chart");
+    expect(
+      strengthChange({ date: "2026-11-02", loadKg: 12, value: 8 }, { date: "2026-11-04", loadKg: 10, value: 12 }, goblet, "kg"),
+    ).toBe("−2 kg");
+  });
+
+  test("each weigh-in shows its value, its average when charted and the change", () => {
+    const points = [
+      { date: "2026-11-02", kg: 80.5 },
+      { date: "2026-11-03", kg: 80.25 },
+      { date: "2026-11-05", kg: 81.2 },
+    ];
+    expect(weighInLabels(points, "kg", [80.5, 80.375, 80.65])).toEqual([
+      { title: "Mon 2 Nov", detail: "80.5 kg\nAverage of 1: 80.5 kg" },
+      { title: "Tue 3 Nov", detail: "80.3 kg\nAverage of 2: 80.4 kg\n−0.3 kg since Mon 2 Nov" },
+      { title: "Thu 5 Nov", detail: "81.2 kg\nAverage of 3: 80.7 kg\n+1.0 kg since Tue 3 Nov" },
+    ]);
+    expect(weighInLabels(points, "lb").map((label) => label.detail)).toEqual([
+      "177.5 lb",
+      "176.9 lb\n−0.6 lb since Mon 2 Nov",
+      "179.0 lb\n+2.1 lb since Tue 3 Nov",
+    ]);
+    // The average counts at most 7 weigh-ins.
+    const many = Array.from({ length: 9 }, (_, i) => ({ date: `2026-11-1${i}`, kg: 80 }));
+    expect(weighInLabels(many, "kg", many.map(() => 80))[8]?.detail).toBe("80.0 kg\nAverage of 7: 80.0 kg\nNo change since Tue 17 Nov");
+  });
+
+  test("weight changes carry a sign, and one that rounds away is no change", () => {
+    expect(weightChange(0.44, "kg")).toBe("+0.4 kg");
+    expect(weightChange(-1.25, "kg")).toBe("−1.3 kg");
+    expect(weightChange(0.02, "kg")).toBe("No change");
+    expect(weightChange(1, "lb")).toBe("+2.2 lb");
+  });
+
+  test("each week shows its sessions, in the order of the bars", () => {
+    const weeks: WeekSummary[] = [
+      { monday: "2026-11-02", strength: { planned: 3, done: 2 }, runs: { planned: 2, done: 2 } },
+      { monday: "2026-11-09", strength: { planned: 0, done: 1 }, runs: { planned: 0, done: 0 } },
+    ];
+    expect(weekBarLabels(weeks)).toEqual([
+      { title: "Week of 2 Nov", detail: "Strength 2/3\nRuns 2/2\n1 planned, not recorded" },
+      { title: "Week of 9 Nov", detail: "Strength 1 done\nRuns 0 done" },
+    ]);
+    // One label for each bar position.
+    expect(new Set(weekBars(weeks).map((bar) => bar.x)).size).toBe(weekBarLabels(weeks).length);
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Entity, RecordEntry } from "@bent/fitness-contracts/domain";
 import {
+  dayLabels,
   daySummary,
   editStatus,
   hasRegular,
@@ -147,6 +148,15 @@ describe("last seven days", () => {
     expect(week.days.at(-2)).toMatchObject({ calories: 2600, selected: false });
     expect(week.highest).toBe(2600);
     expect(lastSevenDays([], day, 2400).highest).toBe(2400);
+  });
+  test("each day's popover shows calories, protein and the target difference", () => {
+    const week = lastSevenDays(records, day, 2400);
+    expect(week.days.at(-1)).toMatchObject({ calories: 1030, protein: 61 });
+    const labels = dayLabels(week.days, 2400);
+    expect(labels).toHaveLength(7);
+    expect(labels.at(-1)).toEqual({ title: "Fri 20 Nov", detail: "1030 kcal · 61 g protein\n1370 kcal under target" });
+    expect(labels.at(-2)?.detail).toEndWith("\n200 kcal over target");
+    expect(dayLabels([{ day, calories: 2400, protein: 0 }], 2400)[0]?.detail).toBe("2400 kcal · 0 g protein\nOn target");
   });
   test("read as text", () => {
     const week = lastSevenDays(records, day, 2400);

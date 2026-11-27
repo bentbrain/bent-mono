@@ -19,10 +19,13 @@ import {
   sessionName,
   shownWeeks,
   shownWeight,
+  strengthLabels,
   strengthSummary,
   trendText,
+  weekBarLabels,
   weekBars,
   weekLabel,
+  weighInLabels,
 } from "./summary";
 
 function StrengthCard({ series, units }: { series: StrengthSeries; units: Settings["units"] }) {
@@ -48,6 +51,8 @@ function StrengthCard({ series, units }: { series: StrengthSeries; units: Settin
             pad={spread * 0.2 || 1}
             label={summary.spoken}
             points={summary.values.map((y, x) => ({ x, y }))}
+            labels={strengthLabels(series, units)}
+            testID={`progress-strength-chart-${series.key}`}
           />
           <View className="flex-row gap-4">
             <View className="flex-1 gap-0.5">
@@ -137,6 +142,7 @@ export function ProgressScreen() {
               <WeekBarsChart
                 height={168}
                 bars={weekBars(weeks)}
+                labels={weekBarLabels(weeks)}
                 label={`Sessions in the last ${weeks.length} week${weeks.length === 1 ? "" : "s"}. Each week is listed below.`}
               />
               <View className="flex-row flex-wrap gap-x-4 gap-y-1" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -222,6 +228,8 @@ export function ProgressScreen() {
                   pad={weightSpread * 0.2 || 0.5}
                   label={`Bodyweight across ${recentWeights.length} recorded dates, from ${shownWeight(recentWeights[0]?.kg ?? 0, units)} to ${shownWeight(recentWeights.at(-1)?.kg ?? 0, units)}.`}
                   points={recentWeights.map((point, x) => ({ x, y: point.kg }))}
+                  labels={weighInLabels(recentWeights, units)}
+                  testID="progress-weight-chart"
                 />
               ) : null}
             </>

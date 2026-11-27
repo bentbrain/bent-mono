@@ -12,7 +12,7 @@ import { AppText } from "../../ui/Text";
 import { haptic } from "../../ui/haptics";
 import { DateBar } from "../shared/DateBar";
 import { TrendChart } from "./charts";
-import { bodyChart, daysBetween, parseWeighIn, replacedWeighIn, roundedWeight, shownWeight, weighInOn, weightLimits } from "./summary";
+import { bodyChart, daysBetween, parseWeighIn, replacedWeighIn, roundedWeight, shownWeight, weighInLabels, weighInOn, weightLimits } from "./summary";
 import type { Weigh } from "./summary";
 
 export function BodyScreen() {
@@ -240,6 +240,11 @@ function BodyChart({
         label={`Bodyweight across ${points.length} recorded dates, from ${shownWeight(lowest, units)} to ${shownWeight(highest, units)}. All weigh-ins are listed below.`}
         points={points.map((point) => ({ x: x(point.date), y: point.kg }))}
         average={trend.map((point) => ({ x: x(point.date), y: point.kg }))}
+        labels={weighInLabels(
+          points,
+          units,
+          trend.map((point) => point.kg),
+        )}
         guides={lowest === highest ? [highest] : [highest, lowest]}
       />
       <View className="flex-row justify-between" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">

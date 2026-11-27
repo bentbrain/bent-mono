@@ -2,6 +2,7 @@ import { displayLoad, formatShortDate, mondayOf, toKg, trainingRecords, weightSc
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
 import type { StrengthPoint, StrengthSeries, WeekSummary } from "@bent/fitness-contracts/progress";
 import { runText } from "../../logic/format";
+import type { PointLabel } from "../../ui/chartSelection";
 
 type Units = Settings["units"];
 type Count = WeekSummary["strength"];
@@ -59,6 +60,68 @@ export function weekBars(weeks: WeekSummary[]): WeekBar[] {
 export function pointText(point: StrengthPoint, series: StrengthSeries, units: Units) {
   const amount = series.mode === "seconds" ? `${point.value} s` : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
   return series.side ? `${amount} each side` : amount;
+}
+
+/** A change in weight with its sign, such as "+0.4 kg"; "No change" when it rounds to zero. */
+export function weightChange(kg: number, units: Units) {
+  const shown = Math.round(displayLoad(Math.abs(kg), units) * 10) / 10;
+  return shown ? `${kg > 0 ? "+" : "−"}${shown.toFixed(1)} ${units}` : "No change";
+}
+
+/** The change from one session to the next: the load when it changed, otherwise the reps or seconds. */
+export function strengthChange(from: StrengthPoint, to: StrengthPoint, series: StrengthSeries, units: Units) {
+  const signed = (value: number, unit: string) => `${value > 0 ? "+" : "−"}${Math.abs(value)} ${unit}`;
+  if (series.mode === "reps") {
+    const load = Math.round((displayLoad(to.loadKg, units) - displayLoad(from.loadKg, units)) * 100) / 100;
+    if (load) return signed(load, units);
+  }
+  const delta = to.value - from.value;
+  if (!delta) return "No change";
+  if (series.mode === "seconds") return signed(delta, "s");
+  return signed(delta, Math.abs(delta) === 1 ? "rep" : "reps");
+}
+
+/** The popover for each session on a strength card's chart: the best set and the change since the one before. */
+export function strengthLabels(series: StrengthSeries, units: Units): PointLabel[] {
+  return series.points.map((point, index) => {
+    const previous = series.points[index - 1];
+    return {
+      title: formatShortDate(point.date),
+      detail: [
+        pointText(point, series, units),
+        previous
+          ? `${strengthChange(previous, point, series, units)} since ${formatShortDate(previous.date)}`
+          : "First in this chart",
+      ].join("\n"),
+    };
+  });
+}
+
+/**
+ * The popover for each weigh-in: its value, the average of up to 7
+ * weigh-ins ending on that date when `averages` are given, and the change
+ * since the weigh-in before.
+ */
+export function weighInLabels(points: { date: string; kg: number }[], units: Units, averages?: number[]): PointLabel[] {
+  return points.map((point, index) => {
+    const previous = points[index - 1];
+    const average = averages?.[index];
+    const lines = [shownWeight(point.kg, units)];
+    if (average !== undefined) lines.push(`Average of ${Math.min(index + 1, 7)}: ${shownWeight(average, units)}`);
+    if (previous) lines.push(`${weightChange(point.kg - previous.kg, units)} since ${formatShortDate(previous.date)}`);
+    return { title: formatShortDate(point.date), detail: lines.join("\n") };
+  });
+}
+
+/** The popover for each week of the sessions chart, oldest first, as `weekBars` orders them. */
+export function weekBarLabels(weeks: WeekSummary[]): PointLabel[] {
+  return weeks.map((week) => {
+    const open =
+      Math.max(0, week.strength.planned - week.strength.done) + Math.max(0, week.runs.planned - week.runs.done);
+    const lines = [`Strength ${countText(week.strength)}`, `Runs ${countText(week.runs)}`];
+    if (open) lines.push(`${open} planned, not recorded`);
+    return { title: `Week of ${weekLabel(week.monday)}`, detail: lines.join("\n") };
+  });
 }
 
 /** What a strength card measures, how it changed and the values it charts. */

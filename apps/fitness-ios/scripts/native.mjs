@@ -166,15 +166,16 @@ const commands = {
   /**
    * Runs again, for the arm64 slice, the Swift compile commands of the
    * first-party targets from the last app and seeder builds: the app target
-   * with the Swift prebuild generates, the fitness-health and workout-activity
-   * modules, the Live Activity extension, the seeder and its UI tests. CodeQL traces this instead of a whole Xcode build.
+   * with the Swift prebuild generates, the fitness-health, fitness-charts and
+   * workout-activity modules, the Live Activity extension, the seeder and its
+   * UI tests. CodeQL traces this instead of a whole Xcode build.
    * The app scope reads only the app build, and the seeder scope only the
    * seeder build.
    */
   "replay-swift"(args) {
     const scope = replayScope(args);
     const builds = [];
-    const appTargets = ["FitnessHealth", "WorkoutActivity", "WorkoutActivityExtension", project()];
+    const appTargets = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()];
     if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });
     if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
     const targets = builds.flatMap((build) => swiftCommands(join(buildDir, build.log), build.targets));

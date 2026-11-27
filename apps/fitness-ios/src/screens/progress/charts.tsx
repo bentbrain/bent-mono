@@ -1,25 +1,22 @@
-import { Chart, Host } from "@expo/ui/swift-ui";
-import { StyleSheet, View } from "react-native";
-import { useCSSVariable } from "uniwind";
+import { View } from "react-native";
+import { SelectableChart, useColor, useSelectionColors } from "../../ui/charts";
+import type { PointLabel } from "../../ui/chartSelection";
 import { chartScale } from "./summary";
 import type { WeekBar } from "./summary";
 
 type Point = { x: number; y: number };
-
-function useColor(name: string) {
-  const value = useCSSVariable(name);
-  return typeof value === "string" ? value : undefined;
-}
 
 const hidden = { accessibilityElementsHidden: true, importantForAccessibility: "no-hide-descendants" } as const;
 
 /**
  * A line chart without axes, scaled to its own range so small changes stay
  * visible. An optional dashed `average` line shares the same scale, and
- * `guides` draw dotted lines at those values. VoiceOver reads `label`.
+ * `guides` draw dotted lines at those values. Tapping or dragging across
+ * it shows each point's label. VoiceOver reads `label` and each point.
  */
 export function TrendChart({
   points,
+  labels,
   average,
   guides = [],
   pad,
@@ -28,6 +25,8 @@ export function TrendChart({
   testID,
 }: {
   points: Point[];
+  /** One popover label for each point. */
+  labels: PointLabel[];
   average?: Point[];
   guides?: number[];
   /** Space kept above the highest and below the lowest value. */
@@ -36,76 +35,75 @@ export function TrendChart({
   label: string;
   testID?: string;
 }) {
-  const primary = useColor("--color-primary");
-  const ink = useColor("--color-foreground");
-  const muted = useColor("--color-foreground-muted");
-  const scale = chartScale([...points, ...(average ?? [])].map((point) => point.y), pad);
-  // Both charts include the same invisible frame, so their scales match.
-  const frame = [
-    { x: "frame-bottom", y: 0, color: "transparent" },
-    { x: "frame-top", y: scale.top, color: "transparent" },
-  ];
-  const guideLines = (color: string | undefined) => guides.map((y, index) => ({ x: `guide-${index}`, y: scale.shift(y), color }));
-  const shifted = (values: Point[]) => values.map((point) => ({ x: point.x, y: scale.shift(point.y) }));
+  const selection = useSelectionColors();
+  const colors = {
+    ...selection,
+    line: useColor("--color-primary"),
+    average: useColor("--color-foreground"),
+    guide: useColor("--color-foreground-muted"),
+  };
+  const scale = chartScale(
+    [...points, ...(average ?? [])].map((point) => point.y),
+    pad,
+  );
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel={label} testID={testID} style={{ height }}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none" {...hidden}>
-        <Host style={{ height, width: "100%" }}>
-          <Chart
-            type="line"
-            data={shifted(points)}
-            showGrid={false}
-            animate={false}
-            lineStyle={{ color: primary, width: 3, pointStyle: "circle", pointSize: 28 }}
-            referenceLines={[...frame, ...guideLines(muted)]}
-            ruleStyle={{ lineWidth: 1, dashArray: [2, 6] }}
-          />
-        </Host>
-      </View>
-      {average ? (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none" {...hidden}>
-          <Host style={{ height, width: "100%" }}>
-            <Chart
-              type="line"
-              data={shifted(average)}
-              showGrid={false}
-              animate={false}
-              lineStyle={{ color: ink, width: 2.5, dashArray: [8, 5], pointSize: 0.1 }}
-              referenceLines={[...frame, ...guideLines("transparent")]}
-              ruleStyle={{ lineWidth: 1 }}
-            />
-          </Host>
-        </View>
-      ) : null}
-    </View>
+    <SelectableChart
+      height={height}
+      label={label}
+      testID={testID}
+      chart={{
+        kind: "line",
+        points,
+        average,
+        guides,
+        yMin: scale.base,
+        yMax: scale.base + scale.top,
+        labels,
+        colors,
+      }}
+    />
   );
 }
 
 /**
  * Stacked bars for each week: completed strength sessions, completed runs
- * and planned sessions not recorded. VoiceOver reads `label`; the rows
+ * and planned sessions not recorded. Tapping or dragging across it shows
+ * each week's counts. VoiceOver reads `label` and each week; the rows
  * beside the chart list every value.
  */
-export function WeekBarsChart({ bars, height, label }: { bars: WeekBar[]; height: number; label: string }) {
+export function WeekBarsChart({
+  bars,
+  labels,
+  height,
+  label,
+}: {
+  bars: WeekBar[];
+  /** One popover label for each week, oldest first. */
+  labels: PointLabel[];
+  height: number;
+  label: string;
+}) {
   const colors = {
     strength: useColor("--color-primary"),
     runs: useColor("--color-done"),
     open: useColor("--color-border-strong"),
   };
+  const selection = useSelectionColors();
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel={label} testID="progress-week-chart" style={{ height }}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none" {...hidden}>
-        <Host style={{ height, width: "100%" }}>
-          <Chart
-            type="bar"
-            data={bars.map((bar) => ({ x: bar.x, y: bar.y, color: colors[bar.part] }))}
-            showGrid
-            animate={false}
-            barStyle={{ cornerRadius: 3 }}
-          />
-        </Host>
-      </View>
-    </View>
+    <SelectableChart
+      height={height}
+      label={label}
+      testID="progress-week-chart"
+      chart={{
+        kind: "bar",
+        bars: bars.map((bar) => ({ x: bar.x, y: bar.y, color: colors[bar.part] })),
+        showAxes: true,
+        cornerRadius: 3,
+        animate: false,
+        labels,
+        colors: selection,
+      }}
+    />
   );
 }
 
