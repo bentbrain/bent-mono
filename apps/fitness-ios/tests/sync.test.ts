@@ -182,9 +182,10 @@ describe("sync engine", () => {
     };
     const refresh = engine.refresh();
     expect(engine.put({ ...settings, calories: 2600 }, settingsId)).toBe(true);
-    await engine.flush();
+    const flushing = engine.flush();
     release();
     await refresh;
+    await flushing;
     const saved = engine.getState().records.find((r) => r.id === settingsId);
     expect(saved?.revision).toBe(2);
     expect(device.snapshots.get(owner)?.find((r) => r.id === settingsId)?.revision).toBe(2);
@@ -392,7 +393,7 @@ describe("sync engine", () => {
     expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
   });
 
-  test("an older load that returns after a newer one is not applied", async () => {
+  test("loads run in order, so an older load never replaces a newer one", async () => {
     const fitness = fakeFitness([settingsRecord]);
     const device = memoryStorage();
     const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
@@ -415,10 +416,11 @@ describe("sync engine", () => {
     const slow = engine.refresh();
     await new Promise((resolve) => setTimeout(resolve, 1));
     fitness.records.delete(id);
-    await engine.refresh();
-    expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+    // The newer refresh waits for the older load, then applies after it.
+    const newer = engine.refresh();
     release();
     await slow;
+    await newer;
     expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
     expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
   });
@@ -444,7 +446,7 @@ describe("sync engine", () => {
     fitness.transport.load = load;
   });
 
-  test("an older load that fails after a newer one applied changes nothing", async () => {
+  test("loads run in order, so the newest load's result stands after an older one fails", async () => {
     const fitness = fakeFitness([settingsRecord]);
     const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
     await engine.start();
@@ -463,9 +465,39 @@ describe("sync engine", () => {
     };
     const slow = engine.refresh();
     await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(await engine.refresh()).toBe(true);
+    const newer = engine.refresh();
     release();
-    await slow;
+    expect(await slow).toBe(false);
+    expect(await newer).toBe(true);
+    // The newer load ran after the failed one, so its result stands.
     expect(engine.getState()).toMatchObject({ online: true, error: "", loaded: true });
+  });
+
+  test("a refusal shows at once while the reconcile load is still running", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      return save(request);
+    };
+    fitness.transport.load = async () => {
+      await gate;
+      return load();
+    };
+    engine.put(meal("Oats"));
+    engine.put(meal("Refused"));
+    const flushing = engine.flush();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(engine.getState()).toMatchObject({ saving: false, rejected: { message: "Refused." } });
+    release();
+    await flushing;
+    expect(engine.getState().rejected?.message).toBe("Refused.");
   });
 });
