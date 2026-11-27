@@ -43,7 +43,8 @@ export function HealthOutsideAccount() {
     }
   }, [status]);
 
-  if (!status || status.state === "signedOut") return null;
+  // A disconnected iPhone still shows keys to revoke by hand until dismissed.
+  if (!status || (status.state === "signedOut" && !status.manualRevocations)) return null;
   return (
     <>
       <ListSection>
@@ -51,7 +52,13 @@ export function HealthOutsideAccount() {
           icon="heart.fill"
           iconTile="bg-missed"
           label="Apple Health sync"
-          description={status.state === "active" ? "Connected on this iPhone" : "Waiting for you on this iPhone"}
+          description={
+            status.state === "active"
+              ? "Connected on this iPhone"
+              : status.state === "signedOut"
+                ? "Keys to revoke in Fitness"
+                : "Waiting for you on this iPhone"
+          }
           navigates
           onPress={() => setOpen(true)}
           testID="open-health-outside"

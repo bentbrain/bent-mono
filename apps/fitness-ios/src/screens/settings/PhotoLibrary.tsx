@@ -12,6 +12,7 @@ import { Notice, SectionTitle } from "../../ui/Layout";
 import { Symbol } from "../../ui/Symbol";
 import { AppText } from "../../ui/Text";
 import { shape } from "../../ui/typography";
+import { clearPickerCopies } from "./pickerFiles";
 import { checkPhoto, photoId, photoLimits, photoName, tooManyPhotos } from "./rules";
 
 const message = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
@@ -43,6 +44,7 @@ export function PhotoLibrary() {
       setError(tooManyPhotos);
       return;
     }
+    clearPickerCopies();
     const picked = await launchImageLibraryAsync({
       mediaTypes: ["images"],
       base64: true,

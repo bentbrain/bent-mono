@@ -77,13 +77,16 @@ export function WorkoutEditor({
   }
 
   function discard() {
+    // The discard names the version shown when it was asked for, so edits
+    // from another device that arrive meanwhile are not deleted.
+    const shown = expected.current;
     Alert.alert("Discard this workout?", "Discard this unfinished workout and the values typed on this device?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Discard draft",
         style: "destructive",
         onPress: () => {
-          if (sync.put(null, entry.id)) {
+          if (sync.put(null, entry.id, shown)) {
             inputs.clear();
             onDiscard();
           }

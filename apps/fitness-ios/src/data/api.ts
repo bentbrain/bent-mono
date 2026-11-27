@@ -47,6 +47,7 @@ export function createApi(
     retried = false,
   ): Promise<Response> {
     const token = await session.token({ generation });
+    if (generation !== session.generation()) throw new SignedOutError();
     let response: Response;
     try {
       response = await request(origin + path, {
@@ -78,6 +79,17 @@ export function createApi(
     }
     return response;
   }
+  /**
+   * Sends a request and reads its reply with `parse`. The sign-in is checked
+   * again once the body is read, so a reply for an earlier sign-in is never
+   * returned to a later one.
+   */
+  async function read<T>(path: string, init: RequestInit, parse: (response: Response) => Promise<T>): Promise<T> {
+    const generation = session.generation();
+    const value = await parse(await send(path, init, generation));
+    if (generation !== session.generation()) throw new SignedOutError();
+    return value;
+  }
   const json = (body: unknown): RequestInit => ({
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -86,19 +98,19 @@ export function createApi(
 
   return {
     async loadRecords() {
-      return AppRecords.parse(await (await send("/api/app/records")).json());
+      return read("/api/app/records", {}, async (response) => AppRecords.parse(await response.json()));
     },
     async saveRecord(mutation: Mutation): Promise<SaveResult> {
-      return resultSchema.parse(await (await send("/api/app/records", json(mutation))).json());
+      return read("/api/app/records", json(mutation), async (response) => resultSchema.parse(await response.json()));
     },
     async listPhotos(): Promise<PhotoSummary[]> {
-      return PhotoList.parse(await (await send("/api/app/photos")).json()).photos;
+      return read("/api/app/photos", {}, async (response) => PhotoList.parse(await response.json()).photos);
     },
     async uploadPhoto(photo: PhotoUpload) {
-      await send("/api/app/photos", json(photo));
+      await read("/api/app/photos", json(photo), async () => undefined);
     },
     async deletePhoto(id: string) {
-      await send(`/api/app/photos/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await read(`/api/app/photos/${encodeURIComponent(id)}`, { method: "DELETE" }, async () => undefined);
     },
     /** The photo's URL and the headers that authorize loading it. */
     async photoSource(id: string) {
@@ -109,7 +121,7 @@ export function createApi(
     },
     /** The account export as text. */
     async exportAccount() {
-      return (await send("/api/app/export")).text();
+      return read("/api/app/export", {}, (response) => response.text());
     },
   };
 }

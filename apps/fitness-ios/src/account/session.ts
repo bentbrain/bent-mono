@@ -50,6 +50,8 @@ export class Session {
    * generation, such as a refresh or a request, must not act on this one.
    */
   private current = 0;
+  /** Keychain writes and removals run one at a time, in the order requested. */
+  private credentials: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly oauth: OAuthClient,
@@ -69,6 +71,17 @@ export class Session {
     for (const listener of this.listeners) listener();
   }
 
+  /**
+   * Runs a Keychain change after every change requested before it. Each one
+   * checks the generation inside, so a change for an ended sign-in never
+   * lands after, or on top of, a later sign-out or sign-in.
+   */
+  private exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.credentials.then(work, work);
+    this.credentials = run.catch(() => undefined);
+    return run;
+  }
+
   /** Reads the saved sign-in. */
   async restore() {
     const refresh = await this.secrets.get(keys.refresh).catch(() => null);
@@ -81,12 +94,15 @@ export class Session {
     const generation = ++this.current;
     const tokens = await this.oauth.authorize();
     if (!tokens.refreshToken) throw new Error("Clerk did not return a refresh token. Allow offline access when you sign in.");
-    if (generation !== this.current) {
-      await this.oauth.revoke(tokens.refreshToken).catch(() => undefined);
-      throw new SessionExpired();
-    }
-    await this.secrets.set(keys.refresh, tokens.refreshToken);
-    await this.secrets.remove(keys.owner);
+    const refreshToken = tokens.refreshToken;
+    await this.exclusive(async () => {
+      if (generation !== this.current) {
+        await this.oauth.revoke(refreshToken).catch(() => undefined);
+        throw new SessionExpired();
+      }
+      await this.secrets.set(keys.refresh, refreshToken);
+      await this.secrets.remove(keys.owner);
+    });
     this.access = { token: tokens.accessToken, expiresAt: tokens.expiresAt };
     this.set({ status: "signedIn", owner: null });
   }
@@ -94,8 +110,12 @@ export class Session {
   /** Records the account Fitness reported for the sign-in of `generation`. */
   async setOwner(owner: string, generation: number) {
     if (generation !== this.current || this.state.status !== "signedIn" || this.state.owner === owner) return;
-    await this.secrets.set(keys.owner, owner);
-    this.set({ status: "signedIn", owner });
+    const saved = await this.exclusive(async () => {
+      if (generation !== this.current) return false;
+      await this.secrets.set(keys.owner, owner);
+      return true;
+    });
+    if (saved && generation === this.current) this.set({ status: "signedIn", owner });
   }
 
   /**
@@ -142,17 +162,15 @@ export class Session {
           }
           throw error;
         }
-        if (generation !== this.current) {
-          if (tokens.refreshToken) await this.oauth.revoke(tokens.refreshToken).catch(() => undefined);
-          throw new SessionExpired();
-        }
-        if (tokens.refreshToken && tokens.refreshToken !== saved) await this.secrets.set(keys.refresh, tokens.refreshToken);
-        if (generation !== this.current) {
-          // Signed out while the token was being saved: remove it again.
-          await this.secrets.remove(keys.refresh).catch(() => undefined);
-          if (tokens.refreshToken) await this.oauth.revoke(tokens.refreshToken).catch(() => undefined);
-          throw new SessionExpired();
-        }
+        const rotated = tokens.refreshToken;
+        await this.exclusive(async () => {
+          if (generation !== this.current) {
+            if (rotated) await this.oauth.revoke(rotated).catch(() => undefined);
+            throw new SessionExpired();
+          }
+          if (rotated && rotated !== saved) await this.secrets.set(keys.refresh, rotated);
+        });
+        if (generation !== this.current) throw new SessionExpired();
         this.access = { token: tokens.accessToken, expiresAt: tokens.expiresAt };
         return tokens.accessToken;
       } finally {
@@ -162,24 +180,30 @@ export class Session {
     return this.refreshing;
   }
 
-  private async end(message = "Your Fitness sign-in ended. Sign in again to continue.") {
+  /** Closes the session to new requests at once, before its credentials are removed. */
+  private close(state: AccountState) {
     this.current++;
     this.refreshing = null;
     this.access = null;
-    await this.secrets.remove(keys.refresh).catch(() => undefined);
-    await this.secrets.remove(keys.owner).catch(() => undefined);
-    this.set({ status: "signedOut", message });
+    this.set(state);
+  }
+
+  private async end(message = "Your Fitness sign-in ended. Sign in again to continue.") {
+    this.close({ status: "signedOut", message });
+    await this.exclusive(async () => {
+      await this.secrets.remove(keys.refresh).catch(() => undefined);
+      await this.secrets.remove(keys.owner).catch(() => undefined);
+    });
   }
 
   /** Revokes the refresh token where possible and forgets the sign-in. */
   async signOut() {
-    this.current++;
-    this.refreshing = null;
-    this.access = null;
-    const saved = await this.secrets.get(keys.refresh).catch(() => null);
-    if (saved) await this.oauth.revoke(saved).catch(() => undefined);
-    await this.secrets.remove(keys.refresh).catch(() => undefined);
-    await this.secrets.remove(keys.owner).catch(() => undefined);
-    this.set({ status: "signedOut" });
+    this.close({ status: "signedOut" });
+    await this.exclusive(async () => {
+      const saved = await this.secrets.get(keys.refresh).catch(() => null);
+      if (saved) await this.oauth.revoke(saved).catch(() => undefined);
+      await this.secrets.remove(keys.refresh).catch(() => undefined);
+      await this.secrets.remove(keys.owner).catch(() => undefined);
+    });
   }
 }

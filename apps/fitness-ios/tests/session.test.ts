@@ -158,4 +158,71 @@ describe("account session", () => {
     // A token for a past sign-in is refused.
     await expect(session.token({ generation: session.generation() - 1 })).rejects.toBeInstanceOf(SessionExpired);
   });
+
+  test("signing out refuses tokens at once, while revocation is still running", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let refreshes = 0;
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "a", refreshToken: "r", expiresAt: null }),
+      refresh: async () => {
+        refreshes++;
+        return { accessToken: "late", refreshToken: "late-refresh", expiresAt: null };
+      },
+      revoke: async () => {
+        await gate;
+      },
+    };
+    const secrets = memorySecrets({ [keys.refresh]: "saved", [keys.owner]: "user_a" });
+    const session = new Session(oauth, secrets.store);
+    await session.restore();
+    const signingOut = session.signOut();
+    expect(session.getState()).toEqual({ status: "signedOut" });
+    await expect(session.token()).rejects.toBeInstanceOf(SessionExpired);
+    release();
+    await signingOut;
+    expect(refreshes).toBe(0);
+    expect(secrets.values.size).toBe(0);
+  });
+
+  test("a refresh held at its Keychain write cannot touch a later sign-in's token", async () => {
+    let releaseWrite = () => undefined as void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let n = 0;
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "b-access", refreshToken: "b-refresh", expiresAt: null }),
+      refresh: async () => ({ accessToken: `a-access-${++n}`, refreshToken: `a-refresh-${n}`, expiresAt: null }),
+      revoke: async () => undefined,
+    };
+    const memory = memorySecrets({ [keys.refresh]: "a-saved", [keys.owner]: "user_a" });
+    let holdNextWrite = true;
+    const secrets: SecretStore = {
+      ...memory.store,
+      set: async (key, value) => {
+        if (holdNextWrite && value.startsWith("a-refresh")) {
+          holdNextWrite = false;
+          await writeGate;
+        }
+        return memory.store.set(key, value);
+      },
+    };
+    const session = new Session(oauth, secrets);
+    await session.restore();
+    const refreshing = session.token({ fresh: true });
+    // Let the refresh reach its write, then sign out and sign in as B.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const switching = (async () => {
+      await session.signOut();
+      await session.signIn();
+    })();
+    releaseWrite();
+    await expect(refreshing).rejects.toBeInstanceOf(SessionExpired);
+    await switching;
+    expect(memory.values.get(keys.refresh)).toBe("b-refresh");
+    expect(session.getState()).toEqual({ status: "signedIn", owner: null });
+  });
 });

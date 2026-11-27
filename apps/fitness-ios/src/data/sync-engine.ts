@@ -167,8 +167,9 @@ export class SyncEngine {
   /** Loads the account from Fitness, then sends anything queued. */
   async refresh() {
     if (this.stopped) return false;
+    let fresh: boolean;
     try {
-      await this.reload();
+      fresh = await this.reload();
       if (this.stopped) return false;
       this.emit({ ready: true, loaded: true, online: true, error: this.base.conflict ? this.base.error : "" });
     } catch (error) {
@@ -176,28 +177,36 @@ export class SyncEngine {
       return false;
     }
     await this.flush();
+    // Saves kept overtaking the load; load once more now the queue is sent.
+    if (!fresh && !this.stopped) {
+      try {
+        await this.reload();
+        this.emit();
+      } catch (error) {
+        this.fail(error, "Could not load your account. Pull to retry when connected.");
+        return false;
+      }
+    }
     return true;
   }
 
   /**
    * Loads the account. A load that a save acknowledgement overtook could
    * hold older revisions, so it is discarded and the account loaded again.
+   * Returns false when saves kept overtaking it and nothing was applied.
    */
-  private async reload() {
-    for (let attempt = 0; ; attempt++) {
+  private async reload(): Promise<boolean> {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const before = this.acknowledged;
       const result = await this.transport.load();
-      if (this.stopped) return;
+      if (this.stopped) return true;
       if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
-      if (this.acknowledged !== before) {
-        if (attempt < 3) continue;
-        // Saves keep landing; the cloud copy already holds each acknowledged save.
-        return;
-      }
+      if (this.acknowledged !== before) continue;
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
-      return;
+      return true;
     }
+    return false;
   }
 
   private fail(error: unknown, fallback: string) {
@@ -238,8 +247,14 @@ export class SyncEngine {
           });
           break;
         }
-        const next = this.cloud.filter((r) => r.id !== item.request.id);
-        if (result.record) next.push(result.record);
+        // A load that finished first can hold a newer version than this
+        // acknowledgement; the newer version stays.
+        const held = this.cloud.find((r) => r.id === item.request.id);
+        const acknowledgedRevision = item.request.revision + 1;
+        const next =
+          held && held.revision > acknowledgedRevision
+            ? this.cloud
+            : [...this.cloud.filter((r) => r.id !== item.request.id), ...(result.record ? [result.record] : [])];
         this.storage.acknowledge(this.owner, item.request.operationId, next);
         this.cloud = next;
         this.acknowledged++;

@@ -46,4 +46,22 @@ describe("app API client", () => {
     ).rejects.toBeInstanceOf(SignedOutError);
     expect(seen).toEqual(["Bearer token-1-1"]);
   });
+
+  test("a reply whose body arrives after the sign-in changed is not returned", async () => {
+    const { source, state } = session();
+    const api = createApi("https://fitness.example", source, async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // The body finishes only after another account signed in.
+          setTimeout(() => {
+            state.generation = 2;
+            controller.enqueue(new TextEncoder().encode(JSON.stringify({ owner: "user_a", records: [] })));
+            controller.close();
+          }, 5);
+        },
+      });
+      return new Response(body, { headers: { "content-type": "application/json" } });
+    });
+    await expect(api.loadRecords()).rejects.toBeInstanceOf(SignedOutError);
+  });
 });

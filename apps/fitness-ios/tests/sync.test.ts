@@ -244,4 +244,61 @@ describe("sync engine", () => {
     const exported = JSON.parse(engine.draftExport({ "workout:1:0:0:value": "12" }));
     expect(exported).toMatchObject({ format: "fitness-pending-v1", typed: { "workout:1:0:0:value": "12" } });
   });
+
+  test("a late acknowledgement keeps a newer version a load already brought in", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const save = fitness.transport.save;
+    fitness.transport.save = async (request) => {
+      const result = await save(request);
+      await gate;
+      return result;
+    };
+    engine.put({ ...settings, calories: 2600 }, settingsId);
+    const flushing = engine.flush();
+    // Another device saves revision 3 and a load brings it in first.
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    fitness.records.set(settingsId, { ...settingsRecord, revision: 3, data: { ...settings, calories: 2800 } });
+    fitness.transport.save = save;
+    const refreshing = engine.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    release();
+    await flushing;
+    await refreshing;
+    const shown = engine.getState().records.find((r) => r.id === settingsId);
+    expect(shown?.revision).toBe(3);
+    expect(device.snapshots.get(owner)?.find((r) => r.id === settingsId)?.revision).toBe(3);
+  });
+
+  test("a load that saves kept overtaking runs again once the queue is sent", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    const load = fitness.transport.load;
+    let overtakes = 4;
+    fitness.transport.load = async () => {
+      const result = await load();
+      if (overtakes-- > 0) {
+        engine.put(meal(`Meal ${overtakes}`));
+        await engine.flush();
+      }
+      return result;
+    };
+    // Another device adds a record the next load should show.
+    fitness.records.set("22222222-2222-4222-8222-222222222222", {
+      id: "22222222-2222-4222-8222-222222222222",
+      revision: 1,
+      data: meal("From another device"),
+      updatedAt: new Date(0).toISOString(),
+    });
+    expect(await engine.refresh()).toBe(true);
+    expect(engine.getState().records.some((r) => r.data.kind === "meal" && r.data.name === "From another device")).toBe(true);
+  });
 });

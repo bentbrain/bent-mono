@@ -11,6 +11,7 @@ import { haptic } from "../../ui/haptics";
 import { Notice, Screen } from "../../ui/Layout";
 import { ListRow, ListSection } from "../../ui/List";
 import { AppText } from "../../ui/Text";
+import { clearPickerCopies } from "./pickerFiles";
 import { signOutMessage } from "./rules";
 import { shareJson } from "./share";
 
@@ -64,6 +65,7 @@ export function SettingsScreen() {
           sync.stop();
           await session.signOut();
           forgetAccount(owner);
+          clearPickerCopies();
           await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]).catch(() => undefined);
         },
       },
