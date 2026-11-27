@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Modal, View } from "react-native";
+import { Alert, Modal, ScrollView, View } from "react-native";
 import { HStack, Host, Image, List, Section, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
 import {
   accessibilityElement,
@@ -177,9 +177,6 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
             </AppText>
             <IconButton icon="xmark" label="Close reorganisation" tone="secondary" size={32} onPress={close} testID="reorganise-close" />
           </View>
-          <AppText textRole="footnote" tone="secondary" className="px-5 pb-1">
-            Drag a session by its handle to another day. The sessions in between shift to make room. This changes only this week.
-          </AppText>
           {origin ? (
             <WeekOrder
               slots={weekSlots(origin.settings, days, order, today, sync.records)}
@@ -189,7 +186,8 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
           ) : (
             <View className="flex-1" />
           )}
-          <View className="gap-3 px-4 pb-8 pt-3">
+          {/* The actions take at most 45% of the sheet and scroll, so the list keeps room at large text sizes. */}
+          <ScrollView style={{ flexGrow: 0, maxHeight: "45%" }} contentContainerClassName="gap-3 px-4 pb-8 pt-3">
             {error ? (
               <Notice tone="danger" testID="reorganise-error">
                 {error}
@@ -209,7 +207,7 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
               }}
               testID="reorganise-schedule"
             />
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -241,7 +239,9 @@ function WeekOrder({
           title={title}
           footer={
             <SwiftText modifiers={[font({ textStyle: "footnote" }), ...tinted(muted)]}>
-              Past days and recorded or started sessions stay fixed.
+              {
+                "Drag a session by its handle to another day. The sessions in between shift to make room. Past days and recorded or started sessions stay fixed. This changes only this week."
+              }
             </SwiftText>
           }
         >
