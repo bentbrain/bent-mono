@@ -60,13 +60,15 @@ export function SettingsScreen() {
         text: "Sign out",
         style: "destructive" as const,
         onPress: async () => {
-          // Stop syncing, then delete this account's data on the iPhone, then
-          // sign out, so the sign-in screen only shows once nothing is left.
+          // Stop syncing, then sign out: the session refuses requests and
+          // clears the Keychain first, then this account's data on the iPhone
+          // is deleted, and only then does the sign-in screen show.
           sync.stop();
-          forgetAccount(owner);
-          clearPickerCopies();
-          await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]).catch(() => undefined);
-          await session.signOut();
+          await session.signOut(async () => {
+            forgetAccount(owner);
+            clearPickerCopies();
+            await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]);
+          });
         },
       },
     ]);

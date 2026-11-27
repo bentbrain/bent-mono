@@ -41,6 +41,8 @@ function Root() {
   switch (state.status) {
     case "loading":
       return <Loading label="Opening bent Fitness" />;
+    case "signingOut":
+      return <Loading label="Signing out" />;
     case "signedOut":
       return <SignInScreen message={state.message} />;
     case "signedIn":

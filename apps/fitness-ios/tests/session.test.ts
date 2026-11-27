@@ -179,7 +179,7 @@ describe("account session", () => {
     const session = new Session(oauth, secrets.store);
     await session.restore();
     const signingOut = session.signOut();
-    expect(session.getState()).toEqual({ status: "signedOut" });
+    expect(session.getState()).toEqual({ status: "signingOut" });
     await expect(session.token()).rejects.toBeInstanceOf(SessionExpired);
     release();
     await signingOut;
@@ -287,5 +287,62 @@ describe("account session", () => {
     await signingOut;
     expect(session.getState()).toEqual({ status: "signedOut" });
     expect(memory.values.size).toBe(0);
+  });
+
+  test("a late refresh's revocation does not hold up the next sign-in", async () => {
+    let releaseRevoke = () => undefined as void;
+    const revokeGate = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    let releaseRefresh = () => undefined as void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let entered = () => undefined as void;
+    const refreshing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "b-access", refreshToken: "b-refresh", expiresAt: null }),
+      refresh: async () => {
+        entered();
+        await refreshGate;
+        return { accessToken: "a-late", refreshToken: "a-rotated", expiresAt: null };
+      },
+      revoke: async () => {
+        await revokeGate;
+      },
+    };
+    const secrets = memorySecrets({ [keys.refresh]: "a-saved", [keys.owner]: "user_a" });
+    const session = new Session(oauth, secrets.store);
+    await session.restore();
+    const late = session.token({ fresh: true });
+    await refreshing;
+    await session.signOut();
+    releaseRefresh();
+    await expect(late).rejects.toBeInstanceOf(SessionExpired);
+    // Both revocations are still waiting for Clerk; signing in does not wait.
+    await session.signIn();
+    expect(secrets.values.get(keys.refresh)).toBe("b-refresh");
+    releaseRevoke();
+  });
+
+  test("sign-out shows the sign-in screen after cleanup, and says when cleanup failed", async () => {
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "a", refreshToken: "r", expiresAt: null }),
+      refresh: async () => ({ accessToken: "a", refreshToken: null, expiresAt: null }),
+      revoke: async () => undefined,
+    };
+    const secrets = memorySecrets({ [keys.refresh]: "saved", [keys.owner]: "user_a" });
+    const session = new Session(oauth, secrets.store);
+    await session.restore();
+    const seen: string[] = [];
+    await session.signOut(async () => {
+      seen.push(session.getState().status);
+      expect(secrets.values.size).toBe(0);
+      throw new Error("disk");
+    });
+    expect(seen).toEqual(["signingOut"]);
+    expect(session.getState()).toMatchObject({ status: "signedOut", message: expect.stringContaining("could not be removed") });
   });
 });

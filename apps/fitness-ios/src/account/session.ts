@@ -33,6 +33,8 @@ export class RefreshRejected extends Error {}
 
 export type AccountState =
   | { status: "loading" }
+  /** Signing out: no requests are made while this iPhone's data is removed. */
+  | { status: "signingOut" }
   | { status: "signedOut"; message?: string }
   | { status: "signedIn"; owner: string | null };
 
@@ -97,7 +99,7 @@ export class Session {
     const refreshToken = tokens.refreshToken;
     await this.exclusive(async () => {
       if (generation !== this.current) {
-        await this.oauth.revoke(refreshToken).catch(() => undefined);
+        this.revokeLater(refreshToken);
         throw new SessionExpired();
       }
       await this.secrets.set(keys.refresh, refreshToken);
@@ -168,7 +170,7 @@ export class Session {
         const rotated = tokens.refreshToken;
         await this.exclusive(async () => {
           if (generation !== this.current) {
-            if (rotated) await this.oauth.revoke(rotated).catch(() => undefined);
+            if (rotated) this.revokeLater(rotated);
             throw new SessionExpired();
           }
           if (rotated && rotated !== saved) await this.secrets.set(keys.refresh, rotated);
@@ -200,19 +202,36 @@ export class Session {
   }
 
   /**
-   * Forgets the sign-in on this iPhone, then asks Clerk to revoke its refresh
-   * token. The Keychain is cleared before this returns; revocation runs
-   * afterwards, outside the credential queue, so a slow or failed request
-   * neither keeps the token on the iPhone nor holds up a new sign-in.
+   * Asks Clerk to revoke a refresh token, without waiting. Revocation runs
+   * outside the credential queue, so a slow request never holds up a
+   * sign-out or a new sign-in.
    */
-  async signOut() {
-    this.close({ status: "signedOut" });
+  private revokeLater(token: string) {
+    void this.oauth.revoke(token).catch(() => undefined);
+  }
+
+  /**
+   * Signs out: refuses requests at once, removes the sign-in from the
+   * Keychain, runs `cleanup` to delete this iPhone's copy of the account,
+   * then shows the sign-in screen and asks Clerk to revoke the token. The
+   * sign-in screen appears only once the Keychain and `cleanup` are done; if
+   * `cleanup` fails, it says what was left.
+   */
+  async signOut(cleanup: () => Promise<void> = async () => undefined) {
+    this.close({ status: "signingOut" });
     const saved = await this.exclusive(async () => {
       const token = await this.secrets.get(keys.refresh).catch(() => null);
       await this.secrets.remove(keys.refresh).catch(() => undefined);
       await this.secrets.remove(keys.owner).catch(() => undefined);
       return token;
     });
-    if (saved) void this.oauth.revoke(saved).catch(() => undefined);
+    let message: string | undefined;
+    try {
+      await cleanup();
+    } catch {
+      message = "You're signed out, but some of your data on this iPhone could not be removed. Sign in and out again to remove it.";
+    }
+    this.set(message ? { status: "signedOut", message } : { status: "signedOut" });
+    if (saved) this.revokeLater(saved);
   }
 }

@@ -76,8 +76,6 @@ export class SyncEngine {
   private flushing: Promise<void> | null = null;
   /** Counts saves Fitness acknowledged, so a load that started earlier is not applied. */
   private acknowledged = 0;
-  /** Counts loads applied, so a save whose reply crossed one can be checked again. */
-  private applied = 0;
   private stopped = false;
   private conflictId: string | null = null;
   private listeners = new Set<() => void>();
@@ -207,7 +205,6 @@ export class SyncEngine {
       if (this.acknowledged !== before) continue;
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
-      this.applied++;
       return true;
     }
     return false;
@@ -232,22 +229,25 @@ export class SyncEngine {
     if (this.stopped || !this.base.ready || this.base.conflict || this.base.rejected) return Promise.resolve();
     this.flushing = this.send().finally(() => {
       this.flushing = null;
+      // A change queued while the send finished goes out now, unless the
+      // send stopped on an error, a conflict or a refused change.
+      const { online, error, conflict, rejected } = this.base;
+      if (!this.stopped && this.queue.length && online && !error && !conflict && !rejected) void this.flush();
     });
     return this.flushing;
   }
 
   private async send() {
     this.emit({ saving: this.queue.length > 0 });
-    // A load applied while a save was in flight can't show whether the
-    // record changed or was removed after the save; load again at the end.
-    let crossed = false;
+    // A save's reply can be older than the account: a replayed receipt, or
+    // a reply that crossed a load. Once the queue is sent, the account is
+    // loaded again, so a record removed elsewhere doesn't stay on the iPhone.
+    let saved = false;
     try {
       while (this.queue[0]) {
         const item = this.queue[0];
-        const loadsBefore = this.applied;
         const result = await this.transport.save(item.request);
         if (this.stopped) return;
-        if (this.applied !== loadsBefore) crossed = true;
         if (result.status === "conflict") {
           this.conflictId = item.request.id;
           this.emit({
@@ -268,9 +268,10 @@ export class SyncEngine {
         this.cloud = next;
         this.acknowledged++;
         this.readQueue();
+        saved = true;
         this.emit({ online: true, error: "" });
       }
-      if (crossed && !this.stopped) {
+      if (saved && !this.stopped) {
         await this.reload();
         this.emit();
       }

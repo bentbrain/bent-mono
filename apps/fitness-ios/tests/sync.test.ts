@@ -286,8 +286,9 @@ describe("sync engine", () => {
     fitness.transport.load = async () => {
       const result = await load();
       if (overtakes-- > 0) {
+        // A save lands while the load is in flight.
         engine.put(meal(`Meal ${overtakes}`));
-        await engine.flush();
+        await new Promise((resolve) => setTimeout(resolve, 2));
       }
       return result;
     };
@@ -332,6 +333,38 @@ describe("sync engine", () => {
     release();
     await flushing;
     await refreshing;
+    expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+    expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
+  });
+
+  test("a replayed save receipt can't bring back a record removed elsewhere", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    const id = "44444444-4444-4444-8444-444444444444";
+    // The save reaches Fitness but its reply is lost.
+    const save = fitness.transport.save;
+    let lose = true;
+    const receipts = new Map<string, Awaited<ReturnType<typeof save>>>();
+    fitness.transport.save = async (request) => {
+      const stored = receipts.get(request.operationId);
+      if (stored) return stored;
+      const result = await save(request);
+      receipts.set(request.operationId, result);
+      if (lose) {
+        lose = false;
+        throw new OfflineError();
+      }
+      return result;
+    };
+    engine.put(meal("Oats"), id);
+    await engine.flush();
+    expect(engine.getState().pending).toBe(1);
+    // Another device removes it, then the iPhone reconnects and retries.
+    fitness.records.delete(id);
+    await engine.refresh();
+    expect(engine.getState().pending).toBe(0);
     expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
     expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
   });
