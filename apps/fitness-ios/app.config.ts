@@ -76,6 +76,7 @@ const config: ExpoConfig = {
         allowLocalNetworking: settings.allowLocalNetworking,
       },
     ],
+    "./modules/workout-activity/app.plugin.js",
   ],
   extra: {
     variant,

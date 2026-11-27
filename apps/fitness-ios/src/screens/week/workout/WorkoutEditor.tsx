@@ -11,14 +11,18 @@ import { AppText } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { shape } from "../../../ui/typography";
 import { ExerciseList } from "./ExerciseList";
+import { useHoldTimer } from "./HoldTimer";
+import { setKeys } from "./inputs";
 import { InputNotices, NotesField } from "./InputNotices";
 import { SessionTimer } from "./SessionTimer";
-import { finishChange, sessionProgress } from "./session";
+import { applySetChange, finishChange, sessionProgress } from "./session";
+import { endWorkoutActivity, useWorkoutActivity } from "./useWorkoutActivity";
 import { useWorkoutInputs } from "./useWorkoutInputs";
 
 /**
  * The logger for a workout in progress: timers, every exercise and set,
- * notes, finishing and discarding. The screen stays awake while it is open.
+ * notes, finishing and discarding. The screen stays awake while it is open,
+ * and a Live Activity shows the current set and any rest or hold.
  */
 export function WorkoutEditor({
   entry,
@@ -69,8 +73,25 @@ export function WorkoutEditor({
     inputs.commit({ keys: [], change: (current) => ({ ...current, restUntil }), place: "timer" });
   }
 
+  const hold = useHoldTimer({
+    workoutId: entry.id,
+    workout,
+    record: (held, change, at) =>
+      inputs.commit({
+        keys: setKeys(held.exerciseIndex, held.setIndex),
+        place: `${held.exerciseIndex}:${held.setIndex}`,
+        change: (current) => applySetChange(current, held.exerciseIndex, held.setIndex, change, { startRest: true, now: at }),
+      }),
+    // Starting a hold ends a rest that is still running.
+    onStart: () => {
+      if (workout.restUntil !== null && workout.restUntil > Date.now()) setRest(null);
+    },
+  });
+  useWorkoutActivity({ workoutId: entry.id, workout, hold: hold.hold, units: settings.units });
+
   function finish() {
     if (inputs.commit({ change: finishChange(new Date()) })) {
+      endWorkoutActivity(entry.id);
       haptic("success");
       onFinish();
     } else haptic("error");
@@ -87,6 +108,7 @@ export function WorkoutEditor({
         style: "destructive",
         onPress: () => {
           if (sync.put(null, entry.id, shown)) {
+            endWorkoutActivity(entry.id);
             inputs.clear();
             onDiscard();
           }
@@ -116,7 +138,7 @@ export function WorkoutEditor({
 
       <InputNotices inputs={inputs} />
 
-      <ExerciseList workout={workout} settings={settings} inputs={inputs} history={history} startRest />
+      <ExerciseList workout={workout} settings={settings} inputs={inputs} history={history} startRest hold={hold} />
 
       <NotesField inputs={inputs} />
 

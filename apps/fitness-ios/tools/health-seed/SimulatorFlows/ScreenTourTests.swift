@@ -62,6 +62,85 @@ final class ScreenTourTests: XCTestCase {
     sleep(2)
   }
 
+  /// Captures the whole Simulator screen, such as the Home Screen with the
+  /// Dynamic Island.
+  private func captureScreen(_ name: String) {
+    sleep(1)
+    let shot = XCUIScreen.main.screenshot()
+    try? shot.pngRepresentation.write(to: folder.appendingPathComponent("\(name).png"))
+    let attachment = XCTAttachment(screenshot: shot)
+    attachment.name = name
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  /// The first element whose test ID ends with `suffix`, scrolled into view.
+  private func scrollTo(suffix: String) -> XCUIElement? {
+    let target = app.descendants(matching: .any).matching(NSPredicate(format: "identifier ENDSWITH %@", suffix)).firstMatch
+    for _ in 0..<12 {
+      if target.exists && target.isHittable { return target }
+      app.swipeUp()
+    }
+    return target.exists ? target : nil
+  }
+
+  /// Allows notifications when iOS asks, as it does for the first rest or hold.
+  private func allowNotifications() {
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    let allow = springboard.alerts.buttons["Allow"]
+    if allow.waitForExistence(timeout: 4) { allow.tap() }
+  }
+
+  /// The hold timer, the rest timer and the workout Live Activity on the
+  /// Home Screen.
+  func testWorkoutActivityTour() throws {
+    app.launch()
+    if element("sign-in").waitForExistence(timeout: 30) { element("sign-in").tap() }
+    XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90), app.debugDescription)
+    sleep(3)
+    app.swipeUp()
+    guard tap("start-workout") || tap("plan-start-workout") || tap("resume-workout") else {
+      XCTFail("No workout to start.")
+      return
+    }
+    sleep(2)
+    // The harness seed makes today Strength A, which ends with a plank.
+    guard let hold = scrollTo(suffix: "-start-hold") else {
+      XCTFail("Today's workout has no hold to start.")
+      return
+    }
+    do {
+      capture("activity-01-hold-button")
+      hold.tap()
+      allowNotifications()
+      capture("activity-02-hold-ready")
+      sleep(5)
+      capture("activity-03-holding")
+      XCUIDevice.shared.press(.home)
+      captureScreen("activity-04-island-hold")
+      app.activate()
+      sleep(2)
+      if let stop = scrollTo(suffix: "-hold-stop") { stop.tap() }
+    }
+    app.swipeDown(velocity: .fast)
+    app.swipeDown(velocity: .fast)
+    XCTAssertTrue(tap("set-0-0-done"), "The first set could not be marked Done.")
+    do {
+      allowNotifications()
+      app.swipeDown(velocity: .fast)
+      capture("activity-05-rest")
+      XCUIDevice.shared.press(.home)
+      captureScreen("activity-06-island-rest")
+      app.activate()
+      sleep(2)
+    }
+    if let discard = scrollTo(suffix: "discard-workout") {
+      discard.tap()
+      let confirm = app.alerts.buttons["Discard draft"]
+      if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+    }
+  }
+
   func testScreenTour() throws {
     app.launch()
     if element("sign-in").waitForExistence(timeout: 30) {

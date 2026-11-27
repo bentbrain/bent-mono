@@ -1,5 +1,6 @@
 included:
   - modules/fitness-health/ios
+  - modules/workout-activity/ios
   - tools/health-seed
 excluded:
   - modules/fitness-health/ios/.build

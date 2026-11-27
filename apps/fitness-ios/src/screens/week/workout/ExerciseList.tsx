@@ -3,13 +3,16 @@ import { Pressable, View } from "react-native";
 import { lastExercise, progression, setResult } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
 import { useTabNavigation } from "../../../navigation/hooks";
-import { IconButton } from "../../../ui/Button";
+import { Button, IconButton } from "../../../ui/Button";
 import { Badge } from "../../../ui/Layout";
 import { Symbol } from "../../../ui/Symbol";
 import { AppText, AppTextInput } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { cn, shape } from "../../../ui/typography";
 import { ExerciseThumb, prescriptionText } from "../../shared/exercise";
+import { HoldCountdown } from "./HoldTimer";
+import type { HoldTimer } from "./HoldTimer";
+import { targetLabel, targetSeconds } from "./hold";
 import { fieldKey, setInputs, setKeys } from "./inputs";
 import type { SetInput } from "./inputs";
 import { applySetChange, currentExercise } from "./session";
@@ -62,7 +65,8 @@ function useSetFocus() {
  * The exercises of a workout: one card per exercise with its sets. With
  * `history`, each card shows the last result and weight advice. With
  * `startRest`, marking a set Done starts the exercise's rest and the first
- * exercise with sets to handle is marked Current.
+ * exercise with sets to handle is marked Current. With `hold`, timed sets
+ * have a hold timer.
  */
 export function ExerciseList({
   workout,
@@ -70,6 +74,7 @@ export function ExerciseList({
   inputs,
   history,
   startRest = false,
+  hold,
 }: {
   workout: Workout;
   settings: Settings;
@@ -78,6 +83,8 @@ export function ExerciseList({
   history?: RecordEntry[];
   /** Start the rest timer when a set is marked Done. */
   startRest?: boolean;
+  /** The hold timer for timed sets. */
+  hold?: HoldTimer;
 }) {
   const focus = useSetFocus();
   const current = startRest ? currentExercise(workout) : -1;
@@ -94,6 +101,7 @@ export function ExerciseList({
           startRest={startRest}
           current={ei === current}
           focus={focus}
+          hold={hold}
         />
       ))}
     </View>
@@ -109,6 +117,7 @@ function ExerciseCard({
   startRest,
   current,
   focus,
+  hold,
 }: {
   workout: Workout;
   exerciseIndex: number;
@@ -118,6 +127,7 @@ function ExerciseCard({
   startRest: boolean;
   current: boolean;
   focus: ReturnType<typeof useSetFocus>;
+  hold?: HoldTimer;
 }) {
   const navigation = useTabNavigation<"WeekTab">();
   const exercise = workout.exercises[ei];
@@ -196,7 +206,9 @@ function ExerciseCard({
               units={settings.units}
               inputs={inputs}
               focus={focus}
-                  act={(change) => act(si, change)}
+              act={(change) => act(si, change)}
+              hold={p.mode === "seconds" ? hold : undefined}
+              side={p.side}
             />
           ))}
         </View>
@@ -215,6 +227,8 @@ function SetRow({
   inputs,
   focus,
   act,
+  hold,
+  side,
 }: {
   name: string;
   exerciseIndex: number;
@@ -225,6 +239,9 @@ function SetRow({
   inputs: WorkoutInputs;
   focus: ReturnType<typeof useSetFocus>;
   act: (change: Partial<SetEntry>) => boolean;
+  /** The hold timer, for a timed set. */
+  hold?: HoldTimer;
+  side: boolean;
 }) {
   const id = `${ei}:${si}`;
   const keys = setKeys(ei, si);
@@ -235,6 +252,11 @@ function SetRow({
   const unconfirmed = keys.some((key) => inputs.unconfirmed.includes(key));
   const held = inputs.held.some((key) => keys.includes(key));
   const testBase = `set-${ei}-${si}`;
+  const holding = hold?.hold?.exerciseIndex === ei && hold.hold.setIndex === si;
+  const targets = {
+    seconds: targetSeconds(inputs.text(fieldKey(ei, si, "value")), set.value),
+    right: side ? targetSeconds(inputs.text(fieldKey(ei, si, "right")), set.right ?? set.value) : null,
+  };
   return (
     <View
       testID={testBase}
@@ -269,6 +291,8 @@ function SetRow({
                 onChangeText={(value) => inputs.setText(key, value)}
                 onFocus={() => focus.focus(id)}
                 onBlur={() => focus.blur(id, () => inputs.commit({ keys, place: id }))}
+                // The running hold owns its seconds until it ends or stops.
+                editable={!(holding && (input.field === "value" || input.field === "right"))}
                 keyboardType={input.integer ? "number-pad" : "decimal-pad"}
                 inputMode={input.integer ? "numeric" : "decimal"}
                 selectTextOnFocus
@@ -283,6 +307,19 @@ function SetRow({
           );
         })}
       </View>
+      {hold && holding ? <HoldCountdown timer={hold} testID={`${testBase}-hold`} /> : null}
+      {hold && !holding && !set.done && !set.skipped ? (
+        <Button
+          label={`Start hold · ${targetLabel(targets.seconds)}${side ? " each side" : ""}`}
+          tone="tinted"
+          icon="timer"
+          fullWidth
+          disabled={hold.hold !== null}
+          accessibilityHint={hold.hold ? "Another hold is running." : "Counts down 5 seconds to get into position, then the hold."}
+          testID={`${testBase}-start-hold`}
+          onPress={() => hold.start(ei, si, targets)}
+        />
+      ) : null}
       <View className="flex-row items-center gap-2">
         <Pressable
           testID={`${testBase}-controlled`}
