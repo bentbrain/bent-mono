@@ -16,6 +16,7 @@ type WorkoutActivityContent = {
     total: number;
     timerStart: number | null;
     timerEnd: number | null;
+    finalEnd: number | null;
   };
   staleAt: number | null;
 };

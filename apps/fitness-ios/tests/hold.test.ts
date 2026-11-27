@@ -101,15 +101,21 @@ describe("hold timer", () => {
     expect(holdResult(both, s(40.5))).toEqual({ value: 20, right: 10 });
   });
 
-  test("reads targets from typed text, else the saved value", () => {
+  test("reads targets as the set field does: typed text, else the saved value", () => {
     expect(targetSeconds("45", 30)).toBe(45);
     expect(targetSeconds(" 60 ", 30)).toBe(60);
+    // Decimal seconds are valid in the set field, so the timer keeps them.
+    expect(targetSeconds("22.5", 30)).toBe(22.5);
+    expect(targetSeconds("", 22.5)).toBe(22.5);
     expect(targetSeconds("", 30)).toBe(30);
-    expect(targetSeconds("4.5", 30)).toBe(30);
     expect(targetSeconds("0", 30)).toBe(30);
     expect(targetSeconds("900", 30)).toBe(30);
     expect(targetSeconds("abc", 0)).toBe(1);
-    expect(targetSeconds("", 700)).toBe(600);
+    // A decimal target runs to the exact moment and records the typed value.
+    const hold = startHold(workout(), 0, 0, { seconds: 22.5, right: null }, t0);
+    if (!hold) throw new Error("No hold");
+    expect(holdEndsAt(hold)).toBe(s(27.5));
+    expect(holdResult(hold, s(27.5))).toEqual({ value: 22.5, done: true, skipped: false });
   });
 });
 
@@ -131,6 +137,7 @@ describe("workout Live Activity", () => {
         completed: 0,
         timerStart: null,
         timerEnd: null,
+        finalEnd: null,
       },
     });
     // A weighted exercise shows the load and rep range; side exercises say each side.
@@ -155,6 +162,7 @@ describe("workout Live Activity", () => {
       doneDetail: "Next: Forearm plank · Set 2 of 2 · 30 s hold",
       timerStart: s(10),
       timerEnd: s(60),
+      finalEnd: null,
     });
     expect(content?.staleAt).toBe(s(60));
     expect(content?.alert).toEqual({ at: s(60), title: "Rest done", body: "Next: Forearm plank, set 2." });
@@ -170,11 +178,28 @@ describe("workout Live Activity", () => {
     const hold = startHold(w, 1, 0, { seconds: 20, right: 25 }, t0);
     if (!hold) throw new Error("No hold");
     const ready = activityContent("w1", w, hold, "kg", s(1));
-    expect(ready?.state).toMatchObject({ phase: "ready", title: "Get ready", exercise: "Side plank", detail: "Set 1 of 2 · 20 s", timerEnd: s(5) });
-    expect(ready?.alert).toEqual({ at: s(55), title: "Hold done", body: "Side plank, set 1. Open bent Fitness to record it." });
-    expect(activityContent("w1", w, hold, "kg", s(6))?.state).toMatchObject({ phase: "hold", title: "Hold left", timerStart: s(5), timerEnd: s(25) });
-    expect(activityContent("w1", w, hold, "kg", s(26))?.state).toMatchObject({ phase: "ready", title: "Switch to right", detail: "Set 1 of 2 · 25 s" });
+    expect(ready?.state).toMatchObject({
+      phase: "ready",
+      title: "Get ready",
+      exercise: "Side plank",
+      detail: "Set 1 of 2 · 20 s left, 25 s right",
+      doneTitle: "Hold done",
+      doneDetail: "Side plank, set 1. Open the workout to record it.",
+      timerEnd: s(5),
+      finalEnd: s(55),
+    });
+    // The activity goes out of date only when the whole hold ends, not at
+    // the end of getting ready or of the left side, so the Lock Screen never
+    // says the hold is done early while the app is suspended.
+    for (const at of [1, 6, 26, 31]) expect(activityContent("w1", w, hold, "kg", s(at))?.staleAt).toBe(s(55));
+    expect(ready?.alert).toEqual({ at: s(55), title: "Hold done", body: "Side plank, set 1. Open the workout to record it." });
+    expect(activityContent("w1", w, hold, "kg", s(6))?.state).toMatchObject({ phase: "hold", title: "Hold left", timerStart: s(5), timerEnd: s(25), finalEnd: s(55) });
+    expect(activityContent("w1", w, hold, "kg", s(26))?.state).toMatchObject({ phase: "ready", title: "Switch to right" });
     expect(activityContent("w1", w, hold, "kg", s(31))?.state).toMatchObject({ phase: "hold", title: "Hold right", timerEnd: s(55) });
     expect(activityContent("w1", w, hold, "kg", s(56))?.state.phase).toBe("lift");
+    // A hold held once shows its single target.
+    const plank = startHold(w, 0, 0, { seconds: 30, right: null }, t0);
+    if (!plank) throw new Error("No hold");
+    expect(activityContent("w1", w, plank, "kg", s(1))?.state.detail).toBe("Set 1 of 2 · 30 s");
   });
 });

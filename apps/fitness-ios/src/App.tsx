@@ -14,6 +14,7 @@ import { Button } from "./ui/Button";
 import { KeyboardDoneBar } from "./ui/KeyboardDoneBar";
 import { Notice } from "./ui/Layout";
 import { AppText } from "./ui/Text";
+import { endAllWorkoutActivities } from "./screens/week/workout/useWorkoutActivity";
 
 export default function App() {
   return (
@@ -38,6 +39,12 @@ function Root() {
   useEffect(() => {
     void session.restore();
   }, []);
+  // When the session ends, by signing out or because Fitness ended the
+  // sign-in, the workout leaves the Lock Screen and its timer alert goes.
+  const closed = state.status === "signedOut" || state.status === "signingOut";
+  useEffect(() => {
+    if (closed) endAllWorkoutActivities();
+  }, [closed]);
   switch (state.status) {
     case "loading":
       return <Loading label="Opening bent Fitness" />;

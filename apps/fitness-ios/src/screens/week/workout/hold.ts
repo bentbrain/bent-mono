@@ -65,11 +65,17 @@ export function holdEndsAt(hold: Hold) {
   return segments(hold).at(-1)?.end ?? hold.startedAt;
 }
 
-/** A target from typed or saved text: whole seconds from 1 to 600, else the fallback. */
+/**
+ * A hold target from the set's typed or saved text. The set field accepts
+ * seconds above 0 up to 600, decimals included, and so does the timer.
+ * Text the field would refuse uses the saved value, else 1 second.
+ */
 export function targetSeconds(text: string, fallback: number) {
-  const value = Number(text.trim());
-  if (Number.isInteger(value) && value >= 1 && value <= 600) return value;
-  return Math.min(600, Math.max(1, Math.round(fallback) || 1));
+  const valid = (value: number) => Number.isFinite(value) && value > 0 && value <= 600;
+  const trimmed = text.trim();
+  const value = Number(trimmed);
+  if (trimmed && valid(value)) return value;
+  return valid(fallback) ? fallback : 1;
 }
 
 /** Starts a hold for a timed set. */

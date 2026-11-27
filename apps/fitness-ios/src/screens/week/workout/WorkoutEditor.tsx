@@ -74,6 +74,7 @@ export function WorkoutEditor({
   }
 
   const hold = useHoldTimer({
+    workoutId: entry.id,
     workout,
     record: (held, change, at) =>
       inputs.commit({

@@ -23,11 +23,13 @@ struct ActivityStateRecord: Record {
   @Field var total: Int = 0
   @Field var timerStart: Double?
   @Field var timerEnd: Double?
+  @Field var finalEnd: Double?
 
   var content: WorkoutActivityAttributes.ContentState {
     WorkoutActivityAttributes.ContentState(
       phase: phase, title: title, exercise: exercise, detail: detail, doneTitle: doneTitle, doneDetail: doneDetail,
-      completed: completed, total: total, timerStart: timerStart.map(date), timerEnd: timerEnd.map(date))
+      completed: completed, total: total, timerStart: timerStart.map(date), timerEnd: timerEnd.map(date),
+      finalEnd: finalEnd.map(date))
   }
 }
 
@@ -39,8 +41,6 @@ private func date(_ milliseconds: Double) -> Date {
 /// rest or hold. The Live Activity has no push updates: the app updates it
 /// while it runs, and its countdowns run on their own.
 public final class WorkoutActivityModule: Module {
-  private static let alertId = "build.bent.fitness.workout-timer"
-
   public func definition() -> ModuleDefinition {
     Name("WorkoutActivity")
 
@@ -89,32 +89,80 @@ public final class WorkoutActivityModule: Module {
 
     // Replaces the pending timer alert. iOS asks for permission the first
     // time; without it, nothing is scheduled. iOS shows no banner while the
-    // app is open, where the logger gives its own haptic.
+    // app is open, where the logger gives its own haptic. Each schedule or
+    // cancel starts a new generation, and an alert whose generation was
+    // replaced while it waited for permission removes itself.
     AsyncFunction("scheduleAlert") { (title: String, body: String, at: Double) async -> Bool in
+      let generation = TimerAlerts.next()
       let center = UNUserNotificationCenter.current()
-      center.removePendingNotificationRequests(withIdentifiers: [Self.alertId])
+      await TimerAlerts.remove(through: generation - 1)
       guard date(at).timeIntervalSinceNow >= 1 else { return false }
       let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
       // The permission prompt can take a while, so the time left is read again.
       let remaining = date(at).timeIntervalSinceNow
-      guard granted, remaining >= 1 else { return false }
+      guard granted, remaining >= 1, TimerAlerts.isCurrent(generation) else { return false }
       let content = UNMutableNotificationContent()
       content.title = title
       content.body = body
       content.sound = .default
+      let identifier = TimerAlerts.identifier(generation)
       let trigger = UNTimeIntervalNotificationTrigger(timeInterval: remaining, repeats: false)
       do {
-        try await center.add(UNNotificationRequest(identifier: Self.alertId, content: content, trigger: trigger))
-        return true
+        try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
       } catch {
         return false
       }
+      // A newer schedule or a cancel arrived while this one was being added.
+      guard TimerAlerts.isCurrent(generation) else {
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        return false
+      }
+      return true
     }
 
     Function("cancelAlert") {
-      let center = UNUserNotificationCenter.current()
-      center.removePendingNotificationRequests(withIdentifiers: [Self.alertId])
-      center.removeDeliveredNotifications(withIdentifiers: [Self.alertId])
+      let generation = TimerAlerts.next()
+      Task { await TimerAlerts.remove(through: generation) }
     }
+  }
+}
+
+/// The timer alert's generations. Each alert has its own identifier, so an
+/// older request can never remove or replace a newer one.
+enum TimerAlerts {
+  private static let prefix = "build.bent.fitness.workout-timer."
+  private static let lock = NSLock()
+  // Starts from the clock, so generations keep rising across launches and
+  // alerts left from an earlier launch are older than any new one.
+  private static var generation = Int(Date().timeIntervalSince1970 * 1000)
+
+  /// Starts a new generation and returns it.
+  static func next() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    generation += 1
+    return generation
+  }
+
+  static func isCurrent(_ value: Int) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return generation == value
+  }
+
+  static func identifier(_ value: Int) -> String { "\(prefix)\(value)" }
+
+  /// Removes pending and delivered timer alerts from generations up to
+  /// `last`. A slow removal never touches an alert a later call scheduled.
+  static func remove(through last: Int) async {
+    let center = UNUserNotificationCenter.current()
+    let pending = await center.pendingNotificationRequests().map(\.identifier)
+    let delivered = await center.deliveredNotifications().map(\.request.identifier)
+    let ours = { (id: String) -> Bool in
+      guard id.hasPrefix(prefix), let value = Int(id.dropFirst(prefix.count)) else { return false }
+      return value <= last
+    }
+    center.removePendingNotificationRequests(withIdentifiers: pending.filter(ours))
+    center.removeDeliveredNotifications(withIdentifiers: delivered.filter(ours))
   }
 }

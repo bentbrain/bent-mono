@@ -5,6 +5,7 @@ import { WorkoutActivity } from "../../../../modules/workout-activity";
 import { activityContent, sameActivity } from "./activity";
 import type { ActivityContent } from "./activity";
 import type { Hold } from "./hold";
+import { clearHolds } from "./HoldTimer";
 
 const ignore = () => undefined;
 
@@ -76,8 +77,12 @@ export function endWorkoutActivity(workoutId: string) {
   void WorkoutActivity.end(workoutId).catch(ignore);
 }
 
-/** Ends every workout Live Activity and the timer alert, for signing out. */
+/**
+ * Ends every workout Live Activity and the timer alert, and forgets holds in
+ * progress, for when the account's session ends.
+ */
 export function endAllWorkoutActivities() {
+  clearHolds();
   if (!WorkoutActivity) return;
   WorkoutActivity.cancelAlert();
   void WorkoutActivity.end(null).catch(ignore);

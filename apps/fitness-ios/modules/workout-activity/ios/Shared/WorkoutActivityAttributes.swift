@@ -17,10 +17,12 @@ public struct WorkoutActivityAttributes: ActivityAttributes {
     public var total: Int
     public var timerStart: Date?
     public var timerEnd: Date?
+    /// When a whole hold ends, after its get-ready and switch phases.
+    public var finalEnd: Date?
 
     public init(
       phase: String, title: String, exercise: String, detail: String, doneTitle: String, doneDetail: String,
-      completed: Int, total: Int, timerStart: Date?, timerEnd: Date?
+      completed: Int, total: Int, timerStart: Date?, timerEnd: Date?, finalEnd: Date?
     ) {
       self.phase = phase
       self.title = title
@@ -32,11 +34,18 @@ public struct WorkoutActivityAttributes: ActivityAttributes {
       self.total = total
       self.timerStart = timerStart
       self.timerEnd = timerEnd
+      self.finalEnd = finalEnd
     }
 
     /// The countdown's interval, when a rest or hold is running.
     public var timer: ClosedRange<Date>? {
       guard let start = timerStart, let end = timerEnd, start < end else { return nil }
+      return start...end
+    }
+
+    /// The countdown to the end of a whole hold.
+    public var finalTimer: ClosedRange<Date>? {
+      guard let start = timerStart, let end = finalEnd, start < end else { return nil }
       return start...end
     }
   }

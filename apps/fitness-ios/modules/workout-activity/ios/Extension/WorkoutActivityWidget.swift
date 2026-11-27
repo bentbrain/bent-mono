@@ -41,6 +41,13 @@ struct WorkoutActivityWidget: Widget {
           VStack(alignment: .leading, spacing: 6) {
             Text(view.headline).font(.headline).lineLimit(1)
             Text(view.subline).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            if let whole = view.finalTimer {
+              HStack(spacing: 4) {
+                Text("Hold ends in")
+                Text(timerInterval: whole, countsDown: true).monospacedDigit()
+              }
+              .font(.caption).foregroundStyle(.secondary)
+            }
             ProgressView(value: Double(view.state.completed), total: Double(max(view.state.total, 1)))
               .tint(accentDark)
           }
@@ -63,10 +70,17 @@ struct Content {
   let context: ActivityViewContext<WorkoutActivityAttributes>
   var state: WorkoutActivityAttributes.ContentState { context.state }
 
-  /// A countdown is running and has not reached its end.
-  var counting: Bool { state.timer != nil && !context.isStale && (state.timerEnd ?? .distantPast) > Date() }
-  /// A rest or hold reached its end before the app updated the activity.
-  var ended: Bool { state.timerEnd != nil && !counting }
+  // The activity goes stale at the end of a rest, or of a whole hold, so
+  // staleness alone says the timer is done. While the app is suspended it
+  // can't move a hold to its next phase; that phase's countdown stops at
+  // 0:00 and the countdown to the end of the whole hold keeps running.
+
+  /// A rest or hold is running.
+  var counting: Bool { state.timer != nil && !context.isStale }
+  /// The rest or hold ended before the app updated the activity.
+  var ended: Bool { state.timerEnd != nil && context.isStale }
+  /// The countdown to the end of the whole hold, while it runs.
+  var finalTimer: ClosedRange<Date>? { counting ? state.finalTimer : nil }
 
   var symbol: String {
     switch state.phase {
@@ -92,9 +106,10 @@ struct Content {
     }
   }
 
-  /// The compact Dynamic Island's trailing text: the countdown or sets done.
+  /// The compact Dynamic Island's trailing text: the countdown to the end of
+  /// the rest or whole hold, or sets done.
   @ViewBuilder var compact: some View {
-    if counting, let timer = state.timer {
+    if let timer = finalTimer ?? (counting ? state.timer : nil) {
       Text(timerInterval: timer, countsDown: true)
         .monospacedDigit().frame(maxWidth: 44).multilineTextAlignment(.trailing)
     } else if ended {
@@ -130,6 +145,13 @@ struct LockScreenView: View {
           }
           Text(view.headline).font(.headline).lineLimit(1)
           Text(view.subline).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+          if let whole = view.finalTimer {
+            HStack(spacing: 4) {
+              Text("Hold ends in")
+              Text(timerInterval: whole, countsDown: true).monospacedDigit()
+            }
+            .font(.caption).foregroundStyle(.secondary)
+          }
         }
         Spacer(minLength: 8)
         if view.counting || view.ended {

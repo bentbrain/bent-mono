@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AccessibilityInfo, AppState, View } from "react-native";
 import type { Workout } from "@bent/fitness-contracts/domain";
 import { formatDuration } from "@bent/fitness-contracts/timing";
@@ -10,22 +10,49 @@ import { holdEndsAt, holdPhase, holdResult, phaseAnnouncement, phaseKey, phaseTi
 import type { Hold, HoldPhase } from "./hold";
 import type { SetEntry } from "./session";
 
+/*
+ * Holds in progress, by workout. They live outside the logger, so a hold
+ * keeps running when the logger closes, and the logger records it on return
+ * if it ended meanwhile. They are kept in memory only.
+ */
+const holds = new Map<string, Hold>();
+const listeners = new Set<() => void>();
+const notify = () => listeners.forEach((listener) => listener());
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+};
+function storeHold(workoutId: string, hold: Hold | null) {
+  if (hold) holds.set(workoutId, hold);
+  else holds.delete(workoutId);
+  notify();
+}
+
+/** Forgets every hold, for example when the account's session ends. */
+export function clearHolds() {
+  holds.clear();
+  notify();
+}
+
 /**
- * The hold in progress, if any. `record` saves a set change from the hold
- * and returns whether it was saved; a finished hold starts the exercise's
- * rest from the moment it ended.
+ * The workout's hold in progress, if any. `record` saves a set change from
+ * the hold and returns whether it was saved; a finished hold starts the
+ * exercise's rest from the moment it ended.
  */
 export function useHoldTimer({
+  workoutId,
   workout,
   record,
   onStart,
 }: {
+  workoutId: string;
   workout: Workout;
   record: (hold: Hold, change: Partial<SetEntry>, at: number) => boolean;
   /** Called as a hold starts, for example to end a rest that is running. */
   onStart?: () => void;
 }) {
-  const [hold, setHold] = useState<Hold | null>(null);
+  const hold = useSyncExternalStore(subscribe, () => holds.get(workoutId) ?? null);
+  const setHold = useCallback((next: Hold | null) => storeHold(workoutId, next), [workoutId]);
   const [now, setNow] = useState(() => Date.now());
   const latest = useRef({ record, onStart });
   useLayoutEffect(() => {
@@ -58,9 +85,10 @@ export function useHoldTimer({
       setHold(null);
       return;
     }
+    // A hold the logger reopens on shows its phase without a haptic.
     if (!first) haptic(phase.kind === "hold" ? "warning" : "medium");
     AccessibilityInfo.announceForAccessibility(phaseAnnouncement(hold, phase));
-  }, [hold, phase, key]);
+  }, [hold, phase, key, setHold]);
 
   const start = useCallback(
     (exerciseIndex: number, setIndex: number, targets: { seconds: number; right: number | null }) => {
@@ -73,7 +101,7 @@ export function useHoldTimer({
       haptic("medium");
       return true;
     },
-    [workout],
+    [workout, setHold],
   );
 
   /** Ends the hold now, recording the seconds held so far. */
@@ -87,13 +115,13 @@ export function useHoldTimer({
     }
     haptic("light");
     setHold(null);
-  }, [hold]);
+  }, [hold, setHold]);
 
   // A hold whose set was handled elsewhere, for example on another device, ends.
   const set = hold ? workout.exercises[hold.exerciseIndex]?.sets[hold.setIndex] : undefined;
   useEffect(() => {
     if (hold && (!set || set.done || set.skipped)) setHold(null);
-  }, [hold, set]);
+  }, [hold, set, setHold]);
 
   return { hold, phase: phase?.kind === "done" ? null : phase, now, start, stop };
 }

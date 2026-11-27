@@ -104,7 +104,12 @@ final class ScreenTourTests: XCTestCase {
       return
     }
     sleep(2)
-    if let hold = scrollTo(suffix: "-start-hold") {
+    // The harness seed makes today Strength A, which ends with a plank.
+    guard let hold = scrollTo(suffix: "-start-hold") else {
+      XCTFail("Today's workout has no hold to start.")
+      return
+    }
+    do {
       capture("activity-01-hold-button")
       hold.tap()
       allowNotifications()
@@ -119,7 +124,8 @@ final class ScreenTourTests: XCTestCase {
     }
     app.swipeDown(velocity: .fast)
     app.swipeDown(velocity: .fast)
-    if tap("set-0-0-done") {
+    XCTAssertTrue(tap("set-0-0-done"), "The first set could not be marked Done.")
+    do {
       allowNotifications()
       app.swipeDown(velocity: .fast)
       capture("activity-05-rest")

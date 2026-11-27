@@ -27,8 +27,15 @@ type ActivityState = {
   doneDetail: string;
   completed: number;
   total: number;
+  /** The current phase's countdown. */
   timerStart: number | null;
   timerEnd: number | null;
+  /**
+   * When a whole hold ends, after its get-ready and switch phases. The
+   * activity shows it beside the phase countdown, so it stays right while
+   * the app is suspended and can't move the activity to the next phase.
+   */
+  finalEnd: number | null;
 };
 
 export type ActivityContent = {
@@ -36,7 +43,7 @@ export type ActivityContent = {
   workoutName: string;
   startedAt: number;
   state: ActivityState;
-  /** When the content goes out of date: the end of the running rest or hold. */
+  /** When the content goes out of date: the end of the running rest or of the whole hold. */
   staleAt: number | null;
   /** A local notification for the end of the running rest or hold. */
   alert: { at: number; title: string; body: string } | null;
@@ -83,7 +90,7 @@ export function activityContent(
     workoutName: workout.name,
     startedAt: Date.parse(workout.startedAt),
     state,
-    staleAt: state.timerEnd,
+    staleAt: state.finalEnd ?? state.timerEnd,
     alert,
   });
 
@@ -98,13 +105,16 @@ export function activityContent(
         phase: holding ? "hold" : "ready",
         title: phaseTitle(phase),
         exercise: hold.name,
-        detail: `Set ${hold.setIndex + 1} of ${exercise?.sets.length ?? hold.setIndex + 1} · ${phase.side === "right" ? hold.right : hold.seconds} s`,
+        detail: `Set ${hold.setIndex + 1} of ${exercise?.sets.length ?? hold.setIndex + 1} · ${
+          hold.right === null ? `${hold.seconds} s` : `${hold.seconds} s left, ${hold.right} s right`
+        }`,
         doneTitle: "Hold done",
-        doneDetail: `Open bent Fitness to record ${hold.name}.`,
+        doneDetail: `${hold.name}, set ${hold.setIndex + 1}. Open the workout to record it.`,
         timerStart: holding ? phase.startedAt : now,
         timerEnd: phase.endsAt,
+        finalEnd: end,
       },
-      { at: end, title: "Hold done", body: `${hold.name}, set ${hold.setIndex + 1}. Open bent Fitness to record it.` },
+      { at: end, title: "Hold done", body: `${hold.name}, set ${hold.setIndex + 1}. Open the workout to record it.` },
     );
   }
 
@@ -120,13 +130,14 @@ export function activityContent(
         doneDetail: next ? `${nextText} · ${next.detail}` : nextText,
         timerStart: Math.min(now, workout.restUntil),
         timerEnd: workout.restUntil,
+        finalEnd: null,
       },
       { at: workout.restUntil, title: "Rest done", body: next ? `${nextText}, set ${next.si + 1}.` : nextText },
     );
   }
 
   return content(
-    { ...base, phase: "lift", title: base.exercise, doneTitle: "", doneDetail: "", timerStart: null, timerEnd: null },
+    { ...base, phase: "lift", title: base.exercise, doneTitle: "", doneDetail: "", timerStart: null, timerEnd: null, finalEnd: null },
     null,
   );
 }

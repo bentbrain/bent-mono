@@ -292,6 +292,8 @@ function SetRow({
                 onChangeText={(value) => inputs.setText(key, value)}
                 onFocus={() => focus.focus(id)}
                 onBlur={() => focus.blur(id, () => inputs.commit({ keys, place: id }))}
+                // The running hold owns its seconds until it ends or stops.
+                editable={!(holding && (input.field === "value" || input.field === "right"))}
                 keyboardType={input.integer ? "number-pad" : "decimal-pad"}
                 inputMode={input.integer ? "numeric" : "decimal"}
                 selectTextOnFocus
