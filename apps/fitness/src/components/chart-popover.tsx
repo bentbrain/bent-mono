@@ -426,7 +426,11 @@ export function ChartPopover({
           detail={shown}
           cardRef={card}
           onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
+          onPointerMove={(event) => {
+            // Only a touch drag scrubs from the card; a mouse over it leaves
+            // the selection as it is.
+            if (event.pointerType === "touch") onPointerMove(event);
+          }}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
         />
