@@ -5,10 +5,10 @@ import { AppState } from "react-native";
 import { localDate } from "@bent/fitness-contracts/domain";
 import type { Entity, Settings } from "@bent/fitness-contracts/domain";
 import { clerkOAuth, keychainStore, oauthSettings } from "../auth";
-import { createApi } from "../data/api";
+import { ApiError, createApi } from "../data/api";
 import type { Api } from "../data/api";
-import { sqliteStorage } from "../data/storage";
-import { SyncEngine } from "../data/sync-engine";
+import { drafts, sqliteStorage } from "../data/storage";
+import { RejectedChange, SyncEngine } from "../data/sync-engine";
 import type { SyncState } from "../data/sync-engine";
 import { Session } from "./session";
 import type { OAuthClient } from "./session";
@@ -37,7 +37,14 @@ export type Sync = SyncState & {
   retry: () => Promise<boolean>;
   refresh: () => Promise<boolean>;
   useCloud: () => Promise<void>;
+  /** Removes the change Fitness refused, so the rest of the queue can save. */
+  discardRejected: () => Promise<void>;
+  /** The queued changes and typed values on this iPhone, as JSON. */
   draftExport: () => string;
+  /** Unsaved changes on this iPhone: queued changes plus typed values. */
+  unsaved: () => number;
+  /** Stops syncing before the account's data on this iPhone is deleted. */
+  stop: () => void;
 };
 
 type Account = {
@@ -83,7 +90,17 @@ export function AccountProvider({ owner, children }: { owner: string; children: 
       new SyncEngine({
         owner,
         storage: sqliteStorage,
-        transport: { load: () => api.loadRecords(), save: (request) => api.saveRecord(request) },
+        transport: {
+          load: () => api.loadRecords(),
+          // A change Fitness refuses as invalid would be refused again, so it
+          // is held for the person to discard rather than sent forever.
+          save: (request) =>
+            api.saveRecord(request).catch((error: unknown) => {
+              if (error instanceof ApiError && [400, 413, 422].includes(error.status))
+                throw new RejectedChange(error.message);
+              throw error;
+            }),
+        },
       }),
     [owner],
   );
@@ -97,7 +114,7 @@ export function AccountProvider({ owner, children }: { owner: string; children: 
     // Queued changes are sent again every 30 seconds until Fitness takes them.
     const timer = setInterval(() => {
       const current = engine.getState();
-      if (current.pending && !current.saving && !current.conflict) void engine.flush();
+      if (current.pending && !current.saving && !current.conflict && !current.rejected) void engine.flush();
     }, 30_000);
     return () => {
       appState.remove();
@@ -123,9 +140,12 @@ export function AccountProvider({ owner, children }: { owner: string; children: 
       retry: () => engine.retry(),
       refresh: () => engine.refresh(),
       useCloud: () => engine.useCloud(),
-      draftExport: () => engine.draftExport(),
+      discardRejected: () => engine.discardRejected(),
+      draftExport: () => engine.draftExport(drafts.all(owner)),
+      unsaved: () => engine.getState().pending + Object.keys(drafts.all(owner)).length,
+      stop: () => engine.stop(),
     }),
-    [engine, state],
+    [engine, state, owner],
   );
 
   const value = useMemo<Account>(

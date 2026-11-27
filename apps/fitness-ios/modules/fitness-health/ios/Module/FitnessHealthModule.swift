@@ -24,6 +24,12 @@ public final class FitnessHealthModule: Module {
       HKHealthStore.isHealthDataAvailable()
     }
 
+    // Keeps the app's own data, such as its copy of the account, out of
+    // iCloud and computer backups, as the sync state already is.
+    Function("excludeFromBackup") { (path: String) throws in
+      try SyncStateFiles.excludeFromBackup(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
     AsyncFunction("getStatus") { () async -> [String: Any] in
       await self.service.status()
     }

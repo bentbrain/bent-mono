@@ -41,9 +41,10 @@ function Privacy() {
         So the app opens without a connection, it keeps a copy of your account
         on the iPhone: your entries and settings, changes waiting to be saved,
         workout values you have typed but not saved yet, and equipment photos it
-        has shown. Signing out deletes the sign-in, that copy and the photos
-        from the iPhone. Changes that were still waiting are deleted too; the
-        app warns you first and offers to export them.
+        has shown. The app excludes this copy from iCloud and computer backups.
+        Signing out deletes the sign-in, that copy and the photos from the
+        iPhone. Changes and typed values that were still waiting are deleted
+        too; the app warns you first and offers to export them.
       </p>
 
       <h2>What Apple Health sync reads</h2>

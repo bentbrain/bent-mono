@@ -1,4 +1,5 @@
 import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
+import { File } from "expo-file-system";
 import { Image } from "expo-image";
 import { launchImageLibraryAsync, UIImagePickerPreferredAssetRepresentationMode } from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
@@ -54,13 +55,25 @@ export function PhotoLibrary() {
     });
     const asset = picked && !picked.canceled ? picked.assets[0] : undefined;
     if (!asset) return;
+    // The picker writes its own copy of the photo; it is deleted once read,
+    // whatever happens, so no copy stays on this iPhone.
+    const removeCopy = () => {
+      try {
+        const copy = new File(asset.uri);
+        if (copy.exists) copy.delete();
+      } catch {
+        // The copy is in the app's temporary files, which iOS also clears.
+      }
+    };
     const checked = checkPhoto(asset.base64, count);
     if (!checked.type) {
+      removeCopy();
       haptic("error");
       setError(checked.error);
       return;
     }
     const base64 = asset.base64 ?? "";
+    removeCopy();
     setUploading(true);
     try {
       const id = photoId(await digestStringAsync(CryptoDigestAlgorithm.SHA256, base64));

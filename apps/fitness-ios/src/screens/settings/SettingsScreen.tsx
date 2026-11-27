@@ -50,13 +50,18 @@ export function SettingsScreen() {
 
   function signOut() {
     haptic("warning");
-    Alert.alert("Sign out of bent Fitness?", signOutMessage(sync.pending), [
+    // Queued changes and typed workout values both stay only on this iPhone.
+    const unsaved = sync.unsaved();
+    Alert.alert("Sign out of bent Fitness?", signOutMessage(unsaved), [
       { text: "Cancel", style: "cancel" },
-      ...(sync.pending > 0 ? [{ text: "Export pending changes", onPress: () => void exportPending() }] : []),
+      ...(unsaved > 0 ? [{ text: "Export pending changes", onPress: () => void exportPending() }] : []),
       {
         text: "Sign out",
         style: "destructive" as const,
         onPress: async () => {
+          // Stop syncing first, so no reply can write this account's data
+          // back after it is deleted.
+          sync.stop();
           await session.signOut();
           forgetAccount(owner);
           await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]).catch(() => undefined);
@@ -125,7 +130,7 @@ export function SettingsScreen() {
             testID="export-account"
           />
         )}
-        {sync.pending > 0 || sync.conflict || sync.error ? (
+        {sync.unsaved() > 0 || sync.conflict || sync.error ? (
           <ListRow
             label="Export pending changes"
             description="The changes on this iPhone that Fitness has not saved"

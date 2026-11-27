@@ -9,6 +9,7 @@ import { OfflineError } from "./data/sync-engine";
 import { Navigation } from "./navigation/Navigation";
 import { Onboarding } from "./screens/settings/Onboarding";
 import { SignInScreen } from "./screens/SignInScreen";
+import { HealthOutsideAccount } from "./screens/health/HealthOutsideAccount";
 import { Button } from "./ui/Button";
 import { KeyboardDoneBar } from "./ui/KeyboardDoneBar";
 import { Notice } from "./ui/Layout";
@@ -63,9 +64,10 @@ function FindAccount() {
   useEffect(() => {
     let active = true;
     setError(null);
+    const generation = session.generation();
     api
       .loadRecords()
-      .then((result) => session.setOwner(result.owner))
+      .then((result) => session.setOwner(result.owner, generation))
       .catch((e: unknown) => {
         if (!active) return;
         setError(
@@ -89,6 +91,7 @@ function FindAccount() {
       <Notice tone="danger">{error}</Notice>
       <Button label="Try again" onPress={() => setAttempt((n) => n + 1)} />
       <Button label="Sign out" tone="plain" onPress={() => void session.signOut()} />
+      <HealthOutsideAccount />
     </View>
   );
 }
@@ -106,6 +109,7 @@ function SignedIn() {
             {sync.error || "Fitness could not be reached. Connect to the internet to load your plan the first time."}
           </Notice>
           <Button label="Try again" onPress={() => void sync.retry()} />
+          <HealthOutsideAccount />
         </View>
       );
     return <Loading label="Opening your plan" />;

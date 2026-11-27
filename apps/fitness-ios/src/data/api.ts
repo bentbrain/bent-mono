@@ -16,17 +16,37 @@ export class ApiError extends Error {
 }
 
 export type TokenSource = {
-  token(options?: { fresh?: boolean }): Promise<string>;
+  token(options?: { fresh?: boolean; generation?: number }): Promise<string>;
   invalidate(token: string): void;
+  /** Changes at each sign-in and sign-out. */
+  generation(): number;
 };
+
+/** Thrown for a reply that arrived after the sign-in it was sent for ended. */
+export class SignedOutError extends Error {
+  constructor() {
+    super("Your Fitness sign-in changed. Sign in again to continue.");
+  }
+}
 
 /**
  * The Fitness app API under `/api/app`. Each request sends the account's
- * access token. A `401` refreshes the token once and tries again.
+ * access token. A `401` refreshes the token once and tries again. A request
+ * belongs to the sign-in it started under: it never retries with, or
+ * returns a reply to, a later sign-in.
  */
-export function createApi(origin: string, session: TokenSource, request: typeof fetch = fetch) {
-  async function send(path: string, init: RequestInit = {}, retried = false): Promise<Response> {
-    const token = await session.token();
+export function createApi(
+  origin: string,
+  session: TokenSource,
+  request: (url: string, init?: RequestInit) => Promise<Response> = fetch,
+) {
+  async function send(
+    path: string,
+    init: RequestInit = {},
+    generation = session.generation(),
+    retried = false,
+  ): Promise<Response> {
+    const token = await session.token({ generation });
     let response: Response;
     try {
       response = await request(origin + path, {
@@ -34,11 +54,13 @@ export function createApi(origin: string, session: TokenSource, request: typeof 
         headers: { Accept: "application/json", ...init.headers, Authorization: `Bearer ${token}` },
       });
     } catch {
+      if (generation !== session.generation()) throw new SignedOutError();
       throw new OfflineError();
     }
+    if (generation !== session.generation()) throw new SignedOutError();
     if (response.status === 401 && !retried) {
       session.invalidate(token);
-      return send(path, init, true);
+      return send(path, init, generation, true);
     }
     if (!response.ok) {
       let body: unknown = null;
@@ -82,7 +104,7 @@ export function createApi(origin: string, session: TokenSource, request: typeof 
     async photoSource(id: string) {
       return {
         uri: `${origin}/api/app/photos/${encodeURIComponent(id)}`,
-        headers: { Authorization: `Bearer ${await session.token()}` },
+        headers: { Authorization: `Bearer ${await session.token({ generation: session.generation() })}` },
       };
     },
     /** The account export as text. */

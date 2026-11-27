@@ -1,5 +1,5 @@
 import { useKeepAwake } from "expo-keep-awake";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Alert, View } from "react-native";
 import { formatDate } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
@@ -37,12 +37,24 @@ export function WorkoutEditor({
 }) {
   useKeepAwake("bent-fitness-workout");
   const workout = entry.data;
+  // Saves name the revision this editor last showed, plus its own saves
+  // since. If another device changed or finished the workout first, the save
+  // is refused on this iPhone and the typed values stay for review, rather
+  // than queueing an edit Fitness refuses.
+  const expected = useRef(entry.revision);
+  useEffect(() => {
+    expected.current = entry.revision;
+  }, [entry.revision]);
   const inputs = useWorkoutInputs({
     workout,
     units: settings.units,
     owner,
     workoutId: entry.id,
-    save: (next) => sync.put(next, entry.id),
+    save: (next) => {
+      if (!sync.put(next, entry.id, expected.current)) return false;
+      expected.current += 1;
+      return true;
+    },
   });
   // The header's sync status says when typed values wait on this iPhone.
   const { setInputPending } = useAccount();

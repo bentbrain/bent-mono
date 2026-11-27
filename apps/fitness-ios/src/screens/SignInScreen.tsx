@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { session, signInConfigured } from "../account/AccountProvider";
 import { SignInCancelled } from "../logic/connect";
 import { Button } from "../ui/Button";
+import { HealthOutsideAccount } from "./health/HealthOutsideAccount";
 import { Notice } from "../ui/Layout";
 import { Symbol } from "../ui/Symbol";
 import type { SFSymbol } from "../ui/Symbol";
@@ -59,6 +60,7 @@ export function SignInScreen({ message }: { message?: string }) {
           ))}
         </View>
         <View className="flex-1" />
+        <HealthOutsideAccount />
         <View className="gap-3">
           {message ? <Notice tone="warning">{message}</Notice> : null}
           {error ? (

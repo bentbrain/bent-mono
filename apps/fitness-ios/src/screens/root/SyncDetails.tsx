@@ -73,6 +73,17 @@ export function SyncDetails() {
     );
   }
 
+  function discardRejected() {
+    Alert.alert(
+      "Discard the refused change?",
+      "Fitness refused this change, so it can't be saved. Export the pending changes first to keep a copy.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Discard change", style: "destructive", onPress: () => void sync.discardRejected() },
+      ],
+    );
+  }
+
   return (
     <Screen testID="screen-sync">
       <ListSection>
@@ -90,10 +101,20 @@ export function SyncDetails() {
       ) : null}
       {message ? <Notice tone="danger">{message}</Notice> : null}
       <View className="gap-3">
+        {sync.rejected ? (
+          <Button
+            label="Discard the refused change"
+            icon="trash"
+            tone="danger"
+            onPress={discardRejected}
+            fullWidth
+            testID="sync-discard-rejected"
+          />
+        ) : null}
         {sync.conflict ? null : (
           <Button label="Retry connection" icon="arrow.clockwise" onPress={() => void retry()} busy={busy} fullWidth testID="sync-retry" />
         )}
-        {sync.pending || sync.conflict ? (
+        {sync.unsaved() || sync.conflict ? (
           <Button
             label="Export pending changes"
             icon="square.and.arrow.up"

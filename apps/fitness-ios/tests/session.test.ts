@@ -82,7 +82,10 @@ describe("account session", () => {
     expect(session.getState()).toEqual({ status: "signedIn", owner: null });
     expect(secrets.values.get(keys.refresh)).toBe("refresh-1");
     expect(secrets.values.has(keys.owner)).toBe(false);
-    await session.setOwner("user_new");
+    // An owner reported for an earlier sign-in is ignored.
+    await session.setOwner("user_stale", session.generation() - 1);
+    expect(session.getState()).toEqual({ status: "signedIn", owner: null });
+    await session.setOwner("user_new", session.generation());
     expect(session.getState()).toEqual({ status: "signedIn", owner: "user_new" });
 
     behaviour.withRefresh = false;
@@ -117,5 +120,42 @@ describe("account session", () => {
     expect(calls.revoke).toEqual(["saved"]);
     expect(secrets.values.size).toBe(0);
     expect(session.getState()).toEqual({ status: "signedOut" });
+  });
+
+  test("a refresh that finishes after sign-out cannot sign the account back in", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revoked: string[] = [];
+    let entered = () => undefined as void;
+    const refreshing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "a", refreshToken: "r", expiresAt: null }),
+      refresh: async () => {
+        entered();
+        await gate;
+        return { accessToken: "late-access", refreshToken: "late-refresh", expiresAt: null };
+      },
+      revoke: async (token) => void revoked.push(token),
+    };
+    const secrets = memorySecrets({ [keys.refresh]: "saved", [keys.owner]: "user_a" });
+    const session = new Session(oauth, secrets.store);
+    await session.restore();
+    const pending = session.token();
+    // Sign out while Clerk is answering the refresh.
+    await refreshing;
+    await session.signOut();
+    release();
+    await expect(pending).rejects.toBeInstanceOf(SessionExpired);
+    expect(secrets.values.size).toBe(0);
+    expect(revoked).toEqual(["saved", "late-refresh"]);
+    const restored = new Session(oauth, secrets.store);
+    await restored.restore();
+    expect(restored.getState()).toEqual({ status: "signedOut" });
+    // A token for a past sign-in is refused.
+    await expect(session.token({ generation: session.generation() - 1 })).rejects.toBeInstanceOf(SessionExpired);
   });
 });

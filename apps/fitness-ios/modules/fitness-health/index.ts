@@ -84,6 +84,8 @@ type FitnessHealthNative = {
   dismissManualRevocations(revision: number): Promise<void>;
   setCutoff(cutoffMs: number): Promise<void>;
   resyncFromEarliest(): Promise<void>;
+  /** Excludes a directory of the app's own data from iCloud and computer backups. */
+  excludeFromBackup(path: string): void;
   addListener(event: "onStatus", listener: (status: SyncStatus) => void): EventSubscription;
 };
 

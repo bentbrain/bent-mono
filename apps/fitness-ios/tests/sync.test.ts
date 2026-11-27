@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { defaultSettings, settingsId } from "@bent/fitness-contracts/domain";
 import type { Mutation, RecordEntry, SaveResult } from "@bent/fitness-contracts/domain";
-import { OfflineError, SyncEngine } from "../src/data/sync-engine";
+import { OfflineError, RejectedChange, SyncEngine } from "../src/data/sync-engine";
 import type { Pending, SyncStorage } from "../src/data/sync-engine";
 
 const owner = "user_synthetic";
@@ -17,6 +17,10 @@ function memoryStorage() {
     readPending: (o) => [...(pending.get(o) ?? [])],
     addPending: (o, item) => void pending.set(o, [...(pending.get(o) ?? []), item]),
     removePending: (o, id) => void pending.set(o, (pending.get(o) ?? []).filter((p) => p.request.operationId !== id)),
+    acknowledge: (o, id, records) => {
+      pending.set(o, (pending.get(o) ?? []).filter((p) => p.request.operationId !== id));
+      snapshots.set(o, records);
+    },
   };
   return { storage, snapshots, pending };
 }
@@ -154,5 +158,90 @@ describe("sync engine", () => {
     engine.put(null, id);
     expect(engine.latest(id)).toEqual({ revision: 2, data: null });
     expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+  });
+
+  test("a load that a save overtook does not roll back the saved revision", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    // Hold the next load while it still reads revision 1.
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const load = fitness.transport.load;
+    let held = true;
+    fitness.transport.load = async () => {
+      const result = await load();
+      if (held) {
+        held = false;
+        await gate;
+      }
+      return result;
+    };
+    const refresh = engine.refresh();
+    expect(engine.put({ ...settings, calories: 2600 }, settingsId)).toBe(true);
+    await engine.flush();
+    release();
+    await refresh;
+    const saved = engine.getState().records.find((r) => r.id === settingsId);
+    expect(saved?.revision).toBe(2);
+    expect(device.snapshots.get(owner)?.find((r) => r.id === settingsId)?.revision).toBe(2);
+  });
+
+  test("a refused change holds the queue until it is discarded", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const save = fitness.transport.save;
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused")
+        throw new RejectedChange("Completed workouts keep their original results.");
+      return save(request);
+    };
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    engine.put(meal("Refused"));
+    engine.put(meal("Next"));
+    await engine.flush();
+    expect(engine.getState().rejected?.message).toBe("Completed workouts keep their original results.");
+    expect(engine.getState().pending).toBe(2);
+    // Sending again is held until the person decides.
+    await engine.flush();
+    expect(fitness.state.saves.filter((m) => m.data?.kind === "meal")).toHaveLength(0);
+    await engine.discardRejected();
+    expect(engine.getState()).toMatchObject({ rejected: null, pending: 0, error: "" });
+    expect([...fitness.records.values()].filter((r) => r.data.kind === "meal").map((r) => r.data.kind === "meal" && r.data.name)).toEqual(["Next"]);
+  });
+
+  test("a stopped engine ignores late replies and refuses changes", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const save = fitness.transport.save;
+    fitness.transport.save = async (request) => {
+      await gate;
+      return save(request);
+    };
+    engine.put(meal("Late"));
+    const flushing = engine.flush();
+    engine.stop();
+    device.snapshots.delete(owner);
+    release();
+    await flushing;
+    expect(device.snapshots.has(owner)).toBe(false);
+    expect(engine.put(meal("After"))).toBe(false);
+  });
+
+  test("the export includes typed values kept on the iPhone", async () => {
+    const engine = new SyncEngine({ owner, transport: fakeFitness([settingsRecord]).transport, storage: memoryStorage().storage });
+    await engine.start();
+    const exported = JSON.parse(engine.draftExport({ "workout:1:0:0:value": "12" }));
+    expect(exported).toMatchObject({ format: "fitness-pending-v1", typed: { "workout:1:0:0:value": "12" } });
   });
 });

@@ -27,6 +27,8 @@ export type SyncStorage = {
   readPending(owner: string): Pending[];
   addPending(owner: string, item: Pending): void;
   removePending(owner: string, operationId: string): void;
+  /** Removes a saved change from the queue and stores the records it produced, together. */
+  acknowledge(owner: string, operationId: string, records: RecordEntry[]): void;
 };
 
 /** Thrown by a transport when Fitness could not be reached. */
@@ -35,6 +37,12 @@ export class OfflineError extends Error {
     super("Fitness could not be reached. Changes stay on this iPhone until you're online.");
   }
 }
+
+/**
+ * Thrown by a transport when Fitness refused a change for good, such as an
+ * edit to a finished workout. Sending it again would be refused again.
+ */
+export class RejectedChange extends Error {}
 
 export type SyncState = {
   /** Cloud records with queued changes applied. */
@@ -51,6 +59,8 @@ export type SyncState = {
   /** Changes when editors should drop their local state and reload. */
   editorReset: number;
   settings: Settings | undefined;
+  /** The queued change Fitness refused, which holds the queue until it is discarded. */
+  rejected: { operationId: string; message: string } | null;
 };
 
 type Options = { owner: string; transport: Transport; storage: SyncStorage; now?: () => number; uuid?: () => string };
@@ -64,6 +74,9 @@ export class SyncEngine {
   private cloud: RecordEntry[] = [];
   private queue: Pending[] = [];
   private flushing: Promise<void> | null = null;
+  /** Counts saves Fitness acknowledged, so a load that started earlier is not applied. */
+  private acknowledged = 0;
+  private stopped = false;
   private conflictId: string | null = null;
   private listeners = new Set<() => void>();
   private snapshot: SyncState;
@@ -75,6 +88,7 @@ export class SyncEngine {
     saving: false,
     online: true,
     editorReset: 0,
+    rejected: null,
   };
 
   constructor({ owner, transport, storage, now = Date.now, uuid = () => crypto.randomUUID() }: Options) {
@@ -93,6 +107,7 @@ export class SyncEngine {
   getState = () => this.snapshot;
 
   private emit(changes: Partial<typeof this.base> = {}) {
+    if (this.stopped) return;
     Object.assign(this.base, changes);
     this.snapshot = this.compute();
     for (const listener of this.listeners) listener();
@@ -125,6 +140,15 @@ export class SyncEngine {
       .sort((a, b) => a.at - b.at || a.request.operationId.localeCompare(b.request.operationId));
   }
 
+  /**
+   * Stops the engine for good, before its account's data is deleted. Replies
+   * that arrive afterwards change nothing on this iPhone.
+   */
+  stop() {
+    this.stopped = true;
+    this.listeners.clear();
+  }
+
   /** Restores the queue and snapshot, then loads from Fitness and sends the queue. */
   async start() {
     try {
@@ -142,8 +166,10 @@ export class SyncEngine {
 
   /** Loads the account from Fitness, then sends anything queued. */
   async refresh() {
+    if (this.stopped) return false;
     try {
       await this.reload();
+      if (this.stopped) return false;
       this.emit({ ready: true, loaded: true, online: true, error: this.base.conflict ? this.base.error : "" });
     } catch (error) {
       this.fail(error, "Could not load your account. Pull to retry when connected.");
@@ -153,15 +179,34 @@ export class SyncEngine {
     return true;
   }
 
+  /**
+   * Loads the account. A load that a save acknowledgement overtook could
+   * hold older revisions, so it is discarded and the account loaded again.
+   */
   private async reload() {
-    const result = await this.transport.load();
-    if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
-    this.cloud = z.array(recordSchema).parse(result.records);
-    this.storage.writeSnapshot(this.owner, this.cloud);
+    for (let attempt = 0; ; attempt++) {
+      const before = this.acknowledged;
+      const result = await this.transport.load();
+      if (this.stopped) return;
+      if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
+      if (this.acknowledged !== before) {
+        if (attempt < 3) continue;
+        // Saves keep landing; the cloud copy already holds each acknowledged save.
+        return;
+      }
+      this.cloud = z.array(recordSchema).parse(result.records);
+      this.storage.writeSnapshot(this.owner, this.cloud);
+      return;
+    }
   }
 
   private fail(error: unknown, fallback: string) {
     if (error instanceof OfflineError) this.emit({ online: false, error: "" });
+    else if (error instanceof RejectedChange && this.queue[0])
+      this.emit({
+        rejected: { operationId: this.queue[0].request.operationId, message: error.message },
+        error: `Fitness refused a change: ${error.message} Export it if you want a copy, then discard it to keep saving.`,
+      });
     else this.emit({ error: error instanceof Error ? error.message : fallback });
   }
 
@@ -171,7 +216,7 @@ export class SyncEngine {
    */
   flush(): Promise<void> {
     if (this.flushing) return this.flushing;
-    if (!this.base.ready || this.base.conflict) return Promise.resolve();
+    if (this.stopped || !this.base.ready || this.base.conflict || this.base.rejected) return Promise.resolve();
     this.flushing = this.send().finally(() => {
       this.flushing = null;
     });
@@ -184,6 +229,7 @@ export class SyncEngine {
       while (this.queue[0]) {
         const item = this.queue[0];
         const result = await this.transport.save(item.request);
+        if (this.stopped) return;
         if (result.status === "conflict") {
           this.conflictId = item.request.id;
           this.emit({
@@ -194,10 +240,10 @@ export class SyncEngine {
         }
         const next = this.cloud.filter((r) => r.id !== item.request.id);
         if (result.record) next.push(result.record);
+        this.storage.acknowledge(this.owner, item.request.operationId, next);
         this.cloud = next;
-        this.storage.removePending(this.owner, item.request.operationId);
+        this.acknowledged++;
         this.readQueue();
-        this.storage.writeSnapshot(this.owner, this.cloud);
         this.emit({ online: true, error: "" });
       }
     } catch (error) {
@@ -221,6 +267,7 @@ export class SyncEngine {
    * since the editor opened it. Returns whether the change was queued.
    */
   put(data: Entity | null, id: string = this.uuid(), expectedRevision?: number) {
+    if (this.stopped) return false;
     if (!this.base.ready || this.base.conflict) {
       this.emit({ error: "Load your data and resolve conflicting changes before editing." });
       return false;
@@ -252,10 +299,20 @@ export class SyncEngine {
     return true;
   }
 
-  /** Loads again after an error. */
+  /** Loads again after an error, and sends a refused change once more. */
   retry() {
-    this.emit({ error: this.base.conflict ? this.base.error : "" });
+    this.emit({ error: this.base.conflict ? this.base.error : "", rejected: null });
     return this.refresh();
+  }
+
+  /** Removes the change Fitness refused from the queue, then sends the rest. */
+  async discardRejected() {
+    const rejected = this.base.rejected;
+    if (!rejected) return;
+    this.storage.removePending(this.owner, rejected.operationId);
+    this.readQueue();
+    this.emit({ rejected: null, error: "", editorReset: this.base.editorReset + 1 });
+    await this.flush();
   }
 
   /** Drops this iPhone's queued changes to the conflicting record and reloads it. */
@@ -269,8 +326,11 @@ export class SyncEngine {
     if (await this.refresh()) this.emit({ editorReset: this.base.editorReset + 1 });
   }
 
-  /** The queued changes as JSON, to keep before discarding them. */
-  draftExport() {
-    return JSON.stringify({ format: "fitness-pending-v1", pending: this.queue }, null, 2);
+  /**
+   * The queued changes as JSON, to keep before discarding them, with any
+   * values typed on this iPhone that are not saved yet.
+   */
+  draftExport(typed: Record<string, string> = {}) {
+    return JSON.stringify({ format: "fitness-pending-v1", pending: this.queue, typed }, null, 2);
   }
 }
