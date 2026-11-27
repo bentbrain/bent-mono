@@ -151,7 +151,7 @@ describe("account session", () => {
     release();
     await expect(pending).rejects.toBeInstanceOf(SessionExpired);
     expect(secrets.values.size).toBe(0);
-    expect(revoked).toEqual(["saved", "late-refresh"]);
+    expect(revoked.sort()).toEqual(["late-refresh", "saved"]);
     const restored = new Session(oauth, secrets.store);
     await restored.restore();
     expect(restored.getState()).toEqual({ status: "signedOut" });
@@ -224,5 +224,68 @@ describe("account session", () => {
     await switching;
     expect(memory.values.get(keys.refresh)).toBe("b-refresh");
     expect(session.getState()).toEqual({ status: "signedIn", owner: null });
+  });
+
+  test("sign-out clears the Keychain before Clerk answers the revocation", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "b-access", refreshToken: "b-refresh", expiresAt: null }),
+      refresh: async () => ({ accessToken: "x", refreshToken: null, expiresAt: null }),
+      revoke: async () => {
+        await gate;
+      },
+    };
+    const secrets = memorySecrets({ [keys.refresh]: "a-saved", [keys.owner]: "user_a" });
+    const session = new Session(oauth, secrets.store);
+    await session.restore();
+    // Revocation is still waiting for Clerk when sign-out returns.
+    await session.signOut();
+    expect(secrets.values.size).toBe(0);
+    const relaunched = new Session(oauth, secrets.store);
+    await relaunched.restore();
+    expect(relaunched.getState()).toEqual({ status: "signedOut" });
+    // A new sign-in doesn't wait for the old revocation.
+    await session.signIn();
+    expect(session.getState()).toEqual({ status: "signedIn", owner: null });
+    expect(secrets.values.get(keys.refresh)).toBe("b-refresh");
+    release();
+  });
+
+  test("a sign-out during a sign-in's Keychain write leaves the app signed out", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = () => undefined as void;
+    const writing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const oauth: OAuthClient = {
+      authorize: async () => ({ accessToken: "access", refreshToken: "refresh", expiresAt: null }),
+      refresh: async () => ({ accessToken: "x", refreshToken: null, expiresAt: null }),
+      revoke: async () => undefined,
+    };
+    const memory = memorySecrets();
+    const secrets: SecretStore = {
+      ...memory.store,
+      set: async (key, value) => {
+        entered();
+        await gate;
+        return memory.store.set(key, value);
+      },
+    };
+    const session = new Session(oauth, secrets);
+    await session.restore();
+    const signingIn = session.signIn();
+    await writing;
+    const signingOut = session.signOut();
+    release();
+    await expect(signingIn).rejects.toBeInstanceOf(SessionExpired);
+    await signingOut;
+    expect(session.getState()).toEqual({ status: "signedOut" });
+    expect(memory.values.size).toBe(0);
   });
 });

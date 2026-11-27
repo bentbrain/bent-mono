@@ -103,6 +103,9 @@ export class Session {
       await this.secrets.set(keys.refresh, refreshToken);
       await this.secrets.remove(keys.owner);
     });
+    // A sign-out during the Keychain write closed this sign-in; its own
+    // cleanup, queued after the write, removes the token again.
+    if (generation !== this.current) throw new SessionExpired();
     this.access = { token: tokens.accessToken, expiresAt: tokens.expiresAt };
     this.set({ status: "signedIn", owner: null });
   }
@@ -196,14 +199,20 @@ export class Session {
     });
   }
 
-  /** Revokes the refresh token where possible and forgets the sign-in. */
+  /**
+   * Forgets the sign-in on this iPhone, then asks Clerk to revoke its refresh
+   * token. The Keychain is cleared before this returns; revocation runs
+   * afterwards, outside the credential queue, so a slow or failed request
+   * neither keeps the token on the iPhone nor holds up a new sign-in.
+   */
   async signOut() {
     this.close({ status: "signedOut" });
-    await this.exclusive(async () => {
-      const saved = await this.secrets.get(keys.refresh).catch(() => null);
-      if (saved) await this.oauth.revoke(saved).catch(() => undefined);
+    const saved = await this.exclusive(async () => {
+      const token = await this.secrets.get(keys.refresh).catch(() => null);
       await this.secrets.remove(keys.refresh).catch(() => undefined);
       await this.secrets.remove(keys.owner).catch(() => undefined);
+      return token;
     });
+    if (saved) void this.oauth.revoke(saved).catch(() => undefined);
   }
 }

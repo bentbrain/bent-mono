@@ -301,4 +301,38 @@ describe("sync engine", () => {
     expect(await engine.refresh()).toBe(true);
     expect(engine.getState().records.some((r) => r.data.kind === "meal" && r.data.name === "From another device")).toBe(true);
   });
+
+  test("a save reply that crossed a load can't bring back a record removed elsewhere", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    const id = "33333333-3333-4333-8333-333333333333";
+    engine.put(meal("Oats"), id);
+    await engine.flush();
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const save = fitness.transport.save;
+    fitness.transport.save = async (request) => {
+      const result = await save(request);
+      await gate;
+      return result;
+    };
+    // Edit the meal; its reply is held while another device removes it and
+    // the iPhone loads the account.
+    engine.put({ ...meal("Oats"), calories: 450 }, id);
+    const flushing = engine.flush();
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    fitness.records.delete(id);
+    fitness.transport.save = save;
+    const refreshing = engine.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    release();
+    await flushing;
+    await refreshing;
+    expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+    expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
+  });
 });

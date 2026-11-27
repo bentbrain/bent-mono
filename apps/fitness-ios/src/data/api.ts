@@ -70,6 +70,7 @@ export function createApi(
       } catch {
         body = null;
       }
+      if (generation !== session.generation()) throw new SignedOutError();
       const parsed = ApiErrorBody.safeParse(body);
       throw new ApiError(
         response.status,

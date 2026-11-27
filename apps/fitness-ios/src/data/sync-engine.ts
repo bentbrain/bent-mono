@@ -76,6 +76,8 @@ export class SyncEngine {
   private flushing: Promise<void> | null = null;
   /** Counts saves Fitness acknowledged, so a load that started earlier is not applied. */
   private acknowledged = 0;
+  /** Counts loads applied, so a save whose reply crossed one can be checked again. */
+  private applied = 0;
   private stopped = false;
   private conflictId: string | null = null;
   private listeners = new Set<() => void>();
@@ -180,8 +182,9 @@ export class SyncEngine {
     // Saves kept overtaking the load; load once more now the queue is sent.
     if (!fresh && !this.stopped) {
       try {
-        await this.reload();
+        const settled = await this.reload();
         this.emit();
+        return settled;
       } catch (error) {
         this.fail(error, "Could not load your account. Pull to retry when connected.");
         return false;
@@ -204,6 +207,7 @@ export class SyncEngine {
       if (this.acknowledged !== before) continue;
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
+      this.applied++;
       return true;
     }
     return false;
@@ -234,11 +238,16 @@ export class SyncEngine {
 
   private async send() {
     this.emit({ saving: this.queue.length > 0 });
+    // A load applied while a save was in flight can't show whether the
+    // record changed or was removed after the save; load again at the end.
+    let crossed = false;
     try {
       while (this.queue[0]) {
         const item = this.queue[0];
+        const loadsBefore = this.applied;
         const result = await this.transport.save(item.request);
         if (this.stopped) return;
+        if (this.applied !== loadsBefore) crossed = true;
         if (result.status === "conflict") {
           this.conflictId = item.request.id;
           this.emit({
@@ -260,6 +269,10 @@ export class SyncEngine {
         this.acknowledged++;
         this.readQueue();
         this.emit({ online: true, error: "" });
+      }
+      if (crossed && !this.stopped) {
+        await this.reload();
+        this.emit();
       }
     } catch (error) {
       this.fail(error, "Save failed. Your pending changes stay on this iPhone.");

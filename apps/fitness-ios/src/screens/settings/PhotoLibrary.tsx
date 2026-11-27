@@ -52,6 +52,8 @@ export function PhotoLibrary() {
       exif: false,
       preferredAssetRepresentationMode: UIImagePickerPreferredAssetRepresentationMode.Compatible,
     }).catch((e: unknown) => {
+      // The picker can fail after writing its copy; clear it now.
+      clearPickerCopies();
       setError(message(e, "The photo library did not open. Try again."));
       return null;
     });
