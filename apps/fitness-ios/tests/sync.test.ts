@@ -500,4 +500,56 @@ describe("sync engine", () => {
     await flushing;
     expect(engine.getState().rejected?.message).toBe("Refused.");
   });
+
+  test("a save still waiting when the engine stops is never sent", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fitness.transport.load = async () => {
+      await gate;
+      return load();
+    };
+    const refreshing = engine.refresh();
+    engine.put(meal("Queued"));
+    engine.stop();
+    release();
+    await refreshing;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(fitness.state.saves).toHaveLength(0);
+  });
+
+  test("a reconcile load that succeeds after an offline refresh shows the phone online", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let loads = 0;
+    fitness.transport.save = async (request) => {
+      await gate;
+      return save(request);
+    };
+    fitness.transport.load = async () => {
+      if (++loads === 1) throw new OfflineError();
+      return load();
+    };
+    engine.put(meal("Oats"));
+    const flushing = engine.flush();
+    // A refresh queued behind the save fails offline; the reconcile load after it succeeds.
+    const refreshing = engine.refresh();
+    release();
+    await flushing;
+    await refreshing;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(engine.getState()).toMatchObject({ online: true, error: "", pending: 0 });
+  });
 });

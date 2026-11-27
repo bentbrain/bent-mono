@@ -85,8 +85,12 @@ export function createApi(
    * again once the body is read, so a reply for an earlier sign-in is never
    * returned to a later one.
    */
-  async function read<T>(path: string, init: RequestInit, parse: (response: Response) => Promise<T>): Promise<T> {
-    const generation = session.generation();
+  async function read<T>(
+    path: string,
+    init: RequestInit,
+    parse: (response: Response) => Promise<T>,
+    generation = session.generation(),
+  ): Promise<T> {
     const value = await parse(await send(path, init, generation));
     if (generation !== session.generation()) throw new SignedOutError();
     return value;
@@ -98,11 +102,18 @@ export function createApi(
   });
 
   return {
-    async loadRecords() {
-      return read("/api/app/records", {}, async (response) => AppRecords.parse(await response.json()));
+    /** The account's records. With `generation`, only under that sign-in. */
+    async loadRecords(generation?: number) {
+      return read("/api/app/records", {}, async (response) => AppRecords.parse(await response.json()), generation);
     },
-    async saveRecord(mutation: Mutation): Promise<SaveResult> {
-      return read("/api/app/records", json(mutation), async (response) => resultSchema.parse(await response.json()));
+    /** Saves a change. With `generation`, only under that sign-in. */
+    async saveRecord(mutation: Mutation, generation?: number): Promise<SaveResult> {
+      return read(
+        "/api/app/records",
+        json(mutation),
+        async (response) => resultSchema.parse(await response.json()),
+        generation,
+      );
     },
     async listPhotos(): Promise<PhotoSummary[]> {
       return read("/api/app/photos", {}, async (response) => PhotoList.parse(await response.json()).photos);

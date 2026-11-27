@@ -85,24 +85,26 @@ function deviceTimezone() {
 
 /** Loads the account for `owner` and keeps it in sync while the app runs. */
 export function AccountProvider({ owner, children }: { owner: string; children: ReactNode }) {
-  const engine = useMemo(
-    () =>
-      new SyncEngine({
+  const engine = useMemo(() => {
+    // The engine's requests belong to the sign-in that opened this account;
+    // a change still queued after signing out is never sent under another.
+    const generation = session.generation();
+    return new SyncEngine({
         owner,
         storage: sqliteStorage,
         transport: {
-          load: () => api.loadRecords(),
+          load: () => api.loadRecords(generation),
           // A change Fitness refuses as invalid would be refused again, so it
           // is held for the person to discard rather than sent forever.
           save: (request) =>
-            api.saveRecord(request).catch((error: unknown) => {
+            api.saveRecord(request, generation).catch((error: unknown) => {
               if (error instanceof ApiError && [400, 413, 422].includes(error.status))
                 throw new RejectedChange(error.message);
               throw error;
             }),
         },
-      }),
-    [owner],
+      });
+  }, [owner],
   );
   const state = useSyncExternalStore(engine.subscribe, engine.getState);
 

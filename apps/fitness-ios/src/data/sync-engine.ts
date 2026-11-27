@@ -38,6 +38,9 @@ export class OfflineError extends Error {
   }
 }
 
+/** Thrown for work that was waiting when the engine stopped; it never reached Fitness. */
+class StoppedError extends Error {}
+
 /**
  * Thrown by a transport when Fitness refused a change for good, such as an
  * edit to a finished workout. Sending it again would be refused again.
@@ -168,9 +171,13 @@ export class SyncEngine {
     await this.refresh();
   }
 
-  /** Runs a load or a save after every one requested before it. */
+  /**
+   * Runs a load or a save after every one requested before it. Work still
+   * waiting when the engine stops is never sent.
+   */
   private serial<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.lane.then(work, work);
+    const guarded = () => (this.stopped ? Promise.reject(new StoppedError()) : work());
+    const run = this.lane.then(guarded, guarded);
     this.lane = run.catch(() => undefined);
     return run;
   }
@@ -181,8 +188,7 @@ export class SyncEngine {
     try {
       await this.reload();
       if (this.stopped) return false;
-      const held = this.base.conflict || this.base.rejected;
-      this.emit({ ready: true, loaded: true, online: true, error: held ? this.base.error : "" });
+      this.emit({ ready: true, loaded: true, ...this.reached() });
     } catch (error) {
       this.fail(error, "Could not load your account. Pull to retry when connected.");
       return false;
@@ -202,7 +208,14 @@ export class SyncEngine {
     });
   }
 
+  /** Online again, keeping a conflict's or a refusal's message and clearing any other error. */
+  private reached() {
+    const held = this.base.conflict || this.base.rejected;
+    return { online: true, error: held ? this.base.error : "" };
+  }
+
   private fail(error: unknown, fallback: string) {
+    if (this.stopped || error instanceof StoppedError) return;
     if (error instanceof OfflineError) this.emit({ online: false, error: "" });
     else if (error instanceof RejectedChange && this.queue[0])
       this.emit({
@@ -275,7 +288,7 @@ export class SyncEngine {
     if (saved && !this.stopped) {
       try {
         await this.reload();
-        this.emit();
+        if (!this.stopped) this.emit(this.reached());
       } catch (error) {
         if (!this.base.error && !this.base.conflict && !this.base.rejected)
           this.fail(error, "Could not load your account. Pull to retry when connected.");
