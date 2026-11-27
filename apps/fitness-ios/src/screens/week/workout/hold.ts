@@ -1,4 +1,5 @@
 import type { Workout } from "@bent/fitness-contracts/domain";
+import { formatDuration } from "@bent/fitness-contracts/timing";
 import type { SetEntry } from "./session";
 
 /*
@@ -63,6 +64,26 @@ export function holdPhase(hold: Hold, now: number): HoldPhase {
 /** When the whole hold ends, in epoch milliseconds. */
 export function holdEndsAt(hold: Hold) {
   return segments(hold).at(-1)?.end ?? hold.startedAt;
+}
+
+/**
+ * The whole millisecond a finished hold is recorded at. A decimal target
+ * can end part-way through a millisecond, and the rest it starts needs a
+ * whole-millisecond deadline.
+ */
+export function holdFinishedAt(hold: Hold) {
+  return Math.ceil(holdEndsAt(hold));
+}
+
+/** Whether the hold's set is still there and still to do, so the hold may record it. */
+export function holdSetOpen(workout: Workout, hold: Hold) {
+  const set = workout.exercises[hold.exerciseIndex]?.sets[hold.setIndex];
+  return Boolean(set && !set.done && !set.skipped);
+}
+
+/** A hold target for a label: "0:30", or "22.5 s" for decimal seconds. */
+export function targetLabel(seconds: number) {
+  return Number.isInteger(seconds) ? formatDuration(seconds) : `${seconds} s`;
 }
 
 /**

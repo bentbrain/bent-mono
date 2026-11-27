@@ -6,7 +6,7 @@ import { Button } from "../../../ui/Button";
 import { AppText } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { cn, shape } from "../../../ui/typography";
-import { holdEndsAt, holdPhase, holdResult, phaseAnnouncement, phaseKey, phaseTitle, startHold } from "./hold";
+import { holdFinishedAt, holdPhase, holdResult, holdSetOpen, phaseAnnouncement, phaseKey, phaseTitle, startHold } from "./hold";
 import type { Hold, HoldPhase } from "./hold";
 import type { SetEntry } from "./session";
 
@@ -54,9 +54,9 @@ export function useHoldTimer({
   const hold = useSyncExternalStore(subscribe, () => holds.get(workoutId) ?? null);
   const setHold = useCallback((next: Hold | null) => storeHold(workoutId, next), [workoutId]);
   const [now, setNow] = useState(() => Date.now());
-  const latest = useRef({ record, onStart });
+  const latest = useRef({ record, onStart, workout });
   useLayoutEffect(() => {
-    latest.current = { record, onStart };
+    latest.current = { record, onStart, workout };
   });
 
   useEffect(() => {
@@ -79,7 +79,13 @@ export function useHoldTimer({
     const first = announced.current === null;
     announced.current = key;
     if (phase.kind === "done") {
-      if (latest.current.record(hold, holdResult(hold, holdEndsAt(hold)) ?? {}, holdEndsAt(hold))) haptic("success");
+      // A set handled elsewhere since the hold started keeps that result.
+      if (!holdSetOpen(latest.current.workout, hold)) {
+        setHold(null);
+        return;
+      }
+      const at = holdFinishedAt(hold);
+      if (latest.current.record(hold, holdResult(hold, at) ?? {}, at)) haptic("success");
       else haptic("error");
       AccessibilityInfo.announceForAccessibility(phaseAnnouncement(hold, phase));
       setHold(null);
@@ -118,10 +124,10 @@ export function useHoldTimer({
   }, [hold, setHold]);
 
   // A hold whose set was handled elsewhere, for example on another device, ends.
-  const set = hold ? workout.exercises[hold.exerciseIndex]?.sets[hold.setIndex] : undefined;
+  const open = hold ? holdSetOpen(workout, hold) : true;
   useEffect(() => {
-    if (hold && (!set || set.done || set.skipped)) setHold(null);
-  }, [hold, set, setHold]);
+    if (hold && !open) setHold(null);
+  }, [hold, open, setHold]);
 
   return { hold, phase: phase?.kind === "done" ? null : phase, now, start, stop };
 }

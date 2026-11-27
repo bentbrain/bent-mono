@@ -25,11 +25,12 @@ export function useWorkoutActivity({
   hold: Hold | null;
   units: Settings["units"];
 }) {
-  // Content changes at the end of a rest or hold phase, so the clock moves
-  // to each of those moments and when the app returns.
+  // Content changes at the end of each rest and hold phase, so the clock
+  // moves to each of those moments and when the app returns. The activity
+  // goes stale only at the end of a whole hold, which can be later.
   const [now, setNow] = useState(() => Date.now());
   const content = activityContent(workoutId, workout, hold, units, now);
-  const boundary = content?.staleAt ?? null;
+  const boundary = content?.state.timerEnd ?? null;
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setNow(Date.now());

@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createWorkout, defaultSettings } from "@bent/fitness-contracts/domain";
+import { createWorkout, defaultSettings, workoutSchema } from "@bent/fitness-contracts/domain";
 import type { Workout } from "@bent/fitness-contracts/domain";
 import {
   holdEndsAt,
+  holdFinishedAt,
+  holdSetOpen,
+  targetLabel,
   holdPhase,
   holdResult,
   phaseAnnouncement,
@@ -201,5 +204,37 @@ describe("workout Live Activity", () => {
     const plank = startHold(w, 0, 0, { seconds: 30, right: null }, t0);
     if (!plank) throw new Error("No hold");
     expect(activityContent("w1", w, plank, "kg", s(1))?.state.detail).toBe("Set 1 of 2 · 30 s");
+  });
+});
+
+describe("recording a hold", () => {
+  test("a decimal target records at a whole millisecond, so its rest saves", () => {
+    const w = workout();
+    const hold = startHold(w, 0, 0, { seconds: 1.2345, right: null }, t0);
+    if (!hold) throw new Error("No hold");
+    expect(holdEndsAt(hold)).toBe(t0 + 5000 + 1234.5);
+    const at = holdFinishedAt(hold);
+    expect(Number.isInteger(at)).toBe(true);
+    const recorded = applySetChange(w, 0, 0, holdResult(hold, at) ?? {}, { startRest: true, now: at });
+    expect(recorded.exercises[0]?.sets[0]?.value).toBe(1.2345);
+    expect(workoutSchema.safeParse(recorded).success).toBe(true);
+  });
+
+  test("records only a set that is still to do", () => {
+    const w = workout();
+    const hold = startHold(w, 0, 0, { seconds: 30, right: null }, t0);
+    if (!hold) throw new Error("No hold");
+    expect(holdSetOpen(w, hold)).toBe(true);
+    // Skipped or done on another device while the logger was closed.
+    expect(holdSetOpen(applySetChange(w, 0, 0, { skipped: true }, { startRest: false, now: t0 }), hold)).toBe(false);
+    expect(holdSetOpen(applySetChange(w, 0, 0, { done: true }, { startRest: false, now: t0 }), hold)).toBe(false);
+    expect(holdSetOpen({ ...w, exercises: w.exercises.slice(1) }, { ...hold, exerciseIndex: 9 })).toBe(false);
+  });
+
+  test("labels targets with their decimals", () => {
+    expect(targetLabel(30)).toBe("0:30");
+    expect(targetLabel(90)).toBe("1:30");
+    expect(targetLabel(0.5)).toBe("0.5 s");
+    expect(targetLabel(22.5)).toBe("22.5 s");
   });
 });

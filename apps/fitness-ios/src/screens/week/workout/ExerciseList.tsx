@@ -10,10 +10,9 @@ import { AppText, AppTextInput } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { cn, shape } from "../../../ui/typography";
 import { ExerciseThumb, prescriptionText } from "../../shared/exercise";
-import { formatDuration } from "@bent/fitness-contracts/timing";
 import { HoldCountdown } from "./HoldTimer";
 import type { HoldTimer } from "./HoldTimer";
-import { targetSeconds } from "./hold";
+import { targetLabel, targetSeconds } from "./hold";
 import { fieldKey, setInputs, setKeys } from "./inputs";
 import type { SetInput } from "./inputs";
 import { applySetChange, currentExercise } from "./session";
@@ -311,7 +310,7 @@ function SetRow({
       {hold && holding ? <HoldCountdown timer={hold} testID={`${testBase}-hold`} /> : null}
       {hold && !holding && !set.done && !set.skipped ? (
         <Button
-          label={`Start hold · ${formatDuration(targets.seconds)}${side ? " each side" : ""}`}
+          label={`Start hold · ${targetLabel(targets.seconds)}${side ? " each side" : ""}`}
           tone="tinted"
           icon="timer"
           fullWidth
