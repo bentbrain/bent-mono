@@ -2210,7 +2210,10 @@ small,
 .chart-frame:has(> .sparkline) {
   max-width: 480px;
 }
-.chart-frame > svg {
+/* Sideways drags select points, on the chart and on its card; vertical
+   drags scroll the page. */
+.chart-frame > svg,
+.chart-frame > .chart-card {
   touch-action: pan-y;
 }
 /* The keyboard and screen reader control for a chart's points, over the chart. */

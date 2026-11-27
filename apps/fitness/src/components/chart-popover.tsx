@@ -96,15 +96,19 @@ export function ChartCard({
   style,
   className,
   onPointerDown,
+  onPointerMove,
   onPointerUp,
+  onPointerCancel,
 }: {
   detail: ChartDetail;
   cardRef?: Ref<HTMLDivElement>;
   style?: CSSProperties;
   className?: string;
-  /** Presses on the card, passed on so they select the point beneath it. */
+  /** Presses and drags on the card, passed on so they select the points beneath it. */
   onPointerDown?: (event: PointerEvent<Element>) => void;
+  onPointerMove?: (event: PointerEvent<Element>) => void;
   onPointerUp?: (event: PointerEvent<Element>) => void;
+  onPointerCancel?: (event: PointerEvent<Element>) => void;
 }) {
   return (
     <div
@@ -113,7 +117,9 @@ export function ChartCard({
       style={style}
       aria-hidden="true"
       onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
       <p className="chart-card-title">{detail.title}</p>
       <dl>
@@ -272,6 +278,9 @@ export function ChartPopover({
   } | null>(null);
   // Whether the mouse made the selection, so leaving the chart clears only that.
   const byMouse = useRef(false);
+  // A press in the chart moves focus off the slider; that blur keeps the
+  // selection the press makes.
+  const pressing = useRef(false);
   const hint = useId();
   const point = selected === null ? undefined : points[selected];
   const shown = point && selected !== null ? detail(selected) : undefined;
@@ -309,6 +318,10 @@ export function ChartPopover({
   };
 
   const onPointerDown = (event: PointerEvent<Element>) => {
+    pressing.current = true;
+    setTimeout(() => {
+      pressing.current = false;
+    }, 0);
     if (event.pointerType !== "touch") return choose(event);
     // A touch selects on release, or once it moves sideways.
     touch.current = {
@@ -320,7 +333,7 @@ export function ChartPopover({
     };
   };
 
-  const onPointerMove = (event: PointerEvent<SVGSVGElement>) => {
+  const onPointerMove = (event: PointerEvent<Element>) => {
     if (event.pointerType !== "touch") return choose(event);
     const current = touch.current;
     if (!current || current.id !== event.pointerId) return;
@@ -346,7 +359,7 @@ export function ChartPopover({
     if (!current.scrubbing) choose(event);
   };
 
-  const onPointerCancel = (event: PointerEvent<SVGSVGElement>) => {
+  const onPointerCancel = (event: PointerEvent<Element>) => {
     const current = touch.current;
     if (!current || current.id !== event.pointerId) return;
     touch.current = null;
@@ -399,7 +412,9 @@ export function ChartPopover({
         aria-valuenow={(selected ?? -1) + 1}
         aria-valuetext={shown ? spokenDetail(shown) : "No point selected"}
         onKeyDown={onKeyDown}
-        onBlur={() => setSelected(null)}
+        onBlur={() => {
+          if (!pressing.current) setSelected(null);
+        }}
       />
       <p id={hint} className="visually-hidden">
         Use the left and right arrow keys to read each point.
@@ -411,7 +426,9 @@ export function ChartPopover({
           detail={shown}
           cardRef={card}
           onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
         />
       )}
     </div>
