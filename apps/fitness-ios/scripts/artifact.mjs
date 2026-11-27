@@ -8,6 +8,26 @@ const { shareDescription, updateDescription } = createRequire(import.meta.url)("
 
 export const bundleIds = { production: "build.bent.fitness", development: "build.bent.fitness.dev" };
 
+/**
+ * The bytes of a section as `otool -X -s` prints it. Each line is an address,
+ * a tab, then the data: single bytes for x86_64 slices, and little-endian
+ * 32-bit words for arm64 slices, the last one possibly shorter.
+ */
+export function otoolSectionBytes(text) {
+  return text.split("\n").flatMap((line) => {
+    const [, data = ""] = line.split("\t");
+    return data
+      .trim()
+      .split(/\s+/)
+      .filter((token) => /^(?:[0-9a-f]{2})+$/.test(token))
+      .flatMap((token) => {
+        const bytes = token.match(/../g) ?? [];
+        // A word is printed as a number, so its bytes read in reverse.
+        return (bytes.length > 1 ? bytes.reverse() : bytes).map((byte) => parseInt(byte, 16));
+      });
+  });
+}
+
 /** The HealthKit entitlement keys the app has, each set to true. */
 export const healthEntitlements = [
   "com.apple.developer.healthkit",
