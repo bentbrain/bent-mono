@@ -182,9 +182,10 @@ describe("sync engine", () => {
     };
     const refresh = engine.refresh();
     expect(engine.put({ ...settings, calories: 2600 }, settingsId)).toBe(true);
-    await engine.flush();
+    const flushing = engine.flush();
     release();
     await refresh;
+    await flushing;
     const saved = engine.getState().records.find((r) => r.id === settingsId);
     expect(saved?.revision).toBe(2);
     expect(device.snapshots.get(owner)?.find((r) => r.id === settingsId)?.revision).toBe(2);
@@ -367,5 +368,213 @@ describe("sync engine", () => {
     expect(engine.getState().pending).toBe(0);
     expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
     expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
+  });
+
+  test("a refused change later in the pass still reconciles an acknowledged save", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    const id = "55555555-5555-4555-8555-555555555555";
+    const save = fitness.transport.save;
+    // The first save lands, then another device removes the record before
+    // the reply; the second change is refused.
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      const result = await save(request);
+      fitness.records.delete(id);
+      return result;
+    };
+    engine.put(meal("Oats"), id);
+    engine.put(meal("Refused"));
+    await engine.flush();
+    expect(engine.getState().rejected?.message).toBe("Refused.");
+    expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+    expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
+  });
+
+  test("loads run in order, so an older load never replaces a newer one", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    await engine.start();
+    const id = "66666666-6666-4666-8666-666666666666";
+    engine.put(meal("Oats"), id);
+    await engine.flush();
+    // The first load reads the record and is held; the second sees it removed.
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    fitness.transport.load = async () => {
+      const result = await load();
+      if (++calls === 1) await gate;
+      return result;
+    };
+    const slow = engine.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    fitness.records.delete(id);
+    // The newer refresh waits for the older load, then applies after it.
+    const newer = engine.refresh();
+    release();
+    await slow;
+    await newer;
+    expect(engine.getState().records.some((r) => r.id === id)).toBe(false);
+    expect(device.snapshots.get(owner)?.some((r) => r.id === id)).toBe(false);
+  });
+
+  test("a failed reconcile load keeps a refused change and its message", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      return save(request);
+    };
+    fitness.transport.load = async () => {
+      throw new Error("Fitness had a problem. Try again shortly.");
+    };
+    engine.put(meal("Oats"));
+    engine.put(meal("Refused"));
+    await engine.flush();
+    expect(engine.getState().rejected?.message).toBe("Refused.");
+    expect(engine.getState().error).toContain("Fitness refused a change: Refused.");
+    fitness.transport.load = load;
+  });
+
+  test("loads run in order, so the newest load's result stands after an older one fails", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    fitness.transport.load = async () => {
+      if (++calls === 1) {
+        await gate;
+        throw new OfflineError();
+      }
+      return load();
+    };
+    const slow = engine.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    const newer = engine.refresh();
+    release();
+    expect(await slow).toBe(false);
+    expect(await newer).toBe(true);
+    // The newer load ran after the failed one, so its result stands.
+    expect(engine.getState()).toMatchObject({ online: true, error: "", loaded: true });
+  });
+
+  test("a refusal shows at once while the reconcile load is still running", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      return save(request);
+    };
+    fitness.transport.load = async () => {
+      await gate;
+      return load();
+    };
+    engine.put(meal("Oats"));
+    engine.put(meal("Refused"));
+    const flushing = engine.flush();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(engine.getState()).toMatchObject({ saving: false, rejected: { message: "Refused." } });
+    release();
+    await flushing;
+    expect(engine.getState().rejected?.message).toBe("Refused.");
+  });
+
+  test("a save still waiting when the engine stops is never sent", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fitness.transport.load = async () => {
+      await gate;
+      return load();
+    };
+    const refreshing = engine.refresh();
+    engine.put(meal("Queued"));
+    engine.stop();
+    release();
+    await refreshing;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(fitness.state.saves).toHaveLength(0);
+  });
+
+  test("a reconcile load that succeeds after an offline refresh shows the phone online", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let loads = 0;
+    fitness.transport.save = async (request) => {
+      await gate;
+      return save(request);
+    };
+    fitness.transport.load = async () => {
+      if (++loads === 1) throw new OfflineError();
+      return load();
+    };
+    engine.put(meal("Oats"));
+    const flushing = engine.flush();
+    // A refresh queued behind the save fails offline; the reconcile load after it succeeds.
+    const refreshing = engine.refresh();
+    release();
+    await flushing;
+    await refreshing;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(engine.getState()).toMatchObject({ online: true, error: "", pending: 0 });
+  });
+
+  test("a refusal keeps its message through an offline refresh and the reconcile after it", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: memoryStorage().storage });
+    await engine.start();
+    const save = fitness.transport.save;
+    const load = fitness.transport.load;
+    fitness.transport.save = async (request) => {
+      if (request.data?.kind === "meal" && request.data.name === "Refused") throw new RejectedChange("Refused.");
+      return save(request);
+    };
+    engine.put(meal("Oats"));
+    engine.put(meal("Refused"));
+    await engine.flush();
+    fitness.transport.load = async () => {
+      throw new OfflineError();
+    };
+    await engine.refresh();
+    expect(engine.getState()).toMatchObject({ online: false, rejected: { message: "Refused." } });
+    expect(engine.getState().error).toContain("Refused.");
+    fitness.transport.load = load;
+    await engine.refresh();
+    expect(engine.getState()).toMatchObject({ online: true, pending: 1, rejected: { message: "Refused." } });
+    expect(engine.getState().error).toContain("Refused.");
   });
 });

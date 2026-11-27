@@ -38,6 +38,9 @@ export class OfflineError extends Error {
   }
 }
 
+/** Thrown for work that was waiting when the engine stopped; it never reached Fitness. */
+class StoppedError extends Error {}
+
 /**
  * Thrown by a transport when Fitness refused a change for good, such as an
  * edit to a finished workout. Sending it again would be refused again.
@@ -74,8 +77,12 @@ export class SyncEngine {
   private cloud: RecordEntry[] = [];
   private queue: Pending[] = [];
   private flushing: Promise<void> | null = null;
-  /** Counts saves Fitness acknowledged, so a load that started earlier is not applied. */
-  private acknowledged = 0;
+  /**
+   * Loads and saves run one at a time, in the order requested. A load then
+   * reflects every save acknowledged before it, and an acknowledgement is
+   * newer than every load applied before it.
+   */
+  private lane: Promise<unknown> = Promise.resolve();
   private stopped = false;
   private conflictId: string | null = null;
   private listeners = new Set<() => void>();
@@ -164,54 +171,54 @@ export class SyncEngine {
     await this.refresh();
   }
 
+  /**
+   * Runs a load or a save after every one requested before it. Work still
+   * waiting when the engine stops is never sent.
+   */
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const guarded = () => (this.stopped ? Promise.reject(new StoppedError()) : work());
+    const run = this.lane.then(guarded, guarded);
+    this.lane = run.catch(() => undefined);
+    return run;
+  }
+
   /** Loads the account from Fitness, then sends anything queued. */
   async refresh() {
     if (this.stopped) return false;
-    let fresh: boolean;
     try {
-      fresh = await this.reload();
+      await this.reload();
       if (this.stopped) return false;
-      this.emit({ ready: true, loaded: true, online: true, error: this.base.conflict ? this.base.error : "" });
+      this.emit({ ready: true, loaded: true, ...this.reached() });
     } catch (error) {
       this.fail(error, "Could not load your account. Pull to retry when connected.");
       return false;
     }
     await this.flush();
-    // Saves kept overtaking the load; load once more now the queue is sent.
-    if (!fresh && !this.stopped) {
-      try {
-        const settled = await this.reload();
-        this.emit();
-        return settled;
-      } catch (error) {
-        this.fail(error, "Could not load your account. Pull to retry when connected.");
-        return false;
-      }
-    }
     return true;
   }
 
-  /**
-   * Loads the account. A load that a save acknowledgement overtook could
-   * hold older revisions, so it is discarded and the account loaded again.
-   * Returns false when saves kept overtaking it and nothing was applied.
-   */
-  private async reload(): Promise<boolean> {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const before = this.acknowledged;
+  /** Loads the account and keeps it as the cloud copy. */
+  private reload() {
+    return this.serial(async () => {
       const result = await this.transport.load();
-      if (this.stopped) return true;
+      if (this.stopped) return;
       if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
-      if (this.acknowledged !== before) continue;
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
-      return true;
-    }
-    return false;
+    });
+  }
+
+  /** Online again, keeping a conflict's or a refusal's message and clearing any other error. */
+  private reached() {
+    const held = this.base.conflict || this.base.rejected;
+    return { online: true, error: held ? this.base.error : "" };
   }
 
   private fail(error: unknown, fallback: string) {
-    if (error instanceof OfflineError) this.emit({ online: false, error: "" });
+    if (this.stopped || error instanceof StoppedError) return;
+    // Going offline keeps a conflict's or a refusal's message; it still applies.
+    if (error instanceof OfflineError)
+      this.emit({ online: false, error: this.base.conflict || this.base.rejected ? this.base.error : "" });
     else if (error instanceof RejectedChange && this.queue[0])
       this.emit({
         rejected: { operationId: this.queue[0].request.operationId, message: error.message },
@@ -239,14 +246,14 @@ export class SyncEngine {
 
   private async send() {
     this.emit({ saving: this.queue.length > 0 });
-    // A save's reply can be older than the account: a replayed receipt, or
-    // a reply that crossed a load. Once the queue is sent, the account is
-    // loaded again, so a record removed elsewhere doesn't stay on the iPhone.
+    // A save's reply can be a replayed receipt, older than the account. Once
+    // the queue is sent, the account is loaded again, so a record removed on
+    // another device doesn't stay on the iPhone.
     let saved = false;
     try {
       while (this.queue[0]) {
         const item = this.queue[0];
-        const result = await this.transport.save(item.request);
+        const result = await this.serial(() => this.transport.save(item.request));
         if (this.stopped) return;
         if (result.status === "conflict") {
           this.conflictId = item.request.id;
@@ -256,8 +263,8 @@ export class SyncEngine {
           });
           break;
         }
-        // A load that finished first can hold a newer version than this
-        // acknowledgement; the newer version stays.
+        // A replayed receipt can be older than a load applied before it;
+        // the newer version stays.
         const held = this.cloud.find((r) => r.id === item.request.id);
         const acknowledgedRevision = item.request.revision + 1;
         const next =
@@ -266,19 +273,28 @@ export class SyncEngine {
             : [...this.cloud.filter((r) => r.id !== item.request.id), ...(result.record ? [result.record] : [])];
         this.storage.acknowledge(this.owner, item.request.operationId, next);
         this.cloud = next;
-        this.acknowledged++;
         this.readQueue();
         saved = true;
         this.emit({ online: true, error: "" });
       }
-      if (saved && !this.stopped) {
-        await this.reload();
-        this.emit();
-      }
     } catch (error) {
+      // A refusal or error shows at once, before reconciling.
       this.fail(error, "Save failed. Your pending changes stay on this iPhone.");
+      if (error instanceof OfflineError) saved = false;
     } finally {
       this.emit({ saving: false });
+    }
+    // Reconcile after any acknowledged save, even when a later change was
+    // refused. A failed reconcile load never replaces a refusal, a conflict
+    // or an error already shown; the next load reconciles instead.
+    if (saved && !this.stopped) {
+      try {
+        await this.reload();
+        if (!this.stopped) this.emit(this.reached());
+      } catch (error) {
+        if (!this.base.error && !this.base.conflict && !this.base.rejected)
+          this.fail(error, "Could not load your account. Pull to retry when connected.");
+      }
     }
   }
 
