@@ -154,21 +154,26 @@ function createBridge(): Bridge {
         );
       const caller = invocation.safeParse(options ?? {});
       const cancel = caller.success ? caller.data.signal : undefined;
-      // Each call gets a signal of its own, linked to the account until the
-      // call settles, so the account's signal keeps no listeners from it.
-      const { signal, release } = either(
-        cancel ?? new AbortController().signal,
-        lifetime.signal,
-      );
       let started = false;
       let stopWaiting: () => void = () => undefined;
       const run = inTurn(async () => {
         started = true;
         stopWaiting();
         if (!live()) return refused();
-        const result = await agent.act(request.data, { signal });
-        return live() ? result : refused();
-      }).finally(release);
+        if (cancel?.aborted) return refused("The call was cancelled.");
+        // Each running call gets a signal of its own, linked to the account
+        // until it settles, so the account's signal keeps no listeners from it.
+        const { signal, release } = either(
+          cancel ?? new AbortController().signal,
+          lifetime.signal,
+        );
+        try {
+          const result = await agent.act(request.data, { signal });
+          return live() ? result : refused();
+        } finally {
+          release();
+        }
+      });
       if (!cancel) return run;
       // A call still queued behind another reports its cancellation at once.
       // Once it runs, the bridge reports which steps finished.
