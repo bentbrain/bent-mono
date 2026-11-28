@@ -254,7 +254,7 @@ export function Nutrition({
             <li key={r.id}>
               <Button
                 className="quick-add"
-                aria-label={`Add ${r.data.name} to ${formatDate(date)}`}
+                aria-label={`Add ${r.data.name} to ${formatDate(date)}, ${foodSummary(r.data, tracked)}`}
                 onClick={() => {
                   if (sync.put({ ...r.data, kind: "meal", date }))
                     setNotice(`Added ${r.data.name} for ${formatDate(date)}.`);
@@ -357,8 +357,7 @@ export function Nutrition({
             }}
             onUseCurrent={() => open(savedVersion())}
             onSaveAsNew={() => {
-              if (form.current)
-                save(form.current, undefined, opened.current);
+              if (form.current) save(form.current, undefined, opened.current);
             }}
           />
         )}
@@ -445,7 +444,7 @@ export function Nutrition({
                   </div>
                   <Button
                     appearance="ghost"
-                    aria-label={`Remove regular ${r.data.name}`}
+                    aria-label={`Remove regular ${r.data.name}, ${foodSummary(r.data, tracked)}`}
                     onClick={() =>
                       window.confirm(`Remove ${r.data.name}?`) &&
                       sync.put(null, r.id, r.revision)

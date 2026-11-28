@@ -432,3 +432,35 @@ test("tool names stay distinct when ids share a prefix", async ({ page }) => {
   const second = await toolNames(page);
   expect(second.filter((name) => first.includes(name))).toEqual([]);
 });
+
+test("an agent tells saved meals with the same name apart", async ({
+  page,
+}) => {
+  await page.goto("/food");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const protein of ["12", "20"]) {
+    await page.getByLabel("Meal or snack").fill("Oats");
+    await page.getByLabel("Calories · kcal").fill("350");
+    await page.getByLabel("Protein · g", { exact: true }).fill(protein);
+    await page.getByLabel("Save as a regular meal").check();
+    await page.getByRole("button", { name: "Add food", exact: true }).click();
+    await expect(page.locator(".sync-state")).toHaveText("Saved");
+  }
+  const quickAdds = (await snapshot(page)).filter((entry) =>
+    entry.label?.startsWith("Add Oats"),
+  );
+  expect(quickAdds).toHaveLength(2);
+  expect(new Set(quickAdds.map((entry) => entry.label)).size).toBe(2);
+  const richer = quickAdds.find((entry) =>
+    entry.label?.endsWith("20g protein"),
+  );
+  expect(richer, "the 20g variant is named by its protein").toBeTruthy();
+  const logged = page
+    .locator(".food-screen > .entries .list-row")
+    .filter({ hasText: "20g protein" });
+  await expect(logged).toHaveCount(1);
+  const result = await act(page, [{ ref: richer?.ref ?? "", action: "press" }]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(logged).toHaveCount(2);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+});
