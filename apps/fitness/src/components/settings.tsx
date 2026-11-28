@@ -113,6 +113,8 @@ function describeIssue(
       text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.`,
     };
   }
+  if (field === "equipment" && index === undefined)
+    return { text: "Keep up to 40 equipment items." };
   if (field === "equipment" && typeof index === "number")
     return {
       id: `equipment-${index}`,
@@ -153,6 +155,7 @@ export function SettingsEditor({
   );
   const [dumbbellError, setDumbbellError] = useState("");
   const [errorField, setErrorField] = useState<string>();
+  const form = useRef<HTMLFormElement>(null);
   const [exporting, setExporting] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
   const dirty =
@@ -256,6 +259,7 @@ export function SettingsEditor({
         </header>
       )}
       <form
+        ref={form}
         onSubmit={(e) => {
           e.preventDefault();
           save();
@@ -792,9 +796,17 @@ export function SettingsEditor({
           <Button
             type="submit"
             appearance="primary"
-            onClick={(event) => {
-              // Saving here, not on submit, lets an agent's press fail with the reason.
+            onClick={(event, details) => {
+              // People submit the form, so the browser checks its fields
+              // first. An agent's press saves here and fails with the reason.
+              if (details.source !== "agent") return;
               event.preventDefault();
+              const invalid =
+                form.current?.querySelector<HTMLInputElement>(":invalid");
+              if (invalid) {
+                const label = invalid.labels?.[0]?.textContent ?? "A setting";
+                throw new Error(`${label}: ${invalid.validationMessage}`);
+              }
               const problem = save();
               if (problem) throw new Error(problem);
             }}

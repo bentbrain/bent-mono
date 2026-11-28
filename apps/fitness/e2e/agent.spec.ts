@@ -630,3 +630,34 @@ test("an agent sees why settings didn't save", async ({ page }) => {
   expect(many.ok).toBe(false);
   expect(many.error?.message).toMatch(/8 routines/);
 });
+
+test("people's saves still check the form's own rules", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const protein = page.getByLabel(/^Daily protein/);
+  await protein.fill("120.5");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  expect(
+    await protein.evaluate((input: HTMLInputElement) => input.validity.valid),
+  ).toBe(false);
+  await expect(page.getByText("Settings queued for saving.")).toHaveCount(0);
+});
+
+test("an agent learns the equipment limit", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const existing = await page
+    .getByRole("button", { name: /^Remove equipment/ })
+    .count();
+  const result = await act(page, [
+    ...Array.from({ length: 41 - existing }, () => ({
+      ref: "Add equipment",
+      action: "press",
+    })),
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toContain("Keep up to 40 equipment items.");
+});
