@@ -5,7 +5,9 @@ import { openBrowserAsync } from "expo-web-browser";
 import { useState } from "react";
 import { ActivityIndicator, Alert } from "react-native";
 import { session, useConfiguredAccount } from "../../account/AccountProvider";
+import { useReminderSettings } from "../../data/reminders";
 import { forgetAccount } from "../../data/storage";
+import { clockText } from "../../logic/reminders";
 import { useTabNavigation } from "../../navigation/hooks";
 import { haptic } from "../../ui/haptics";
 import { Notice, Screen } from "../../ui/Layout";
@@ -17,10 +19,11 @@ import { shareJson } from "./share";
 
 const origin = String(Constants.expoConfig?.extra?.fitnessOrigin ?? "https://fitness.bent.build").replace(/\/$/, "");
 
-/** The Settings tab: profile, plan, equipment, Apple Health, data and the account. */
+/** The Settings tab: profile, plan, equipment, reminders, Apple Health, data and the account. */
 export function SettingsScreen() {
   const navigation = useTabNavigation<"SettingsTab">();
   const { owner, sync, settings, api } = useConfiguredAccount();
+  const reminder = useReminderSettings();
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
@@ -105,6 +108,19 @@ export function SettingsScreen() {
           navigates
           onPress={() => navigation.navigate("Equipment")}
           testID="open-equipment"
+        />
+        <ListRow
+          label="Reminders"
+          description={
+            reminder.enabled
+              ? `${reminder.restDays ? "Every day" : "Training days"} at ${clockText(reminder.minutes)}`
+              : "Off"
+          }
+          icon="bell.fill"
+          iconTile="bg-primary"
+          navigates
+          onPress={() => navigation.navigate("Reminders")}
+          testID="open-reminders"
         />
       </ListSection>
 

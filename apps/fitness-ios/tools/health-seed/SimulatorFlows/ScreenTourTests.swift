@@ -176,6 +176,82 @@ final class ScreenTourTests: XCTestCase {
     }
   }
 
+  /// Sets the open compact time picker to `date`'s hour and minute.
+  private func setTime(_ date: Date) {
+    let wheels = app.pickerWheels
+    guard wheels.firstMatch.waitForExistence(timeout: 5) else {
+      XCTFail("The time picker shows no wheels.")
+      return
+    }
+    let calendar = Calendar.current
+    let hour = calendar.component(.hour, from: date)
+    let minute = calendar.component(.minute, from: date)
+    let twelveHour = wheels.count > 2
+    let shownHour = twelveHour ? (hour % 12 == 0 ? 12 : hour % 12) : hour
+    wheels.element(boundBy: 0).adjust(toPickerWheelValue: twelveHour ? "\(shownHour)" : String(format: "%02d", shownHour))
+    wheels.element(boundBy: 1).adjust(toPickerWheelValue: String(format: "%02d", minute))
+    if twelveHour { wheels.element(boundBy: 2).adjust(toPickerWheelValue: hour < 12 ? "AM" : "PM") }
+  }
+
+  /// Settings with the Reminders row, the Reminders screen off and on, and a
+  /// reminder delivered a few minutes ahead, then tapped to open the Week tab.
+  func testRemindersTour() throws {
+    app.launch()
+    if element("sign-in").waitForExistence(timeout: 30) { element("sign-in").tap() }
+    XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90), app.debugDescription)
+    sleep(3)
+    openTab("Settings")
+    capture("reminders-01-settings")
+    XCTAssertTrue(tap("open-reminders"), "Settings has no Reminders row.")
+    capture("reminders-02-off")
+    let toggle = app.switches["reminders-enabled"]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The Reminders screen has no switch.")
+    toggle.tap()
+    // The permission alert can take a few seconds to appear.
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    let allow = springboard.buttons["Allow"]
+    if allow.waitForExistence(timeout: 15) { allow.tap() }
+    XCTAssertTrue(element("reminders-next").waitForExistence(timeout: 10), "Turning reminders on shows no next reminder.")
+    capture("reminders-03-on")
+    let restDays = app.switches["reminders-rest-days"]
+    if restDays.exists {
+      restDays.tap()
+      capture("reminders-04-rest-days")
+      restDays.tap()
+    }
+
+    // Today's planned session, a couple of minutes from now.
+    let seconds = Calendar.current.component(.second, from: Date())
+    let fireAt = Date().addingTimeInterval(seconds > 40 ? 180 : 120)
+    guard tap("reminders-time") else {
+      XCTFail("The Reminders screen has no time picker.")
+      return
+    }
+    setTime(fireAt)
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+    sleep(2)
+    capture("reminders-05-time")
+    XCUIDevice.shared.press(.home)
+    let start = Calendar.current.date(bySetting: .second, value: 0, of: fireAt) ?? fireAt
+    let wait = max(0, start.timeIntervalSinceNow) + 2
+    Thread.sleep(forTimeInterval: wait)
+    captureScreen("reminders-06-banner")
+    // Notification Center, opened from the top of the Home Screen.
+    let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.005))
+    top.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)))
+    sleep(2)
+    captureScreen("reminders-07-notification-center")
+    let reminder = springboard.descendants(matching: .any)
+      .matching(NSPredicate(format: "label CONTAINS %@", "Today:")).firstMatch
+    if reminder.waitForExistence(timeout: 5) {
+      reminder.tap()
+      sleep(3)
+      capture("reminders-08-opened-week")
+    } else {
+      XCTFail("No reminder was delivered.")
+    }
+  }
+
   func testScreenTour() throws {
     app.launch()
     if element("sign-in").waitForExistence(timeout: 30) {

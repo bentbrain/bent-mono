@@ -1,0 +1,123 @@
+import { useEffect, useState } from "react";
+import { AppState, Linking } from "react-native";
+import { addDays, formatShortDate } from "@bent/fitness-contracts/domain";
+import { useConfiguredAccount } from "../../account/AccountProvider";
+import { reminderPermission, reminderSettings, requestReminderPermission, useReminderSettings } from "../../data/reminders";
+import { clockText, reminderPlan } from "../../logic/reminders";
+import { Button } from "../../ui/Button";
+import { TimeField } from "../../ui/Form";
+import { haptic } from "../../ui/haptics";
+import { Notice, Screen } from "../../ui/Layout";
+import { ListRow, ListSection, ListToggleRow } from "../../ui/List";
+
+type Permission = "granted" | "denied" | "undetermined";
+
+/** Notification permission, read again each time the app comes forward from Settings. */
+function usePermission() {
+  const [permission, setPermission] = useState<Permission | null>(null);
+  useEffect(() => {
+    const read = () => void reminderPermission().then(setPermission, () => setPermission("denied"));
+    read();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") read();
+    });
+    return () => subscription.remove();
+  }, []);
+  return { permission, setPermission };
+}
+
+/** Daily workout reminders on this iPhone: on or off, the time and rest days. */
+export function RemindersScreen() {
+  const { settings, sync, today } = useConfiguredAccount();
+  const preferences = useReminderSettings();
+  const { permission, setPermission } = usePermission();
+  const [asked, setAsked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const denied = permission === "denied" && (asked || preferences.enabled);
+  const next = reminderPlan(settings, sync.records, preferences, Date.now())[0];
+
+  async function toggle(enabled: boolean) {
+    if (!enabled) {
+      reminderSettings.set({ ...preferences, enabled: false });
+      return;
+    }
+    setBusy(true);
+    const granted = await requestReminderPermission();
+    setBusy(false);
+    setAsked(true);
+    setPermission(granted ? "granted" : "denied");
+    if (granted) reminderSettings.set({ ...preferences, enabled: true });
+    else haptic("warning");
+  }
+
+  const dayLabel = (day: string) =>
+    day === today ? "Today" : day === addDays(today, 1) ? "Tomorrow" : formatShortDate(day);
+
+  return (
+    <Screen testID="screen-reminders">
+      <ListSection footer="Each day's reminder says what's planned, such as the routine, how many exercises and about how long it takes. Reminder settings stay on this iPhone.">
+        <ListToggleRow
+          label="Workout reminders"
+          value={preferences.enabled && !denied}
+          disabled={busy}
+          onValueChange={(value) => void toggle(value)}
+          testID="reminders-enabled"
+        />
+      </ListSection>
+
+      {denied ? (
+        <Notice tone="warning" testID="reminders-denied">
+          Notifications are off for bent Fitness. To get reminders, open Settings, choose Notifications and turn on Allow
+          Notifications, then come back and turn on Workout reminders.
+        </Notice>
+      ) : null}
+      {denied ? (
+        <Button label="Open Settings" tone="secondary" icon="gear" onPress={() => void Linking.openSettings()} testID="reminders-open-settings" />
+      ) : null}
+
+      {preferences.enabled && !denied ? (
+        <>
+          <ListSection footer={`Reminders follow your account timezone, ${settings.timezone}.`}>
+            <ListRow
+              label="Time"
+              trailing={
+                <TimeField
+                  label="Reminder time"
+                  minutes={preferences.minutes}
+                  onChange={(minutes) => reminderSettings.set({ ...preferences, minutes })}
+                  testID="reminders-time"
+                />
+              }
+            />
+            <ListToggleRow
+              label="Rest days"
+              description="A reminder on rest days, with your next session"
+              value={preferences.restDays}
+              onValueChange={(restDays) => reminderSettings.set({ ...preferences, restDays })}
+              testID="reminders-rest-days"
+            />
+          </ListSection>
+
+          <ListSection title="Next reminder">
+            {next ? (
+              <ListRow
+                label={`${next.title} · ${next.body}`}
+                description={`${dayLabel(next.day)} at ${clockText(preferences.minutes)}`}
+                icon="bell.fill"
+                iconTile="bg-primary"
+                testID="reminders-next"
+              />
+            ) : (
+              <ListRow
+                label="No reminders in the next two weeks"
+                description="Days with a recorded session, and rest days when their reminders are off, have none."
+                icon="bell.slash"
+                testID="reminders-next"
+              />
+            )}
+          </ListSection>
+        </>
+      ) : null}
+    </Screen>
+  );
+}

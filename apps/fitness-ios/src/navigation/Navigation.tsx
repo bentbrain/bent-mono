@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, createNavigationContainerRef, createStaticNavi
 import type { StaticParamList } from "@react-navigation/native";
 import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/unstable";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useColorScheme } from "react-native";
 import { FitnessHealth } from "../../modules/fitness-health";
 import { useAccount } from "../account/AccountProvider";
@@ -14,6 +14,7 @@ import { progressScreens } from "../screens/progress";
 import { settingsScreens } from "../screens/settings";
 import { weekScreens } from "../screens/week";
 import { rootScreens } from "../screens/root";
+import { takeOpenedReminder, useReminderSchedule, useReminderTaps } from "./reminders";
 
 /*
  * The route table. Each tab has its own native stack, so pushed screens
@@ -119,6 +120,20 @@ function resumeHealthStep() {
   );
 }
 
+/** Opens the Week tab at a tapped reminder's day. */
+function useOpenReminder() {
+  const { setDate } = useAccount();
+  const open = useCallback(
+    (day: string) => {
+      setDate(day);
+      if (navigationRef.isReady()) navigationRef.navigate("Tabs", { screen: "WeekTab", params: { screen: "Week" } });
+    },
+    [setDate],
+  );
+  useReminderTaps(open);
+  return open;
+}
+
 function useColor(name: string, fallback: string) {
   const value = useCSSVariable(name);
   return typeof value === "string" ? value : fallback;
@@ -127,6 +142,13 @@ function useColor(name: string, fallback: string) {
 /** The signed-in app's navigation, themed from the app's colour tokens. */
 export function Navigation() {
   useConflictReview();
+  useReminderSchedule();
+  const openReminder = useOpenReminder();
+  const ready = () => {
+    resumeHealthStep();
+    const day = takeOpenedReminder();
+    if (day) openReminder(day);
+  };
   const dark = useColorScheme() === "dark";
   const base = dark ? DarkTheme : DefaultTheme;
   const theme = {
@@ -140,5 +162,5 @@ export function Navigation() {
       border: useColor("--color-border", base.colors.border),
     },
   };
-  return <StaticNavigation ref={navigationRef} theme={theme} onReady={resumeHealthStep} />;
+  return <StaticNavigation ref={navigationRef} theme={theme} onReady={ready} />;
 }
