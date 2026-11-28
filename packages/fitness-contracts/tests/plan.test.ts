@@ -4,11 +4,12 @@ import {
   createWorkout,
   defaultSettings,
   exercises,
+  lastExercise,
   loadTypeOf,
   progression,
   settingsSchema,
 } from "../src/domain";
-import type { Exercise, Settings, Workout } from "../src/domain";
+import type { Exercise, RecordEntry, Settings, Workout } from "../src/domain";
 import { guides } from "../src/guides";
 import {
   appContract,
@@ -158,6 +159,60 @@ describe("progression by load type", () => {
     });
     expect(advice.loadKg).toBe(12);
     expect(advice.text).toContain("next available dumbbell");
+  });
+  test("keeps a weight saved on a timed plank when it changes to reps", () => {
+    const plank = exercises.find((item) => item.id === "plank")!;
+    const reps: Exercise = { ...plank, mode: "reps", min: 8, max: 12 };
+    const held = completed(plank, 10);
+    held.sets[0] = { ...held.sets[0]!, value: plank.min };
+    const advice = progression(reps, held, { dumbbellsKg: [10, 12] });
+    expect(advice.loadKg).toBe(10);
+    expect(advice.text).toContain("Repeat the load");
+  });
+  test("keeps a weight set by a correction on a timed plank", () => {
+    const settings = base();
+    const plank = exercises.find((item) => item.id === "plank")!;
+    const routine = { ...settings.routines[0]!, exercises: [plank] };
+    const draft = createWorkout(settings, routine, "2026-11-30", false, []);
+    const finished = {
+      ...draft,
+      finishedAt: "2026-11-30T08:00:00.000Z",
+      exercises: draft.exercises.map((item) => ({
+        ...item,
+        sets: item.sets.map((set) => ({ ...set, done: true, value: 30 })),
+      })),
+    };
+    const workoutId = crypto.randomUUID();
+    const records: RecordEntry[] = [
+      {
+        id: workoutId,
+        revision: 1,
+        data: finished,
+        updatedAt: "2026-11-30T08:00:00.000Z",
+      },
+      {
+        id: crypto.randomUUID(),
+        revision: 1,
+        data: {
+          kind: "workoutCorrection",
+          workoutId,
+          reason: "Held a plate",
+          replacement: {
+            ...finished,
+            exercises: finished.exercises.map((item) => ({
+              ...item,
+              sets: item.sets.map((set) => ({ ...set, loadKg: 12 })),
+            })),
+          },
+        },
+        updatedAt: "2026-11-30T09:00:00.000Z",
+      },
+    ];
+    const previous = lastExercise(records, "plank");
+    const reps: Exercise = { ...plank, mode: "reps", min: 8, max: 12 };
+    expect(progression(reps, previous, { dumbbellsKg: [12, 14] }).loadKg).toBe(
+      12,
+    );
   });
   test("starts timed exercises at no weight, as the logger records none", () => {
     const hold: Exercise = {

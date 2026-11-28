@@ -587,8 +587,11 @@ export function progression(
 ) {
   const type = loadTypeOf(p);
   // A weight recorded another way, such as on a machine, says nothing about
-  // the load for this one.
-  if (!previous || loadTypeOf(previous.prescription) !== type)
+  // the load for this one. Only prescriptions that name a load type can
+  // differ: every other load means one dumbbell, as before load types.
+  const typed =
+    p.load !== undefined || previous?.prescription.load !== undefined;
+  if (!previous || (typed && loadTypeOf(previous.prescription) !== type))
     return { text: "Start light. Keep 2–3 reps in reserve.", loadKg: null };
   const load =
     previous.sets.find((set) => set.done)?.loadKg ??
