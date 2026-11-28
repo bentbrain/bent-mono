@@ -8,7 +8,9 @@ import {
   displayLoad,
   exercises,
   formatShortDate,
+  isNutrient,
   mondayOf,
+  nutrientInfo,
   scheduled,
   settingsId,
   settingsSchema,
@@ -74,6 +76,10 @@ export function describeIssue(issue: z.core.$ZodIssue | undefined, draft: Settin
   if (field === "routines") return { text: "Keep 1 to 8 routines." };
   if (field === "equipment" && typeof index === "number")
     return { id: `equipment-${index}`, text: "Equipment: enter a name of up to 160 characters and notes of up to 500." };
+  if (field === "nutrients" && isNutrient(index)) {
+    const { label, target } = nutrientInfo[index];
+    return { id: `${index}-target`, text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.` };
+  }
   const help = typeof field === "string" ? fieldHelp[field] : undefined;
   return help ?? { text: "Check the highlighted settings and try again." };
 }

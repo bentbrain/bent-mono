@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { useState } from "react";
 import { Alert } from "react-native";
+import { trackedNutrients } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { IconButton } from "../../ui/Button";
 import { ListRow, ListSection } from "../../ui/List";
@@ -10,7 +11,8 @@ import { mealSummary, regulars } from "./meals";
 
 /** Saved meals and removing them. Days already logged keep their food. */
 export function FoodSavedMealsScreen(): JSX.Element {
-  const { sync } = useConfiguredAccount();
+  const { sync, settings } = useConfiguredAccount();
+  const tracked = trackedNutrients(settings);
   const saved = regulars(sync.records);
   const [failed, setFailed] = useState(false);
 
@@ -37,7 +39,7 @@ export function FoodSavedMealsScreen(): JSX.Element {
             <ListRow
               key={item.id}
               label={item.data.name}
-              description={mealSummary(item.data)}
+              description={mealSummary(item.data, tracked)}
               trailing={
                 <IconButton
                   icon="trash"

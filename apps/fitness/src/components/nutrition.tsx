@@ -4,11 +4,22 @@ import { Button } from "@bent/ui/button";
 import {
   addDays,
   dateSearch,
+  foodSummary,
+  formNutrients,
   formatDate,
   formatShortDate,
+  mealEntryError,
+  mealNutrientValues,
   mealSchema,
+  nutrientCoverage,
+  nutrientInfo,
+  nutrientList,
+  nutrientNote,
+  nutrientTotals,
   regularSchema,
+  sameNutrients,
   totals,
+  trackedNutrients,
 } from "@bent/fitness-contracts/domain";
 import type { Entity, Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
@@ -37,6 +48,16 @@ export function Nutrition({
   const { today } = useAccount();
   const [error, setError] = useState("");
   const total = totals(sync.records, date);
+  const tracked = trackedNutrients(settings);
+  // Every nutrient field the form has shown stays until it resets, so a
+  // tracking change made elsewhere never drops a typed value.
+  const [shownFields, setShownFields] = useState(tracked);
+  const fields = formNutrients(shownFields, tracked);
+  const fieldKey = fields.join();
+  useEffect(() => {
+    if (fields.length > shownFields.length) setShownFields(fields);
+  }, [fieldKey]);
+  const eaten = nutrientTotals(sync.records, date);
   const [notice, setNotice] = useState("");
   // The meal version the form opened with. Saving checks it is still current.
   const [editing, setEditing] = useState<Opened<Meal>>();
@@ -63,7 +84,9 @@ export function Nutrition({
     opened.current = next;
     setEditing(next);
     setChecked(undefined);
-    if (reload) setFormVersion((value) => value + 1);
+    if (!reload) return;
+    setShownFields(trackedNutrients(settings));
+    setFormVersion((value) => value + 1);
   }
   function savedVersion() {
     const target = opened.current;
@@ -72,17 +95,33 @@ export function Nutrition({
       ? { id: target.id, revision: current.revision, data: current.data }
       : undefined;
   }
-  function save(element: HTMLFormElement, target: Opened<Meal> | undefined) {
+  /**
+   * Saves the form over `target`, or as new food without one. `source` is
+   * the version the form opened, whose values for untracked nutrients stay.
+   */
+  function save(
+    element: HTMLFormElement,
+    target: Opened<Meal> | undefined,
+    source = target,
+  ) {
     const data = new FormData(element);
+    // Values for nutrients the account doesn't track stay on the meal.
+    const values = mealNutrientValues(source?.data ?? {});
+    for (const nutrient of fields) {
+      const text = String(data.get(nutrient) ?? "").trim();
+      if (text === "") delete values[nutrient];
+      else values[nutrient] = Number(text);
+    }
     const result = mealSchema.safeParse({
       kind: "meal",
       date: target?.data.date ?? date,
       name: data.get("name"),
       calories: Number(data.get("calories")),
       protein: Number(data.get("protein")),
+      ...values,
     });
     if (!result.success) {
-      setError("Enter a meal name, calories and protein.");
+      setError(mealEntryError(fields));
       return;
     }
     if (target) {
@@ -99,7 +138,8 @@ export function Nutrition({
         record.data.kind === "regular" &&
         record.data.name.toLowerCase() === result.data.name.toLowerCase() &&
         record.data.calories === result.data.calories &&
-        record.data.protein === result.data.protein,
+        record.data.protein === result.data.protein &&
+        sameNutrients(record.data, result.data),
     );
     if (data.get("regular") && !duplicate)
       sync.put(
@@ -108,6 +148,7 @@ export function Nutrition({
           name: result.data.name,
           calories: result.data.calories,
           protein: result.data.protein,
+          ...mealNutrientValues(result.data),
         }),
       );
     setNotice(
@@ -134,7 +175,11 @@ export function Nutrition({
   return (
     <section className="food-screen" data-feedback-redact data-feedback-private>
       <header className="page-head">
-        <p className="eyebrow">Calories and protein</p>
+        <p className="eyebrow">
+          {tracked.length
+            ? `Calories, protein, ${nutrientList(tracked)}`
+            : "Calories and protein"}
+        </p>
         <h1>Food</h1>
       </header>
       <DateBar path="/food" step />
@@ -169,6 +214,40 @@ export function Nutrition({
           </small>
         </div>
       </div>
+      {tracked.length > 0 && (
+        <div
+          className="food-totals is-nutrients"
+          aria-label={`${nutrientList(tracked)} for ${formatDate(date)}`}
+        >
+          {tracked.map((nutrient) => {
+            const { label } = nutrientInfo[nutrient];
+            const target = settings.nutrients?.[nutrient]?.target ?? null;
+            const grams = eaten[nutrient].grams;
+            const coverage = nutrientCoverage(eaten[nutrient], eaten.meals);
+            return (
+              <div className="food-total" key={nutrient}>
+                <strong>{Math.round(grams)}g</strong>
+                <span>
+                  {target === null
+                    ? label.toLowerCase()
+                    : `of ${target}g ${label.toLowerCase()}`}
+                </span>
+                {target !== null && (
+                  <progress
+                    aria-label={`${label} toward the daily target`}
+                    value={Math.min(grams, target)}
+                    max={target}
+                  />
+                )}
+                {target !== null && (
+                  <small>{nutrientNote(nutrient, grams, target)}</small>
+                )}
+                {coverage && <small className="coverage">{coverage}</small>}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <p role="status" className="food-notice">
         {notice}
       </p>
@@ -190,10 +269,7 @@ export function Nutrition({
                   <Icon name="plus" size={14} />
                   {r.data.name}
                 </strong>
-                <small>
-                  {Math.round(r.data.calories)} kcal ·{" "}
-                  {Math.round(r.data.protein)}g protein
-                </small>
+                <small>{foodSummary(r.data, tracked)}</small>
               </button>
             </li>
           ))}
@@ -248,6 +324,24 @@ export function Nutrition({
           step="any"
           required
         />
+        {fields.length > 0 && (
+          <div className="food-nutrient-fields">
+            {fields.map((nutrient) => (
+              <TextField
+                key={nutrient}
+                label={`${nutrientInfo[nutrient].label} · g, optional`}
+                id={`meal-${nutrient}`}
+                defaultValue={shown?.[nutrient] ?? ""}
+                name={nutrient}
+                type="number"
+                inputMode="decimal"
+                min="0"
+                max={nutrientInfo[nutrient].mealMax}
+                step="any"
+              />
+            ))}
+          </div>
+        )}
         <label>
           <input type="checkbox" name="regular" /> Save as a regular meal
         </label>
@@ -257,7 +351,7 @@ export function Nutrition({
             noun="food"
             current={
               saved
-                ? `${saved.name} · ${Math.round(saved.calories)} kcal · ${Math.round(saved.protein)}g protein`
+                ? `${saved.name} · ${foodSummary(saved, tracked)}`
                 : undefined
             }
             onKeepMine={() => {
@@ -268,7 +362,8 @@ export function Nutrition({
             }}
             onUseCurrent={() => open(savedVersion())}
             onSaveAsNew={() => {
-              if (form.current) save(form.current, undefined);
+              if (form.current)
+                save(form.current, undefined, opened.current);
             }}
           />
         )}
@@ -293,10 +388,7 @@ export function Nutrition({
                 <li className="list-row" key={r.id}>
                   <div>
                     <strong>{r.data.name}</strong>
-                    <p>
-                      {Math.round(r.data.calories)} kcal ·{" "}
-                      {Math.round(r.data.protein)}g protein
-                    </p>
+                    <p>{foodSummary(r.data, tracked)}</p>
                   </div>
                   <Button
                     appearance="outline"
@@ -354,10 +446,7 @@ export function Nutrition({
                 <li className="saved-row" key={r.id}>
                   <div>
                     <strong>{r.data.name}</strong>
-                    <p>
-                      {Math.round(r.data.calories)} kcal ·{" "}
-                      {Math.round(r.data.protein)}g protein
-                    </p>
+                    <p>{foodSummary(r.data, tracked)}</p>
                   </div>
                   <Button
                     appearance="ghost"

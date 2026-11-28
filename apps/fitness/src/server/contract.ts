@@ -5,13 +5,17 @@
  * newer contract are refused, so every stored record stays readable by the
  * builds Fitness serves.
  *
- * Before raising it to 2, label weights by load type in both apps (plan
+ * Contract 2 stores carbs, fat and fibre and the nutrients settings track.
+ * Release the iPhone build that declares 2 to TestFlight before the
+ * website release that raises the minimum to 2.
+ *
+ * Before raising it to 3, label weights by load type in both apps (plan
  * suggestions, workout and correction loggers, VoiceOver hints, guides and
  * strength charts all say "per dumbbell" today), leave weight entry out of
- * band exercises, and ship an iPhone build that declares contract 2.
- * Contract 1 records hold only dumbbell loads.
+ * band exercises, and ship an iPhone build that declares contract 3.
+ * Records below contract 3 hold only dumbbell loads.
  */
-const defaultMinimum = 1;
+const defaultMinimum = 2;
 let minimum = defaultMinimum;
 export function minimumAppContract() {
   return minimum;

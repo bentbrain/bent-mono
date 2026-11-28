@@ -3,7 +3,7 @@
  * with OAuth access tokens issued to its own client.
  */
 import { z } from "zod";
-import { recordSchema } from "./domain";
+import { nutrients, recordSchema } from "./domain";
 import type { Entity, Exercise, Routine } from "./domain";
 
 /**
@@ -11,13 +11,16 @@ import type { Entity, Exercise, Routine } from "./domain";
  * `X-Fitness-Contract` header. Builds without the header count as 1.
  *
  * - 1: the original settings, routines and records. Weights are per dumbbell.
- * - 2: load types on exercises outside the catalogue and the planning profile
+ * - 2: carbs, fat and fibre on meals and saved meals, and the nutrients
+ *   settings track.
+ * - 3: load types on exercises outside the catalogue and the planning profile
  *   in settings.
  *
- * A build declares 2 only once its screens label and enter every load type,
- * since Fitness serves version 2 records to any build that declares it.
+ * A build declares a contract only once its screens show and keep every
+ * field it adds, since Fitness serves those records to any build that
+ * declares it. A build declaring 3 declares everything 2 adds.
  */
-export const appContract = 1;
+export const appContract = 2;
 export const appContractHeader = "X-Fitness-Contract";
 /** The contract a request declares, or 1 when it names none or an invalid one. */
 export function requestContract(value: string | null) {
@@ -27,8 +30,8 @@ export function requestContract(value: string | null) {
     : 1;
 }
 
-/** Settings fields that contract 2 added. */
-const contractTwoSettings = [
+/** Settings fields that contract 3 added. */
+const contractThreeSettings = [
   "experience",
   "sessionMinutes",
   "limitations",
@@ -42,21 +45,24 @@ const routineHasLoad = (routine: Routine | null | undefined) =>
 /** The oldest contract that can read `data`. */
 export function requiredContract(data: Entity): number {
   if (data.kind === "settings") {
-    const two =
-      contractTwoSettings.some((key) => data[key] !== undefined) ||
+    const three =
+      contractThreeSettings.some((key) => data[key] !== undefined) ||
       data.routines.some(routineHasLoad) ||
       Object.values(data.dayPlans ?? {}).some((plan) =>
         routineHasLoad(plan.routine),
       );
-    return two ? 2 : 1;
+    if (three) return 3;
+    return data.nutrients === undefined ? 1 : 2;
   }
+  if (data.kind === "meal" || data.kind === "regular")
+    return nutrients.some((nutrient) => data[nutrient] !== undefined) ? 2 : 1;
   const workout =
     data.kind === "workout"
       ? data
       : data.kind === "workoutCorrection"
         ? data.replacement
         : null;
-  return workout?.exercises.some((item) => hasLoad(item.prescription)) ? 2 : 1;
+  return workout?.exercises.some((item) => hasLoad(item.prescription)) ? 3 : 1;
 }
 
 export const photoTypes = ["image/jpeg", "image/png", "image/webp"] as const;
@@ -89,5 +95,11 @@ export const PhotoList = z.object({ photos: z.array(PhotoSummary) });
 export const AppRecords = z.object({
   owner: z.string(),
   records: z.array(recordSchema),
+  /**
+   * The newest records contract Fitness stores, so a build offers only
+   * fields Fitness can save. Fitness releases before contract 2 leave it
+   * out, which means 1.
+   */
+  contract: z.number().int().positive().optional(),
 });
 export type AppRecords = z.infer<typeof AppRecords>;

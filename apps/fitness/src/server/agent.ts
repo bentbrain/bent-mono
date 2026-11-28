@@ -9,20 +9,27 @@ import {
   addDays,
   displayLoad,
   localDate,
+  mealNutrientValues,
   mealSchema,
+  nutrientTotals,
+  nutrients,
   regularSchema,
   runSchema,
   scheduled,
+  sameData,
   settingsId,
   settingsSchema,
   toKg,
   totals,
+  trackedNutrients,
   trainingRecords,
   weightSchema,
+  withNutrient,
 } from "@bent/fitness-contracts/domain";
 import type {
   Entity,
   Mutation,
+  Nutrient,
   RecordEntry,
   Settings,
 } from "@bent/fitness-contracts/domain";
@@ -59,7 +66,17 @@ function mealView(record: RecordEntry) {
     name: record.data.name,
     calories: record.data.calories,
     protein: record.data.protein,
+    ...mealNutrientValues(record.data),
   };
+}
+
+/** The nutrients the account tracks, each with `value(nutrient)`. */
+function byTracked(
+  account: Account,
+  value: (nutrient: Nutrient) => number | null,
+): Partial<Record<Nutrient, number | null>> {
+  const tracked = account.settings ? trackedNutrients(account.settings) : [];
+  return Object.fromEntries(tracked.map((n) => [n, value(n)]));
 }
 
 function food(account: Account, date: string) {
@@ -68,14 +85,27 @@ function food(account: Account, date: string) {
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
     .map(mealView);
   const total = totals(account.records, date);
+  const eaten = nutrientTotals(account.records, date);
   const settings = account.settings;
   return {
     meals,
-    totals: { calories: round(total.calories), protein: round(total.protein) },
+    totals: {
+      calories: round(total.calories),
+      protein: round(total.protein),
+      ...byTracked(account, (n) => round(eaten[n].grams)),
+    },
+    /** How many of the day's meals recorded each tracked nutrient. */
+    recordedIn: byTracked(account, (n) => eaten[n].recorded),
     remaining: settings
       ? {
           calories: round(settings.calories - total.calories),
           protein: round(settings.protein - total.protein),
+          ...byTracked(account, (n) => {
+            const target = settings.nutrients?.[n]?.target;
+            return typeof target === "number"
+              ? round(target - eaten[n].grams)
+              : null;
+          }),
         }
       : null,
   };
@@ -163,8 +193,15 @@ function summary(account: Account) {
       ? {
           calories: account.settings.calories,
           protein: account.settings.protein,
+          ...byTracked(
+            account,
+            (n) => account.settings?.nutrients?.[n]?.target ?? null,
+          ),
         }
       : null,
+    trackedNutrients: account.settings
+      ? trackedNutrients(account.settings)
+      : [],
     goal: account.settings?.goal ?? null,
   };
 }
@@ -206,8 +243,8 @@ export async function getHistory(
     days.push({
       date,
       plan: plan(a, date)?.type ?? null,
-      calories: eaten.totals.calories,
-      protein: eaten.totals.protein,
+      ...eaten.totals,
+      recordedIn: eaten.recordedIn,
       meals: eaten.meals.length,
       weight: weightOn(a, date)?.display ?? null,
       workouts: workouts.map((w) => `${w.name} (${w.status})`),
@@ -225,6 +262,7 @@ function savedMealView(record: RecordEntry) {
     name: record.data.name,
     calories: record.data.calories,
     protein: record.data.protein,
+    ...mealNutrientValues(record.data),
   };
 }
 
@@ -342,16 +380,39 @@ function find(
   return current;
 }
 
-/** Matches the app: a saved meal with the same name, calories and protein is a duplicate. */
-function sameMeal(
-  a: { name: string; calories: number; protein: number },
-  b: { name: string; calories: number; protein: number },
-) {
+type MealInput = {
+  name: string;
+  calories: number;
+  protein: number;
+} & Partial<Record<Nutrient, number>>;
+/** Changes to a meal. A null nutrient removes its value. */
+type MealChange = {
+  name?: string;
+  calories?: number;
+  protein?: number;
+} & Partial<Record<Nutrient, number | null>>;
+
+/** Matches the app: a saved meal with the same name, calories, protein and nutrients is a duplicate. */
+function sameMeal(a: MealInput, b: MealInput) {
   return (
     a.name.toLowerCase() === b.name.toLowerCase() &&
     a.calories === b.calories &&
-    a.protein === b.protein
+    a.protein === b.protein &&
+    nutrients.every((n) => a[n] === b[n])
   );
+}
+
+/** A meal or saved meal's data with `input`'s changes applied. */
+function changedMeal(data: Entity, input: MealChange) {
+  const next: Record<string, unknown> = { ...data };
+  for (const key of ["name", "calories", "protein"] as const)
+    if (input[key] !== undefined) next[key] = input[key];
+  for (const n of nutrients) {
+    const value = input[n];
+    if (value === null) delete next[n];
+    else if (value !== undefined) next[n] = value;
+  }
+  return next;
 }
 
 export function addMeals(
@@ -360,7 +421,7 @@ export function addMeals(
   input: {
     requestId: string;
     date?: string;
-    meals: { name: string; calories: number; protein: number }[];
+    meals: MealInput[];
   },
 ) {
   return once(owner, access, "add_meals", input, async (change) => {
@@ -375,6 +436,7 @@ export function addMeals(
             name: meal.name,
             calories: meal.calories,
             protein: meal.protein,
+            ...mealNutrientValues(meal),
           }),
         ),
       );
@@ -394,11 +456,8 @@ export function updateMeal(
     requestId: string;
     id: string;
     revision: number;
-    name?: string;
-    calories?: number;
-    protein?: number;
     date?: string;
-  },
+  } & MealChange,
 ) {
   return once(owner, access, "update_meal", input, async (change) => {
     const record = find(account(await change.records()), access, input, [
@@ -406,10 +465,7 @@ export function updateMeal(
     ]);
     if (record.data.kind !== "meal") throw new Error("Expected a meal.");
     const data = parsed(mealSchema, {
-      ...record.data,
-      ...(input.name === undefined ? {} : { name: input.name }),
-      ...(input.calories === undefined ? {} : { calories: input.calories }),
-      ...(input.protein === undefined ? {} : { protein: input.protein }),
+      ...changedMeal(record.data, input),
       ...(input.date === undefined ? {} : { date: input.date }),
     });
     const saved = await change.save(changed(record, input.revision, data));
@@ -544,7 +600,7 @@ export function addSavedMeals(
   access: AgentAccess,
   input: {
     requestId: string;
-    savedMeals: { name: string; calories: number; protein: number }[];
+    savedMeals: MealInput[];
   },
 ) {
   // Skipping meals already saved would show a write-only connection which
@@ -556,7 +612,13 @@ export function addSavedMeals(
     const added = [];
     const alreadySaved = [];
     for (const meal of input.savedMeals) {
-      const data = parsed(regularSchema, { kind: "regular", ...meal });
+      const data = parsed(regularSchema, {
+        kind: "regular",
+        name: meal.name,
+        calories: meal.calories,
+        protein: meal.protein,
+        ...mealNutrientValues(meal),
+      });
       const match = [...existing, ...added].find((m) => sameMeal(m, data));
       if (match) {
         alreadySaved.push(match);
@@ -585,10 +647,7 @@ export function updateSavedMeal(
     requestId: string;
     id: string;
     revision: number;
-    name?: string;
-    calories?: number;
-    protein?: number;
-  },
+  } & MealChange,
 ) {
   return once(owner, access, "update_saved_meal", input, async (change) => {
     const record = find(account(await change.records()), access, input, [
@@ -596,18 +655,75 @@ export function updateSavedMeal(
     ]);
     if (record.data.kind !== "regular")
       throw new Error("Expected a saved meal.");
-    const data = parsed(regularSchema, {
-      ...record.data,
-      ...(input.name === undefined ? {} : { name: input.name }),
-      ...(input.calories === undefined ? {} : { calories: input.calories }),
-      ...(input.protein === undefined ? {} : { protein: input.protein }),
-    });
+    const data = parsed(regularSchema, changedMeal(record.data, input));
     const saved = await change.save(changed(record, input.revision, data));
     return {
       full: { updated: saved ? savedMealView(saved) : null },
       receipt: {
         updated: saved ? { id: saved.id, revision: saved.revision } : null,
       },
+    };
+  });
+}
+
+/** A tracked nutrient's change: stop tracking it, or track it with a daily target. */
+type NutrientTracking = { track: boolean; target?: number | null };
+
+/**
+ * Changes the daily calorie and protein targets and which nutrients the
+ * account tracks. Omitted values keep their current settings.
+ */
+export function updateFoodTargets(
+  owner: string,
+  access: AgentAccess,
+  input: {
+    requestId: string;
+    calories?: number;
+    protein?: number;
+    nutrients?: Partial<Record<Nutrient, NutrientTracking>>;
+  },
+) {
+  return once(owner, access, "update_food_targets", input, async (change) => {
+    const a = account(await change.records());
+    const record = a.records.find((r) => r.id === settingsId);
+    if (!a.settings || !record)
+      throw new AgentError(
+        "Set up Fitness in the app before changing food targets.",
+      );
+    let next: Settings = {
+      ...a.settings,
+      ...(input.calories === undefined ? {} : { calories: input.calories }),
+      ...(input.protein === undefined ? {} : { protein: input.protein }),
+    };
+    for (const n of nutrients) {
+      const tracking = input.nutrients?.[n];
+      if (!tracking) continue;
+      if (!tracking.track && tracking.target !== undefined)
+        throw new AgentError(
+          `nutrients.${n}: leave out the target when track is false.`,
+        );
+      next = withNutrient(
+        next,
+        n,
+        tracking.track
+          ? tracking.target === undefined
+            ? (next.nutrients?.[n]?.target ?? null)
+            : tracking.target
+          : false,
+      );
+    }
+    const data = parsed(settingsSchema, next);
+    if (!sameData(data, a.settings))
+      await change.save(changed(record, record.revision, data));
+    const after = account(await change.records());
+    return {
+      full: {
+        targets: summary(after).targets,
+        trackedNutrients: summary(after).trackedNutrients,
+      },
+      // The same for every request, so a connection that can't read learns
+      // nothing about the targets it replaced.
+      receipt: { saved: true },
     };
   });
 }

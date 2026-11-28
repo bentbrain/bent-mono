@@ -16,7 +16,8 @@ export const pendingSchema = z.object({ request: mutationSchema, at: z.number() 
 export type Pending = z.infer<typeof pendingSchema>;
 
 export type Transport = {
-  load(): Promise<{ owner: string; records: RecordEntry[] }>;
+  /** `contract` is the newest records contract Fitness stores; Fitness releases that leave it out store 1. */
+  load(): Promise<{ owner: string; records: RecordEntry[]; contract?: number }>;
   save(request: Mutation): Promise<SaveResult>;
 };
 
@@ -54,6 +55,8 @@ export type SyncState = {
   ready: boolean;
   /** True once Fitness answered a load in this session. */
   loaded: boolean;
+  /** The newest records contract Fitness stores, from its last answer in this session; 1 until then. */
+  storedContract: number;
   error: string;
   conflict: (SaveResult & { status: "conflict" }) | null;
   pending: number;
@@ -90,6 +93,7 @@ export class SyncEngine {
   private base: Omit<SyncState, "records" | "pending" | "settings"> = {
     ready: false,
     loaded: false,
+    storedContract: 1,
     error: "",
     conflict: null,
     saving: false,
@@ -205,6 +209,7 @@ export class SyncEngine {
       if (result.owner !== this.owner) throw new Error("Your account changed. Sign in again to continue.");
       this.cloud = z.array(recordSchema).parse(result.records);
       this.storage.writeSnapshot(this.owner, this.cloud);
+      this.base = { ...this.base, storedContract: result.contract ?? 1 };
     });
   }
 

@@ -62,6 +62,14 @@ export function deviceClientIds() {
       .filter(Boolean),
   );
 }
+/**
+ * Whether assistants are told to request `fitness:targets`. Set
+ * FITNESS_TARGETS_SCOPE to `enabled` once Clerk issues that scope; until
+ * then a client requesting it couldn't sign in.
+ */
+export function targetsScopeEnabled() {
+  return process.env.FITNESS_TARGETS_SCOPE?.trim() === "enabled";
+}
 /** Device enrollment is on only when FITNESS_DEVICE_ENROLLMENT is `enabled`. */
 export function deviceEnrollmentEnabled() {
   return process.env.FITNESS_DEVICE_ENROLLMENT?.trim() === "enabled";

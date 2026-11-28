@@ -12,8 +12,10 @@ export class AgentScopeError extends Error {}
 export const agentScopes = {
   read: fitnessScopes.read,
   write: fitnessScopes.write,
+  targets: fitnessScopes.targets,
 } as const;
-export type AgentAccess = { read: boolean; write: boolean };
+/** What a connection may do. `targets` changes food targets and tracked nutrients. */
+export type AgentAccess = { read: boolean; write: boolean; targets: boolean };
 
 /** The verified primary email, when it is on the invitation list. */
 export async function invitedEmail(userId: string) {
@@ -55,6 +57,7 @@ export function agentAccess(
   return {
     read: ownerKey || scopes.includes(agentScopes.read),
     write: ownerKey || scopes.includes(agentScopes.write),
+    targets: ownerKey || scopes.includes(agentScopes.targets),
   };
 }
 
@@ -379,7 +382,7 @@ async function requireTokenOwner(request: Request, accepts: BearerToken[]) {
       "This key only imports Apple Health data. Connect with Fitness read or write access.",
     );
   const access = agentAccess(bearer.tokenType, bearer.scopes);
-  if (!access.read && !access.write)
+  if (!access.read && !access.write && !access.targets)
     throw new AgentScopeError(
       "Approve Fitness read or write access for this connection.",
     );
