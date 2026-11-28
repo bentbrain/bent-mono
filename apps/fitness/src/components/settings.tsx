@@ -269,6 +269,9 @@ export function SettingsEditor({
               <TextField
                 label="Timezone"
                 id="timezone"
+                accepts={(value) =>
+                  settingsSchema.shape.timezone.safeParse(value).success
+                }
                 value={draft.timezone}
                 onValueChange={(value) => update({ timezone: value })}
                 required

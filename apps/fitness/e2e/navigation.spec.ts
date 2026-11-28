@@ -1580,8 +1580,7 @@ test("correction saves explain unhandled sets and keep typed changes when the cl
   await page.getByRole("button", { name: `Correct ${label}` }).click();
   const weight = (set: number) =>
     page.getByRole("spinbutton", {
-      name: `Goblet squat set ${set} weight`,
-      exact: true,
+      name: new RegExp(`^Goblet squat set ${set} weight(,|$)`),
     });
   await weight(2).fill("5");
   await page.getByRole("button", { name: "Save correction" }).click();

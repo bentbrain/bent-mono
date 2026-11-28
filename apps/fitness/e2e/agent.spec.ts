@@ -592,4 +592,8 @@ test("an agent can't enter a date or number the field doesn't take", async ({
   await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
     "Build strength consistently",
   );
+  const zone = await act(page, [
+    { ref: "Timezone", action: "setValue", args: ["Mars/Olympus"] },
+  ]);
+  expect(zone.ok).toBe(false);
 });

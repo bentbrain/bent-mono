@@ -73,6 +73,7 @@ export function TextField({
   label,
   context,
   keepFilled,
+  accepts,
   id,
   value,
   defaultValue,
@@ -81,6 +82,8 @@ export function TextField({
   label: string;
   context?: string;
   keepFilled?: boolean;
+  /** A further check on an agent's value, like a schema rule. */
+  accepts?: (value: string) => boolean;
   value?: string | number;
   defaultValue?: string | number;
 }) {
@@ -99,7 +102,8 @@ export function TextField({
           // gets no form validation, so check what an agent sends here.
           if (
             details.source === "agent" &&
-            !fits(next, { ...props, keepFilled })
+            (!fits(next, { ...props, keepFilled }) ||
+              (next !== "" && accepts && !accepts(next)))
           ) {
             details.cancel();
             return;
