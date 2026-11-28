@@ -11,7 +11,7 @@
     "build": "vite build && tsc --noEmit",
     "typecheck": "bun scripts/routes.ts && tsc --noEmit",
     "lint": "eslint src tests e2e scripts *.ts",
-    "test": "bun scripts/bounded-test.ts tests/domain.test.ts tests/charts.test.ts tests/health.test.ts tests/devices.test.ts tests/clerk-sdk.test.ts tests/commit-cut-proxy.test.ts",
+    "test": "bun scripts/bounded-test.ts tests/domain.test.ts tests/charts.test.ts tests/health.test.ts tests/devices.test.ts tests/clerk-sdk.test.ts tests/commit-cut-proxy.test.ts tests/guide.test.ts",
     "test:integration": "bun scripts/bounded-test.ts tests/*.integration.test.ts",
     "fixtures:wire": "FITNESS_WIRE_FIXTURES=update bun scripts/bounded-test.ts tests/wire.integration.test.ts",
     "knip": "bun scripts/routes.ts && knip",

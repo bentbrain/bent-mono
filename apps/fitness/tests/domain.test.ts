@@ -1062,6 +1062,7 @@ describe("public pages", () => {
   test("render /privacy outside account services, with or without trailing slashes", () => {
     expect(isPublicPage("/privacy")).toBe(true);
     expect(isPublicPage("/privacy/")).toBe(true);
+    expect(isPublicPage("/llms.txt")).toBe(true);
     expect(isPublicPage("/")).toBe(false);
     expect(isPublicPage("/privacy-policy")).toBe(false);
     expect(isPublicPage("/settings")).toBe(false);

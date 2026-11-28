@@ -93,3 +93,47 @@ export function clerkKeysValid() {
     /^sk_(?:test|live)_\S+$/.test(secret)
   );
 }
+/**
+ * The MCP endpoint when assistants can connect to it: the endpoint is valid
+ * and account services and Clerk are configured. Otherwise null.
+ */
+export function assistantEndpoint() {
+  const resource = mcpResource();
+  return resource &&
+    configurationReady() &&
+    clerkKeysValid() &&
+    authorizationServer()
+    ? resource
+    : null;
+}
+/** Top-level names reserved for local, private or documentation use. */
+const nonPublicNames = [
+  "localhost",
+  "local",
+  "test",
+  "example",
+  "invalid",
+  "internal",
+  "lan",
+  "alt",
+  "onion",
+];
+/**
+ * Whether hosted chat apps can be expected to reach an endpoint: HTTPS on
+ * a public domain name. IP addresses, and names under reserved local or
+ * special-use domains such as localhost, .local, .test or home.arpa,
+ * don't count.
+ */
+export function publicEndpoint(resource: string) {
+  const url = new URL(resource);
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const labels = host.split(".");
+  return (
+    url.protocol === "https:" &&
+    labels.length > 1 &&
+    !host.startsWith("[") &&
+    !/^[\d.]+$/.test(host) &&
+    !nonPublicNames.includes(labels.at(-1) ?? "") &&
+    !host.endsWith(".home.arpa")
+  );
+}
