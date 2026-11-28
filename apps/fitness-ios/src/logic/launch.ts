@@ -14,6 +14,8 @@ export type LaunchTarget<Link> = (
 ) & {
   /** A tap that came before navigation was ready. */
   early?: boolean;
+  /** The router's version when it was worked out (0 when absent); a newer tap makes it stale. */
+  version?: number;
 };
 
 export type LaunchSources<Link> = {
@@ -28,6 +30,8 @@ export type LaunchSources<Link> = {
 /** Works out the launch destination once, unless a newer tap replaces it. */
 export class LaunchRouter<Link> {
   private replaced = false;
+  /** Rises with each tap that replaces the destination. */
+  private version = 0;
   /** A tap that came before navigation was ready, to open in place of the launch destination. */
   private early: LaunchTarget<Link> | null = null;
 
@@ -38,6 +42,7 @@ export class LaunchRouter<Link> {
    */
   replace(early: LaunchTarget<Link> | null = null) {
     this.replaced = true;
+    this.version += 1;
     this.early = early ?? this.early;
   }
 
@@ -46,20 +51,46 @@ export class LaunchRouter<Link> {
     if (this.replaced) {
       const early = this.early;
       this.early = null;
-      return early ? { ...early, early: true } : null;
+      return early ? { ...early, early: true, version: this.version } : null;
     }
     const day = sources.reminder();
-    if (day) return { kind: "reminder", day };
+    if (day) return { kind: "reminder", day, version: this.version };
     const link = await sources.widget().catch(() => null);
     if (this.replaced) return null;
-    if (link) return { kind: "widget", link };
+    if (link) return { kind: "widget", link, version: this.version };
     const health = await sources.health().catch(() => false);
     if (this.replaced || !health) return null;
-    return { kind: "health" };
+    return { kind: "health", version: this.version };
   }
 
   /** Runs `open` for the destination unless a newer tap replaced it after it was worked out. */
   openIfCurrent(target: LaunchTarget<Link> | null, open: (target: LaunchTarget<Link>) => void) {
-    if (target && (!this.replaced || target.early)) open(target);
+    if (target && (target.version ?? 0) === this.version) open(target);
+  }
+}
+
+/**
+ * Holds the latest tap until something listens for it, so a tap that
+ * arrives while the app is still loading the account is opened once
+ * navigation mounts. A listener gets taps as they arrive.
+ */
+export class TapBuffer<T> {
+  private pending: T | null = null;
+  private listener: ((tap: T) => void) | null = null;
+
+  push(tap: T) {
+    if (this.listener) this.listener(tap);
+    else this.pending = tap;
+  }
+
+  /** Delivers a waiting tap at once, then each later one. Returns the unsubscribe. */
+  listen(listener: (tap: T) => void) {
+    this.listener = listener;
+    const waiting = this.pending;
+    this.pending = null;
+    if (waiting !== null) listener(waiting);
+    return () => {
+      if (this.listener === listener) this.listener = null;
+    };
   }
 }

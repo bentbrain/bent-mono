@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LaunchRouter } from "../src/logic/launch";
+import { LaunchRouter, TapBuffer } from "../src/logic/launch";
 import type { LaunchSources, LaunchTarget } from "../src/logic/launch";
 
 type Link = { tab: "week" | "food"; day: string };
@@ -41,7 +41,7 @@ describe("the launch destination", () => {
         return "2026-11-23";
       },
     });
-    expect(await new LaunchRouter<Link>().resolve(value)).toEqual({ kind: "reminder", day: "2026-11-23" });
+    expect(await new LaunchRouter<Link>().resolve(value)).toEqual({ kind: "reminder", day: "2026-11-23", version: 0 });
     expect(asked).toEqual(["reminder"]);
   });
 
@@ -52,7 +52,11 @@ describe("the launch destination", () => {
         return { tab: "food", day: "2026-11-24" };
       },
     });
-    expect(await new LaunchRouter<Link>().resolve(value)).toEqual({ kind: "widget", link: { tab: "food", day: "2026-11-24" } });
+    expect(await new LaunchRouter<Link>().resolve(value)).toEqual({
+      kind: "widget",
+      link: { tab: "food", day: "2026-11-24" },
+      version: 0,
+    });
     expect(asked).toEqual(["reminder", "widget"]);
   });
 
@@ -73,7 +77,7 @@ describe("the launch destination", () => {
     await Promise.resolve();
     expect(asked).toEqual(["widget"]);
     link.resolve(null);
-    expect(await result).toEqual({ kind: "health" });
+    expect(await result).toEqual({ kind: "health", version: 0 });
     expect(asked).toEqual(["widget", "health"]);
   });
 
@@ -126,11 +130,11 @@ describe("the launch destination", () => {
     router.replace({ kind: "reminder", day: "2026-11-25" });
     const { value, asked } = sources({ reminder: () => "2026-11-23" });
     const target = await router.resolve(value);
-    expect(target).toEqual({ kind: "reminder", day: "2026-11-25", early: true });
+    expect(target).toEqual({ kind: "reminder", day: "2026-11-25", early: true, version: 2 });
     expect(asked).toEqual([]);
     const opened: LaunchTarget<Link>[] = [];
     router.openIfCurrent(target, (next) => opened.push(next));
-    expect(opened).toEqual([{ kind: "reminder", day: "2026-11-25", early: true }]);
+    expect(opened).toEqual([{ kind: "reminder", day: "2026-11-25", early: true, version: 2 }]);
     // It opens once.
     expect(await router.resolve(value)).toBeNull();
   });
@@ -141,5 +145,49 @@ describe("the launch destination", () => {
     const { value, asked } = sources();
     expect(await router.resolve(value)).toBeNull();
     expect(asked).toEqual([]);
+  });
+});
+
+describe("taps while the app loads", () => {
+  test("wait until navigation listens, keeping the latest", () => {
+    const taps = new TapBuffer<Link>();
+    taps.push({ tab: "week", day: "2026-12-01" });
+    taps.push({ tab: "food", day: "2026-12-02" });
+    const seen: Link[] = [];
+    const stop = taps.listen((link) => seen.push(link));
+    expect(seen).toEqual([{ tab: "food", day: "2026-12-02" }]);
+    taps.push({ tab: "week", day: "2026-12-03" });
+    expect(seen).toHaveLength(2);
+    stop();
+    taps.push({ tab: "food", day: "2026-12-04" });
+    expect(seen).toHaveLength(2);
+    // The next listener gets the tap that came while nobody listened.
+    taps.listen((link) => seen.push(link));
+    expect(seen.at(-1)).toEqual({ tab: "food", day: "2026-12-04" });
+  });
+
+  test("a widget tap during startup opens in place of the reminder that launched the app", async () => {
+    const taps = new TapBuffer<Link>();
+    // A reminder launched the app; the Food widget was tapped while the account loaded.
+    taps.push({ tab: "food", day: "2026-12-01" });
+    const router = new LaunchRouter<Link>();
+    // Navigation mounts and listens before it is ready, so the tap becomes the launch destination.
+    taps.listen((link) => router.replace({ kind: "widget", link }));
+    const { value } = sources({ reminder: () => "2026-11-30" });
+    const target = await router.resolve(value);
+    const opened: LaunchTarget<Link>[] = [];
+    router.openIfCurrent(target, (next) => opened.push(next));
+    expect(opened).toMatchObject([{ kind: "widget", link: { tab: "food", day: "2026-12-01" }, early: true }]);
+  });
+
+  test("a tap after the destination was worked out makes it stale", async () => {
+    const router = new LaunchRouter<Link>();
+    router.replace({ kind: "widget", link: { tab: "food", day: "2026-12-01" } });
+    const target = await router.resolve(sources().value);
+    // A newer tap arrives before the earlier one opens; it opens itself.
+    router.replace();
+    const opened: LaunchTarget<Link>[] = [];
+    router.openIfCurrent(target, (next) => opened.push(next));
+    expect(opened).toEqual([]);
   });
 });
