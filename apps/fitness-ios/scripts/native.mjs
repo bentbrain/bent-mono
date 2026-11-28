@@ -87,6 +87,22 @@ function swiftCommands(log, targets) {
 /** Extra xcodebuild settings, such as CodeQL's, from XCODEBUILD_SETTINGS. */
 const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filter(Boolean);
 
+/**
+ * The builds a replay-swift scope reads, with the targets each must show.
+ * `project` names the generated app project; it is read only for the app
+ * build, because the seeder scope runs without a prebuilt ios folder.
+ */
+export function replayBuilds(scope, project) {
+  const builds = [];
+  if (scope !== "seeder")
+    builds.push({
+      log: "app-build.log",
+      targets: ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()],
+    });
+  if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+  return builds;
+}
+
 /** The replay-swift scope: all, app or seeder, with all as the default. */
 export function replayScope(args) {
   if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app or seeder.");
@@ -182,11 +198,7 @@ const commands = {
    * seeder build.
    */
   "replay-swift"(args) {
-    const scope = replayScope(args);
-    const builds = [];
-    const appTargets = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()];
-    if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });
-    if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+    const builds = replayBuilds(replayScope(args), project);
     const targets = builds.flatMap((build) => swiftCommands(join(buildDir, build.log), build.targets));
     const expected = builds.flatMap((build) => build.targets);
     const missing = expected.filter((target) => !targets.some((entry) => entry.target === target));

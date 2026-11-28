@@ -28,7 +28,7 @@ import {
   otoolSectionBytes,
 } from "../scripts/artifact.mjs";
 import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
-import { replayScope } from "../scripts/native.mjs";
+import { replayBuilds, replayScope } from "../scripts/native.mjs";
 import {
   admit,
   isBundleVersion,
@@ -2038,16 +2038,21 @@ describe("the CodeQL Swift scopes", () => {
     expect(replayScope([])).toBe("all");
     for (const scope of ["all", "app", "seeder"]) expect(replayScope([scope])).toBe(scope);
     for (const args of [["tools"], ["App"], ["app", "seeder"], [""]]) expect(() => replayScope(args)).toThrow("scope");
+    // The seeder scope reads only the seeder build, so it never reads the
+    // generated app project: the CodeQL tools job runs without a prebuild.
+    const noProject = () => {
+      throw new Error("The seeder scope read the app project.");
+    };
+    const app = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", "bentFitness"];
+    const seeder = { log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] };
+    expect(replayBuilds("seeder", noProject)).toEqual([seeder]);
+    expect(replayBuilds("app", () => "bentFitness")).toEqual([{ log: "app-build.log", targets: app }]);
+    expect(replayBuilds("all", () => "bentFitness")).toEqual([{ log: "app-build.log", targets: app }, seeder]);
+    expect(() => replayBuilds("app", noProject)).toThrow("app project");
     const source = readFileSync(new URL("../scripts/native.mjs", import.meta.url), "utf8");
     const replay = source.slice(source.indexOf('"replay-swift"(args)'), source.indexOf('"core-build"()'));
-    // The seeder scope reads only the seeder build, so it needs no prebuilt app project.
-    expect(replay).toContain(
-      'const appTargets = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()];',
-    );
-    expect(replay).toContain('if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });');
-    expect(replay).toContain(
-      'if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });',
-    );
+    // The command passes the project lookup itself, so it runs only when needed.
+    expect(replay).toContain("const builds = replayBuilds(replayScope(args), project);");
   });
 });
 
