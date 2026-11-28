@@ -318,7 +318,7 @@ describe("skipped sets", () => {
     const squat = workout.exercises.find((e) => e.prescription.id === "squat");
     if (!squat) throw new Error("Missing exercise");
     const skipped = { ...squat, sets: squat.sets.map((set, i) => (i === 0 ? { ...set, done: false, skipped: true, loadKg: 4 } : set)) };
-    expect(progression(squat.prescription, skipped, [10, 12]).loadKg).toBe(10);
+    expect(progression(squat.prescription, skipped, { dumbbellsKg: [10, 12] }).loadKg).toBe(10);
   });
   test("last time ignores exercises that were skipped entirely", () => {
     const earlier = completedWorkout("2026-01-05", 8);

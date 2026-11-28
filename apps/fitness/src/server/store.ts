@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { requiredContract } from "@bent/fitness-contracts";
+import { minimumAppContract } from "./contract";
 import { database } from "./db";
 import {
   mutationSchema,
@@ -846,6 +848,10 @@ async function saveWithin(
       );
     return resultSchema.parse(receipt.result);
   }
+  if (request.data && requiredContract(request.data) > minimumAppContract())
+    throw new StoreRuleError(
+      "This change uses fields the bent Fitness app can't read yet. Remove them and try again.",
+    );
   const [row] =
     await sql`SELECT id,revision,data,updated_at,deleted FROM fitness_records WHERE owner_id=${owner} AND id=${request.id}`;
   const current = row && !row.deleted ? entry(row) : null;

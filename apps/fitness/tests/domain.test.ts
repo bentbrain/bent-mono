@@ -139,29 +139,33 @@ test("progression requires every side, control, reserve and the prescribed set c
       rir: 2,
     })),
   };
-  expect(progression(ex.prescription, done, [10, 12.5, 15]).loadKg).toBe(12.5);
+  expect(
+    progression(ex.prescription, done, { dumbbellsKg: [10, 12.5, 15] }).loadKg,
+  ).toBe(12.5);
   expect(
     progression(
       ex.prescription,
       { ...done, sets: done.sets.slice(0, 2) },
-      [12.5],
+      { dumbbellsKg: [12.5] },
     ).loadKg,
   ).toBe(10);
   expect(
     progression(
       ex.prescription,
       { ...done, sets: done.sets.map((s) => ({ ...s, right: 14 })) },
-      [12.5],
+      { dumbbellsKg: [12.5] },
     ).loadKg,
   ).toBe(10);
   expect(
     progression(
       ex.prescription,
       { ...done, sets: done.sets.map((s) => ({ ...s, controlled: false })) },
-      [12.5],
+      { dumbbellsKg: [12.5] },
     ).loadKg,
   ).toBe(10);
-  expect(progression(ex.prescription, done, []).loadKg).toBe(10);
+  expect(progression(ex.prescription, done, { dumbbellsKg: [] }).loadKg).toBe(
+    10,
+  );
 });
 test("unit round-trip and daily food totals", () => {
   expect(toKg(displayLoad(10, "lb"), "lb")).toBeCloseTo(10, 2);
@@ -275,14 +279,18 @@ describe("skipped sets", () => {
     const workout = completedWorkout("2026-01-05", 0, 10);
     const squat = workout.exercises.find((e) => e.prescription.id === "squat");
     if (!squat) throw new Error("Missing exercise");
-    expect(progression(squat.prescription, squat, [10, 12]).loadKg).toBe(12);
+    expect(
+      progression(squat.prescription, squat, { dumbbellsKg: [10, 12] }).loadKg,
+    ).toBe(12);
     const skipped = {
       ...squat,
       sets: squat.sets.map((set, i) =>
         i === 0 ? { ...set, done: false, skipped: true, loadKg: 4 } : set,
       ),
     };
-    const advice = progression(squat.prescription, skipped, [10, 12]);
+    const advice = progression(squat.prescription, skipped, {
+      dumbbellsKg: [10, 12],
+    });
     expect(advice.loadKg).toBe(10);
     expect(advice.text).toContain("Repeat the load");
   });

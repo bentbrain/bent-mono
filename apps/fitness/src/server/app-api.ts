@@ -1,10 +1,16 @@
-import { fitnessScopes, PhotoUpload } from "@bent/fitness-contracts";
+import {
+  appContractHeader,
+  fitnessScopes,
+  PhotoUpload,
+  requestContract,
+} from "@bent/fitness-contracts";
 import type { ApiErrorCode } from "@bent/fitness-contracts";
 import { mutationSchema } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import { invitedEmail, verifyBearer } from "./auth";
 import { readBodyUpTo } from "./body";
 import { deviceClientIds } from "./config";
+import { minimumAppContract } from "./contract";
 import { exportResponse } from "./export";
 import {
   PhotoRuleError,
@@ -77,6 +83,22 @@ async function authenticateApp(
   needs: Need[],
 ): Promise<{ ok: true; owner: string } | { ok: false; response: Response }> {
   const refuse = (response: Response) => ({ ok: false as const, response });
+  // Older builds would fail to read newer records, or save settings without
+  // fields they don't know. Builds that predate a code read an unknown one
+  // as a failed reply, so this refusal carries only the message they show.
+  if (
+    requestContract(request.headers.get(appContractHeader)) <
+    minimumAppContract()
+  )
+    return refuse(
+      json(
+        {
+          error:
+            "Update bent Fitness to the latest version to keep syncing. Changes on this iPhone stay queued until then.",
+        },
+        426,
+      ),
+    );
   const deadline = performance.now() + timing.authMs;
   const check = await verifyBearer(request, ["oauth_token"], {
     timeoutMs: timing.authMs,

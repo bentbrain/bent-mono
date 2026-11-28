@@ -43,7 +43,8 @@ export type ApiErrorCode = (typeof apiErrorCodes)[number];
 /** An error reply. `error` is safe to show; `code` is stable for clients. */
 export const ApiError = z.object({
   error: z.string(),
-  code: z.enum(apiErrorCodes).optional(),
+  /** Codes this build does not know read as no code, keeping the message. */
+  code: z.enum(apiErrorCodes).optional().catch(undefined),
 });
 export type ApiError = z.infer<typeof ApiError>;
 

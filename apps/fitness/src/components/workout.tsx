@@ -350,9 +350,7 @@ export function ExerciseList({
   return workout.exercises.map((exercise, ei) => {
     const p = exercise.prescription;
     const previous = history ? lastExercise(history, p.id) : undefined;
-    const advice = history
-      ? progression(p, previous, settings.dumbbellsKg)
-      : undefined;
+    const advice = history ? progression(p, previous, settings) : undefined;
     function act(si: number, set: SetEntry, change: Partial<SetEntry>) {
       inputs.commit({
         keys: setKeys(ei, si),

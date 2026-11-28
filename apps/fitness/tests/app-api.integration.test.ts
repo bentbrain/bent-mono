@@ -31,6 +31,8 @@ const { defaultSettings, settingsId } =
   await import("@bent/fitness-contracts/domain");
 const { saveRecord } = await import("../src/server/store");
 const { bearerOnlyPath } = await import("../src/start");
+const { setMinimumAppContractForTests } =
+  await import("../src/server/contract");
 
 const owner = syntheticOwner.id;
 const timezone = "Australia/Brisbane";
@@ -105,7 +107,40 @@ test("app routes take bearer tokens only", () => {
   expect(bearerOnlyPath("/api/apps")).toBe(false);
 });
 
+test("app routes ask builds older than the minimum contract to update", async () => {
+  setMinimumAppContractForTests(2);
+  try {
+    for (const contract of [null, "1", "not-a-number"]) {
+      const init: RequestInit =
+        contract === null
+          ? {}
+          : { headers: { "X-Fitness-Contract": contract } };
+      const response = await api.handleRecordsLoad(
+        bearer(token(), init, "/api/app/records"),
+      );
+      expect(response.status).toBe(426);
+      const reply = await body(response);
+      // Builds that predate a code read an unknown one as a failed reply.
+      expect(reply.code).toBeUndefined();
+      expect(reply.error).toContain("Update bent Fitness");
+    }
+  } finally {
+    setMinimumAppContractForTests();
+  }
+});
+
 describe.skipIf(!configured)("app API", () => {
+  test("loads the account's records with the current contract", async () => {
+    const response = await api.handleRecordsLoad(
+      bearer(
+        token(),
+        { headers: { "X-Fitness-Contract": "2" } },
+        "/api/app/records",
+      ),
+    );
+    expect(response.status).toBe(200);
+  });
+
   test("loads the account's records with a read token from the app", async () => {
     const response = await api.handleRecordsLoad(
       bearer(token(), {}, "/api/app/records"),
@@ -142,6 +177,65 @@ describe.skipIf(!configured)("app API", () => {
     const stale = await body(await send(0, crypto.randomUUID()));
     expect(stale.status).toBe("conflict");
     expect((stale.current as { revision: number }).revision).toBe(1);
+  });
+
+  test("refuses saves that older app builds could not read until the minimum contract allows them", async () => {
+    const settings = defaultSettings("2026-11-01", timezone);
+    const save = (data: unknown) =>
+      api.handleRecordSave(
+        bearer(
+          token(),
+          json({
+            id: settingsId,
+            revision: 1,
+            operationId: crypto.randomUUID(),
+            data,
+          }),
+          "/api/app/records",
+        ),
+      );
+    const routine = settings.routines[0];
+    if (!routine) throw new Error("Missing routine");
+    for (const data of [
+      { ...settings, experience: "new" },
+      {
+        ...settings,
+        routines: [
+          {
+            ...routine,
+            exercises: [{ ...routine.exercises[0], load: "dumbbell" }],
+          },
+        ],
+      },
+    ]) {
+      const refused = await save(data);
+      expect(refused.status).toBe(422);
+      expect((await body(refused)).error).toContain("can't read yet");
+    }
+    setMinimumAppContractForTests(2);
+    try {
+      const saved = await api.handleRecordSave(
+        bearer(
+          token(),
+          {
+            ...json({
+              id: settingsId,
+              revision: 1,
+              operationId: crypto.randomUUID(),
+              data: { ...settings, experience: "new" },
+            }),
+            headers: {
+              "content-type": "application/json",
+              "X-Fitness-Contract": "2",
+            },
+          },
+          "/api/app/records",
+        ),
+      );
+      expect((await body(saved)).status).toBe("saved");
+    } finally {
+      setMinimumAppContractForTests();
+    }
   });
 
   test("record rules reply 422 with their message, and bad bodies 400 or 413", async () => {

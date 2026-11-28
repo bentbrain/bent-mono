@@ -105,7 +105,7 @@ export function PlanScreen({
         {routine.exercises.map((prescription, index) => {
           const exercise = effectivePrescription(prescription, intro);
           const previous = lastExercise(sync.records, exercise.id);
-          const advice = progression(exercise, previous, settings.dumbbellsKg);
+          const advice = progression(exercise, previous, settings);
           return (
             <article className="plan-exercise" key={`${exercise.id}:${index}`}>
               <ExerciseThumb id={exercise.id} />

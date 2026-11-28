@@ -1,4 +1,4 @@
-import { ApiError as ApiErrorBody, AppRecords, PhotoList } from "@bent/fitness-contracts";
+import { ApiError as ApiErrorBody, AppRecords, PhotoList, appContract, appContractHeader } from "@bent/fitness-contracts";
 import type { PhotoSummary, PhotoUpload } from "@bent/fitness-contracts";
 import { resultSchema } from "@bent/fitness-contracts/domain";
 import type { Mutation, SaveResult } from "@bent/fitness-contracts/domain";
@@ -52,7 +52,12 @@ export function createApi(
     try {
       response = await request(origin + path, {
         ...init,
-        headers: { Accept: "application/json", ...init.headers, Authorization: `Bearer ${token}` },
+        headers: {
+          Accept: "application/json",
+          ...init.headers,
+          [appContractHeader]: String(appContract),
+          Authorization: `Bearer ${token}`,
+        },
       });
     } catch {
       if (generation !== session.generation()) throw new SignedOutError();
@@ -128,7 +133,10 @@ export function createApi(
     async photoSource(id: string) {
       return {
         uri: `${origin}/api/app/photos/${encodeURIComponent(id)}`,
-        headers: { Authorization: `Bearer ${await session.token({ generation: session.generation() })}` },
+        headers: {
+          [appContractHeader]: String(appContract),
+          Authorization: `Bearer ${await session.token({ generation: session.generation() })}`,
+        },
       };
     },
     /** The account export as text. */
