@@ -49,10 +49,14 @@ export function Nutrition({
   const [error, setError] = useState("");
   const total = totals(sync.records, date);
   const tracked = trackedNutrients(settings);
-  // The form keeps the fields it opened with, so a tracking change made
-  // elsewhere while it is open never drops a typed value.
-  const [openedWith, setOpenedWith] = useState(tracked);
-  const fields = formNutrients(openedWith, tracked);
+  // Every nutrient field the form has shown stays until it resets, so a
+  // tracking change made elsewhere never drops a typed value.
+  const [shownFields, setShownFields] = useState(tracked);
+  const fields = formNutrients(shownFields, tracked);
+  const fieldKey = fields.join();
+  useEffect(() => {
+    if (fields.length > shownFields.length) setShownFields(fields);
+  }, [fieldKey]);
   const eaten = nutrientTotals(sync.records, date);
   const [notice, setNotice] = useState("");
   // The meal version the form opened with. Saving checks it is still current.
@@ -81,7 +85,7 @@ export function Nutrition({
     setEditing(next);
     setChecked(undefined);
     if (!reload) return;
-    setOpenedWith(trackedNutrients(settings));
+    setShownFields(trackedNutrients(settings));
     setFormVersion((value) => value + 1);
   }
   function savedVersion() {

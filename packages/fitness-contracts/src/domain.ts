@@ -794,7 +794,9 @@ export function nutrientTotals(records: RecordEntry[], date: string) {
       grams += value;
       recorded++;
     }
-    return { grams, recorded };
+    // Sums of decimal grams carry floating-point noise, such as
+    // 10.1 + 10.2 + 9.7 = 29.999999999999996; a thousandth of a gram is plenty.
+    return { grams: Math.round(grams * 1000) / 1000, recorded };
   };
   return {
     meals: meals.length,
@@ -812,8 +814,9 @@ export function nutrientList(list: readonly Nutrient[]) {
 }
 /** What the day's total means for a nutrient's target: "40g left", "12g over", "8g to go". */
 export function nutrientNote(nutrient: Nutrient, grams: number, target: number) {
-  const left = target - grams;
-  // Compares exact grams and rounds only the amount shown.
+  // Compares grams to a thousandth, past floating-point noise, and rounds
+  // only the amount shown.
+  const left = Math.round((target - grams) * 1000) / 1000;
   const amount = (value: number) =>
     value < 0.5 ? "<1g" : `${Math.round(value)}g`;
   if (nutrientInfo[nutrient].aim === "least")
@@ -824,15 +827,15 @@ export function nutrientNote(nutrient: Nutrient, grams: number, target: number) 
   return left > 0 ? `${amount(left)} left` : `${amount(-left)} over`;
 }
 /**
- * The nutrient fields a meal form shows: those tracked when it opened and
- * those tracked now. A field stays while its form is open, so a tracking
- * change elsewhere never drops a typed value.
+ * The nutrient fields a meal form shows: every one it has shown since it
+ * opened, and those tracked now. A field stays until the form resets, so a
+ * tracking change elsewhere never drops a typed value.
  */
 export function formNutrients(
-  openedWith: readonly Nutrient[],
+  shown: readonly Nutrient[],
   now: readonly Nutrient[],
 ) {
-  return nutrients.filter((n) => openedWith.includes(n) || now.includes(n));
+  return nutrients.filter((n) => shown.includes(n) || now.includes(n));
 }
 /** "450 kcal · 30g protein · 40g carbs", listing the tracked nutrients the meal recorded. */
 export function foodSummary(

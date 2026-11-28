@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { View } from "react-native";
 import type { StaticScreenProps } from "@react-navigation/native";
 import { formNutrients, nutrientInfo, trackedNutrients } from "@bent/fitness-contracts/domain";
@@ -24,9 +24,14 @@ export type FoodMealParams = { date: string; mealId?: string };
 export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JSX.Element {
   const { date, mealId } = route.params;
   const { sync, settings } = useConfiguredAccount();
-  // The fields stay while the sheet is open, whatever changes tracking elsewhere.
-  const [openedWith] = useState(() => trackedNutrients(settings));
-  const tracked = formNutrients(openedWith, trackedNutrients(settings));
+  // Every field the sheet has shown stays until it closes, whatever changes
+  // tracking elsewhere, so a typed value is never dropped.
+  const [shown, setShown] = useState(() => trackedNutrients(settings));
+  const tracked = formNutrients(shown, trackedNutrients(settings));
+  const fieldKey = tracked.join();
+  useEffect(() => {
+    if (tracked.length > shown.length) setShown(tracked);
+  }, [fieldKey]);
   const navigation = useFoodNavigation();
   const [editing, setEditing] = useState<Opened<Meal> | undefined>(() => {
     const record = mealId ? sync.records.find((item) => item.id === mealId) : undefined;

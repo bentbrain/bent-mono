@@ -118,6 +118,15 @@ describe("nutrients", () => {
     expect(nutrientNote("carbs", 248.6, 250)).toBe("1g left");
     expect(formNutrients(["fibre"], ["carbs"])).toEqual(["carbs", "fibre"]);
     expect(formNutrients([], [])).toEqual([]);
+    // Several meals can sum to a hair under the target.
+    const fibre = nutrientTotals(
+      [10.1, 10.2, 9.7].map((grams) => record({ ...meal, date: "2026-12-05", fibre: grams })),
+      "2026-12-05",
+    ).fibre.grams;
+    expect(fibre).toBe(30);
+    expect(nutrientNote("fibre", fibre, 30)).toBe("Fibre target reached");
+    expect(nutrientNote("fibre", 29.999999999999996, 30)).toBe("Fibre target reached");
+    expect(nutrientNote("fat", 70.00000000000001, 70)).toBe("On target");
     expect(foodSummary({ calories: 450.4, protein: 30, carbs: 40.2, fibre: 3 }, ["carbs", "fat"])).toBe(
       "450 kcal · 30g protein · 40g carbs",
     );
