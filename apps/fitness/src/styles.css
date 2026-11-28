@@ -148,6 +148,7 @@ small,
 .subtitle {
   color: var(--muted);
   max-width: 62ch;
+  overflow-wrap: anywhere;
   margin-bottom: 0;
 }
 .icon {
@@ -437,16 +438,24 @@ small,
 .date-bar {
   margin-bottom: 16px;
 }
+/* The row's layout depends on the screen width, never on the date shown,
+   so the bar keeps its height on any day. */
 .date-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 .date-label {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   margin: 0 auto 0 0;
   line-height: 1.2;
+}
+.date-label > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .date-label strong {
   font-size: 1.0625rem;
@@ -484,24 +493,29 @@ small,
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
-.date-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 12px;
-  margin: 10px 0 0;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--ink-2);
-  font-size: 0.875rem;
-}
-.date-banner a {
+.date-label a {
+  justify-self: start;
+  max-width: 100%;
+  font-size: 0.8125rem;
   font-weight: 650;
+}
+/* On narrow screens, day steps and the date share one row and the date
+   picker takes the next. */
+@media (max-width: 419px) {
+  .date-row.is-stepped {
+    flex-wrap: wrap;
+  }
+  .date-row.is-stepped .date-pick {
+    flex-basis: 100%;
+  }
 }
 
 /* Week */
+/* Long routine names wrap in the day's headings and links. */
+.week-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .week-card {
   margin-bottom: 16px;
   padding: 12px;
@@ -734,28 +748,101 @@ small,
 .reorganise-week > [role="status"]:empty {
   flex-basis: 0;
 }
-.reorganise-week form {
+.reorganise-actions {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   margin-block: 16px;
 }
-.reorganise-week form > div {
+.reorganise-actions [role="alert"] {
+  margin: 0;
+  color: var(--missed-ink);
+  font-weight: 600;
+}
+.week-order .section-label {
+  margin-bottom: 8px;
+}
+/* Every day's row has the tallest row's height and the same border, so
+   moving a long session never changes where the days are. The column
+   stays within the list, so long names wrap and handles stay visible. */
+.week-order ol {
   display: grid;
-  gap: 6px;
-}
-.reorganise-week form label {
-  font-size: 0.8125rem;
-  font-weight: 650;
-}
-.reorganise-week select {
-  width: 100%;
-  min-width: 0;
-  min-height: 44px;
-  padding: 8px 12px;
-  border: 1px solid var(--field-line);
-  border-radius: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 1fr;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
   background: var(--surface);
+  overflow: hidden;
+}
+.week-order li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 4px 0 14px;
+  border-top: 1px solid transparent;
+  background: var(--surface);
+}
+.week-order li + li {
+  border-top-color: var(--line);
+}
+.week-order li.is-lifted {
+  position: relative;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-lift);
+}
+.week-order ol.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.week-order-day {
+  min-width: 60px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.week-order-session {
+  flex: 1;
+  min-width: 0;
   color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.is-locked .week-order-session {
+  color: var(--muted);
+}
+.week-order-lock,
+.week-order-handle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: var(--muted);
+}
+.week-order-handle {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.week-order-handle:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.week-order-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.week-order-help {
+  margin: 8px 4px 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 .move-preview {
   margin: 0;
@@ -983,6 +1070,32 @@ small,
 .tally a:hover strong {
   color: var(--accent);
 }
+.plan-met {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--done);
+  color: #fff;
+}
+.plan-met .icon {
+  stroke-width: 2.6;
+}
+.plan-meter {
+  display: block;
+  max-width: 96px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.plan-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--done);
+}
 .pips {
   display: flex;
   gap: 4px;
@@ -1007,6 +1120,7 @@ small,
 .rotation-note {
   font-size: 0.875rem;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 /* Exercises */
@@ -1020,7 +1134,9 @@ small,
 }
 .exercise-tile {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
+  overflow-wrap: anywhere;
   height: 100%;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1205,6 +1321,8 @@ small,
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 -8px 32px rgb(20 23 31 / 0.18);
+  /* Controls scrolled into view, such as by Tab, stay clear of the sticky header. */
+  scroll-padding-top: 64px;
 }
 .sheet::backdrop {
   background: rgb(20 23 31 / 0.45);
@@ -2762,6 +2880,7 @@ legend {
 }
 .routine-editor > summary {
   padding: 14px 0;
+  overflow-wrap: anywhere;
 }
 .routine-editor[open] > summary {
   margin-bottom: 8px;

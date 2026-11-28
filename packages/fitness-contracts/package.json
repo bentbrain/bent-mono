@@ -12,7 +12,8 @@
     "./timing": "./src/timing.ts",
     "./catalogue": "./src/catalogue.ts",
     "./plan": "./src/plan.ts",
-    "./proposal": "./src/proposal.ts"
+    "./proposal": "./src/proposal.ts",
+    "./week": "./src/week.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   clerk,
   clerkSetup,
@@ -147,12 +147,12 @@ test("main navigation returns to today and the date picker adds browser history 
   page,
 }) => {
   await expect(page).toHaveURL(/\/\?date=2026-01-05$/);
-  await expect(page.locator(".date-banner")).toContainText(
-    "Viewing Mon 5 Jan 2026",
-  );
+  await expect(page.locator(".date-label")).toContainText("Mon 5 Jan 2026");
   await page.getByRole("link", { name: "Food", exact: true }).click();
   await expect(page).toHaveURL(/\/food$/);
-  await expect(page.locator(".date-banner")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Back to today/ })).toHaveCount(
+    0,
+  );
   await expect(
     page.getByRole("navigation").locator("[aria-current=page]"),
   ).toHaveText("Food");
@@ -164,9 +164,7 @@ test("main navigation returns to today and the date picker adds browser history 
   await page.locator("#view-date").fill("2026-01-06");
   await expect(page).toHaveURL(/date=2026-01-06/);
   await expect(page).toHaveURL(/\/food\?date=2026-01-06/);
-  await expect(page.locator(".date-banner")).toContainText(
-    "Viewing Tue 6 Jan 2026",
-  );
+  await expect(page.locator(".date-label")).toContainText("Tue 6 Jan 2026");
   await expect(
     page.getByRole("heading", { name: "Logged on Tue 6 Jan 2026" }),
   ).toBeVisible();
@@ -182,9 +180,7 @@ test("main navigation returns to today and the date picker adds browser history 
   await page.goForward();
   await expect(page.getByLabel("Meal or snack")).toBeVisible();
   await expect(page.locator("#view-date")).toHaveValue("2026-01-06");
-  await page
-    .getByRole("link", { name: "Return to today", exact: true })
-    .click();
+  await page.getByRole("link", { name: /^Back to today/ }).click();
   await expect(page).toHaveURL(/\/food$/);
   await page.getByRole("link", { name: "Week", exact: true }).click();
   await page.getByRole("link", { name: "Exercises", exact: true }).click();
@@ -656,7 +652,7 @@ test("week days link to each day, and future plans start today", async ({
   ).toBeVisible();
   // A future plan becomes today's workout and does not move the date.
   await page.goto("/?date=2030-01-07");
-  await expect(page.locator(".date-banner")).toContainText("Mon 7 Jan 2030");
+  await expect(page.locator(".date-label")).toContainText("Mon 7 Jan 2030");
   await week
     .getByRole("link", { name: /^Wed 9 Jan 2030: Strength [AB], Planned$/ })
     .click();
@@ -678,7 +674,9 @@ test("week days link to each day, and future plans start today", async ({
   );
   await page.getByRole("link", { name: "Food", exact: true }).click();
   await expect(page).toHaveURL(/\/food$/);
-  await expect(page.locator(".date-banner")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Back to today/ })).toHaveCount(
+    0,
+  );
   await page.getByRole("link", { name: "Week", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Resume workout", exact: true }),
@@ -1878,9 +1876,7 @@ test("the week board selects days in place, keeps date context and starts today'
     .getByRole("link", { name: "Thu 8 Jan 2026: Rest, Rest day" })
     .click();
   await expect(page).toHaveURL(/\/\?date=2026-01-08$/);
-  await expect(page.locator(".date-banner")).toContainText(
-    "Viewing Thu 8 Jan 2026",
-  );
+  await expect(page.locator(".date-label")).toContainText("Thu 8 Jan 2026");
   const panel = page.locator(".now-panel");
   await expect(panel.getByRole("heading", { name: "Rest" })).toBeVisible();
   await expect(panel).toContainText("Next: Fri 9 Jan 2026 · Strength A");
@@ -1906,7 +1902,7 @@ test("the week board selects days in place, keeps date context and starts today'
   // Browsing days changes nothing in the account.
   expect(await records(page)).toEqual(before);
   // Today offers Start workout directly from the week.
-  await page.getByRole("link", { name: "Return to today" }).click();
+  await page.getByRole("link", { name: /^Back to today/ }).click();
   await expect(page).toHaveURL(/\/$/);
   const start = page.getByRole("button", {
     name: "Start workout",
@@ -2204,14 +2200,78 @@ test("reorganise days manually preserves the next week and recovers after reload
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
-  const panel = page.getByRole("dialog", { name: "Move a planned session" });
-  await panel.getByLabel("Session to move").selectOption(monday);
-  await panel.getByLabel("Move to", { exact: true }).selectOption(thursday);
+  const panel = page.getByRole("dialog", { name: "Reorganise week" });
+  const rows = panel.getByRole("listitem");
+  await expect(rows).toHaveCount(7);
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Save week", exact: true }),
+  ).toBeDisabled();
+  // A mouse drag moves Monday's session down to Wednesday, and a drag back
+  // restores the week.
+  const save = panel.getByRole("button", { name: "Save week", exact: true });
+  const drag = async (from: number, to: number) => {
+    const handle = rows.nth(from).getByRole("button");
+    const source = await handle.boundingBox();
+    const target = await rows.nth(to).boundingBox();
+    if (!source || !target) throw Error("Missing reorganise rows");
+    await page.mouse.move(
+      source.x + source.width / 2,
+      source.y + source.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      source.x + source.width / 2,
+      target.y + target.height / 2,
+      { steps: 8 },
+    );
+    // Save waits until the drag ends, even from the keyboard.
+    await expect(save).toBeDisabled();
+    await panel
+      .locator("form.reorganise-actions")
+      .evaluate((form: HTMLFormElement) => form.requestSubmit());
+    await expect(panel).toBeVisible();
+    await page.mouse.up();
+  };
+  await drag(0, 2);
+  await expect(save).toBeEnabled();
+  await expect(rows.nth(2)).toContainText(routine.name);
+  await drag(2, 0);
+  await expect(rows.nth(0)).toContainText(routine.name);
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // Selecting a handle and then another day's handle moves the session too.
+  await rows.nth(0).getByRole("button").click();
+  await panel
+    .getByRole("button", { name: new RegExp(`^Move ${routine.name} to Tue`) })
+    .click();
+  await expect(rows.nth(1)).toContainText(routine.name);
+  await rows.nth(1).getByRole("button").click();
+  await panel
+    .getByRole("button", { name: new RegExp(`^Move ${routine.name} to Mon`) })
+    .click();
+  await expect(rows.nth(0)).toContainText(routine.name);
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // The arrow keys move a focused session one open day at a time.
+  const handle = panel.getByRole("button", {
+    name: new RegExp(`^Move ${routine.name}, Mon`),
+  });
+  await handle.focus();
+  for (let step = 0; step < 3; step += 1)
+    await page.keyboard.press("ArrowDown");
+  await expect(rows.nth(3)).toContainText(routine.name);
+  await expect(
+    panel.getByRole("button", {
+      name: new RegExp(`^Move ${routine.name}, Thu`),
+    }),
+  ).toBeFocused();
+  await expect(panel.locator(".move-preview")).toHaveText(
+    /^4 days change: Mon \d+, Tue \d+, Wed \d+, Thu \d+\.$/,
+  );
   await page.screenshot({
     path: `private/reorganise/move-${info.project.name}.png`,
     fullPage: true,
   });
-  await panel.getByRole("button", { name: "Apply move" }).click();
+  await panel.getByRole("button", { name: "Save week", exact: true }).click();
   await expect(panel).not.toBeVisible();
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await page.reload();
@@ -2221,7 +2281,16 @@ test("reorganise days manually preserves the next week and recovers after reload
   );
   const record = exported.records.find((r) => r.data.kind === "settings");
   if (record?.data.kind !== "settings") throw Error("Missing updated settings");
-  expect(scheduled(record.data, monday).type).toBe("rest");
+  // The sessions between Monday and Thursday each move up a day.
+  const wednesday = scheduled(original.data, addDays(monday, 2));
+  expect(scheduled(record.data, monday).type).toBe(
+    scheduled(original.data, addDays(monday, 1)).type,
+  );
+  expect(scheduled(record.data, addDays(monday, 1)).type).toBe(wednesday.type);
+  expect(scheduled(record.data, addDays(monday, 1)).routine?.id).toBe(
+    wednesday.routine?.id,
+  );
+  expect(scheduled(record.data, addDays(monday, 2)).type).toBe("rest");
   expect(scheduled(record.data, thursday).routine?.id).toBe(routine.id);
   expect(scheduled(record.data, addDays(monday, 7))).toEqual(
     scheduled(original.data, addDays(monday, 7)),
@@ -2250,6 +2319,372 @@ test("reorganise days manually preserves the next week and recovers after reload
   expect(reset.data.dayPlans).toEqual({});
 });
 
+test("reorganise closes when the week changes and scrolls while dragging by touch", async ({
+  page,
+  isMobile,
+}) => {
+  const monday = addDays(mondayOf(localDate("UTC")), 7);
+  await page.locator("#view-date").fill(monday);
+  await page.locator("#view-date").fill(addDays(monday, 14));
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const panel = page.getByRole("dialog", { name: "Reorganise week" });
+  await panel
+    .getByRole("button", { name: /^Move / })
+    .first()
+    .focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(panel.locator(".move-preview")).toHaveText(/^2 days change/);
+  // Browser Back shows another week, so the unsaved arrangement closes with it.
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`date=${monday}`));
+  await expect(panel).toBeHidden();
+  if (!isMobile) return;
+  // On a short screen, holding a touch drag near the bottom edge scrolls the
+  // sheet, so one gesture reaches Sunday.
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const rows = panel.getByRole("listitem");
+  const name = (
+    await rows.nth(0).locator(".week-order-session").innerText()
+  ).trim();
+  const handle = await rows.nth(0).getByRole("button").boundingBox();
+  const sheet = await panel.boundingBox();
+  if (!handle || !sheet) throw Error("Missing reorganise sheet");
+  const touch = await page.context().newCDPSession(page);
+  const x = handle.x + handle.width / 2;
+  const at = (y: number) => [{ x, y }];
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: at(handle.y + handle.height / 2),
+  });
+  for (
+    let y = handle.y + handle.height / 2;
+    y < sheet.y + sheet.height - 12;
+    y += 20
+  )
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: at(y),
+    });
+  await expect(rows.nth(6)).toContainText(name);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  const preview = panel.locator(".move-preview");
+  await expect(preview).toHaveText(/^\d+ days? changes?:/);
+  const kept = await rows.allInnerTexts();
+  // A cancelled touch puts the week back as it was before that drag.
+  await panel.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const first = await rows.nth(0).getByRole("button").boundingBox();
+  const third = await rows.nth(2).boundingBox();
+  if (!first || !third) throw Error("Missing reorganise rows");
+  const finger = (y: number, id = 0) => ({ x, y, id });
+  const start = first.y + first.height / 2;
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [finger(start)],
+  });
+  for (let y = start; y < third.y + third.height / 2; y += 10)
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [finger(y)],
+    });
+  await expect.poll(() => rows.allInnerTexts()).not.toEqual(kept);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchCancel",
+    touchPoints: [],
+  });
+  await expect.poll(() => rows.allInnerTexts()).toEqual(kept);
+  // A second finger on another handle doesn't take over a drag.
+  const second = await rows.nth(3).getByRole("button").boundingBox();
+  if (!second) throw Error("Missing reorganise rows");
+  const other = (y: number) => ({
+    x: second.x + second.width / 2,
+    y,
+    id: 1,
+  });
+  const otherStart = second.y + second.height / 2;
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [finger(start)],
+  });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [finger(start + 10)],
+  });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [finger(start + 10), other(otherStart)],
+  });
+  for (let step = 1; step <= 6; step += 1)
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [finger(start + 10), other(otherStart + step * 15)],
+    });
+  await expect.poll(() => rows.allInnerTexts()).toEqual(kept);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await expect.poll(() => rows.allInnerTexts()).toEqual(kept);
+});
+
+test("reorganise keeps long sessions steady, ignores a release outside the list and keeps the draft on Escape", async ({
+  page,
+  context,
+}) => {
+  // A long routine name without spaces wraps, and every row takes its height.
+  // Another tab renames the routine, so this one opens only the week.
+  const long = `Synthetic${"Longroutinename".repeat(9)}`;
+  const editor = await context.newPage();
+  await editor.goto("/schedule");
+  await editor.locator(".routine-editor > summary").first().click();
+  await editor.getByLabel("Routine name", { exact: true }).first().fill(long);
+  await editor
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(editor.locator(".sync-state")).toHaveText("Saved");
+  // The goal under the Week heading can be just as long.
+  await editor.goto("/settings");
+  await editor.locator("#goal").fill(long);
+  await editor
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await expect(editor.locator(".sync-state")).toHaveText("Saved");
+  await editor.close();
+  // The name wraps, so no page grows wider than the screen: Exercises, and
+  // each day of the week, including strength days and the rest days before them.
+  const next = addDays(mondayOf(localDate("UTC")), 7);
+  for (const path of [
+    "/guides",
+    ...Array.from(
+      { length: 8 },
+      (_, day) => `/?date=${addDays(next, day - 1)}`,
+    ),
+    "/",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator(".sync-state")).toHaveText("Saved");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+  }
+  await page.locator("#view-date").fill(addDays(mondayOf(localDate("UTC")), 7));
+  const panel = page.getByRole("dialog", { name: "Reorganise week" });
+  const rows = panel.getByRole("listitem");
+  const center = async (target: Locator) => {
+    const box = await target.boundingBox();
+    if (!box) throw Error("Missing reorganise row");
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+  await page.setViewportSize({ width: 320, height: 1700 });
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  // A press released outside the list starts nothing when the mouse returns.
+  let at = await center(rows.first().getByRole("button"));
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  const heading = await center(panel.getByRole("heading", { level: 2 }));
+  await page.mouse.move(heading.x, heading.y, { steps: 4 });
+  await page.mouse.up();
+  at = await center(rows.nth(1));
+  await page.mouse.move(at.x, at.y, { steps: 4 });
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // Nor does a second press that starts outside the list.
+  at = await center(rows.first().getByRole("button"));
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(heading.x, heading.y, { steps: 4 });
+  await page.mouse.up();
+  await page.mouse.down();
+  at = await center(rows.nth(3));
+  await page.mouse.move(at.x, at.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // Every handle stays inside the list.
+  const list = await panel.getByRole("list").boundingBox();
+  if (!list) throw Error("Missing reorganise list");
+  for (const box of await Promise.all(
+    (await rows.getByRole("button").all()).map((handle) =>
+      handle.boundingBox(),
+    ),
+  ))
+    expect((box?.x ?? Infinity) + (box?.width ?? 0)).toBeLessThanOrEqual(
+      list.x + list.width + 1,
+    );
+  // A small movement just past the drag threshold lifts the session and
+  // keeps it on its day.
+  const saturday = rows.nth(5);
+  await saturday.getByRole("button").scrollIntoViewIfNeeded();
+  const before = await saturday.boundingBox();
+  at = await center(saturday.getByRole("button"));
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, at.y + 8, { steps: 2 });
+  await expect(saturday).toHaveClass(/is-lifted/);
+  await page.mouse.move(at.x + 1, at.y + 9);
+  expect(await saturday.boundingBox()).toEqual(before);
+  await page.mouse.up();
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  const first = (await rows.allInnerTexts()).findIndex((text) =>
+    text.includes(long),
+  );
+  expect(first).toBeGreaterThanOrEqual(0);
+  expect(first).toBeLessThan(4);
+  // A drag that changes direction drops the session on the day under the
+  // pointer.
+  at = await center(rows.nth(first).getByRole("button"));
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, at.y + 10, { steps: 2 });
+  at = await center(rows.nth(first + 3));
+  await page.mouse.move(at.x, at.y, { steps: 6 });
+  await expect(rows.nth(first + 3)).toContainText(long);
+  at = await center(rows.nth(first + 1));
+  await page.mouse.move(at.x, at.y, { steps: 6 });
+  // A sideways nudge on the same day keeps the session there.
+  await page.mouse.move(at.x + 1, at.y);
+  await page.mouse.up();
+  await expect(rows.nth(first + 1)).toContainText(long);
+  await expect(rows.nth(first)).not.toContainText(long);
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await page.setViewportSize({ width: 320, height: 340 });
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  // Holding a drag at the bottom edge carries the long session to Sunday
+  // and keeps it there.
+  const handle = rows.filter({ hasText: long }).first().getByRole("button");
+  await handle.scrollIntoViewIfNeeded();
+  at = await center(handle);
+  const sheet = await panel.boundingBox();
+  if (!sheet) throw Error("Missing reorganise sheet");
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, sheet.y + sheet.height - 8, { steps: 10 });
+  await expect(rows.nth(6)).toContainText(long);
+  for (let sample = 0; sample < 5; sample += 1) {
+    await page.waitForTimeout(100);
+    await expect(rows.nth(6)).toContainText(long);
+  }
+  await page.mouse.up();
+  const preview = await panel.locator(".move-preview").innerText();
+  expect(preview).toMatch(/^\d+ days? changes?:/);
+  // Escape first puts a selected session back, from anywhere in the sheet.
+  await rows.first().getByRole("button").press("Enter");
+  await expect(
+    panel.getByRole("button", { name: /^Cancel moving / }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "Save week", exact: true }).focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /^Cancel moving / }),
+  ).toHaveCount(0);
+  await expect(panel.locator(".move-preview")).toHaveText(preview);
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  // Only a visible row chooses a day: not the sticky header covering one.
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const head = panel.locator(".sheet-head");
+  await panel.evaluate((sheet) => {
+    const top = sheet.querySelector(".sheet-head")?.getBoundingClientRect();
+    const row = sheet.querySelectorAll("li")[1]?.getBoundingClientRect();
+    if (top && row) sheet.scrollTop += row.top - top.bottom;
+  });
+  at = await center(rows.nth(1).getByRole("button"));
+  const title = await center(head);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, at.y + 10, { steps: 2 });
+  await page.mouse.move(title.x, title.y, { steps: 6 });
+  await page.waitForTimeout(300);
+  await page.mouse.up();
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // Tab and the arrow keys keep the focused handle clear of the header.
+  const clear = async () => {
+    const top = await head.boundingBox();
+    const sheet = await panel.boundingBox();
+    const focused = await panel
+      .locator(".week-order-handle:focus")
+      .boundingBox();
+    if (!top || !sheet || !focused) throw Error("Missing focused handle");
+    expect(focused.y).toBeGreaterThanOrEqual(top.y + top.height - 1);
+    expect(focused.y + focused.height).toBeLessThanOrEqual(
+      sheet.y + sheet.height + 1,
+    );
+  };
+  await panel.evaluate((sheet) => {
+    sheet.scrollTop = sheet.scrollHeight;
+  });
+  await panel
+    .getByRole("button", { name: "Close reorganisation", exact: true })
+    .focus();
+  await page.keyboard.press("Tab");
+  await clear();
+  await page.keyboard.press("ArrowDown");
+  await clear();
+  await page.keyboard.press("ArrowUp");
+  await clear();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  // Over the backdrop, a drag changes nothing.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page
+    .getByRole("button", { name: "Reorganise week", exact: true })
+    .click();
+  const wide = await panel.boundingBox();
+  if (!wide) throw Error("Missing reorganise sheet");
+  at = await center(rows.first().getByRole("button"));
+  const thursday = await center(rows.nth(3));
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, at.y + 10, { steps: 2 });
+  await page.mouse.move(wide.x - 20, at.y + 10, { steps: 6 });
+  await page.mouse.move(wide.x - 20, thursday.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+  // A drag that passes over other days and ends outside the list puts the
+  // week back as it was.
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x, thursday.y, { steps: 8 });
+  await expect(panel.locator(".move-preview")).toHaveText(/days? changes?:/);
+  await page.mouse.move(wide.x - 20, thursday.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(panel.getByText("No changes yet.")).toBeVisible();
+});
+
+test("the date bar keeps its height when the date changes", async ({
+  page,
+}) => {
+  for (const width of [320, 380, 420, 430, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const path of ["/", "/food", "/body"]) {
+      await page.goto(path);
+      await expect(page.locator(".sync-state")).toHaveText("Saved");
+      const today = await page.locator(".date-bar").boundingBox();
+      await page.goto(`${path}?date=2026-01-06`);
+      await expect(
+        page.getByRole("link", { name: /^Back to today/ }),
+      ).toBeVisible();
+      const other = await page.locator(".date-bar").boundingBox();
+      expect(other?.height, `${path} at ${width} px`).toBe(today?.height);
+    }
+  }
+});
+
 test("reorganise rejects a stale plan when another tab saves settings", async ({
   page,
   context,
@@ -2259,7 +2694,12 @@ test("reorganise rejects a stale plan when another tab saves settings", async ({
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
-  const panel = page.getByRole("dialog", { name: "Move a planned session" });
+  const panel = page.getByRole("dialog", { name: "Reorganise week" });
+  await panel
+    .getByRole("button", { name: /^Move / })
+    .first()
+    .focus();
+  await page.keyboard.press("ArrowDown");
   const other = await context.newPage();
   await other.goto("/settings");
   await other
@@ -2269,8 +2709,15 @@ test("reorganise rejects a stale plan when another tab saves settings", async ({
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
   await expect(other.locator(".sync-state")).toHaveText("Saved");
-  await panel.getByRole("button", { name: "Apply move" }).click();
-  await expect(panel.getByRole("alert")).toContainText("Your plan changed");
+  await panel.getByRole("button", { name: "Save week", exact: true }).click();
+  // The sheet refuses the save once this tab has the other tab's change;
+  // before then, the cloud refuses it as a conflicting edit.
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: /Your plan changed|changed on another device/ })
+      .first(),
+  ).toBeVisible();
   const records = exportSchema.parse(
     await (await page.request.get("/api/export")).json(),
   ).records;

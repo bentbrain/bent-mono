@@ -4,7 +4,8 @@ import { weeklySummary } from "@bent/fitness-contracts/progress";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { ListRow, ListSection } from "../../ui/List";
 import { Symbol } from "../../ui/Symbol";
-import { planProgress, rotationNote } from "./logic";
+import { planProgress } from "@bent/fitness-contracts/week";
+import { rotationNote } from "./logic";
 import { useWeekNavigation } from "./navigation";
 import { Meter } from "./parts";
 
