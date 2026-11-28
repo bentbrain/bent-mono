@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import {
   correctionReplacement,
   formatDate,
@@ -124,14 +124,18 @@ export function History() {
               </p>
               {record.data.notes && <p>{record.data.notes}</p>}
               <div className="row history-actions">
-                <Link
+                <Button
                   className="bent-button bent-button--outline"
-                  to="/run"
-                  search={{ runId: record.id }}
-                  aria-label={`Edit ${label}`}
+                  render={
+                    <Link
+                      to="/run"
+                      search={{ runId: record.id }}
+                      aria-label={`Edit ${label}`}
+                    />
+                  }
                 >
                   Edit run
-                </Link>
+                </Button>
                 <Button
                   appearance="ghost"
                   aria-label={`Remove ${label}`}

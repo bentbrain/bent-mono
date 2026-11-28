@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
+import { Button } from "@bent/ui/sdk/button";
 import { readiness } from "../server/functions";
 import { FeedbackToolbar } from "../components/feedback-toolbar";
 import { isPublicPage } from "../public-pages";
@@ -43,7 +44,7 @@ export const Route = createRootRoute({
         Check your connection, then try again. Pending changes remain on this
         device.
       </p>
-      <button onClick={reset}>Try again</button>
+      <Button onClick={() => reset()}>Try again</Button>
     </main>
   ),
 });

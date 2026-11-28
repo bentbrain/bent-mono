@@ -102,6 +102,8 @@
         "@modelcontextprotocol/sdk": "1.32.2",
         "@tanstack/react-router": "1.170.46",
         "@tanstack/react-start": "1.169.5",
+        "@ui-sdk/core": "0.1.0-beta.18",
+        "@ui-sdk/react": "0.1.0-beta.18",
         "postgres": "4.1.1",
         "react": "19.3.1",
         "react-dom": "19.3.1",
@@ -476,6 +478,8 @@
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@bent/design-tokens": "workspace:*",
+        "@ui-sdk/core": "0.1.0-beta.18",
+        "@ui-sdk/react": "0.1.0-beta.18",
         "clsx": "^2.1.1",
         "tailwind-merge": "^3.7.0",
       },
@@ -2623,6 +2627,10 @@
     "@typescript-eslint/utils": ["@typescript-eslint/utils@8.72.1", "", { "dependencies": { "@eslint-community/eslint-utils": "^4.9.1", "@typescript-eslint/scope-manager": "8.72.1", "@typescript-eslint/types": "8.72.1", "@typescript-eslint/typescript-estree": "8.72.1" }, "peerDependencies": { "eslint": "^8.57.0 || ^9.0.0 || ^10.0.0", "typescript": ">=4.8.4 <6.1.0" } }, "sha512-5v5liypurJBFHCBNqh/RjsymAD+VWcE0djuGY/BUqp5fC3Qn+luWDEksjuTtWjPn6i5zQlUtkZCRG/CYG0yCkA=="],
 
     "@typescript-eslint/visitor-keys": ["@typescript-eslint/visitor-keys@8.72.1", "", { "dependencies": { "@typescript-eslint/types": "8.72.1", "eslint-visitor-keys": "^5.0.0" } }, "sha512-SB8xqipSzZHUePCCLNeYxqnxq83X61/qzNhjQGbTfjxGZIeOEP7tBgWYX05Tcd6CgE02WdTJnh5b8kMZJ/+bnQ=="],
+
+    "@ui-sdk/core": ["@ui-sdk/core@0.1.0-beta.18", "", {}, "sha512-y5S6komEjZ2dtD/rrW0ulkP67zNZpfbTBmtynuw4oLvhazXoEQI7Yk1/jMuOVOJvj0RUk8tLY/iyckbzaI+CrA=="],
+
+    "@ui-sdk/react": ["@ui-sdk/react@0.1.0-beta.18", "", { "peerDependencies": { "@types/react": ">=19.2.10", "@ui-sdk/core": "^0.1.0-beta.18", "react": ">=19", "react-dom": ">=19" }, "optionalPeers": ["@types/react"] }, "sha512-iTL1slJ0PFJXPGLrNMQCuQq4cQjUlzsOAlLRsuz/aMCFtDJhvhH7E6euBwdak8mHYxGwSwVHprTfnFhkyQi44Q=="],
 
     "@ungap/structured-clone": ["@ungap/structured-clone@1.4.0", "", {}, "sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ=="],
 

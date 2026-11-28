@@ -8,7 +8,8 @@ import {
 } from "@tanstack/react-router";
 import { AccountContext, useAccount } from "./account-context";
 import { UserButton, SignInButton, useAuth } from "@clerk/tanstack-react-start";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
+import { AgentBridge } from "./agent";
 import { localDate, settingsId } from "@bent/fitness-contracts/domain";
 import { load, save } from "../server/functions";
 import { useSync } from "../sync";
@@ -124,15 +125,20 @@ function Account({ owner }: { owner: string }) {
   );
   return (
     <div className="app-shell">
+      <AgentBridge />
       <header className="app-header">
-        <Link
+        <Button
           className="wordmark"
-          to="/"
-          search={{}}
-          activeOptions={{ exact: true, includeSearch: false }}
+          render={
+            <Link
+              to="/"
+              search={{}}
+              activeOptions={{ exact: true, includeSearch: false }}
+            />
+          }
         >
           bent<span>/</span>fitness
-        </Link>
+        </Button>
         <div
           className="account-tools"
           data-feedback-private
@@ -167,34 +173,33 @@ function Account({ owner }: { owner: string }) {
                         ? "Saved"
                         : "Loading…"}
           </span>
-          <Link
+          <Button
             className="icon-button"
-            to="/settings"
-            search={{}}
             aria-label="Settings"
             aria-current={
               location.pathname === "/settings" ? "page" : undefined
             }
+            render={<Link to="/settings" search={{}} />}
           >
             <Icon name="settings" />
-          </Link>
+          </Button>
           <UserButton userProfileMode="navigation" userProfileUrl="/account" />
         </div>
       </header>
       <nav className="navigation" aria-label="Main navigation">
         {navigation.map((item) => (
-          <Link
+          <Button
             key={item.to}
-            to={item.to}
-            search={{}}
-            activeOptions={{ exact: true }}
             aria-current={
               item.paths.includes(location.pathname) ? "page" : undefined
+            }
+            render={
+              <Link to={item.to} search={{}} activeOptions={{ exact: true }} />
             }
           >
             <Icon name={item.icon} />
             {item.name}
-          </Link>
+          </Button>
         ))}
       </nav>
       <main className="content">
@@ -233,7 +238,11 @@ function Account({ owner }: { owner: string }) {
               <summary>Device changes</summary>
               <pre>{sync.draftExport()}</pre>
             </details>
-            <Button appearance="outline" onClick={() => void sync.useCloud()}>
+            <Button
+              appearance="outline"
+              data-agent-confirm="Replaces this record's changes on this device with the cloud version"
+              onClick={() => void sync.useCloud()}
+            >
               Use cloud version for this record
             </Button>
             <p>

@@ -1,3 +1,4 @@
+@layer ui-sdk;
 @import "@bent/design-tokens/tokens.css";
 @import "@bent/ui/controls.css";
 
@@ -74,7 +75,8 @@ button,
 summary {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+a[data-slot="button"][data-disabled] {
   cursor: default;
   opacity: 0.45;
 }
@@ -1233,6 +1235,40 @@ small,
   min-height: 36px;
   border: 0;
   background: var(--surface-2);
+}
+
+/* Assistant confirmation */
+.agent-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(20 23 31 / 0.45);
+  backdrop-filter: blur(2px);
+}
+.agent-confirm {
+  position: fixed;
+  inset: 0;
+  width: min(440px, calc(100% - 2 * var(--gutter)));
+  height: fit-content;
+  margin: auto;
+  padding: 20px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-lift);
+}
+.agent-confirm h2 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+.agent-confirm p {
+  margin: 0 0 18px;
+  color: var(--ink-2);
+}
+.agent-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Plan preview */

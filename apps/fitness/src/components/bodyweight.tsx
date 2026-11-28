@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import {
   displayLoad,
   formatDate,

@@ -1,4 +1,4 @@
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import { sameData } from "@bent/fitness-contracts/domain";
 import type { Entity } from "@bent/fitness-contracts/domain";
 

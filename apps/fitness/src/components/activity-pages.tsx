@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import { z } from "zod";
 import {
   dateSearch,
@@ -72,9 +72,12 @@ export function PlanScreen({
       data-feedback-private
       data-feedback-redact
     >
-      <Link className="back-link" to="/" search={dateSearch(date, today)}>
+      <Button
+        className="back-link"
+        render={<Link to="/" search={dateSearch(date, today)} />}
+      >
         <Icon name="back" size={16} /> Back to week
-      </Link>
+      </Button>
       <header className="page-head">
         <p className="eyebrow">
           Workout plan · {formatDate(date)}
@@ -95,9 +98,11 @@ export function PlanScreen({
         {recorded && (
           <p>
             You recorded {routine.name} for {formatDate(date)}.{" "}
-            <Link to="/history" search={dateSearch(date, today)}>
+            <Button
+              render={<Link to="/history" search={dateSearch(date, today)} />}
+            >
               View results
-            </Link>
+            </Button>
           </p>
         )}
       </div>
@@ -148,13 +153,12 @@ export function PlanScreen({
               You have a workout in progress. Resume it when you are ready to
               train.
             </p>
-            <Link
+            <Button
               className="bent-button bent-button--primary"
-              to="/workout"
-              search={{ workoutId: active.id }}
+              render={<Link to="/workout" search={{ workoutId: active.id }} />}
             >
               Resume workout
-            </Link>
+            </Button>
           </>
         ) : (
           <>
@@ -210,20 +214,23 @@ export function WorkoutScreen({ workoutId }: { workoutId: string }) {
           View your results in History. Check the save status before closing the
           app.
         </p>
-        <Link to="/history" search={dateSearch(workoutDate, today)}>
+        <Button
+          render={
+            <Link to="/history" search={dateSearch(workoutDate, today)} />
+          }
+        >
           Open history
-        </Link>
+        </Button>
       </section>
     );
   return (
     <>
-      <Link
+      <Button
         className="back-link"
-        to="/"
-        search={dateSearch(workoutDate, today)}
+        render={<Link to="/" search={dateSearch(workoutDate, today)} />}
       >
         <Icon name="back" size={16} /> Back to week
-      </Link>
+      </Button>
       <WorkoutEditor
         entry={{ ...entry, data: entry.data }}
         settings={settings}
@@ -303,9 +310,12 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
   }
   return (
     <section data-feedback-private data-feedback-redact>
-      <Link className="back-link" to="/" search={dateSearch(day, today)}>
+      <Button
+        className="back-link"
+        render={<Link to="/" search={dateSearch(day, today)} />}
+      >
         <Icon name="back" size={16} /> Back to week
-      </Link>
+      </Button>
       <header className="page-head">
         <p className="eyebrow">
           {run ? "Recorded run" : "Run plan"} · {formatDate(day)}
@@ -403,9 +413,9 @@ function Unavailable({ title }: { title: string }) {
     <section>
       <h1>{title}</h1>
       <p>Open your current plan from your week.</p>
-      <Link to="/" search={dateSearch(date, today)}>
+      <Button render={<Link to="/" search={dateSearch(date, today)} />}>
         Back to week
-      </Link>
+      </Button>
     </section>
   );
 }

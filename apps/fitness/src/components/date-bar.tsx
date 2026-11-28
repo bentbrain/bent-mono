@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { Button } from "@bent/ui/sdk/button";
 import {
   addDays,
   dateSearch,
@@ -28,30 +29,38 @@ export function DateBar({
     <div className="date-bar" data-feedback-private data-feedback-redact>
       <div className="date-row">
         {step && (
-          <Link
+          <Button
             className="icon-button"
-            to={path}
-            search={dateSearch(previous, today)}
-            activeOptions={{ exact: true }}
-            aria-label={`Previous day, ${formatDate(previous)}`}
+            render={
+              <Link
+                to={path}
+                search={dateSearch(previous, today)}
+                activeOptions={{ exact: true }}
+                aria-label={`Previous day, ${formatDate(previous)}`}
+              />
+            }
           >
             <Icon name="back" />
-          </Link>
+          </Button>
         )}
         <p className="date-label">
           <strong>{isToday ? "Today" : formatShortDate(date)}</strong>
           <span>{isToday ? formatShortDate(date) : date.slice(0, 4)}</span>
         </p>
         {step && (
-          <Link
+          <Button
             className="icon-button"
-            to={path}
-            search={dateSearch(next, today)}
-            activeOptions={{ exact: true }}
-            aria-label={`Next day, ${formatDate(next)}`}
+            render={
+              <Link
+                to={path}
+                search={dateSearch(next, today)}
+                activeOptions={{ exact: true }}
+                aria-label={`Next day, ${formatDate(next)}`}
+              />
+            }
           >
             <Icon name="forward" />
-          </Link>
+          </Button>
         )}
         <label className="date-pick">
           <span>Choose date</span>
@@ -73,9 +82,13 @@ export function DateBar({
           <span>
             Viewing {formatDate(date)}. New entries here use this date.
           </span>{" "}
-          <Link to={path} search={{}} activeOptions={{ exact: true }}>
+          <Button
+            render={
+              <Link to={path} search={{}} activeOptions={{ exact: true }} />
+            }
+          >
             Return to today
-          </Link>
+          </Button>
         </p>
       )}
     </div>

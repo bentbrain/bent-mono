@@ -4,7 +4,7 @@ import {
   UserProfile,
   useAuth,
 } from "@clerk/tanstack-react-start";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 
 export const Route = createFileRoute("/account/$")({
   component: Account,
@@ -16,9 +16,9 @@ function Account() {
   if (!isLoaded) return <p className="loading">Loading account…</p>;
   return (
     <main className="auth-page account-page">
-      <Link className="text-link" to="/" search={{}}>
+      <Button className="text-link" render={<Link to="/" search={{}} />}>
         Back to Fitness
-      </Link>
+      </Button>
       {userId ? (
         <UserProfile routing="path" path="/account" />
       ) : (
