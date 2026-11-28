@@ -29,7 +29,7 @@ import { ChartCard, spokenDetail, useDismiss } from "./chart-popover";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
 import { Icon } from "./icons";
-import { variantNames } from "./meal-names";
+import { distinctLabels, variantNames } from "./meal-names";
 import { EditConflict, editStatus } from "./record-edit";
 import type { Opened } from "./record-edit";
 type Meal = Extract<Entity, { kind: "meal" }>;
@@ -161,10 +161,18 @@ export function Nutrition({
     record.data.kind === "regular" ? [{ ...record, data: record.data }] : [],
   );
   const variants = variantNames(regulars);
-  const variant = (id: string) => {
-    const name = variants.get(id);
-    return name ? `, ${name}` : "";
+  const named = (verb: string, r: (typeof regulars)[number]) => {
+    const variant = variants.get(r.id);
+    return { id: r.id, label: `${verb}${variant ? `, ${variant}` : ""}` };
   };
+  const addLabels = distinctLabels(
+    regulars.map((r) => named(`Add ${r.data.name} to ${formatDate(date)}`, r)),
+    "saved meal",
+  );
+  const removeLabels = distinctLabels(
+    regulars.map((r) => named(`Remove regular ${r.data.name}`, r)),
+    "saved meal",
+  );
   const left = {
     calories: Math.round(settings.calories - total.calories),
     protein: Math.round(settings.protein - total.protein),
@@ -260,7 +268,7 @@ export function Nutrition({
             <li key={r.id}>
               <Button
                 className="quick-add"
-                aria-label={`Add ${r.data.name} to ${formatDate(date)}${variant(r.id)}`}
+                aria-label={addLabels.get(r.id)}
                 onClick={() => {
                   if (sync.put({ ...r.data, kind: "meal", date }))
                     setNotice(`Added ${r.data.name} for ${formatDate(date)}.`);
@@ -450,7 +458,7 @@ export function Nutrition({
                   </div>
                   <Button
                     appearance="ghost"
-                    aria-label={`Remove regular ${r.data.name}${variant(r.id)}`}
+                    aria-label={removeLabels.get(r.id)}
                     onClick={() =>
                       window.confirm(`Remove ${r.data.name}?`) &&
                       sync.put(null, r.id, r.revision)

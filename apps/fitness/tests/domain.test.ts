@@ -28,7 +28,11 @@ import {
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
-import { variantNames } from "../src/components/meal-names";
+import {
+  distinctLabels,
+  matchKey,
+  variantNames,
+} from "../src/components/meal-names";
 import {
   dailyWeights,
   strengthSeries,
@@ -1098,5 +1102,33 @@ describe("saved meal variant names", () => {
     ]);
     expect(names.get("a")).toBe("350 kcal · 12g protein · no fibre");
     expect(names.get("b")).toBe("400 kcal · 20g protein · 6g fibre");
+  });
+
+  test("groups names the way the agent bridge compares them", () => {
+    expect(matchKey("  Péanut,  BUTTER ")).toBe(matchKey("peanut butter"));
+    expect(matchKey("Straße")).toBe("strasse");
+    const names = variantNames([
+      meal("a", { name: "Peanut butter", calories: 350 }),
+      meal("b", { name: "Peanut  butter", calories: 400 }),
+    ]);
+    expect(names.get("a")).toBe("350 kcal");
+    expect(names.get("b")).toBe("400 kcal");
+  });
+
+  test("gives labels that still match another their place", () => {
+    const labels = distinctLabels(
+      [
+        { id: "a", label: "Remove regular Oats, 12.1g protein" },
+        { id: "b", label: "Remove regular Oats, 12.4g protein" },
+        { id: "c", label: "Remove regular Oats, 12.1g protein" },
+      ],
+      "saved meal",
+    );
+    expect([...labels.values()]).toEqual([
+      "Remove regular Oats, 12.1g protein, saved meal 1",
+      "Remove regular Oats, 12.4g protein",
+      "Remove regular Oats, 12.1g protein, saved meal 3",
+    ]);
+    expect(new Set([...labels.values()].map(matchKey)).size).toBe(3);
   });
 });
