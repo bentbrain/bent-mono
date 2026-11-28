@@ -1,17 +1,19 @@
 // Checks that a Swift CodeQL database extracted every Swift source its
 // analysis must cover. Every tracked Swift file in the repository belongs to
-// the app scope, the tools scope or both, and a file in neither fails the
-// check:
+// the app, modules or tools scope, or more than one, and a file in none fails
+// the check:
 //
-// - app: the fitness-health module's Core, Platform and Module sources, the
-//   fitness-charts and workout-activity modules, the Live Activity extension,
-//   and each Swift file the production app target compiles, including the
-//   ones prebuild generates.
-// - tools: the module's Core sources and XCTest suite, and the seeder with
-//   its UI tests.
-// - all: both.
+// - app: the widget extension's sources and the workout-activity sources it
+//   shares, and each Swift file the production app target compiles,
+//   including the ones prebuild generates.
+// - modules: the fitness-health module's Core, Platform and Module sources,
+//   the fitness-charts module, and the workout-activity module's Module and
+//   shared sources.
+// - tools: the fitness-health module's Core sources and XCTest suite, and the
+//   seeder with its UI tests.
+// - all: every scope.
 //
-//   node scripts/codeql-coverage.mjs [--scope all|app|tools] <database> [<derived data>]
+//   node scripts/codeql-coverage.mjs [--scope all|app|modules|tools] <database> [<derived data>]
 //
 // The app and all scopes read the app target's Swift file lists from the
 // derived data. Package.swift manifests are build descriptions, not compiled
@@ -26,18 +28,19 @@ const healthModule = "apps/fitness-ios/modules/fitness-health/ios";
 const chartsModule = "apps/fitness-ios/modules/fitness-charts/ios/";
 const activityModule = "apps/fitness-ios/modules/workout-activity/ios";
 const partition = {
-  app: [
+  app: [`${activityModule}/Shared/`, `${activityModule}/Extension/`],
+  modules: [
     `${healthModule}/Core/`,
     `${healthModule}/Platform/`,
     `${healthModule}/Module/`,
     chartsModule,
     `${activityModule}/Module/`,
     `${activityModule}/Shared/`,
-    `${activityModule}/Extension/`,
   ],
   tools: [`${healthModule}/Core/`, `${healthModule}/Tests/`, "apps/fitness-ios/tools/health-seed/"],
 };
-const usage = "Usage: node scripts/codeql-coverage.mjs [--scope all|app|tools] <database> [<derived data>]";
+const scopes = Object.keys(partition);
+const usage = "Usage: node scripts/codeql-coverage.mjs [--scope all|app|modules|tools] <database> [<derived data>]";
 
 /** The scope, database and derived data the arguments name. */
 export function coverageArguments(args) {
@@ -47,9 +50,9 @@ export function coverageArguments(args) {
     scope = rest[1];
     rest = rest.slice(2);
   }
-  if (!["all", "app", "tools"].includes(scope)) throw new Error(usage);
+  if (scope !== "all" && !scopes.includes(scope)) throw new Error(usage);
   const [database, derived, ...extra] = rest;
-  const needsDerived = scope !== "tools";
+  const needsDerived = scope === "all" || scope === "app";
   if (!database || extra.length || needsDerived !== Boolean(derived)) throw new Error(usage);
   return { scope, database, derived };
 }
@@ -61,9 +64,9 @@ export function coverageArguments(args) {
 export function swiftFilesFor(scope, files) {
   const sources = files.filter((file) => file && !file.endsWith("/Package.swift") && file !== "Package.swift");
   const inScope = (file, name) => partition[name].some((prefix) => file.startsWith(prefix));
-  const outside = sources.filter((file) => !inScope(file, "app") && !inScope(file, "tools"));
+  const outside = sources.filter((file) => !scopes.some((name) => inScope(file, name)));
   if (outside.length)
-    throw new Error(`Tracked Swift files outside the CodeQL app and tools scopes:\n${outside.join("\n")}`);
+    throw new Error(`Tracked Swift files outside the CodeQL app, modules and tools scopes:\n${outside.join("\n")}`);
   const selected = sources.filter((file) => scope === "all" || inScope(file, scope));
   if (!selected.length) throw new Error(`No tracked Swift files were found for the ${scope} scope.`);
   return selected;
