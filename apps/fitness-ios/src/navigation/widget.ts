@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppState, Linking } from "react-native";
 import { session, useAccount } from "../account/AccountProvider";
 import { appScheme, widget } from "../data/widget";
+import { forLaunchSignIn } from "../logic/launch";
 import { widgetLink, widgetSnapshot } from "../logic/widget";
 
 /**
@@ -33,11 +34,17 @@ export function useWidgetSnapshot() {
 
 /** Whether the link that launched the app was handled. It opens once per launch. */
 let launchLinkTaken = false;
+/** The sign-in the app launched under. The link that launched the app belongs to it. */
+const launchGeneration = session.generation();
 
-/** The widget link that launched the app, once. */
-export async function takeLaunchWidgetLink() {
+/**
+ * The widget link that launched the app, once, for navigation opening under
+ * `generation`. After the launch sign-in ended, it never opens.
+ */
+export async function takeLaunchWidgetLink(generation: number) {
   if (launchLinkTaken) return null;
   launchLinkTaken = true;
+  if (forLaunchSignIn(true, launchGeneration, generation) === null) return null;
   const url = await Linking.getInitialURL().catch(() => null);
   return url ? widgetLink(url, appScheme) : null;
 }

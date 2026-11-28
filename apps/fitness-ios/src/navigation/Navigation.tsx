@@ -5,7 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useColorScheme } from "react-native";
 import { FitnessHealth } from "../../modules/fitness-health";
-import { useAccount } from "../account/AccountProvider";
+import { session, useAccount } from "../account/AccountProvider";
 import { LaunchRouter } from "../logic/launch";
 import type { LaunchTarget } from "../logic/launch";
 import { screenFor } from "../logic/screens";
@@ -158,6 +158,8 @@ function useOpenWidgetLink() {
  * it opens in its place.
  */
 function useLaunchRouting() {
+  // The sign-in this navigation opened under; the launch widget link must belong to it.
+  const [generation] = useState(() => session.generation());
   const reminder = useOpenReminder();
   const openWidgetLink = useOpenWidgetLink();
   const [router] = useState(() => new LaunchRouter<WidgetLink>());
@@ -183,7 +185,7 @@ function useLaunchRouting() {
     void router
       .resolve({
         reminder: () => takeOpenedReminder(reminder.owner),
-        widget: takeLaunchWidgetLink,
+        widget: () => takeLaunchWidgetLink(generation),
         health: healthStepWaiting,
       })
       .then((target) => router.openIfCurrent(target, openTarget));

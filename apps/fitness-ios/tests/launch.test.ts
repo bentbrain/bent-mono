@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LaunchRouter, TapBuffer, tapTarget } from "../src/logic/launch";
+import { LaunchRouter, TapBuffer, forLaunchSignIn, tapTarget } from "../src/logic/launch";
 import type { LaunchSources, LaunchTarget } from "../src/logic/launch";
 
 type Link = { tab: "week" | "food"; day: string };
@@ -223,5 +223,14 @@ describe("taps while the app loads", () => {
     expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_a", 5)).toEqual({ kind: "reminder", day: "2026-12-02" });
     expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_b", 5)).toBeNull();
     expect(tapTarget<Link>({ ...widget, generation: 5 }, "user_a", 5)).toEqual(widget);
+  });
+
+  test("the link that launched the app opens only under the sign-in it launched with", () => {
+    const link: Link = { tab: "food", day: "2026-12-01" };
+    // Launched under sign-in 0 with a saved session.
+    expect(forLaunchSignIn(link, 0, 0)).toEqual(link);
+    // The saved session expired before navigation opened (1), then the person signed in again (2).
+    expect(forLaunchSignIn(link, 0, 2)).toBeNull();
+    expect(forLaunchSignIn(null, 0, 0)).toBeNull();
   });
 });

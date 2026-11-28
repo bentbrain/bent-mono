@@ -97,6 +97,15 @@ export class TapBuffer<T> {
   }
 }
 
+/**
+ * What launched the app, such as the widget link it opened with, only when
+ * navigation opens under the sign-in the app launched with. A session that
+ * ended before navigation opened takes its launch link with it.
+ */
+export function forLaunchSignIn<T>(value: T | null, launchGeneration: number, generation: number): T | null {
+  return generation === launchGeneration ? value : null;
+}
+
 /** A reminder or widget tap while the app runs, with the sign-in it arrived during. */
 export type AppTap<Link> = ({ kind: "reminder"; day: string; owner: string } | { kind: "widget"; link: Link }) & {
   generation: number;
