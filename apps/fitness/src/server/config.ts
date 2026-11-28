@@ -70,6 +70,13 @@ export function deviceClientIds() {
 export function targetsScopeEnabled() {
   return process.env.FITNESS_TARGETS_SCOPE?.trim() === "enabled";
 }
+/**
+ * Whether assistants are told to request `fitness:plan`. Set
+ * FITNESS_PLAN_SCOPE to `enabled` once Clerk issues that scope.
+ */
+export function planScopeEnabled() {
+  return process.env.FITNESS_PLAN_SCOPE?.trim() === "enabled";
+}
 /** Device enrollment is on only when FITNESS_DEVICE_ENROLLMENT is `enabled`. */
 export function deviceEnrollmentEnabled() {
   return process.env.FITNESS_DEVICE_ENROLLMENT?.trim() === "enabled";

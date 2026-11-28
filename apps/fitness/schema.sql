@@ -134,3 +134,19 @@ CREATE TABLE IF NOT EXISTS fitness_device_sequences (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (owner_id, installation_id)
 );
+-- Training plans assistants propose for the owner to accept in the app.
+-- status is pending until the owner accepts or dismisses it, or a newer
+-- proposal replaces it; an account has at most one pending proposal. plan
+-- holds the proposal as storedPlanSchema in @bent/fitness-contracts/proposal
+-- describes it.
+CREATE TABLE IF NOT EXISTS fitness_plan_proposals (
+  owner_id text NOT NULL REFERENCES fitness_accounts(owner_id),
+  id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','dismissed','replaced')),
+  plan jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  decided_at timestamptz,
+  PRIMARY KEY (owner_id,id),
+  CHECK ((status = 'pending') = (decided_at IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS fitness_plan_proposal_pending ON fitness_plan_proposals(owner_id) WHERE status = 'pending';

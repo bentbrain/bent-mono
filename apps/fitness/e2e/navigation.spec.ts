@@ -41,7 +41,13 @@ test.beforeEach(async ({ page, context }) => {
     .parse(await response.json());
   const sql = postgres(url, { ssl: "verify-full", max: 1, prepare: false });
   try {
+    // Plan proposals reference the account. Databases that haven't had
+    // the proposals table applied yet have none to remove.
+    const [{ proposals }] =
+      await sql`SELECT to_regclass('fitness_plan_proposals') IS NOT NULL AS proposals`;
     for (const user of users) {
+      if (proposals)
+        await sql`DELETE FROM fitness_plan_proposals WHERE owner_id=${user.id}`;
       await sql`DELETE FROM fitness_photos WHERE owner_id=${user.id}`;
       await sql`DELETE FROM fitness_operations WHERE owner_id=${user.id}`;
       await sql`DELETE FROM fitness_records WHERE owner_id=${user.id}`;

@@ -493,9 +493,11 @@ describe.skipIf(!configured)("app API", () => {
     const exported = (await response.json()) as {
       format: string;
       records: { id: string }[];
+      planProposals: unknown[];
       photos: { name: string; base64: string }[];
     };
     expect(exported.format).toBe("bent-fitness-v1");
+    expect(exported.planProposals).toEqual([]);
     expect(exported.records.map((r) => r.id)).toEqual([settingsId]);
     expect(exported.photos).toEqual([
       expect.objectContaining({ name: "Bench", base64: png }),

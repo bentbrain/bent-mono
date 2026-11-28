@@ -346,7 +346,7 @@ test("accepts a bare API key in the Authorization header, as Clerk does", async 
     });
   expect(await auth.requireAgentOwner(bareKey)).toEqual({
     owner: syntheticOwner.id,
-    access: { read: true, write: true, targets: true },
+    access: { read: true, write: true, targets: true, plan: true },
   });
 });
 

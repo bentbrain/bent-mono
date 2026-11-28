@@ -22,6 +22,7 @@ import type {
 import { elapsedSeconds, formatDuration } from "@bent/fitness-contracts/timing";
 import { weeklySummary } from "@bent/fitness-contracts/progress";
 import { useAccount } from "./account-context";
+import { ProposalNotice } from "./plan-proposal";
 import { DateBar } from "./date-bar";
 import { ExerciseHelp, ExerciseThumb, prescriptionText } from "./exercises";
 import { Icon } from "./icons";
@@ -90,6 +91,7 @@ export function WeekScreen() {
         <h1>Your week</h1>
         <p className="subtitle">{settings.goal}</p>
       </header>
+      <ProposalNotice />
       <DateBar path="/" />
       <div className="week-card">
         <WeekBoard monday={monday} />

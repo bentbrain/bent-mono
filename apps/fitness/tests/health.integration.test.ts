@@ -20,7 +20,7 @@ const timezone = "Australia/Brisbane";
 const today = localDate(timezone);
 const day = (offset: number) => addDays(today, offset);
 const at = (date: string, time: string) => `${date} ${time} +1000`;
-const both = { read: true, write: true, targets: false };
+const both = { read: true, write: true, targets: false, plan: false };
 
 beforeAll(async () => {
   if (!configured) return;
@@ -198,7 +198,7 @@ test.skipIf(!configured)(
   async () => {
     const result = await importHealth(
       owner,
-      { read: false, write: true, targets: false },
+      { read: false, write: true, targets: false, plan: false },
       exportOf(
         [
           { date: at(day(-8), "06:00:00"), qty: 80 },

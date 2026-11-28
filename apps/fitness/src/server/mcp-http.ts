@@ -8,6 +8,7 @@ import {
 import {
   authorizationServer,
   mcpResource,
+  planScopeEnabled,
   targetsScopeEnabled,
 } from "./config";
 import { createFitnessMcpServer } from "./mcp";
@@ -34,6 +35,7 @@ export function advertisedScopes() {
     agentScopes.read,
     agentScopes.write,
     ...(targetsScopeEnabled() ? [agentScopes.targets] : []),
+    ...(planScopeEnabled() ? [agentScopes.plan] : []),
   ];
 }
 
