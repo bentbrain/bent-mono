@@ -146,12 +146,15 @@ export function instructions(access: AgentAccess) {
       access.read
         ? "Before editing or removing entries, call fitness_get_day, or fitness_list_saved_meals for saved meals, to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
         : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
-      "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
       "Weights are stored in kilograms; pass the unit the user gave.",
     );
   if (access.targets)
     lines.push(
       "Use fitness_update_food_targets when the user wants to change their calorie or protein target, or start or stop tracking carbs, fat or fibre and set their daily targets.",
+    );
+  if (access.write || access.targets)
+    lines.push(
+      "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
     );
   return lines.join(" ");
 }

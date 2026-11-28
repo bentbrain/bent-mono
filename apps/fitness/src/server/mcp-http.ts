@@ -5,7 +5,11 @@ import {
   agentScopes,
   requireAgentOwner,
 } from "./auth";
-import { authorizationServer, mcpResource } from "./config";
+import {
+  authorizationServer,
+  mcpResource,
+  targetsScopeEnabled,
+} from "./config";
 import { createFitnessMcpServer } from "./mcp";
 
 /** Browser origins allowed to call the endpoint. Server-side clients send no Origin. */
@@ -24,6 +28,15 @@ function json(value: unknown, status = 200, headers: HeadersInit = {}) {
   });
 }
 
+/** The scopes assistants are told to request. */
+export function advertisedScopes() {
+  return [
+    agentScopes.read,
+    agentScopes.write,
+    ...(targetsScopeEnabled() ? [agentScopes.targets] : []),
+  ];
+}
+
 /** OAuth protected resource metadata (RFC 9728) for the MCP endpoint. */
 export function resourceMetadata() {
   const issuer = authorizationServer();
@@ -36,7 +49,7 @@ export function resourceMetadata() {
       resource_name: "Fitness",
       authorization_servers: [issuer],
       bearer_methods_supported: ["header"],
-      scopes_supported: [agentScopes.read, agentScopes.write],
+      scopes_supported: advertisedScopes(),
     },
     200,
     { "Access-Control-Allow-Origin": "*" },
@@ -69,7 +82,7 @@ function challenge(
   const metadata = resource
     ? `, resource_metadata="${new URL(resource).origin}/.well-known/oauth-protected-resource/api/mcp"`
     : "";
-  const scope = `${agentScopes.read} ${agentScopes.write}`;
+  const scope = advertisedScopes().join(" ");
   return json({ error, error_description: description }, status, {
     "WWW-Authenticate": `Bearer error="${error}", error_description="${description}", scope="${scope}"${metadata}`,
   });

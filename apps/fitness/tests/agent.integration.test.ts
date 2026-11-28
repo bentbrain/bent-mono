@@ -6,6 +6,7 @@ import { database } from "../src/server/db";
 import { agentAccess } from "../src/server/auth";
 import type { AgentAccess } from "../src/server/auth";
 import { createFitnessMcpServer, instructions } from "../src/server/mcp";
+import { advertisedScopes } from "../src/server/mcp-http";
 import {
   BatchConflict,
   changeOnce,
@@ -674,6 +675,23 @@ test("token scopes grant read and write access separately", () => {
   expect(agentAccess("api_key", ["other"])).toEqual(none);
 });
 
+test("assistants are told to request fitness:targets once Clerk issues it", () => {
+  const before = process.env.FITNESS_TARGETS_SCOPE;
+  try {
+    delete process.env.FITNESS_TARGETS_SCOPE;
+    expect(advertisedScopes()).toEqual(["fitness:read", "fitness:write"]);
+    process.env.FITNESS_TARGETS_SCOPE = "enabled";
+    expect(advertisedScopes()).toEqual([
+      "fitness:read",
+      "fitness:write",
+      "fitness:targets",
+    ]);
+  } finally {
+    if (before === undefined) delete process.env.FITNESS_TARGETS_SCOPE;
+    else process.env.FITNESS_TARGETS_SCOPE = before;
+  }
+});
+
 test("instructions mention only the tools and results a grant includes", () => {
   const tools = /fitness_[a-z_]+/g;
   const reader = instructions({ read: true, write: false, targets: false });
@@ -687,9 +705,9 @@ test("instructions mention only the tools and results a grant includes", () => {
   expect(instructions({ ...full, targets: false })).not.toContain(
     "fitness_update_food_targets",
   );
-  expect(
-    instructions({ read: false, write: false, targets: true }).match(tools),
-  ).toEqual(["fitness_update_food_targets"]);
+  const targetsOnly = instructions({ read: false, write: false, targets: true });
+  expect(targetsOnly.match(tools)).toEqual(["fitness_update_food_targets"]);
+  expect(targetsOnly).toContain("requestId");
   expect(writer).not.toContain("totals");
   expect(writer).toContain("receipts");
   const both = instructions(full);
