@@ -128,32 +128,40 @@ const decisionNames = {
   dismissed: "dismissed",
   replaced: "replaced by a newer proposal",
 } as const;
+/** The settings changed after the owner reviewed a proposal against them. */
+export class ProposalReviewStale extends StoreRuleError {}
 /**
- * Accepts or dismisses a pending proposal. Accepting checks the plan against
- * the settings as they are now and saves them in the same transaction.
- * Repeating a decision already made returns the same result.
+ * Accepts or dismisses a pending proposal. Accepting needs the settings
+ * revision the owner reviewed the proposal against; it checks the plan
+ * against those settings and saves them in the same transaction. Repeating
+ * a decision already made returns the same result.
  */
 export async function decideProposal(
   owner: string,
   id: string,
-  decision: "accepted" | "dismissed",
+  decision:
+    { status: "accepted"; reviewedRevision: number } | { status: "dismissed" },
 ): Promise<PlanProposalRecord> {
   return database().begin(async (sql) => {
     await lockAccount(sql, owner);
     const proposal = await planProposals(sql, owner).get(id);
     if (!proposal)
       throw new StoreRuleError("This plan proposal is no longer available.");
-    if (proposal.status === decision) return proposal;
+    if (proposal.status === decision.status) return proposal;
     if (proposal.status !== "pending")
       throw new StoreRuleError(
         `This plan proposal was ${decisionNames[proposal.status]}.`,
       );
-    if (decision === "accepted") {
+    if (decision.status === "accepted") {
       const [row] =
         await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
       const record = row ? entry(row) : null;
       if (record?.data.kind !== "settings")
         throw new StoreRuleError("Set up Fitness before accepting a plan.");
+      if (record.revision !== decision.reviewedRevision)
+        throw new ProposalReviewStale(
+          "Your settings changed after you opened this plan. Check its changes again before accepting.",
+        );
       const settings = record.data;
       const check = reviewPlan(
         settings,
@@ -174,7 +182,7 @@ export async function decideProposal(
         throw new StoreRuleError("Your settings changed. Try again.");
     }
     const [row] =
-      await sql`UPDATE fitness_plan_proposals SET status=${decision}, decided_at=now() WHERE owner_id=${owner} AND id=${id} RETURNING ${proposalColumns(sql)}`;
+      await sql`UPDATE fitness_plan_proposals SET status=${decision.status}, decided_at=now() WHERE owner_id=${owner} AND id=${id} RETURNING ${proposalColumns(sql)}`;
     return proposalOf(row);
   });
 }

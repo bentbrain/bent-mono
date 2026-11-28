@@ -43,15 +43,19 @@ export function exportResponse(owner: string) {
             }
             // Plan proposals assistants made, with their status, outside the
             // synced records.
-            const proposals =
-              await sql`SELECT id,status,plan,created_at,decided_at FROM fitness_plan_proposals WHERE owner_id=${owner} ORDER BY created_at`;
-            controller.enqueue(
-              encoder.encode(
-                '],"planProposals":' +
-                  JSON.stringify(proposals.map(proposalOf)) +
-                  ',"photos":[',
-              ),
-            );
+            controller.enqueue(encoder.encode('],"planProposals":['));
+            separator = "";
+            for await (const rows of sql`SELECT id,status,plan,created_at,decided_at FROM fitness_plan_proposals WHERE owner_id=${owner} ORDER BY created_at`.cursor(
+              25,
+            )) {
+              for (const row of rows) {
+                controller.enqueue(
+                  encoder.encode(separator + JSON.stringify(proposalOf(row))),
+                );
+                separator = ",";
+              }
+            }
+            controller.enqueue(encoder.encode('],"photos":['));
             separator = "";
             for await (const rows of sql`SELECT id,name,content_type,bytes FROM fitness_photos WHERE owner_id=${owner} ORDER BY created_at`.cursor(
               1,

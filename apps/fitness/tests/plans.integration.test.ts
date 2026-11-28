@@ -7,6 +7,7 @@ import type { AgentAccess } from "../src/server/auth";
 import { createFitnessMcpServer, setUpTraining } from "../src/server/mcp";
 import { advertisedScopes } from "../src/server/mcp-http";
 import {
+  ProposalReviewStale,
   StoreRuleError,
   decideProposal,
   loadRecords,
@@ -184,6 +185,14 @@ const trainingPlan = z.object({
 });
 const settingsOf = async (owner: string) =>
   (await loadRecords(owner)).find((r) => r.id === settingsId);
+/** Accepts a proposal as reviewed against the account's current settings. */
+const accept = async (owner: string, id: string) =>
+  decideProposal(owner, id, {
+    status: "accepted",
+    reviewedRevision: (await settingsOf(owner))?.revision ?? 0,
+  });
+const dismiss = (owner: string, id: string) =>
+  decideProposal(owner, id, { status: "dismissed" });
 
 test("assistants are told to request fitness:plan once Clerk issues it", () => {
   const before = process.env.FITNESS_PLAN_SCOPE;
@@ -373,7 +382,15 @@ test.skipIf(!configured)(
       { requestId: key(), ...proposal },
       proposed,
     );
-    const accepted = await decideProposal(decider, made.id, "accepted");
+    // A review of settings that have since changed can't be accepted.
+    expect(
+      decideProposal(decider, made.id, {
+        status: "accepted",
+        reviewedRevision: (before?.revision ?? 0) - 1,
+      }),
+    ).rejects.toBeInstanceOf(ProposalReviewStale);
+    expect((await pendingProposal(decider))?.id).toBe(made.id);
+    const accepted = await accept(decider, made.id);
     expect(accepted.status).toBe("accepted");
     expect(accepted.decidedAt).not.toBeNull();
     const after = await settingsOf(decider);
@@ -397,16 +414,12 @@ test.skipIf(!configured)(
     expect(after.data.calories).toBe(before.data.calories);
 
     // Repeating the decision returns the same result; a different one is refused.
-    expect(await decideProposal(decider, made.id, "accepted")).toEqual(
-      accepted,
-    );
+    expect(await accept(decider, made.id)).toEqual(accepted);
     expect((await settingsOf(decider))?.revision).toBe(after.revision);
-    expect(decideProposal(decider, made.id, "dismissed")).rejects.toThrow(
+    expect(dismiss(decider, made.id)).rejects.toThrow(
       new StoreRuleError("This plan proposal was accepted."),
     );
-    expect(
-      decideProposal(decider, crypto.randomUUID(), "accepted"),
-    ).rejects.toThrow(
+    expect(accept(decider, crypto.randomUUID())).rejects.toThrow(
       new StoreRuleError("This plan proposal is no longer available."),
     );
     const status = await call(
@@ -431,16 +444,10 @@ test.skipIf(!configured)("dismissing a proposal keeps the plan", async () => {
     { requestId: key(), ...proposal },
     proposed,
   );
-  expect(
-    decideProposal(dismisser, first.proposal.id, "accepted"),
-  ).rejects.toThrow(
+  expect(accept(dismisser, first.proposal.id)).rejects.toThrow(
     new StoreRuleError("This plan proposal was replaced by a newer proposal."),
   );
-  const dismissed = await decideProposal(
-    dismisser,
-    second.proposal.id,
-    "dismissed",
-  );
+  const dismissed = await dismiss(dismisser, second.proposal.id);
   expect(dismissed.status).toBe("dismissed");
   expect(await settingsOf(dismisser)).toEqual(before);
   expect(await pendingProposal(dismisser)).toBeNull();
@@ -452,9 +459,7 @@ test.skipIf(!configured)("dismissing a proposal keeps the plan", async () => {
       id: second.proposal.id,
     }),
   ).toBe("No plan proposal has this ID.");
-  expect(
-    decideProposal(planner, second.proposal.id, "accepted"),
-  ).rejects.toThrow(
+  expect(accept(planner, second.proposal.id)).rejects.toThrow(
     new StoreRuleError("This plan proposal is no longer available."),
   );
 
@@ -506,9 +511,7 @@ test.skipIf(!configured)(
 
     // A proposal made while the profile could be saved is refused once it can't.
     setMinimumAppContractForTests(2);
-    expect(
-      decideProposal(profiler, made.proposal.id, "accepted"),
-    ).rejects.toThrow(
+    expect(accept(profiler, made.proposal.id)).rejects.toThrow(
       new StoreRuleError(
         "This change uses fields the bent Fitness app can't read yet. Remove them and try again.",
       ),
@@ -516,7 +519,7 @@ test.skipIf(!configured)(
     expect((await pendingProposal(profiler))?.id).toBe(made.proposal.id);
 
     setMinimumAppContractForTests(3);
-    await decideProposal(profiler, made.proposal.id, "accepted");
+    await accept(profiler, made.proposal.id);
     const after = await settingsOf(profiler);
     expect(after?.data).toMatchObject({
       experience: "returning",

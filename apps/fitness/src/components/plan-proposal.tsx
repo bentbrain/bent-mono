@@ -1,17 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
+import { catalogueEntry } from "@bent/fitness-contracts/catalogue";
 import {
-  catalogueEntry,
-  equipmentNames,
-} from "@bent/fitness-contracts/catalogue";
-import {
-  displayLoad,
   formatDate,
   localDate,
   sessionMinutes,
 } from "@bent/fitness-contracts/domain";
-import type { Exercise, Settings } from "@bent/fitness-contracts/domain";
+import type { Exercise } from "@bent/fitness-contracts/domain";
 import type { StoredPlan } from "@bent/fitness-contracts/proposal";
 import { decidePlanProposal, planProposal } from "../server/proposals";
 import { useAccount } from "./account-context";
@@ -34,6 +30,7 @@ const dayTypes = { strength: "Strength", run: "Run", rest: "Rest" } as const;
 function usePendingProposal() {
   const [review, setReview] = useState<Review | null>(null);
   const [error, setError] = useState("");
+  const [loads, setLoads] = useState(0);
   useEffect(() => {
     let active = true;
     planProposal()
@@ -47,84 +44,8 @@ function usePendingProposal() {
     return () => {
       active = false;
     };
-  }, []);
-  return { review, error };
-}
-
-const experienceNames = {
-  new: "New to training",
-  returning: "Returning to training",
-  experienced: "Experienced",
-} as const;
-
-/**
- * The settings besides the week and routines that accepting `plan` changes,
- * as they read now and after, so the owner sees every change before
- * accepting it.
- */
-function otherChanges(plan: StoredPlan, settings: Settings) {
-  const units = settings.units;
-  const weights = (values: number[] | undefined) =>
-    values?.length
-      ? values.map((kg) => `${displayLoad(kg, units)}`).join(", ") + ` ${units}`
-      : "None";
-  const profile = plan.profile ?? {};
-  const changes: { label: string; from: string; to: string }[] = [];
-  const add = (label: string, from: string, to: string) => {
-    if (from !== to) changes.push({ label, from, to });
-  };
-  if (plan.goal !== undefined) add("Goal", settings.goal, plan.goal);
-  if (plan.dumbbellsKg !== undefined)
-    add("Dumbbells", weights(settings.dumbbellsKg), weights(plan.dumbbellsKg));
-  if (profile.experience !== undefined)
-    add(
-      "Experience",
-      settings.experience ? experienceNames[settings.experience] : "Not set",
-      experienceNames[profile.experience],
-    );
-  if (profile.sessionMinutes !== undefined)
-    add(
-      "Session length",
-      settings.sessionMinutes ? `${settings.sessionMinutes} min` : "Not set",
-      `${profile.sessionMinutes} min`,
-    );
-  if (profile.limitations !== undefined)
-    add(
-      "Injuries and limits",
-      settings.limitations || "None",
-      profile.limitations || "None",
-    );
-  if (profile.availableEquipment !== undefined) {
-    const names = (items: Settings["availableEquipment"]) =>
-      items?.length
-        ? items.map((item) => equipmentNames[item]).join(", ")
-        : "None";
-    add(
-      "Equipment",
-      settings.availableEquipment
-        ? names(settings.availableEquipment)
-        : "Not set",
-      names(profile.availableEquipment),
-    );
-  }
-  if (profile.kettlebellsKg !== undefined)
-    add(
-      "Kettlebells",
-      weights(settings.kettlebellsKg),
-      weights(profile.kettlebellsKg),
-    );
-  if (profile.incrementsKg !== undefined) {
-    const steps = (value: Settings["incrementsKg"]) =>
-      Object.entries(value ?? {})
-        .map(([kind, kg]) => `${kind} ${displayLoad(kg, units)} ${units}`)
-        .join(", ") || "Not set";
-    add(
-      "Weight steps",
-      steps(settings.incrementsKg),
-      steps(profile.incrementsKg),
-    );
-  }
-  return changes;
+  }, [loads]);
+  return { review, error, reload: () => setLoads((count) => count + 1) };
 }
 
 /** Exercises as the plan records them, with names and modes from the catalogue. */
@@ -168,28 +89,47 @@ export function ProposalNotice() {
 export function ProposalScreen() {
   const { sync, today, settings } = useAccount();
   const navigate = useNavigate();
-  const { review, error: loadError } = usePendingProposal();
+  const { review, error: loadError, reload } = usePendingProposal();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function decide(id: string, decision: "accepted" | "dismissed") {
+  /** Set once Fitness confirmed the decision but the new plan didn't load. */
+  const [decided, setDecided] = useState(false);
+  async function decide(
+    request: Parameters<typeof decidePlanProposal>[0]["data"],
+  ) {
     setBusy(true);
     setError("");
-    const message = await settle(id, decision);
-    setBusy(false);
-    if (message) setError(message);
-    else await navigate({ to: "/" });
-  }
-  /** Records the decision and reloads the plan; returns a message on failure. */
-  async function settle(id: string, decision: "accepted" | "dismissed") {
     try {
-      const result = await decidePlanProposal({ data: { id, decision } });
-      if (result.error) return result.error;
-    } catch {
-      return "Fitness couldn't confirm this change. Reload to see whether your plan changed.";
+      const outcome = await settle(request);
+      if (outcome === "done") await navigate({ to: "/" });
+    } finally {
+      setBusy(false);
     }
-    if (decision === "accepted" && !(await sync.retry()))
-      return "Your new plan is saved. Reload to see it.";
-    return "";
+  }
+  /** Records the decision and loads the new plan. */
+  async function settle(
+    request: Parameters<typeof decidePlanProposal>[0]["data"],
+  ) {
+    try {
+      const result = await decidePlanProposal({ data: request });
+      if (result.error) {
+        setError(result.error);
+        // The settings changed since the review loaded: show it afresh.
+        if (result.stale) reload();
+        return "failed";
+      }
+    } catch {
+      setError(
+        "Fitness couldn't confirm this change. Reload to see whether your plan changed.",
+      );
+      return "failed";
+    }
+    if (request.decision === "accepted" && !(await sync.retry())) {
+      setDecided(true);
+      setError("Your new plan is saved. Reload to see it.");
+      return "failed";
+    }
+    return "done";
   }
   const head = (
     <Link className="back-link" to="/">
@@ -204,7 +144,7 @@ export function ProposalScreen() {
       </section>
     );
   if (!review) return <section className="proposal-screen">{head}</section>;
-  const { proposal, check } = review;
+  const { proposal, review: check } = review;
   if (!proposal)
     return (
       <section className="proposal-screen">
@@ -220,7 +160,7 @@ export function ProposalScreen() {
   const { plan } = proposal;
   const blocked = !check?.ok;
   const unsaved = sync.pending > 0;
-  const changes = otherChanges(plan, settings);
+  const changes = check?.changes ?? [];
   return (
     <section
       className="proposal-screen"
@@ -331,20 +271,40 @@ export function ProposalScreen() {
         </p>
         {unsaved && <p>Finish saving your changes before accepting.</p>}
         <div className="proposal-actions">
-          <Button
-            appearance="primary"
-            disabled={busy || blocked || unsaved}
-            onClick={() => void decide(proposal.id, "accepted")}
-          >
-            Accept plan
-          </Button>
-          <Button
-            appearance="outline"
-            disabled={busy}
-            onClick={() => void decide(proposal.id, "dismissed")}
-          >
-            Dismiss
-          </Button>
+          {decided ? (
+            <Button
+              appearance="primary"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </Button>
+          ) : (
+            <>
+              <Button
+                appearance="primary"
+                disabled={busy || blocked || unsaved || !check}
+                onClick={() =>
+                  check &&
+                  void decide({
+                    id: proposal.id,
+                    decision: "accepted",
+                    reviewedRevision: check.revision,
+                  })
+                }
+              >
+                Accept plan
+              </Button>
+              <Button
+                appearance="outline"
+                disabled={busy}
+                onClick={() =>
+                  void decide({ id: proposal.id, decision: "dismissed" })
+                }
+              >
+                Dismiss
+              </Button>
+            </>
+          )}
         </div>
         {error && <p role="alert">{error}</p>}
       </div>

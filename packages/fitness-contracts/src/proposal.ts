@@ -6,8 +6,8 @@
  * plan start date and the food settings stay as they are.
  */
 import { z } from "zod";
-import { catalogueEntry } from "./catalogue";
-import { settingsSchema } from "./domain";
+import { catalogueEntry, equipmentNames } from "./catalogue";
+import { displayLoad, settingsSchema } from "./domain";
 import type { Settings } from "./domain";
 import { checkPlan } from "./plan";
 import type { PlanCheck } from "./plan";
@@ -196,4 +196,134 @@ export function reviewPlan(
       warnings: check.warnings,
     };
   return { ok: true, settings: merged.data, warnings: check.warnings };
+}
+
+const experienceNames = {
+  new: "New to training",
+  returning: "Returning to training",
+  experienced: "Experienced",
+} as const;
+
+export type PlanChange = { label: string; from: string; to: string };
+
+/**
+ * Weights as the owner reads them. When two lists differ but round to the
+ * same text, both show more decimals so the difference stays visible.
+ */
+function weightTexts(
+  from: readonly number[] | undefined,
+  to: readonly number[] | undefined,
+  units: Settings["units"],
+) {
+  const text = (values: readonly number[] | undefined, decimals: number) =>
+    values?.length
+      ? values
+          .map((kg) => {
+            const shown = units === "lb" ? kg * 2.2046226218 : kg;
+            return decimals === 2
+              ? String(displayLoad(kg, units))
+              : String(Number(shown.toFixed(decimals)));
+          })
+          .join(", ") + ` ${units}`
+      : "None";
+  for (const decimals of [2, 3, 4, 6]) {
+    const pair = [text(from, decimals), text(to, decimals)] as const;
+    if (pair[0] !== pair[1] || decimals === 6) return pair;
+  }
+  return [text(from, 6), text(to, 6)] as const;
+}
+
+const sameValues = (a: unknown, b: unknown) =>
+  JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/**
+ * Every setting besides the week and routines that accepting `plan` changes
+ * on `current`, as it reads now and after, so the owner sees each change
+ * before accepting it. Values are compared as stored, not as displayed.
+ */
+export function planChanges(current: Settings, plan: StoredPlan): PlanChange[] {
+  const units = current.units;
+  const profile = plan.profile ?? {};
+  const changes: PlanChange[] = [];
+  const add = (label: string, from: string, to: string) =>
+    changes.push({ label, from, to });
+  if (plan.goal !== undefined && plan.goal !== current.goal)
+    add("Goal", current.goal, plan.goal);
+  const weights = (
+    label: string,
+    from: number[] | undefined,
+    to: number[] | undefined,
+  ) => {
+    if (to === undefined || sameValues(from ?? [], to)) return;
+    const [before, after] = weightTexts(from, to, units);
+    add(label, before, after);
+  };
+  weights("Dumbbells", current.dumbbellsKg, plan.dumbbellsKg);
+  if (
+    profile.experience !== undefined &&
+    profile.experience !== current.experience
+  )
+    add(
+      "Experience",
+      current.experience ? experienceNames[current.experience] : "Not set",
+      experienceNames[profile.experience],
+    );
+  if (
+    profile.sessionMinutes !== undefined &&
+    profile.sessionMinutes !== current.sessionMinutes
+  )
+    add(
+      "Session length",
+      current.sessionMinutes ? `${current.sessionMinutes} min` : "Not set",
+      `${profile.sessionMinutes} min`,
+    );
+  if (
+    profile.limitations !== undefined &&
+    profile.limitations !== current.limitations
+  )
+    add(
+      "Injuries and limits",
+      current.limitations || "None",
+      profile.limitations || "None",
+    );
+  if (
+    profile.availableEquipment !== undefined &&
+    !sameValues(current.availableEquipment, profile.availableEquipment)
+  ) {
+    const names = (items: Settings["availableEquipment"]) =>
+      items?.length
+        ? items.map((item) => equipmentNames[item]).join(", ")
+        : "None";
+    add(
+      "Equipment",
+      current.availableEquipment
+        ? names(current.availableEquipment)
+        : "Not set",
+      names(profile.availableEquipment),
+    );
+  }
+  weights("Kettlebells", current.kettlebellsKg, profile.kettlebellsKg);
+  if (
+    profile.incrementsKg !== undefined &&
+    !sameValues(current.incrementsKg, profile.incrementsKg)
+  ) {
+    const kinds = ["barbell", "machine", "cable"] as const;
+    const step = (
+      value: Settings["incrementsKg"],
+      kind: (typeof kinds)[number],
+    ) => (value?.[kind] === undefined ? undefined : [value[kind]]);
+    const parts = kinds.map((kind) =>
+      weightTexts(
+        step(current.incrementsKg, kind),
+        step(profile.incrementsKg, kind),
+        units,
+      ),
+    );
+    const join = (index: 0 | 1) =>
+      kinds
+        .map((kind, k) => `${kind} ${parts[k]?.[index] ?? "None"}`)
+        .join(", ");
+    add("Weight steps", join(0), join(1));
+  }
+  return changes;
 }

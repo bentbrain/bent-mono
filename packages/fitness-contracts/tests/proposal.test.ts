@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { defaultSettings, settingsSchema } from "../src/domain";
 import type { Settings } from "../src/domain";
 import {
+  planChanges,
   planProposalSchema,
   reviewPlan,
   storePlan,
@@ -195,4 +196,49 @@ test("earlier dated routines the owner changed don't block a plan", () => {
   const check = reviewPlan(withHistory, storePlan(proposal, ids), today);
   if (!check.ok) throw new Error(JSON.stringify(check.errors));
   expect(check.settings.dayPlans?.["2026-11-25"]?.routine).toEqual(edited);
+});
+
+test("plan changes list each other setting a plan changes, compared as stored", () => {
+  const base = { ...current(), dumbbellsKg: [8, 10] };
+  const same = storePlan(
+    { ...proposal, goal: base.goal, dumbbellsKg: [8, 10] },
+    ids,
+  );
+  expect(planChanges(base, same)).toEqual([]);
+  const cleared = storePlan({ ...proposal, dumbbellsKg: [] }, ids);
+  expect(planChanges(base, cleared)).toEqual([
+    { label: "Goal", from: base.goal, to: "Get stronger" },
+    { label: "Dumbbells", from: "8, 10 kg", to: "None" },
+  ]);
+  // A change that rounds to the same label shows more decimals.
+  const nudged = storePlan(
+    { ...proposal, goal: base.goal, dumbbellsKg: [8.004, 10] },
+    ids,
+  );
+  expect(planChanges(base, nudged)).toEqual([
+    { label: "Dumbbells", from: "8, 10 kg", to: "8.004, 10 kg" },
+  ]);
+  const profiled = storePlan(
+    {
+      ...proposal,
+      goal: base.goal,
+      profile: {
+        experience: "returning",
+        sessionMinutes: 45,
+        availableEquipment: ["dumbbells", "flat-bench"],
+        incrementsKg: { barbell: 2.5 },
+      },
+    },
+    ids,
+  );
+  expect(planChanges({ ...base, dumbbellsKg: [5, 10, 15] }, profiled)).toEqual([
+    { label: "Experience", from: "Not set", to: "Returning to training" },
+    { label: "Session length", from: "Not set", to: "45 min" },
+    { label: "Equipment", from: "Not set", to: "Dumbbells, Flat bench" },
+    {
+      label: "Weight steps",
+      from: "barbell None, machine None, cable None",
+      to: "barbell 2.5 kg, machine None, cable None",
+    },
+  ]);
 });
