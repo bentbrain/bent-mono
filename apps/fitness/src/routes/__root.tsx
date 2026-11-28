@@ -24,7 +24,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Private tracker for strength sessions, runs, food and bodyweight. Access is by invitation.",
+          "Private tracker for strength sessions, runs, food and bodyweight. Access is by invitation. AI assistants can set it up: instructions are at /llms.txt.",
       },
       { name: "theme-color", content: "#0647ff" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
@@ -34,6 +34,12 @@ export const Route = createRootRoute({
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", href: "/icon.svg" },
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      {
+        rel: "alternate",
+        type: "text/plain",
+        href: "/llms.txt",
+        title: "Fitness for AI assistants",
+      },
     ],
   }),
   component: Root,

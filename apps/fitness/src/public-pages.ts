@@ -1,8 +1,9 @@
 /**
  * Pages anyone can read without signing in or account services: they render
- * outside Clerk, and before the app is configured.
+ * outside Clerk, and before the app is configured. `/llms.txt` tells AI
+ * assistants how to connect.
  */
-const publicPages = new Set(["/privacy"]);
+const publicPages = new Set(["/privacy", "/llms.txt"]);
 
 /** Whether a location's path is a public page, ignoring trailing slashes. */
 export function isPublicPage(pathname: string) {
