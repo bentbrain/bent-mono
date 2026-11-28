@@ -8,7 +8,7 @@ import { Symbol } from "../../ui/Symbol";
 import { AppText, AppTextInput } from "../../ui/Text";
 import { haptic } from "../../ui/haptics";
 import { cn, shape } from "../../ui/typography";
-import { guideFor, prescriptionText } from "../shared/exercise";
+import { prescriptionText } from "../shared/exercise";
 import { fieldKey, setKeys } from "./correction-inputs";
 import type { InputField } from "./correction-inputs";
 
@@ -88,15 +88,13 @@ export function CorrectionSets({ workout, inputs }: { workout: Workout; inputs: 
               {prescriptionText(p)}
             </AppText>
           </View>
-          {guideFor(p.id) ? (
-            <IconButton
-              icon="info.circle"
-              tone="plain"
-              size={32}
-              label={`How to do ${p.name}`}
-              onPress={() => navigation.navigate("ExerciseGuide", { id: p.id })}
-            />
-          ) : null}
+          <IconButton
+            icon="info.circle"
+            tone="plain"
+            size={32}
+            label={`How to do ${p.name}`}
+            onPress={() => navigation.navigate("ExerciseGuide", { id: p.id, prescription: p })}
+          />
         </View>
         {exercise.sets.map((set, si) => {
           const name = `${p.name} set ${si + 1}`;

@@ -486,7 +486,7 @@ describe("plan check", () => {
 describe("app contract", () => {
   test("reads the declared contract and treats a missing one as 1", () => {
     // Builds declare 3 only once their screens handle every load type.
-    expect(appContract).toBe(2);
+    expect(appContract).toBe(3);
     expect(requestContract(null)).toBe(1);
     expect(requestContract("2")).toBe(2);
     expect(requestContract("two")).toBe(1);

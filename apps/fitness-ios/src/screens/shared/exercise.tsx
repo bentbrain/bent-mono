@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { Image } from "expo-image";
 import { View } from "react-native";
-import { exercises, loadWording } from "@bent/fitness-contracts/domain";
+import { exercises, loadTag, loadWording } from "@bent/fitness-contracts/domain";
 import type { Exercise } from "@bent/fitness-contracts/domain";
 import { guides } from "@bent/fitness-contracts/guides";
 import { formatDuration } from "@bent/fitness-contracts/timing";
@@ -28,7 +28,8 @@ export function prescriptionText(exercise: Exercise) {
       : exercise.side
         ? "reps each side"
         : "reps";
-  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit} · ${formatDuration(exercise.rest)} rest`;
+  const tag = loadTag(exercise);
+  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit}${tag ? ` · ${tag}` : ""} · ${formatDuration(exercise.rest)} rest`;
 }
 
 /** How to record the exercise, in plain words. */

@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import {
   createWorkout,
   defaultSettings,
+  loadAmount,
   loadNote,
+  loadTag,
   loadWording,
   progression,
   setResult,
@@ -74,7 +76,7 @@ test("band sets show reps without a weight", () => {
   };
   expect(setResult(set, custom("band"), "kg")).toBe("12 reps");
   expect(setResult({ ...set, loadKg: 20 }, custom("barbell"), "kg")).toBe(
-    "20 kg × 12 reps",
+    "20 kg on the bar × 12 reps",
   );
 });
 
@@ -199,4 +201,41 @@ test("band charts rank by reps, and naming the implicit load type keeps the char
   expect(holds.map((s) => [s.key, s.points.length])).toEqual([
     ["custom-hold:seconds:single", 2],
   ]);
+});
+
+test("weights say what they measure outside dumbbells, and prescriptions carry the tag", () => {
+  expect(loadAmount(10, custom(undefined), "kg")).toBe("10 kg");
+  expect(loadAmount(10, custom("bodyweight"), "kg")).toBe("10 kg added");
+  expect(loadAmount(16, custom("kettlebell"), "kg")).toBe(
+    "16 kg per kettlebell",
+  );
+  expect(loadTag(custom(undefined))).toBe("");
+  expect(loadTag(custom("barbell"))).toBe("Whole bar");
+  expect(loadTag(custom("band"))).toBe("Band");
+  expect(loadTag(custom("barbell", "seconds"))).toBe("");
+});
+
+test("kettlebell progression points to the assistant for heavier sizes", () => {
+  const bell = custom("kettlebell");
+  const top = progression(
+    bell,
+    previous(bell, [done(12, 8), done(12, 8), done(12, 8)]),
+    {
+      dumbbellsKg: [],
+      kettlebellsKg: [8],
+    },
+  );
+  expect(top.text).toBe(
+    "Top of range reached. Keep this kettlebell and slow the lowering, or move to a harder variation, until a heavier one is in your planning profile.",
+  );
+  const dumbbell = custom(undefined);
+  expect(
+    progression(
+      dumbbell,
+      previous(dumbbell, [done(12, 8), done(12, 8), done(12, 8)]),
+      { dumbbellsKg: [8] },
+    ).text,
+  ).toBe(
+    "Top of range reached. Add an available dumbbell size in Settings before increasing.",
+  );
 });

@@ -1574,6 +1574,19 @@ small,
   font-weight: 400;
   color: var(--muted);
 }
+.profile-list {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+.profile-list dt {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.profile-list dd {
+  margin: 0;
+  font-weight: 600;
+}
 .proposal-actions {
   display: flex;
   flex-wrap: wrap;

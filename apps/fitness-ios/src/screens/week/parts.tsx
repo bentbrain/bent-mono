@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { formatDate } from "@bent/fitness-contracts/domain";
-import type { RecordEntry } from "@bent/fitness-contracts/domain";
+import type { Exercise, RecordEntry } from "@bent/fitness-contracts/domain";
 import { elapsedSeconds, formatDuration } from "@bent/fitness-contracts/timing";
 import { Button } from "../../ui/Button";
 import { Badge, Card, EmptyState, Screen } from "../../ui/Layout";
 import { AppText } from "../../ui/Text";
 import { cn } from "../../ui/typography";
-import { nameFor } from "../shared/exercise";
+import { guideFor, nameFor } from "../shared/exercise";
 import type { DayState } from "./logic";
 import { workoutProgress } from "./logic";
 import { useWeekNavigation } from "./navigation";
@@ -19,7 +19,7 @@ export const stateTone = { done: "done", missed: "missed", planned: "primary", r
 >;
 
 /** A "How to" button that opens the exercise guide sheet. */
-export function ExerciseHelp({ id }: { id: string }) {
+export function ExerciseHelp({ id, prescription }: { id: string; prescription?: Exercise }) {
   const navigation = useWeekNavigation();
   return (
     <Button
@@ -27,8 +27,8 @@ export function ExerciseHelp({ id }: { id: string }) {
       icon="info.circle"
       tone="tinted"
       size="compact"
-      accessibilityLabel={`How to do ${nameFor(id)}`}
-      onPress={() => navigation.navigate("ExerciseGuide", { id })}
+      accessibilityLabel={`How to do ${guideFor(id) ? nameFor(id) : (prescription?.name ?? nameFor(id))}`}
+      onPress={() => navigation.navigate("ExerciseGuide", { id, prescription })}
       testID={`exercise-help-${id}`}
     />
   );

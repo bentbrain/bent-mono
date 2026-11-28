@@ -124,7 +124,7 @@ export function PlanScreen({
                   {exercise.name}
                 </h2>
                 <p className="prescription">{prescriptionText(exercise)}</p>
-                <ExerciseHelp id={exercise.id} />
+                <ExerciseHelp id={exercise.id} prescription={exercise} />
               </div>
               <div>
                 <p className="previous">

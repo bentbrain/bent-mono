@@ -150,7 +150,7 @@ export function PlanScreen({ route }: StaticScreenProps<{ date: string; routineI
                 </AppText>
               </View>
               <View className="flex-row">
-                <ExerciseHelp id={exercise.id} />
+                <ExerciseHelp id={exercise.id} prescription={exercise} />
               </View>
             </View>
           );

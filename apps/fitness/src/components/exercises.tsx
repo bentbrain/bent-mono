@@ -4,6 +4,7 @@ import { Button } from "@bent/ui/sdk/button";
 import {
   exercises,
   lastExercise,
+  loadTag,
   loadWording,
   setResult,
 } from "@bent/fitness-contracts/domain";
@@ -27,7 +28,8 @@ export function prescriptionText(exercise: Exercise) {
       : exercise.side
         ? "reps each side"
         : "reps";
-  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit} · ${formatDuration(exercise.rest)} rest`;
+  const tag = loadTag(exercise);
+  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit}${tag ? ` · ${tag}` : ""} · ${formatDuration(exercise.rest)} rest`;
 }
 
 /** How to record the exercise, in plain words. */
@@ -66,9 +68,12 @@ export function ExerciseThumb({ id }: { id: string }) {
 /** Setup, steps, picture, video and plan details for one exercise. */
 function ExerciseDetail({
   id,
+  prescription,
   headingLevel = 2,
 }: {
   id: string;
+  /** The prescription being planned or logged, for exercises without a guide. */
+  prescription?: Exercise;
   headingLevel?: 2 | 3;
 }) {
   const { settings, sync } = useAccount();
@@ -84,10 +89,18 @@ function ExerciseDetail({
   const previous = lastExercise(sync.records, id);
   if (!guide)
     return (
-      <p>
-        Use a familiar movement and a light practice set. Ask a qualified
-        trainer for setup and form guidance.
-      </p>
+      <>
+        {prescription && (
+          <>
+            <p className="prescription">{prescriptionText(prescription)}</p>
+            <p>{recordingNotes(prescription)}</p>
+          </>
+        )}
+        <p>
+          Use a familiar movement and a light practice set. Ask a qualified
+          trainer for setup and form guidance.
+        </p>
+      </>
     );
   return (
     <div
@@ -192,10 +205,17 @@ function ExerciseDetail({
  * A "How to" button that opens the exercise guide over the current screen.
  * Closing it returns focus to the button and leaves the page state unchanged.
  */
-export function ExerciseHelp({ id }: { id: string }) {
+export function ExerciseHelp({
+  id,
+  prescription,
+}: {
+  id: string;
+  /** The prescription being planned or logged, for exercises without a guide. */
+  prescription?: Exercise;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const title = useId();
-  const name = nameFor(id);
+  const name = guideFor(id) ? nameFor(id) : (prescription?.name ?? nameFor(id));
   useEffect(() => {
     const element = dialog.current;
     return () => element?.close();
@@ -230,19 +250,26 @@ export function ExerciseHelp({ id }: { id: string }) {
               <Icon name="close" />
             </Button>
           </div>
-          <ExerciseDetail id={id} headingLevel={3} />
-          <Button
-            className="text-link"
-            render={
-              <Link
-                to="/guides"
-                search={{ exercise: id }}
-                onClick={() => dialog.current?.close()}
-              />
-            }
-          >
-            Open in Exercises
-          </Button>
+          <ExerciseDetail
+            id={id}
+            prescription={prescription}
+            headingLevel={3}
+          />
+          {/* Only catalogue exercises have a page in Exercises. */}
+          {guideFor(id) && (
+            <Button
+              className="text-link"
+              render={
+                <Link
+                  to="/guides"
+                  search={{ exercise: id }}
+                  onClick={() => dialog.current?.close()}
+                />
+              }
+            >
+              Open in Exercises
+            </Button>
+          )}
         </div>
       </dialog>
     </>

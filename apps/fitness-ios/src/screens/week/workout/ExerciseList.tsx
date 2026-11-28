@@ -175,7 +175,7 @@ function ExerciseCard({
             label={`How to do ${p.name}`}
             size={36}
             testID={`exercise-${ei}-guide`}
-            onPress={() => navigation.navigate("ExerciseGuide", { id: p.id })}
+            onPress={() => navigation.navigate("ExerciseGuide", { id: p.id, prescription: p })}
           />
         </View>
         {history ? (

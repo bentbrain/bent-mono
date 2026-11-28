@@ -210,6 +210,8 @@ test("assistants are told to request fitness:plan once Clerk issues it", () => {
 test.skipIf(!configured)(
   "a plan connection lists the planning tools and the set-up prompt",
   async () => {
+    // Below contract 3 the planning profile isn't offered.
+    setMinimumAppContractForTests(2);
     const { client, instructions } = await connect(planner);
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -272,7 +274,7 @@ test.skipIf(!configured)(
     const current = await call("fitness_get_training_plan", {}, trainingPlan);
     expect(current).toMatchObject({
       today,
-      profileSaved: false,
+      profileSaved: true,
       pendingProposal: null,
       plan: {
         routines: [{ name: "Strength A" }, { name: "Strength B" }],
@@ -496,6 +498,7 @@ test.skipIf(!configured)(
     };
     // Below contract 3 the tool doesn't offer a profile and refuses one sent
     // anyway, so an assistant never reports a profile Fitness didn't keep.
+    setMinimumAppContractForTests(2);
     const early = await connect(profiler);
     expect(
       await early.failure("fitness_propose_plan", {
