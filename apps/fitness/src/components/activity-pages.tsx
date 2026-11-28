@@ -8,6 +8,8 @@ import {
   effectivePrescription,
   formatDate,
   lastExercise,
+  loadNote,
+  loadWording,
   progression,
   runSchema,
   scheduled,
@@ -93,7 +95,7 @@ export function PlanScreen({
       <div className="plan-summary input-notice">
         <p>
           Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
-          reserve. Weights mean one dumbbell.
+          reserve. {loadNote(routine.exercises, settings.units)}
         </p>
         {recorded && (
           <p>
@@ -137,8 +139,9 @@ export function PlanScreen({
                 </p>
                 <p className="suggestion">
                   {advice.text}
-                  {exercise.mode === "reps" && advice.loadKg !== null
-                    ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${settings.units} per dumbbell.`
+                  {loadWording(exercise, settings.units).weighed &&
+                  advice.loadKg !== null
+                    ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${loadWording(exercise, settings.units).unit}.`
                     : ""}
                 </p>
               </div>

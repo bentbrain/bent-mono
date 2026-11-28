@@ -5,6 +5,7 @@ import {
   displayLoad,
   formatDate,
   formatShortDate,
+  loadTypeWording,
   mondayOf,
   trainingRecords,
 } from "@bent/fitness-contracts/domain";
@@ -129,8 +130,10 @@ function StrengthCard({
     series.mode === "seconds"
       ? "Longest completed hold"
       : byLoad
-        ? `Heaviest completed set, ${units} per dumbbell`
-        : `Reps at ${displayLoad(first.loadKg, units)} ${units}`;
+        ? `Heaviest completed set, ${loadTypeWording(series.load, units).unit}`
+        : series.load === "band"
+          ? "Reps with a band"
+          : `Reps at ${displayLoad(first.loadKg, units)} ${loadTypeWording(series.load, units).unit}`;
   let change = "";
   if (series.points.length > 1) {
     if (byLoad) {
@@ -151,7 +154,9 @@ function StrengthCard({
       <header>
         <h3>{series.name}</h3>
         <span className="chip">
-          {series.mode === "seconds" ? "Timed" : "Reps"}
+          {series.mode === "seconds"
+            ? "Timed"
+            : `Reps · ${loadTypeWording(series.load, units).tag}`}
           {series.side ? " · each side" : ""}
         </span>
       </header>

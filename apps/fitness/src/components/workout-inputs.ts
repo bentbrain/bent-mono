@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import {
   displayLoad,
+  loadWording,
   toKg,
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
@@ -101,7 +102,15 @@ export function applyText(
   const field = match?.[3];
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
-  if (!match || !exercise || !set) return null;
+  // A weight typed for an exercise that records none, such as a band
+  // exercise, has no field to apply to.
+  if (
+    !match ||
+    !exercise ||
+    !set ||
+    (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)
+  )
+    return null;
   const prescription = exercise.prescription;
   const label =
     field === "loadKg"
@@ -166,7 +175,24 @@ export function holdInBackground(
   key: string,
   entry: Buffered,
 ) {
-  return entry.base === null || savedBase(workout, key) !== entry.base;
+  return (
+    !hiddenField(workout, key) &&
+    (entry.base === null || savedBase(workout, key) !== entry.base)
+  );
+}
+
+/**
+ * Whether `key` is a field the editor doesn't show, such as a weight typed
+ * for an exercise that now records none. Saving drops it.
+ */
+function hiddenField(workout: Workout, key: string) {
+  const match = fieldPattern.exec(key);
+  const prescription = workout.exercises[Number(match?.[1])]?.prescription;
+  return (
+    match?.[3] === "loadKg" &&
+    prescription !== undefined &&
+    !loadWording(prescription, "kg").weighed
+  );
 }
 
 const sameEntry = (a: Buffered | undefined, b: Buffered | undefined) =>
@@ -493,10 +519,13 @@ export function useWorkoutInputs({
   return {
     pending: Object.keys(buffer).length > 0,
     errors,
-    held,
+    // A held field the editor no longer shows has nothing to review.
+    held: held.filter((key) => !hiddenField(workout, key)),
     /** Weights kept without units, waiting for the person to confirm them. */
     unconfirmed: Object.entries(buffer)
-      .filter(([, entry]) => entry.base === null)
+      .filter(
+        ([key, entry]) => entry.base === null && !hiddenField(workout, key),
+      )
       .map(([key]) => key),
     units,
     message,

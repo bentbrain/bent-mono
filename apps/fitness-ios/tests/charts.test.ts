@@ -26,6 +26,7 @@ describe("chart selection for VoiceOver", () => {
         name: "Goblet squat",
         mode: "reps",
         side: false,
+        load: "dumbbell",
         points: [
           { date: "2026-11-02", loadKg: 10, value: 8 },
           { date: "2026-11-04", loadKg: 12, value: 8 },

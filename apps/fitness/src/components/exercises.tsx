@@ -4,6 +4,7 @@ import { Button } from "@bent/ui/sdk/button";
 import {
   exercises,
   lastExercise,
+  loadWording,
   setResult,
 } from "@bent/fitness-contracts/domain";
 import type { Exercise } from "@bent/fitness-contracts/domain";
@@ -35,9 +36,11 @@ function recordingNotes(exercise: Exercise) {
     return exercise.side
       ? "Hold each side for time. Log the seconds for left and right."
       : "Hold for time. Log the seconds you held with good form.";
+  // The note names no unit, so either unit reads the same.
+  const { note } = loadWording(exercise, "kg");
   return exercise.side
-    ? "Weight is for one dumbbell. Log the reps for your left and right side separately."
-    : "Weight is for one dumbbell. Log the reps you completed with control.";
+    ? `${note} Log the reps for your left and right side separately.`
+    : `${note} Log the reps you completed with control.`;
 }
 
 /** The middle frames of an exercise illustration, as a small picture. */
@@ -304,7 +307,9 @@ export function ExercisesScreen({ exercise }: { exercise?: string }) {
                     </span>
                     {base.side && <span className="chip">Each side</span>}
                     {base.mode === "reps" && (
-                      <span className="chip">Per dumbbell</span>
+                      <span className="chip">
+                        {loadWording(base, "kg").tag}
+                      </span>
                     )}
                   </span>
                   <small>

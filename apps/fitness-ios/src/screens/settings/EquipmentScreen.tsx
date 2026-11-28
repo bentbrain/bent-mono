@@ -45,7 +45,7 @@ function EquipmentEditor() {
       <View className="gap-3">
         <SectionTitle>Your equipment</SectionTitle>
         <AppText textRole="footnote" tone="secondary" className="px-1">
-          Add only the sizes you have checked. All loads in a workout mean one dumbbell.
+          Add only the sizes you have checked. A dumbbell weight in a workout is for one dumbbell.
         </AppText>
         <Card>
           <InputField

@@ -8,6 +8,8 @@ import { z } from "zod";
 import {
   addDays,
   displayLoad,
+  loadTypeOf,
+  loadWording,
   localDate,
   mealNutrientValues,
   mealSchema,
@@ -158,6 +160,7 @@ function training(account: Account, date: string) {
             exercises: r.data.exercises.map((e) => ({
               name: e.prescription.name,
               mode: e.prescription.mode,
+              load: loadTypeOf(e.prescription),
               sets: e.sets.map((s) =>
                 s.skipped
                   ? "skipped"
@@ -165,7 +168,9 @@ function training(account: Account, date: string) {
                     ? "not done"
                     : e.prescription.mode === "seconds"
                       ? `${s.value}s${s.right === null ? "" : ` / ${s.right}s`}`
-                      : `${displayLoad(s.loadKg, units)} ${units} × ${s.value}${s.right === null ? "" : ` / ${s.right}`}`,
+                      : !loadWording(e.prescription, units).weighed
+                        ? `${s.value} reps${s.right === null ? "" : ` / ${s.right}`}`
+                        : `${displayLoad(s.loadKg, units)} ${units} × ${s.value}${s.right === null ? "" : ` / ${s.right}`}`,
               ),
             })),
             notes: r.data.notes,

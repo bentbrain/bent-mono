@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { displayLoad, toKg, workoutSchema } from "@bent/fitness-contracts/domain";
+import { displayLoad, loadWording, toKg, workoutSchema } from "@bent/fitness-contracts/domain";
 import type { Exercise, Settings, Workout } from "@bent/fitness-contracts/domain";
 
 /*
@@ -82,7 +82,8 @@ export function applyText(workout: Workout, key: string, text: string, units: Un
   const field = match?.[3];
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
-  if (!match || !exercise || !set) return null;
+  // A weight typed for an exercise that records none, such as a band exercise, has no field to apply to.
+  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)) return null;
   const prescription = exercise.prescription;
   const label = field === "loadKg" ? "weight" : field === "rir" ? "reps left" : prescription.mode === "seconds" ? "seconds" : "reps";
   const trimmed = text.trim();
@@ -124,13 +125,20 @@ export function migrateLegacy(legacy: Record<string, { text: string; base: strin
 
 /** Whether a background save keeps the value for the person to review. */
 export function holdInBackground(workout: Workout, key: string, entry: Buffered) {
-  return entry.base === null || savedBase(workout, key) !== entry.base;
+  return !hiddenField(workout, key) && (entry.base === null || savedBase(workout, key) !== entry.base);
 }
 
-/** Weights kept without units, waiting for the person to confirm them. */
-export function unconfirmedKeys(buffer: InputBuffer) {
+/** Whether `key` is a field the editor doesn't show, such as a weight typed for an exercise that now records none. Saving drops it. */
+export function hiddenField(workout: Workout, key: string) {
+  const match = fieldPattern.exec(key);
+  const prescription = workout.exercises[Number(match?.[1])]?.prescription;
+  return match?.[3] === "loadKg" && prescription !== undefined && !loadWording(prescription, "kg").weighed;
+}
+
+/** Weights kept without units, waiting for the person to confirm them. Hidden fields don't count. */
+export function unconfirmedKeys(buffer: InputBuffer, workout: Workout) {
   return Object.entries(buffer)
-    .filter(([, entry]) => entry.base === null)
+    .filter(([key, entry]) => entry.base === null && !hiddenField(workout, key))
     .map(([key]) => key);
 }
 
@@ -272,14 +280,18 @@ export type SetInput = {
   spoken: string;
   /** Whole numbers only, which shows the number pad without a decimal point. */
   integer: boolean;
+  /** What VoiceOver adds about the value, such as "In kg per dumbbell". */
+  hint?: string;
 };
 
 /** The inputs a set of this exercise records, in display order. */
 export function setInputs(prescription: Exercise, units: Units): SetInput[] {
   const seconds = prescription.mode === "seconds";
+  const wording = loadWording(prescription, units);
   const amount = seconds ? "seconds" : "reps";
   const inputs: SetInput[] = [];
-  if (!seconds) inputs.push({ field: "loadKg", heading: `${units} / dumbbell`, spoken: "weight", integer: false });
+  if (wording.weighed)
+    inputs.push({ field: "loadKg", heading: wording.heading, spoken: "weight", integer: false, hint: `In ${wording.unit}` });
   inputs.push({
     field: "value",
     heading: seconds ? (prescription.side ? "Left seconds" : "Seconds") : prescription.side ? "Left reps" : "Reps",

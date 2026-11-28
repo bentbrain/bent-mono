@@ -1,4 +1,4 @@
-import { exercises, lastExercise, setResult } from "@bent/fitness-contracts/domain";
+import { exercises, lastExercise, loadWording, setResult } from "@bent/fitness-contracts/domain";
 import type { Exercise, RecordEntry, Routine, Settings } from "@bent/fitness-contracts/domain";
 
 /**
@@ -44,7 +44,7 @@ export function exerciseTags(exercise: Exercise) {
   return [
     exercise.mode === "seconds" ? "Timed hold" : "Reps",
     ...(exercise.side ? ["Each side"] : []),
-    ...(exercise.mode === "reps" ? ["Per dumbbell"] : []),
+    ...(exercise.mode === "reps" ? [loadWording(exercise, "kg").tag] : []),
   ];
 }
 

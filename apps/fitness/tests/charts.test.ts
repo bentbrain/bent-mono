@@ -147,6 +147,7 @@ describe("chart popover text", () => {
     name: "Goblet squat",
     mode: "reps",
     side: false,
+    load: "dumbbell",
     points: [
       { date: "2026-01-05", loadKg: 10, value: 8 },
       { date: "2026-01-07", loadKg: 12, value: 8 },
@@ -181,6 +182,7 @@ describe("chart popover text", () => {
       name: "Plank",
       mode: "seconds",
       side: false,
+      load: "bodyweight",
       points: [
         { date: "2026-01-05", loadKg: 0, value: 30 },
         { date: "2026-01-07", loadKg: 0, value: 45 },

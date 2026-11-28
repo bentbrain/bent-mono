@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { Image } from "expo-image";
 import { View } from "react-native";
-import { exercises } from "@bent/fitness-contracts/domain";
+import { exercises, loadWording } from "@bent/fitness-contracts/domain";
 import type { Exercise } from "@bent/fitness-contracts/domain";
 import { guides } from "@bent/fitness-contracts/guides";
 import { formatDuration } from "@bent/fitness-contracts/timing";
@@ -37,9 +37,11 @@ export function recordingNotes(exercise: Exercise) {
     return exercise.side
       ? "Hold each side for time. Log the seconds for left and right."
       : "Hold for time. Log the seconds you held with good form.";
+  // The note names no unit, so either unit reads the same.
+  const { note } = loadWording(exercise, "kg");
   return exercise.side
-    ? "Weight is for one dumbbell. Log the reps for your left and right side separately."
-    : "Weight is for one dumbbell. Log the reps you completed with control.";
+    ? `${note} Log the reps for your left and right side separately.`
+    : `${note} Log the reps you completed with control.`;
 }
 
 /** A small illustration of an exercise, or a dumbbell when it has no guide. */

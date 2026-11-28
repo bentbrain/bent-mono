@@ -1,5 +1,12 @@
-import { addDays, mondayOf, scheduled, trainingRecords } from "./domain";
+import {
+  addDays,
+  loadTypeOf,
+  mondayOf,
+  scheduled,
+  trainingRecords,
+} from "./domain";
 import type { Exercise, RecordEntry, Settings, Workout } from "./domain";
+import type { LoadType } from "./catalogue";
 
 export type WeekSummary = {
   monday: string;
@@ -65,13 +72,17 @@ export type StrengthSeries = {
   name: string;
   mode: Exercise["mode"];
   side: boolean;
+  /** How the series' weights were recorded. */
+  load: LoadType;
   points: StrengthPoint[];
 };
 
-function bestSet(exercise: Workout["exercises"][number]) {
+/** The best completed set. Bands record no weight, so they rank by reps. */
+function bestSet(exercise: Workout["exercises"][number], band: boolean) {
   let best: { loadKg: number; value: number } | undefined;
-  for (const set of exercise.sets) {
-    if (!set.done) continue;
+  for (const done of exercise.sets) {
+    if (!done.done) continue;
+    const set = band ? { ...done, loadKg: 0 } : done;
     const value = exercise.prescription.side
       ? Math.min(set.value, set.right ?? 0)
       : set.value;
@@ -105,15 +116,23 @@ export function strengthSeries(records: RecordEntry[]): StrengthSeries[] {
   const series = new Map<string, StrengthSeries>();
   for (const workout of workouts)
     for (const exercise of workout.exercises) {
-      const best = bestSet(exercise);
-      if (!best) continue;
       const p = exercise.prescription;
-      const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}`;
+      const load = loadTypeOf(p);
+      const best = bestSet(exercise, load === "band");
+      if (!best) continue;
+      // A weighed exercise recorded with a load type other than the one it
+      // would have without one charts apart. Timed holds record seconds
+      // whatever the load type, so they keep one chart.
+      const implicit = loadTypeOf({ id: p.id, mode: p.mode });
+      const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}${
+        load === implicit || p.mode === "seconds" ? "" : `:${load}`
+      }`;
       const entry = series.get(key) ?? {
         key,
         name: p.name,
         mode: p.mode,
         side: p.side,
+        load,
         points: [],
       };
       entry.name = p.name;

@@ -36,7 +36,12 @@ export const nutrientInfo: Record<
     target: { min: 20, max: 1000 },
     aim: "most",
   },
-  fat: { label: "Fat", mealMax: 500, target: { min: 10, max: 400 }, aim: "most" },
+  fat: {
+    label: "Fat",
+    mealMax: 500,
+    target: { min: 10, max: 400 },
+    aim: "most",
+  },
   fibre: {
     label: "Fibre",
     mealMax: 200,
@@ -377,6 +382,104 @@ export function loadTypeOf(
   if (entry && entry.mode === exercise.mode) return entry.load;
   return exercise.load ?? "dumbbell";
 }
+/** How an exercise's weight reads wherever it is entered or shown. */
+export type LoadWording = {
+  /** Whether sets record a weight. Timed sets and bands don't. */
+  weighed: boolean;
+  /** Short heading for the weight input, such as "kg / dumbbell". */
+  heading: string;
+  /** A weight's unit in a sentence, such as "kg per dumbbell". */
+  unit: string;
+  /** What the logged weight means, in one sentence. */
+  note: string;
+  /** A short tag for exercise guides, such as "Per dumbbell". */
+  tag: string;
+};
+const wordings: Record<
+  LoadType,
+  (units: Settings["units"]) => Omit<LoadWording, "weighed">
+> = {
+  dumbbell: (units) => ({
+    heading: `${units} / dumbbell`,
+    unit: `${units} per dumbbell`,
+    note: "Weight is for one dumbbell.",
+    tag: "Per dumbbell",
+  }),
+  kettlebell: (units) => ({
+    heading: `${units} / kettlebell`,
+    unit: `${units} per kettlebell`,
+    note: "Weight is for one kettlebell.",
+    tag: "Per kettlebell",
+  }),
+  barbell: (units) => ({
+    heading: `${units} on bar`,
+    unit: `${units} on the bar`,
+    note: "Weight is the whole bar, plates included.",
+    tag: "Whole bar",
+  }),
+  machine: (units) => ({
+    heading: `${units} on stack`,
+    unit: `${units} on the stack`,
+    note: "Weight is what the machine shows.",
+    tag: "Machine weight",
+  }),
+  cable: (units) => ({
+    heading: `${units} on stack`,
+    unit: `${units} on the stack`,
+    note: "Weight is what the cable stack shows.",
+    tag: "Stack weight",
+  }),
+  bodyweight: (units) => ({
+    heading: `Added ${units}`,
+    unit: `${units} added`,
+    note: "Weight is any you add, such as a vest or belt. Enter 0 for none.",
+    tag: "Added weight",
+  }),
+  band: () => ({
+    heading: "",
+    unit: "",
+    note: "Bands record no weight. Use a stronger band to progress.",
+    tag: "Band",
+  }),
+};
+/** How weights of a load type read. */
+export function loadTypeWording(
+  type: LoadType,
+  units: Settings["units"],
+): Omit<LoadWording, "weighed"> {
+  return wordings[type](units);
+}
+/** How `exercise`'s weight reads, from its load type and mode. */
+export function loadWording(
+  exercise: Pick<Exercise, "id" | "load" | "mode">,
+  units: Settings["units"],
+): LoadWording {
+  const type = loadTypeOf(exercise);
+  return {
+    ...wordings[type](units),
+    weighed: exercise.mode === "reps" && type !== "band",
+  };
+}
+/**
+ * One sentence on what weights mean across `exercises`: the shared note when
+ * every weighed exercise records the same way, otherwise a pointer to each
+ * exercise's own label. Empty when none records a weight.
+ */
+export function loadNote(
+  exercises: readonly Pick<Exercise, "id" | "load" | "mode">[],
+  units: Settings["units"],
+) {
+  const notes = new Set(
+    exercises.flatMap((exercise) => {
+      const wording = loadWording(exercise, units);
+      return wording.weighed ? [wording.note] : [];
+    }),
+  );
+  if (notes.size === 0) return "";
+  return notes.size === 1
+    ? [...notes][0]!
+    : "Each exercise shows how its weight is measured.";
+}
 /** Default smallest steps, in kg, for loads that add plates or pins. */
 export const defaultIncrementsKg = { barbell: 2.5, machine: 5, cable: 2.5 };
 function selection(ids: string[]) {
@@ -658,6 +761,8 @@ export function progression(
     previous.sets.find((set) => set.done)?.loadKg ??
     previous.sets[0]?.loadKg ??
     0;
+  // Bands record no weight, so any stored weight says nothing about them.
+  const band = type === "band";
   const eligible =
     previous.prescription.mode === p.mode &&
     previous.prescription.side === p.side &&
@@ -669,7 +774,7 @@ export function progression(
         s.rir >= 2 &&
         s.value >= p.max &&
         (!p.side || (s.right ?? 0) >= p.max) &&
-        s.loadKg === load,
+        (band || s.loadKg === load),
     );
   // Timed sets record no weight: the logger has no weight field for them.
   if (p.mode === "seconds")
@@ -681,10 +786,15 @@ export function progression(
         : "Build controlled hold time within the range.",
       loadKg: 0,
     };
-  const repeat = {
-    text: "Repeat the load and build controlled reps within the range.",
-    loadKg: load,
-  };
+  const repeat = band
+    ? {
+        text: "Repeat this band and build controlled reps within the range.",
+        loadKg: 0,
+      }
+    : {
+        text: "Repeat the load and build controlled reps within the range.",
+        loadKg: load,
+      };
   if (!eligible) return repeat;
   const restart = `Return to ${p.min} reps; keep this load if the jump affects form.`;
   if (type === "dumbbell" || type === "kettlebell") {
@@ -821,7 +931,11 @@ export function targetStatus(grams: number, target: number) {
   if (Math.abs(difference) < 1e-6) return "on";
   return difference < 0 ? "under" : "over";
 }
-export function nutrientNote(nutrient: Nutrient, grams: number, target: number) {
+export function nutrientNote(
+  nutrient: Nutrient,
+  grams: number,
+  target: number,
+) {
   const status = targetStatus(grams, target);
   // Rounds only the amount shown.
   const amount = (value: number) =>
@@ -926,6 +1040,11 @@ export function setResult(
     return exercise.side
       ? `${set.value} s left / ${set.right ?? 0} s right`
       : `${set.value} seconds`;
+  // Bands record no weight, so their sets show reps alone.
+  if (!loadWording(exercise, units).weighed)
+    return exercise.side
+      ? `${set.value} reps left / ${set.right ?? 0} right`
+      : `${set.value} reps`;
   const load = `${displayLoad(set.loadKg, units)} ${units}`;
   return exercise.side
     ? `${load} × ${set.value} left / ${set.right ?? 0} right`

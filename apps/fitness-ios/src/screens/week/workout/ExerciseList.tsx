@@ -286,7 +286,7 @@ function SetRow({
               <AppTextInput
                 testID={`${testBase}-${input.field}`}
                 accessibilityLabel={`${name} ${input.spoken}`}
-                accessibilityHint={input.field === "loadKg" ? `In ${units} per dumbbell` : undefined}
+                accessibilityHint={input.hint}
                 value={inputs.text(key)}
                 onChangeText={(value) => inputs.setText(key, value)}
                 onFocus={() => focus.focus(id)}

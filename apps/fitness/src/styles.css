@@ -2245,8 +2245,9 @@ small,
 }
 .strength-card header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
   align-items: start;
 }
 .strength-card h3 {

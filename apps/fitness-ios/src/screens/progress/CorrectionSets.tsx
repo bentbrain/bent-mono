@@ -1,5 +1,6 @@
 import { useTabNavigation } from "../../navigation/hooks";
 import { Pressable, View } from "react-native";
+import { loadWording } from "@bent/fitness-contracts/domain";
 import type { Settings, Workout } from "@bent/fitness-contracts/domain";
 import { Button, IconButton } from "../../ui/Button";
 import { Card } from "../../ui/Layout";
@@ -113,11 +114,11 @@ export function CorrectionSets({ workout, inputs }: { workout: Workout; inputs: 
                     {si + 1}
                   </AppText>
                 </View>
-                {p.mode === "reps" ? (
+                {loadWording(p, units).weighed ? (
                   <SetInput
                     inputs={inputs}
-                    label={`${name} weight, ${units}`}
-                    caption={`${units} / dumbbell`}
+                    label={`${name} weight, ${loadWording(p, units).unit}`}
+                    caption={loadWording(p, units).heading}
                     exercise={ei}
                     set={si}
                     field="loadKg"

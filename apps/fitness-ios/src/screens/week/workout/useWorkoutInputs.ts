@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { AppState } from "react-native";
 import type { Workout } from "@bent/fitness-contracts/domain";
 import { drafts } from "../../../data/storage";
-import { WorkoutInputStore, planCommit, savedBase, savedText, shownText, unconfirmedKeys } from "./inputs";
+import { WorkoutInputStore, hiddenField, planCommit, savedBase, savedText, shownText, unconfirmedKeys } from "./inputs";
 import type { CommitOptions, DraftBackend, InputBuffer, Units } from "./inputs";
 
 /** The drafts table for one account, as the input store uses it. */
@@ -138,9 +138,10 @@ export function useWorkoutInputs({
   return {
     pending: Object.keys(buffer).length > 0,
     errors,
-    held,
+    // A held field the editor no longer shows has nothing to review.
+    held: held.filter((key) => !hiddenField(workout, key)),
     /** Weights kept without units, waiting for the person to confirm them. */
-    unconfirmed: unconfirmedKeys(buffer),
+    unconfirmed: unconfirmedKeys(buffer, workout),
     units,
     message,
     storageError,

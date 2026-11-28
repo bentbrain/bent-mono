@@ -1,7 +1,7 @@
 import { useKeepAwake } from "expo-keep-awake";
 import { useEffect, useRef } from "react";
 import { Alert, View } from "react-native";
-import { formatDate } from "@bent/fitness-contracts/domain";
+import { formatDate, loadNote } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
 import { useAccount } from "../../../account/AccountProvider";
 import type { Sync } from "../../../account/AccountProvider";
@@ -132,8 +132,12 @@ export function WorkoutEditor({
       <SessionTimer workout={workout} error={inputs.message?.place === "timer" ? inputs.message.text : undefined} onRest={setRest} />
 
       <Notice tone="info">
-        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve. Weights are for one dumbbell; each side has its own
-        reps.
+        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve.{" "}
+        {loadNote(
+          workout.exercises.map((exercise) => exercise.prescription),
+          settings.units,
+        )}{" "}
+        Each side has its own reps.
       </Notice>
 
       <InputNotices inputs={inputs} />

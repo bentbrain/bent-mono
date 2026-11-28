@@ -1,4 +1,4 @@
-import { displayLoad, formatShortDate, mondayOf, toKg, trainingRecords, weightSchema } from "@bent/fitness-contracts/domain";
+import { displayLoad, formatShortDate, loadTypeWording, mondayOf, toKg, trainingRecords, weightSchema } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
 import type { StrengthPoint, StrengthSeries, WeekSummary } from "@bent/fitness-contracts/progress";
 import { runText } from "../../logic/format";
@@ -58,7 +58,12 @@ export function weekBars(weeks: WeekSummary[]): WeekBar[] {
 
 /** One set result as the strength cards show it. */
 export function pointText(point: StrengthPoint, series: StrengthSeries, units: Units) {
-  const amount = series.mode === "seconds" ? `${point.value} s` : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
+  const amount =
+    series.mode === "seconds"
+      ? `${point.value} s`
+      : series.load === "band"
+        ? `${point.value} reps`
+        : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
   return series.side ? `${amount} each side` : amount;
 }
 
@@ -134,8 +139,10 @@ export function strengthSummary(series: StrengthSeries, units: Units) {
     series.mode === "seconds"
       ? "Longest completed hold"
       : byLoad
-        ? `Heaviest completed set, ${units} per dumbbell`
-        : `Reps at ${displayLoad(first.loadKg, units)} ${units}`;
+        ? `Heaviest completed set, ${loadTypeWording(series.load, units).unit}`
+        : series.load === "band"
+          ? "Reps with a band"
+          : `Reps at ${displayLoad(first.loadKg, units)} ${loadTypeWording(series.load, units).unit}`;
   let change = "";
   if (series.points.length > 1) {
     if (byLoad) {
@@ -151,7 +158,7 @@ export function strengthSummary(series: StrengthSeries, units: Units) {
     latest,
     measure,
     change,
-    chip: `${series.mode === "seconds" ? "Timed" : "Reps"}${series.side ? " · each side" : ""}`,
+    chip: `${series.mode === "seconds" ? "Timed" : `Reps · ${loadTypeWording(series.load, units).tag}`}${series.side ? " · each side" : ""}`,
     values: series.points.map((point) => (byLoad ? displayLoad(point.loadKg, units) : point.value)),
     spoken: `${series.name}: ${measure}, ${series.points.length} sessions from ${pointText(first, series, units)} to ${pointText(latest, series, units)}.`,
   };
