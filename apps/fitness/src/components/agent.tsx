@@ -14,39 +14,59 @@ type Request = { action: string };
 type Bridge = {
   agent: ReturnType<typeof createAgent>;
   ask: ReturnType<typeof createConfirm<Request>>;
+  end: () => void;
 };
 
-let bridge: Bridge | undefined;
-
-/** One bridge per page. It asks the person before any step on a control marked `data-agent-confirm`. */
-function browserBridge(): Bridge {
-  if (bridge) return bridge;
+/**
+ * A bridge for one signed-in account. Once it ends, every step it still has,
+ * including ones queued behind a question, is refused. A step on a control
+ * marked `data-agent-confirm` waits for the person to allow it.
+ */
+function createBridge(): Bridge {
   const ask = createConfirm<Request>();
+  let live = true;
   const agent = createAgent({
-    allow: (step, { signal }) => {
+    allow: async (step, { signal }) => {
+      if (!live) return false;
       if (!step.confirm) return true;
+      // A native modal dialog makes the question underneath it unanswerable.
+      if (document.querySelector("dialog:modal")) return false;
       signal.addEventListener("abort", () => ask.controller.close(), {
         once: true,
       });
-      return ask({ action: step.confirm });
+      return (await ask({ action: step.confirm })) && live;
     },
   });
-  bridge = { agent, ask };
-  return bridge;
+  return {
+    agent,
+    ask,
+    end: () => {
+      live = false;
+      ask.controller.close();
+    },
+  };
 }
 
 /**
- * Lets a browser agent read and use the signed-in app through WebMCP. Every
- * step on a marked control waits for the person to answer in this dialog.
+ * Lets a browser agent read and use the signed-in app through WebMCP while
+ * this account is open. Every step on a marked control waits for the person
+ * to answer in this dialog.
  */
 export function AgentBridge() {
-  const [ask, setAsk] = useState<Bridge["ask"]>();
+  const [bridge, setBridge] = useState<Bridge>();
   useEffect(() => {
-    const { agent, ask } = browserBridge();
-    setAsk(() => ask);
-    // The bridge's own allow already asks the person, so this one doesn't ask twice.
-    return registerTools(agent, { allow: () => true });
+    const next = createBridge();
+    setBridge(next);
+    return next.end;
   }, []);
+  useEffect(() => {
+    if (!bridge) return;
+    // Runs after the dialog below has mounted, so a first call can ask. The
+    // bridge's own allow already asks the person, so this one doesn't ask twice.
+    return registerTools(bridge.agent, { allow: () => true });
+  }, [bridge]);
+  if (!bridge) return null;
+  const { ask } = bridge;
   if (!ask) return null;
   return (
     <AlertDialog controller={ask.controller}>

@@ -36,8 +36,14 @@ async function installModelContext(page: Page) {
     Object.defineProperty(document, "modelContext", {
       configurable: true,
       value: {
-        registerTool: async (tool: Tool & { name: string }) => {
+        registerTool: async (
+          tool: Tool & { name: string },
+          options?: { signal?: AbortSignal },
+        ) => {
           tools.set(tool.name, tool);
+          options?.signal?.addEventListener("abort", () => {
+            if (tools.get(tool.name) === tool) tools.delete(tool.name);
+          });
         },
         unregisterTool: async (name: string) => {
           tools.delete(name);
@@ -184,4 +190,52 @@ test("an agent's export waits for the person to allow it", async ({ page }) => {
   await ask.getByRole("button", { name: "Allow" }).click();
   expect((await allowed).ok).toBe(true);
   expect((await download).suggestedFilename()).toBe("fitness-export.json");
+});
+
+test("signing out ends the agent's access to the page", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const ask = page.getByRole("alertdialog", {
+    name: "Allow your assistant to do this?",
+  });
+  const waiting = act(page, [
+    { ref: "Export account data and photos", action: "press" },
+  ]);
+  await expect(ask).toBeVisible();
+  await page.evaluate(() => {
+    Object.assign(window, { staleAct: window.webmcpTools?.get("act") });
+  });
+  await clerk.signOut({ page });
+  expect((await waiting).ok).toBe(false);
+  await expect(ask).toBeHidden();
+  const signIn = page.getByRole("button", { name: "Sign in" });
+  await expect(signIn).toBeVisible();
+  expect(await page.evaluate(() => window.webmcpTools?.size)).toBe(0);
+  const late = actSchema.parse(
+    await page.evaluate(() =>
+      (window as Window & { staleAct?: Tool }).staleAct?.execute({
+        steps: [{ ref: "Sign in", action: "press" }],
+      }),
+    ),
+  );
+  expect(late.ok, "a call made through the earlier registration").toBe(false);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("an agent's marked step is refused while a native modal is open", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.evaluate(() => {
+    const modal = document.createElement("dialog");
+    modal.textContent = "Another sheet";
+    document.body.append(modal);
+    modal.showModal();
+  });
+  const result = await act(page, [
+    { ref: "Export account data and photos", action: "press" },
+  ]);
+  expect(result.ok).toBe(false);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
 });

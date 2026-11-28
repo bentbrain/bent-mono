@@ -90,9 +90,9 @@ Access follows the token's scopes. `fitness:read` lists the read tools, `fitness
 
 ### Browser agents
 
-Signed-in screens register `snapshot`, `query` and `act` tools with the browser through WebMCP (`document.modelContext`), using the [UI SDK](https://ui-sdk.dev) agent bridge. An agent built into the browser finds each button and link by its accessible name and presses it through the same component a person uses. A step on a control marked `data-agent-confirm`, such as exporting account data or replacing device changes with the cloud version, waits until you choose Allow in the app. The agent can't see or answer that question. Browsers without WebMCP get no tools.
+While you're signed in, the Week, Exercises, Food, Progress and Settings screens register `snapshot`, `query` and `act` tools with the browser through WebMCP (`document.modelContext`), using the [UI SDK](https://ui-sdk.dev) agent bridge. The account pages under `/account` don't. An agent built into the browser finds each button and link by its accessible name and presses it through the same component a person uses. A step on a control marked `data-agent-confirm`, such as exporting account data or replacing device changes with the cloud version, waits until you choose Allow in the app. The agent can't see or answer that question, and the step is refused while another modal sheet is open. Signing out removes the tools and refuses any step still waiting. Browsers without WebMCP get no tools.
 
-The bridge sees only UI SDK components, so Fitness builds its controls from `@ui-sdk/react` through `@bent/ui/sdk/*`. `e2e/agent.spec.ts` checks that every control on each screen has a name, that an agent can move between sections, and that a marked control waits for the person.
+The bridge sees only UI SDK components, so Fitness builds its controls from `@ui-sdk/react` through `@bent/ui/sdk/*`. `e2e/agent.spec.ts` checks that every control the bridge lists on eight screens has a name and that each screen's main controls are listed. It also checks that an agent can move between sections, that a marked control waits for the person, and that signing out or an open modal sheet refuses the agent's steps.
 
 ## iPhone app API
 
