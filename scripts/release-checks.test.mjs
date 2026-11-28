@@ -85,7 +85,9 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   for (const [, action, ref] of source.matchAll(/uses: ([^@\s]+)@(\S+)/g)) {
     assert.match(ref, /^[a-f0-9]{40}$/, action);
     assert.ok(pinned.includes(`uses: ${action}@${ref}`) ||
-      (action === "github/codeql-action/init" || action === "github/codeql-action/analyze") && pinned.includes(`@${ref}`), action);
+      (action === "github/codeql-action/init" || action === "github/codeql-action/analyze") && pinned.includes(`@${ref}`) ||
+      // The flow shards download the flow build; Quality has no artifact to download. v4.3.0.
+      action === "actions/download-artifact" && ref === "d3f86a106a0bac45b974a628896c90dbdf5c8093", action);
   }
   assert.ok(source.startsWith("name: Fitness iOS Verification\non:\n  workflow_dispatch:\n  schedule:\n    - cron: \"0 17 * * *\"\n  push:\n    branches: [main]\n"));
   assert.ok(source.includes("permissions:\n  contents: read\nconcurrency:\n  group: fitness-ios-verify-${{ github.ref }}\n  cancel-in-progress: true\n"));
@@ -97,7 +99,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     if (script) assert.ok(!script.includes("${{"), block);
   }
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  assert.deepEqual(declared, ["codeql-swift-app", "codeql-swift-tools", "simulator-flow", "verification"]);
+  assert.deepEqual(declared, ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow", "verification"]);
   const job = name => qualityJob(source, name);
   for (const [name, scope, traces] of [["codeql-swift-app", "app", ["native.mjs replay-swift app"]],
     ["codeql-swift-tools", "tools", ["native.mjs replay-swift seeder", "native.mjs core-build"]]]) {
@@ -134,49 +136,58 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   assert.ok(tools.indexOf("run: node scripts/native.mjs seeder\n") < tools.indexOf("codeql-action/init@"));
   assert.ok(!tools.includes("./.github/actions/setup"));
   assert.ok(tools.includes("uses: actions/setup-node@"));
+  // The production build checks the arm64 production app, as Quality's native suite does.
+  const production = job("production-build");
+  assert.ok(production.includes("    name: Production build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
+  assert.ok(production.includes("    env:\n      APP_VARIANT: production\n      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n"));
+  const order = (body, runs) => {
+    const positions = runs.map(run => body.indexOf(`run: ${run}\n`));
+    assert.ok(positions.every(position => position > 0), runs.join());
+    assert.deepEqual([...positions].sort((x, y) => x - y), positions);
+  };
+  order(production, ["node scripts/native.mjs prebuild", "node scripts/native.mjs build", "node scripts/native.mjs artifact"]);
+  // One job builds the development app and the seeder for every flow shard.
+  const build = job("simulator-build");
+  assert.ok(build.includes("    name: Simulator flow build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
+  assert.match(build, /^      XCODEBUILD_SETTINGS: >-\n        ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n/m);
+  order(build, ["node scripts/flows.mjs --build-only"]);
+  assert.ok(build.includes("app/Build/Products/Release-iphonesimulator/bentFitnessDev.app \\\n            seeder/Build/Products\n"));
+  assert.ok(build.includes("          name: fitness-ios-sim-build\n          path: ${{ runner.temp }}/fitness-ios-sim-build.tar\n          if-no-files-found: error\n"));
   const flows = job("simulator-flow");
-  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    runs-on: macos-26\n    timeout-minutes: ${{ matrix.timeout }}\n"));
-  assert.match(flows, /^    env:\n(      #.*\n)*      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n    strategy:\n      fail-fast: false\n/m);
-  for (const [label, flow, native, minutes] of [["denied", "testDeniedHealthAccessSendsNothing", "production", 27],
-    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory", "module", 25],
-    ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance", "none", 25]]) {
-    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n            native: ${native}\n            timeout: ${minutes}\n`));
+  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    needs: simulator-build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
+  for (const [label, flow, native] of [["denied", "testDeniedHealthAccessSendsNothing", "module"],
+    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory", "none"],
+    ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance", "none"]]) {
+    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n            native: ${native}\n`));
   }
-  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n        run: node scripts/flows.mjs \"$FLOW\"\n"));
-  // The native suite runs in the flow shards: each check once, in its own named step, before the flow.
+  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
+  // No flow shard builds the app; each runs the flow build's app and seeder.
+  assert.ok(!/native\.mjs (prebuild|build|seeder)\n/.test(flows));
+  assert.ok(flows.includes("          name: fitness-ios-sim-build\n"));
+  // The module's checks run in the denied shard: each once, in its own named step, before the flow.
   const steps = flows.split("\n      - ").slice(1).map(body => `${body}\n`);
   const step = run => {
     const found = steps.filter(body => body.includes(`run: ${run}\n`));
     assert.equal(found.length, 1, run);
     return found[0];
   };
-  const flowStep = steps.indexOf(step('node scripts/flows.mjs "$FLOW"'));
-  for (const [run, native] of [
-    ["node scripts/native.mjs lint", "module"],
-    ["node scripts/native.mjs core-test", "module"],
-    ["node scripts/roundtrip.mjs", "module"],
-    ["node scripts/native.mjs prebuild", "production"],
-    ['NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs build', "production"],
-    ['NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs artifact', "production"],
-  ]) {
+  const unpack = steps.findIndex(body => body.startsWith("name: Unpack the built app and the seeder's test products\n"));
+  const flowStep = steps.indexOf(step('node scripts/flows.mjs --prebuilt "$FLOW"'));
+  assert.ok(unpack >= 0 && unpack < flowStep);
+  for (const run of ["node scripts/native.mjs lint", "node scripts/native.mjs core-test", "node scripts/roundtrip.mjs"]) {
     const body = step(run);
     assert.match(body, /^name: \S/, run);
-    assert.ok(body.includes(`\n        if: matrix.native == '${native}'\n`), run);
+    assert.ok(body.includes("\n        if: matrix.native == 'module'\n"), run);
     assert.ok(steps.indexOf(body) < flowStep, run);
-    if (native === "production") assert.ok(body.includes("        env:\n          APP_VARIANT: production\n"), run);
   }
   assert.ok(step("node scripts/native.mjs lint").includes("name: Lint the Swift sources\n"));
   assert.ok(steps.findIndex(body => body.startsWith("name: Install verified SwiftLint\n        if: matrix.native == 'module'\n")) <
     steps.indexOf(step("node scripts/native.mjs lint")));
-  // The production build is checked before the flow's development prebuild replaces ios/.
-  const production = ["prebuild", "build", "artifact"].map(name =>
-    steps.findIndex(body => body.includes(`node scripts/native.mjs ${name}\n`)));
-  assert.deepEqual([...production].sort((x, y) => x - y), production);
   assert.ok(steps.findIndex(body => body.startsWith("name: Start a temporary Postgres\n")) < steps.indexOf(step("node scripts/roundtrip.mjs")));
   const aggregate = job("verification");
   assert.ok(aggregate.includes("    name: Fitness iOS verification\n    if: always()\n"));
   assert.deepEqual(jobDependencies(aggregate), declared.filter(name => name !== "verification"));
-  assert.ok(aggregate.includes('const expected = ["codeql-swift-app", "codeql-swift-tools", "simulator-flow"];'));
+  assert.ok(aggregate.includes('const expected = ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];'));
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
 });
 
@@ -215,32 +226,34 @@ test("every Quality job stops within 20 minutes and the longest job chain stays 
   const longest = name => limits[name].minutes + Math.max(0, ...needs(limits[name].body).map(longest));
   assert.ok(longest("release-qualification") < 30, `The longest Quality chain takes ${longest("release-qualification")} minutes`);
 });
-test("Fitness iOS Verification runs at most five macOS jobs side by side and finishes within 30 minutes", async () => {
+test("Fitness iOS Verification fits five macOS runners and keeps every job short", async () => {
   const source = await verifySource();
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
   const needs = body => body.match(/^    needs: (?:\[([^\]]+)\]|(\S+))$/m)?.slice(1).find(Boolean)?.split(",").map(value => value.trim()) ?? [];
-  // Each job, with a matrix expanded to one entry per shard and its own time limit.
   const jobs = Object.fromEntries(declared.map(name => {
     const body = qualityJob(source, name);
-    const shards = [...(body.split("\n        include:\n")[1] ?? "").matchAll(/^          - label: (\S+)\n((?:            .*\n)*)/gm)]
-      .map(([, label, fields]) => ({ label, timeout: Number(fields.match(/^            timeout: (\d+)$/m)?.[1]) }));
-    const limit = body.match(/^    timeout-minutes: (.+)$/m)?.[1];
-    const minutes = limit === "${{ matrix.timeout }}" ? shards.map(shard => shard.timeout) : [Number(limit)];
-    if (limit === "${{ matrix.timeout }}") assert.ok(shards.length > 0, name);
-    for (const value of minutes) assert.ok(Number.isInteger(value) && value > 0 && value <= 27, `${name} needs a job timeout of at most 27 minutes`);
-    return [name, { macos: /^    runs-on: macos-/m.test(body), runners: Math.max(1, shards.length), minutes, needs: needs(body) }];
+    const shards = [...(body.split("\n        include:\n")[1] ?? "").matchAll(/^          - label: (\S+)\n/gm)].length;
+    const minutes = Number(body.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+    assert.ok(Number.isInteger(minutes) && minutes > 0, `${name} needs a fixed job timeout`);
+    return [name, { macos: /^    runs-on: macos-/m.test(body), runners: Math.max(1, shards), minutes, needs: needs(body) }];
   }));
-  // The repository runs at most five macOS jobs at a time, so every macOS job starts at once and none waits for another.
-  const macos = declared.filter(name => jobs[name].macos);
-  assert.equal(macos.reduce((total, name) => total + jobs[name].runners, 0), 5);
-  for (const name of macos) assert.deepEqual(jobs[name].needs, [], `${name} must not wait for another job`);
+  // CodeQL jobs stop at 27 minutes, every other macOS job at 20.
+  for (const name of declared.filter(name => jobs[name].macos))
+    assert.ok(jobs[name].minutes <= (name.startsWith("codeql-") ? 27 : 20), `${name} runs too long`);
+  // The jobs that start at once leave one of the five macOS runners free.
+  const first = declared.filter(name => jobs[name].macos && jobs[name].needs.length === 0);
+  assert.deepEqual(first, ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build"]);
+  assert.ok(first.reduce((total, name) => total + jobs[name].runners, 0) <= 4);
+  // The flows wait only for the flow build, never for the CodeQL jobs.
+  assert.deepEqual(jobs["simulator-flow"].needs, ["simulator-build"]);
+  assert.equal(jobs["simulator-flow"].runners, 3);
   assert.ok(!source.includes("max-parallel"));
-  // The worst case follows the dependency graph with every job running to its time limit.
-  const worst = name => Math.max(...jobs[name].minutes) + Math.max(0, ...jobs[name].needs.map(worst));
-  assert.deepEqual(jobs.verification.needs, macos);
+  assert.deepEqual(jobs.verification.needs, declared.filter(name => jobs[name].macos));
   assert.equal(jobs.verification.macos, false);
-  assert.ok(Math.max(...declared.map(worst)) < 30, `A Fitness iOS Verification run can take ${Math.max(...declared.map(worst))} minutes`);
-  assert.equal(worst("verification"), 29);
+  assert.equal(jobs.verification.minutes, 2);
+  // Every job running to its limit: the flow build, then a flow, then the aggregate.
+  const worst = name => jobs[name].minutes + Math.max(0, ...jobs[name].needs.map(worst));
+  assert.equal(worst("verification"), 42);
 });
 
 test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {

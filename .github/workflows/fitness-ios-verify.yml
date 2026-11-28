@@ -39,16 +39,16 @@ concurrency:
   cancel-in-progress: true
 # This workflow reports on main after merges that touch the native iPhone
 # inputs, daily at 17:00 UTC and on dispatch. Releases do not wait for it.
-# Time budget: the five macOS jobs run at the same time, one on each of the
-# repository's five macOS runners, and none waits for another. CodeQL Swift
-# (app) and CodeQL Swift (tools) stop at 27 minutes, Simulator flow (denied)
-# at 27 and the other two flows at 25. The aggregate starts when they finish
-# and stops at 2, so once runners are available a run executes within 29
-# minutes. Expected, until measured:
-# app about 24, tools about 24, denied about 21, allowed about 18 and partial
-# about 18.
-# The Simulator flow builds and the CodeQL builds compile only the arm64
-# Simulator slice, and the CodeQL builds skip optimisation and dSYM generation.
+# Time budget: CodeQL Swift (app), CodeQL Swift (tools), the production build
+# and the Simulator flow build start together on four of the repository's five
+# macOS runners. The three Simulator flows start when the flow build finishes
+# and run its app and seeder, so no flow builds the app itself. The CodeQL
+# jobs stop at 27 minutes and every other macOS job at 20; the aggregate
+# starts when they finish and stops at 2. Expected, until measured: each
+# CodeQL job about 24 minutes, each build about 15, each flow about 10, and a
+# whole run about 27.
+# Every build compiles only the arm64 Simulator slice; the CodeQL builds also
+# skip optimisation and dSYM generation, and the flow build skips the dSYM.
 # The CodeQL Swift reports and databases stay out of Code Scanning: pull
 # requests never run these categories, so an upload from main would leave
 # GitHub's CodeQL check on every pull request neutral. check-sarif.mjs enforces
@@ -260,43 +260,22 @@ jobs:
           path: ${{ runner.temp }}/codeql-swift-results/*.sarif
           if-no-files-found: error
           retention-days: 90
-  simulator-flow:
-    name: Simulator flow (${{ matrix.label }})
+  production-build:
+    # The production app's entitlements, Info.plist and contents, checked on
+    # the arm64 Simulator slice as Quality's native suite checks them.
+    name: Production build
     runs-on: macos-26
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: 20
     env:
-      # The flows run on an Apple silicon Simulator, so the builds make only
-      # the arm64 slice.
+      APP_VARIANT: production
       XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
-    strategy:
-      fail-fast: false
-      matrix:
-        # Each shard also runs part of the native suite. The production
-        # build and artifact check run beside the denied flow, the fastest,
-        # and SwiftLint, the XCTest suite and the round trip beside the
-        # allowed flow.
-        include:
-          - label: denied
-            flow: testDeniedHealthAccessSendsNothing
-            native: production
-            timeout: 27
-          - label: allowed
-            flow: testAllowedHealthAccessSyncsTheSeededHistory
-            native: module
-            timeout: 25
-          - label: partial
-            flow: testPartialHealthAccessHoldsRunsWithoutDistance
-            native: none
-            timeout: 25
     defaults:
       run:
         working-directory: apps/fitness-ios
     steps:
       - name: Keep native build output outside the checkout
         working-directory: .
-        run: |
-          echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
-          echo "PRODUCTION_BUILD_DIR=$RUNNER_TEMP/fitness-ios-production" >> "$GITHUB_ENV"
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
@@ -305,6 +284,96 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           node scripts/native.mjs xcode 26.6
       - uses: ./.github/actions/setup
+      - name: Generate the production native project
+        run: node scripts/native.mjs prebuild
+      - name: Build the production app
+        run: node scripts/native.mjs build
+      - name: Check the production app's entitlements, Info.plist and contents
+        run: node scripts/native.mjs artifact
+  simulator-build:
+    # Builds the development app against the local harness and the seeder
+    # once, for the three flow shards.
+    name: Simulator flow build
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      # The flows run on an Apple silicon Simulator, so the builds make only
+      # the arm64 slice, without an index store or a dSYM.
+      XCODEBUILD_SETTINGS: >-
+        ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+        COMPILER_INDEX_STORE_ENABLE=NO DEBUG_INFORMATION_FORMAT=dwarf
+    defaults:
+      run:
+        working-directory: apps/fitness-ios
+    steps:
+      - name: Keep native build output outside the checkout
+        working-directory: .
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          node scripts/native.mjs xcode 26.6
+      - uses: ./.github/actions/setup
+      - name: Build the development app and the seeder
+        run: node scripts/flows.mjs --build-only
+      # tar keeps the bundles' executable bits and symbolic links.
+      - name: Pack the built app and the seeder's test products
+        run: |
+          tar -cf "$RUNNER_TEMP/fitness-ios-sim-build.tar" -C "$NATIVE_BUILD_DIR" \
+            app/Build/Products/Release-iphonesimulator/bentFitnessDev.app \
+            seeder/Build/Products
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fitness-ios-sim-build
+          path: ${{ runner.temp }}/fitness-ios-sim-build.tar
+          if-no-files-found: error
+          retention-days: 1
+  simulator-flow:
+    name: Simulator flow (${{ matrix.label }})
+    needs: simulator-build
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The denied flow, the fastest, also runs SwiftLint, the module's
+        # XCTest suite and the contract round trip.
+        include:
+          - label: denied
+            flow: testDeniedHealthAccessSendsNothing
+            native: module
+          - label: allowed
+            flow: testAllowedHealthAccessSyncsTheSeededHistory
+            native: none
+          - label: partial
+            flow: testPartialHealthAccessHoldsRunsWithoutDistance
+            native: none
+    defaults:
+      run:
+        working-directory: apps/fitness-ios
+    steps:
+      - name: Keep native build output outside the checkout
+        working-directory: .
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          node scripts/native.mjs xcode 26.6
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: fitness-ios-sim-build
+          path: ${{ runner.temp }}
+      - name: Unpack the built app and the seeder's test products
+        run: |
+          mkdir -p "$NATIVE_BUILD_DIR"
+          tar -xf "$RUNNER_TEMP/fitness-ios-sim-build.tar" -C "$NATIVE_BUILD_DIR"
       - name: Install verified SwiftLint
         if: matrix.native == 'module'
         timeout-minutes: 3
@@ -327,26 +396,6 @@ jobs:
       - name: Run the module's XCTest suite
         if: matrix.native == 'module'
         run: node scripts/native.mjs core-test
-      # The production build has its own build directory, so the flow's
-      # development build starts from clean.
-      - name: Generate the production native project
-        if: matrix.native == 'production'
-        env:
-          APP_VARIANT: production
-        run: node scripts/native.mjs prebuild
-      # The production build uses Quality's default settings, which keep the
-      # HealthKit entitlements section that the artifact check reads.
-      - name: Build the production app
-        if: matrix.native == 'production'
-        env:
-          APP_VARIANT: production
-          XCODEBUILD_SETTINGS: ""
-        run: NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs build
-      - name: Check the production app's entitlements, Info.plist and contents
-        if: matrix.native == 'production'
-        env:
-          APP_VARIANT: production
-        run: NATIVE_BUILD_DIR="$PRODUCTION_BUILD_DIR" node scripts/native.mjs artifact
       - name: Start a temporary Postgres
         run: |
           brew install postgresql@16
@@ -365,7 +414,7 @@ jobs:
       - name: Run the Simulator flow against the local harness
         env:
           FLOW: ${{ matrix.flow }}
-        run: node scripts/flows.mjs "$FLOW"
+        run: node scripts/flows.mjs --prebuilt "$FLOW"
       - name: Retain the Simulator flow results
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -384,7 +433,7 @@ jobs:
     # Requires each job above. Releases don't wait for this workflow; it reports the result after merge and nightly.
     name: Fitness iOS verification
     if: always()
-    needs: [codeql-swift-app, codeql-swift-tools, simulator-flow]
+    needs: [codeql-swift-app, codeql-swift-tools, production-build, simulator-build, simulator-flow]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -394,7 +443,7 @@ jobs:
         run: |
           node --input-type=module -e '
             const jobs = JSON.parse(process.env.VERIFY_RESULTS);
-            const expected = ["codeql-swift-app", "codeql-swift-tools", "simulator-flow"];
+            const expected = ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];
             if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
                 Object.values(jobs).some(job => job.result !== "success")) {
               throw new Error("Every Fitness iOS Verification job must succeed");
