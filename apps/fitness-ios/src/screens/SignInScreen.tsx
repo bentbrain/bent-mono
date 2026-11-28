@@ -13,8 +13,16 @@ import { AppText } from "../ui/Text";
 const jobs: { icon: SFSymbol; title: string; body: string }[] = [
   { icon: "calendar", title: "Week", body: "See what's planned each day and start the next session." },
   { icon: "timer", title: "Workouts", body: "Log sets with a rest timer, then review and correct past sessions." },
-  { icon: "fork.knife", title: "Food", body: "Daily calories and protein, optional carbs, fat and fibre, and saved meals you add in one tap." },
-  { icon: "chart.line.uptrend.xyaxis", title: "Progress", body: "Sessions by week, strength by exercise and your bodyweight trend." },
+  {
+    icon: "fork.knife",
+    title: "Food",
+    body: "Daily calories and protein, optional carbs, fat and fibre, and saved meals you add in one tap.",
+  },
+  {
+    icon: "chart.line.uptrend.xyaxis",
+    title: "Progress",
+    body: "Sessions by week, strength by exercise and your bodyweight trend.",
+  },
   { icon: "heart.text.square", title: "Apple Health", body: "Weigh-ins and runs sync from Health in the background." },
 ];
 

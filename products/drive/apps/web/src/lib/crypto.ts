@@ -20,7 +20,10 @@ export function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-export function verifyPkce(verifier: string, expectedChallenge: string): boolean {
+export function verifyPkce(
+  verifier: string,
+  expectedChallenge: string,
+): boolean {
   const actual = Buffer.from(pkceChallenge(verifier));
   const expected = Buffer.from(expectedChallenge);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
@@ -30,9 +33,14 @@ export function seal(plaintext: string, encodedKey: string): string {
   const key = decodeEncryptionKey(encodedKey);
   const iv = randomBytes(12);
   const cipher = createCipheriv(encryptionAlgorithm, key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
   const tag = cipher.getAuthTag();
-  return [iv, tag, ciphertext].map((part) => part.toString("base64url")).join(".");
+  return [iv, tag, ciphertext]
+    .map((part) => part.toString("base64url"))
+    .join(".");
 }
 
 export function open(sealedValue: string, encodedKey: string): string {
@@ -48,7 +56,7 @@ export function open(sealedValue: string, encodedKey: string): string {
   const decipher = createDecipheriv(
     encryptionAlgorithm,
     decodeEncryptionKey(encodedKey),
-    Buffer.from(encodedIv, "base64url")
+    Buffer.from(encodedIv, "base64url"),
   );
   decipher.setAuthTag(Buffer.from(encodedTag, "base64url"));
   return Buffer.concat([
@@ -60,7 +68,9 @@ export function open(sealedValue: string, encodedKey: string): string {
 function decodeEncryptionKey(encodedKey: string): Buffer {
   const key = Buffer.from(encodedKey, "base64url");
   if (key.length !== 32) {
-    throw new Error("TOKEN_ENCRYPTION_KEY must be a base64url-encoded 32-byte key.");
+    throw new Error(
+      "TOKEN_ENCRYPTION_KEY must be a base64url-encoded 32-byte key.",
+    );
   }
   return key;
 }

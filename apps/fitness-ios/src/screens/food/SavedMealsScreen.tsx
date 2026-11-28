@@ -54,7 +54,11 @@ export function FoodSavedMealsScreen(): JSX.Element {
           ))}
         </ListSection>
       ) : (
-        <EmptyState icon="bookmark" title="No saved meals" body="Turn on Add to Saved meals when you add food to reuse it with one tap." />
+        <EmptyState
+          icon="bookmark"
+          title="No saved meals"
+          body="Turn on Add to Saved meals when you add food to reuse it with one tap."
+        />
       )}
       {failed && sync.error ? <Notice tone="danger">{sync.error}</Notice> : null}
     </Screen>

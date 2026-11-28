@@ -155,8 +155,8 @@ export function Bodyweight({
         <p className="chart-legend">
           Blue line: each weigh-in. Dashed black line: average of up to 7
           weigh-ins ending on that date. Dotted lines mark your highest and
-          lowest weigh-ins in this view. Hover over or tap the chart, or use
-          the arrow keys, to see each date's weigh-in, average and change.
+          lowest weigh-ins in this view. Hover over or tap the chart, or use the
+          arrow keys, to see each date's weigh-in, average and change.
         </p>
       )}
       <form

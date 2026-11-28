@@ -31,7 +31,11 @@ export function RotationPreview({ draft }: { draft: Settings }) {
             return (
               <View
                 key={day.day}
-                className={cn("flex-row items-center gap-3 px-3 py-2", style.surface, day.day === today && "border border-border-strong")}
+                className={cn(
+                  "flex-row items-center gap-3 px-3 py-2",
+                  style.surface,
+                  day.day === today && "border border-border-strong",
+                )}
                 style={{ borderRadius: shape.control, borderCurve: "continuous" }}
                 accessible
                 accessibilityLabel={`${day.weekday}${day.day === today ? ", today" : ""}: ${day.title}`}

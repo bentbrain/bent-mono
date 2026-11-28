@@ -77,7 +77,12 @@ export function RoutineEditor({
             {routine.exercises.length} exercises
           </AppText>
         </View>
-        <Symbol name={expanded ? "chevron.up" : "chevron.down"} size={13} weight="semibold" tintColorClassName="accent-chevron" />
+        <Symbol
+          name={expanded ? "chevron.up" : "chevron.down"}
+          size={13}
+          weight="semibold"
+          tintColorClassName="accent-chevron"
+        />
       </Pressable>
       {expanded ? (
         <View className="gap-4 px-4 pb-4">
@@ -98,7 +103,10 @@ export function RoutineEditor({
               routineIndex={ri}
               register={register}
               onChange={(patch) =>
-                onChange({ ...routine, exercises: routine.exercises.map((item, j) => (j === ei ? { ...item, ...patch } : item)) })
+                onChange({
+                  ...routine,
+                  exercises: routine.exercises.map((item, j) => (j === ei ? { ...item, ...patch } : item)),
+                })
               }
               onMove={(direction) => onChange({ ...routine, exercises: move(routine.exercises, ei, direction) })}
               onRemove={() =>
@@ -113,16 +121,26 @@ export function RoutineEditor({
               }
             />
           ))}
-          <Button label="Add an exercise" icon="plus" tone="tinted" onPress={chooseExercise} testID={`add-exercise-${ri}`} />
+          <Button
+            label="Add an exercise"
+            icon="plus"
+            tone="tinted"
+            onPress={chooseExercise}
+            testID={`add-exercise-${ri}`}
+          />
           <Button
             label="Remove routine"
             icon="trash"
             tone="danger"
             onPress={() =>
-              Alert.alert("Remove routine?", `Remove ${routine.name}? Recorded workouts keep their original exercises.`, [
-                { text: "Cancel", style: "cancel" },
-                { text: "Remove", style: "destructive", onPress: onRemove },
-              ])
+              Alert.alert(
+                "Remove routine?",
+                `Remove ${routine.name}? Recorded workouts keep their original exercises.`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Remove", style: "destructive", onPress: onRemove },
+                ],
+              )
             }
             testID={`remove-routine-${ri}`}
           />
@@ -166,12 +184,21 @@ function ExerciseEditor({
             {position + 1}. {exercise.name}
           </AppText>
           <AppText textRole="caption" tone="muted">
-            {Number.isFinite(exercise.sets) && Number.isFinite(exercise.min) && Number.isFinite(exercise.max) && Number.isFinite(exercise.rest)
+            {Number.isFinite(exercise.sets) &&
+            Number.isFinite(exercise.min) &&
+            Number.isFinite(exercise.max) &&
+            Number.isFinite(exercise.rest)
               ? prescriptionText(exercise)
               : "Enter the sets, range and rest"}
           </AppText>
         </View>
-        <IconButton icon="chevron.up" label={`Move ${exercise.name} up`} size={34} disabled={position === 0} onPress={() => onMove(-1)} />
+        <IconButton
+          icon="chevron.up"
+          label={`Move ${exercise.name} up`}
+          size={34}
+          disabled={position === 0}
+          onPress={() => onMove(-1)}
+        />
         <IconButton
           icon="chevron.down"
           label={`Move ${exercise.name} down`}
@@ -246,7 +273,14 @@ function ExerciseEditor({
           testID={`side-${key}`}
         />
       </View>
-      <Button label="Remove exercise" tone="plain" size="compact" icon="minus.circle" onPress={onRemove} accessibilityLabel={`Remove ${exercise.name}`} />
+      <Button
+        label="Remove exercise"
+        tone="plain"
+        size="compact"
+        icon="minus.circle"
+        onPress={onRemove}
+        accessibilityLabel={`Remove ${exercise.name}`}
+      />
     </View>
   );
 }

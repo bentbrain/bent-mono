@@ -147,7 +147,7 @@ type RefreshTokenRotation =
 export const registerOAuthClient = (
   clientId: string,
   redirectUris: string[],
-  clientName: string | null
+  clientName: string | null,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -156,7 +156,9 @@ export const registerOAuthClient = (
       VALUES (${clientId}, ${JSON.stringify(redirectUris)}::jsonb, ${clientName})
     `;
   }).pipe(
-    Effect.withSpan("db.oauth_client.register", { attributes: { "oauth.client_id": clientId } })
+    Effect.withSpan("db.oauth_client.register", {
+      attributes: { "oauth.client_id": clientId },
+    }),
   );
 
 export const getOAuthClient = (clientId: string) =>
@@ -168,7 +170,11 @@ export const getOAuthClient = (clientId: string) =>
       WHERE client_id = ${clientId}
       LIMIT 1
     `;
-    const row = yield* decodeOptional(oauthClientRowSchema, rows[0], "oauth_client");
+    const row = yield* decodeOptional(
+      oauthClientRowSchema,
+      rows[0],
+      "oauth_client",
+    );
     if (!row) {
       return null;
     }
@@ -177,7 +183,11 @@ export const getOAuthClient = (clientId: string) =>
       redirectUris: row.redirect_uris,
       clientName: row.client_name,
     } satisfies OAuthClient;
-  }).pipe(Effect.withSpan("db.oauth_client.get", { attributes: { "oauth.client_id": clientId } }));
+  }).pipe(
+    Effect.withSpan("db.oauth_client.get", {
+      attributes: { "oauth.client_id": clientId },
+    }),
+  );
 
 export const completeTeslaAuthorization = (
   connection: TeslaConnection,
@@ -185,7 +195,7 @@ export const completeTeslaAuthorization = (
   codeHash: string,
   record: AuthorizationCodeRecord,
   codeExpiresAtEpoch: number,
-  auditEventId: string
+  auditEventId: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -218,7 +228,7 @@ export const completeTeslaAuthorization = (
             ${JSON.stringify({ clientId: record.clientId, scopes: record.scopes })}::jsonb
           )
         `;
-      })
+      }),
     );
   }).pipe(
     Effect.withSpan("db.tesla_authorization.complete", {
@@ -226,7 +236,7 @@ export const completeTeslaAuthorization = (
         "oauth.client_id": record.clientId,
         "tesla.connection_id": connection.id,
       },
-    })
+    }),
   );
 
 export const getTeslaConnection = (connectionId: string) =>
@@ -244,7 +254,11 @@ export const getTeslaConnection = (connectionId: string) =>
       WHERE id = ${connectionId}
       LIMIT 1
     `;
-    const row = yield* decodeOptional(teslaConnectionRowSchema, rows[0], "tesla_connection");
+    const row = yield* decodeOptional(
+      teslaConnectionRowSchema,
+      rows[0],
+      "tesla_connection",
+    );
     if (!row) {
       return null;
     }
@@ -259,7 +273,7 @@ export const getTeslaConnection = (connectionId: string) =>
   }).pipe(
     Effect.withSpan("db.tesla_connection.get", {
       attributes: { "tesla.connection_id": connectionId },
-    })
+    }),
   );
 
 export const updateTeslaConnectionTokens = (
@@ -268,7 +282,7 @@ export const updateTeslaConnectionTokens = (
   accessTokenEncrypted: string,
   refreshTokenEncrypted: string,
   scopes: string,
-  expiresAtEpoch: number
+  expiresAtEpoch: number,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -291,7 +305,7 @@ export const updateTeslaConnectionTokens = (
         "tesla.connection_id": connectionId,
         "tesla.token_version": expectedVersion,
       },
-    })
+    }),
   );
 
 export const exchangeAuthorizationCodeForTokens = (
@@ -300,7 +314,7 @@ export const exchangeAuthorizationCodeForTokens = (
   redirectUri: string,
   resource: string,
   codeChallenge: string,
-  tokens: OAuthTokenMaterial
+  tokens: OAuthTokenMaterial,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -318,7 +332,11 @@ export const exchangeAuthorizationCodeForTokens = (
             AND expires_at > NOW()
           RETURNING client_id, connection_id, redirect_uri, resource, scopes, code_challenge
         `;
-        const row = yield* decodeOptional(authorizationCodeRowSchema, rows[0], "oauth_code");
+        const row = yield* decodeOptional(
+          authorizationCodeRowSchema,
+          rows[0],
+          "oauth_code",
+        );
         if (!row) {
           return null;
         }
@@ -347,19 +365,19 @@ export const exchangeAuthorizationCodeForTokens = (
           )
         `;
         return record;
-      })
+      }),
     );
   }).pipe(
     Effect.withSpan("db.oauth_code.exchange", {
       attributes: { "oauth.client_id": clientId },
-    })
+    }),
   );
 
 export const rotateRefreshToken = (
   refreshTokenHash: string,
   clientId: string,
   resource: string,
-  tokens: OAuthTokenMaterial
+  tokens: OAuthTokenMaterial,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -386,7 +404,7 @@ export const rotateRefreshToken = (
         const row = yield* decodeOptional(
           refreshTokenRotationRowSchema,
           rows[0],
-          "oauth_refresh_token"
+          "oauth_refresh_token",
         );
         if (!row) {
           return { status: "invalid" } satisfies RefreshTokenRotation;
@@ -405,7 +423,7 @@ export const rotateRefreshToken = (
                 WHERE family_id = ${row.family_id}
               `,
             ],
-            { discard: true }
+            { discard: true },
           );
           return { status: "replayed" } satisfies RefreshTokenRotation;
         }
@@ -442,12 +460,12 @@ export const rotateRefreshToken = (
           )
         `;
         return { status: "rotated", record } satisfies RefreshTokenRotation;
-      })
+      }),
     );
   }).pipe(
     Effect.withSpan("db.oauth_refresh_token.rotate", {
       attributes: { "oauth.client_id": clientId },
-    })
+    }),
   );
 
 export const getAccessSession = (accessTokenHash: string) =>
@@ -468,7 +486,11 @@ export const getAccessSession = (accessTokenHash: string) =>
         AND oat.revoked_at IS NULL
       LIMIT 1
     `;
-    const row = yield* decodeOptional(accessSessionRowSchema, rows[0], "oauth_access_token");
+    const row = yield* decodeOptional(
+      accessSessionRowSchema,
+      rows[0],
+      "oauth_access_token",
+    );
     if (!row) {
       return null;
     }
@@ -487,7 +509,7 @@ export const authorizeGithubIdentity = (
   githubUsername: string,
   githubUserId: string,
   isAdmin: boolean,
-  isAllowlisted: boolean
+  isAllowlisted: boolean,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -501,11 +523,16 @@ export const authorizeGithubIdentity = (
           LIMIT 1
           FOR UPDATE
         `;
-        const existing = yield* decodeOptional(appUserRowSchema, existingRows[0], "app_user");
+        const existing = yield* decodeOptional(
+          appUserRowSchema,
+          existingRows[0],
+          "app_user",
+        );
         const existingIsAuthorized = existing?.status === "active";
-        const inviteRows = isAdmin || isAllowlisted || existingIsAuthorized
-          ? []
-          : yield* sql<Record<string, unknown>>`
+        const inviteRows =
+          isAdmin || isAllowlisted || existingIsAuthorized
+            ? []
+            : yield* sql<Record<string, unknown>>`
               SELECT id
               FROM invites
               WHERE github_username = ${githubUsername}
@@ -518,7 +545,7 @@ export const authorizeGithubIdentity = (
         const invite = yield* decodeOptional(
           inviteAuthorizationRowSchema,
           inviteRows[0],
-          "invite_authorization"
+          "invite_authorization",
         );
         if (!isAdmin && !isAllowlisted && !existingIsAuthorized && !invite) {
           return null;
@@ -547,7 +574,11 @@ export const authorizeGithubIdentity = (
               )
               RETURNING id, clerk_user_id, github_username, github_user_id, role, status
             `;
-        const user = yield* decodeRequired(appUserRowSchema, userRows[0], "app_user");
+        const user = yield* decodeRequired(
+          appUserRowSchema,
+          userRows[0],
+          "app_user",
+        );
 
         if (invite) {
           yield* sql`
@@ -561,7 +592,7 @@ export const authorizeGithubIdentity = (
           `;
         }
         return toAppUser(user);
-      })
+      }),
     );
   }).pipe(
     Effect.annotateSpans({
@@ -570,7 +601,7 @@ export const authorizeGithubIdentity = (
       "identity.is_admin": isAdmin,
       "identity.is_allowlisted": isAllowlisted,
     }),
-    Effect.withSpan("db.identity.authorize")
+    Effect.withSpan("db.identity.authorize"),
   );
 
 export const listInvites = Effect.gen(function* () {
@@ -588,7 +619,7 @@ export const listInvites = Effect.gen(function* () {
     ORDER BY created_at DESC
   `;
   return yield* Effect.forEach(rows, (row) =>
-    decodeRequired(inviteRowSchema, row, "invite").pipe(Effect.map(toInvite))
+    decodeRequired(inviteRowSchema, row, "invite").pipe(Effect.map(toInvite)),
   );
 }).pipe(Effect.withSpan("db.invite.list"));
 
@@ -598,7 +629,7 @@ export const createInvite = (
   expiresAtEpoch: number,
   auditEventId: string,
   createdByClerkUserId: string,
-  githubUsernameFingerprint: string
+  githubUsernameFingerprint: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -624,7 +655,11 @@ export const createInvite = (
             EXTRACT(EPOCH FROM revoked_at) AS revoked_at_epoch,
             EXTRACT(EPOCH FROM created_at) AS created_at_epoch
         `;
-        const invite = yield* decodeRequired(inviteRowSchema, rows[0], "invite");
+        const invite = yield* decodeRequired(
+          inviteRowSchema,
+          rows[0],
+          "invite",
+        );
         yield* sql`
           INSERT INTO audit_events (id, connection_id, event_type, details)
           VALUES (
@@ -635,17 +670,19 @@ export const createInvite = (
           )
         `;
         return toInvite(invite);
-      })
+      }),
     );
   }).pipe(
-    Effect.annotateSpans({ "invite.github_username_fingerprint": githubUsernameFingerprint }),
-    Effect.withSpan("db.invite.create")
+    Effect.annotateSpans({
+      "invite.github_username_fingerprint": githubUsernameFingerprint,
+    }),
+    Effect.withSpan("db.invite.create"),
   );
 
 export const revokeInvite = (
   inviteId: string,
   auditEventId: string,
-  revokedByClerkUserId: string
+  revokedByClerkUserId: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient;
@@ -657,7 +694,11 @@ export const revokeInvite = (
           WHERE id = ${inviteId}
           RETURNING accepted_by_user_id
         `;
-        const invite = yield* decodeOptional(revokedInviteRowSchema, inviteRows[0], "invite");
+        const invite = yield* decodeOptional(
+          revokedInviteRowSchema,
+          inviteRows[0],
+          "invite",
+        );
         if (!invite) {
           return false;
         }
@@ -691,7 +732,7 @@ export const revokeInvite = (
               )
             `,
           ],
-          { discard: true }
+          { discard: true },
         );
         yield* sql`
           INSERT INTO audit_events (id, connection_id, event_type, details)
@@ -703,14 +744,18 @@ export const revokeInvite = (
           )
         `;
         return true;
-      })
+      }),
     );
   }).pipe(
     Effect.annotateSpans({ "invite.id": inviteId }),
-    Effect.withSpan("db.invite.revoke")
+    Effect.withSpan("db.invite.revoke"),
   );
 
-function decodeOptional<A>(schema: z.ZodType<A>, value: unknown, entity: string) {
+function decodeOptional<A>(
+  schema: z.ZodType<A>,
+  value: unknown,
+  entity: string,
+) {
   if (value === undefined) {
     return Effect.succeed<A | null>(null);
   }
@@ -720,15 +765,24 @@ function decodeOptional<A>(schema: z.ZodType<A>, value: unknown, entity: string)
       new StoreDecodeError({
         entity,
         message: parsed.error.issues.map((issue) => issue.message).join("; "),
-      })
+      }),
     );
   }
   return Effect.succeed<A | null>(parsed.data);
 }
 
-function decodeRequired<A>(schema: z.ZodType<A>, value: unknown, entity: string) {
+function decodeRequired<A>(
+  schema: z.ZodType<A>,
+  value: unknown,
+  entity: string,
+) {
   if (value === undefined) {
-    return Effect.fail(new StoreDecodeError({ entity, message: "The database returned no row." }));
+    return Effect.fail(
+      new StoreDecodeError({
+        entity,
+        message: "The database returned no row.",
+      }),
+    );
   }
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
@@ -736,7 +790,7 @@ function decodeRequired<A>(schema: z.ZodType<A>, value: unknown, entity: string)
       new StoreDecodeError({
         entity,
         message: parsed.error.issues.map((issue) => issue.message).join("; "),
-      })
+      }),
     );
   }
   return Effect.succeed(parsed.data);

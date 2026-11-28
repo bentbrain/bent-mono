@@ -31,7 +31,10 @@ export function useStartWorkout() {
       }
     } catch (problem) {
       haptic("error");
-      Alert.alert("The workout didn't start", problem instanceof Error ? problem.message : "Check your plan and try again.");
+      Alert.alert(
+        "The workout didn't start",
+        problem instanceof Error ? problem.message : "Check your plan and try again.",
+      );
     } finally {
       // The Week screen stays mounted under the workout, so it is ready again on return.
       busy.current = false;

@@ -12,22 +12,22 @@ export function InputNotices({ inputs }: { inputs: WorkoutInputs }) {
     <View className="gap-3">
       {/* Always shown, so saving a field never moves the controls below. */}
       <AppText textRole="footnote" tone="muted" className="px-1">
-        Typed values stay on this device until you leave the set, press Done or Skip, or leave this screen. Then they save to your
-        account.
+        Typed values stay on this device until you leave the set, press Done or Skip, or leave this screen. Then they
+        save to your account.
       </AppText>
       {inputs.held.some((key) => !inputs.unconfirmed.includes(key)) ? (
         <View accessibilityRole="alert">
           <Notice tone="warning" testID="notice-input-held">
-            A highlighted value changed on another device. Your typed value is still here. Leave the field to save it, or retype the
-            saved value.
+            A highlighted value changed on another device. Your typed value is still here. Leave the field to save it,
+            or retype the saved value.
           </Notice>
         </View>
       ) : null}
       {inputs.unconfirmed.length > 0 ? (
         <View accessibilityRole="alert">
           <Notice tone="warning" testID="notice-input-unconfirmed">
-            A weight typed on this device is waiting for you to check it. Confirm it is in {inputs.units}, then leave the set to save
-            it.
+            A weight typed on this device is waiting for you to check it. Confirm it is in {inputs.units}, then leave
+            the set to save it.
           </Notice>
         </View>
       ) : null}

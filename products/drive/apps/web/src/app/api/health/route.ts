@@ -16,7 +16,7 @@ export function GET(request: Request): Promise<Response> {
         mode: "read-only",
         database: "connected",
       },
-      { headers: { "cache-control": "no-store" } }
+      { headers: { "cache-control": "no-store" } },
     );
   }).pipe(Effect.withSpan("health.database"));
   return runAppResponse("route.health", program, {

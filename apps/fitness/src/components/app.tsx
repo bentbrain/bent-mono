@@ -51,7 +51,8 @@ function Welcome() {
         </li>
         <li>
           <strong>Food</strong>
-          Daily calories and protein, optional carbs, fat and fibre, and saved meals you add in one tap.
+          Daily calories and protein, optional carbs, fat and fibre, and saved
+          meals you add in one tap.
         </li>
         <li>
           <strong>Progress</strong>

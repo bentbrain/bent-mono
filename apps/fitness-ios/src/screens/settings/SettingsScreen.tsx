@@ -81,7 +81,9 @@ export function SettingsScreen() {
     ]);
   }
 
-  const version = [nativeApplicationVersion, nativeBuildVersion ? `(${nativeBuildVersion})` : null].filter(Boolean).join(" ");
+  const version = [nativeApplicationVersion, nativeBuildVersion ? `(${nativeBuildVersion})` : null]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <Screen testID="screen-settings">
@@ -171,7 +173,10 @@ export function SettingsScreen() {
         </Notice>
       ) : null}
 
-      <ListSection title="Account" footer="Signing out keeps Apple Health sync connected until you disconnect it under Apple Health.">
+      <ListSection
+        title="Account"
+        footer="Signing out keeps Apple Health sync connected until you disconnect it under Apple Health."
+      >
         <ListRow
           label="Manage account"
           description="Profile, email and security"
@@ -180,7 +185,13 @@ export function SettingsScreen() {
           onPress={() => void openBrowserAsync(`${origin}/account`)}
           testID="manage-account"
         />
-        <ListRow label="Sign out" icon="rectangle.portrait.and.arrow.right" tone="danger" onPress={signOut} testID="sign-out" />
+        <ListRow
+          label="Sign out"
+          icon="rectangle.portrait.and.arrow.right"
+          tone="danger"
+          onPress={signOut}
+          testID="sign-out"
+        />
       </ListSection>
 
       <AppText textRole="footnote" tone="muted" className="text-center" testID="app-version">

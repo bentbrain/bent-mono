@@ -220,7 +220,10 @@ describe("taps while the app loads", () => {
     // Tapped while the account loaded under sign-in 3; the session then expired (4) and user_a signed in again (5).
     expect(tapTarget<Link>({ ...reminder, generation: 3 }, "user_a", 5)).toBeNull();
     expect(tapTarget<Link>({ ...widget, generation: 3 }, "user_a", 5)).toBeNull();
-    expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_a", 5)).toEqual({ kind: "reminder", day: "2026-12-02" });
+    expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_a", 5)).toEqual({
+      kind: "reminder",
+      day: "2026-12-02",
+    });
     expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_b", 5)).toBeNull();
     expect(tapTarget<Link>({ ...widget, generation: 5 }, "user_a", 5)).toEqual(widget);
   });

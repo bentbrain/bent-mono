@@ -74,8 +74,8 @@ function StrengthCard({ series, units }: { series: StrengthSeries; units: Settin
         </>
       ) : (
         <AppText textRole="footnote" tone="muted">
-          One session so far: {pointText(latest, series, units)} on {formatShortDate(latest.date)}. The trend starts after
-          your next session.
+          One session so far: {pointText(latest, series, units)} on {formatShortDate(latest.date)}. The trend starts
+          after your next session.
         </AppText>
       )}
     </Card>
@@ -145,7 +145,11 @@ export function ProgressScreen() {
                 labels={weekBarLabels(weeks)}
                 label={`Sessions in the last ${weeks.length} week${weeks.length === 1 ? "" : "s"}. Each week is listed below.`}
               />
-              <View className="flex-row flex-wrap gap-x-4 gap-y-1" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <View
+                className="flex-row flex-wrap gap-x-4 gap-y-1"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
                 {(
                   [
                     ["strength", "Strength done"],
@@ -214,7 +218,12 @@ export function ProgressScreen() {
           {trend.average !== null ? (
             <>
               <View className="gap-0.5">
-                <AppText textRole="display" weight="bold" style={{ fontVariant: ["tabular-nums"] }} testID="progress-weight-average">
+                <AppText
+                  textRole="display"
+                  weight="bold"
+                  style={{ fontVariant: ["tabular-nums"] }}
+                  testID="progress-weight-average"
+                >
                   {shownWeight(trend.average, units)}
                 </AppText>
                 <AppText textRole="footnote" tone="muted">

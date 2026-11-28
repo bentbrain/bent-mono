@@ -30,10 +30,21 @@ export function EditConflict({
           status === "changed" ? (
             <View className="gap-2">
               <Button label="Save my changes instead" onPress={onKeepMine} fullWidth testID="conflict-keep-mine" />
-              <Button label="Load saved version" tone="secondary" onPress={onUseCurrent} fullWidth testID="conflict-use-saved" />
+              <Button
+                label="Load saved version"
+                tone="secondary"
+                onPress={onUseCurrent}
+                fullWidth
+                testID="conflict-use-saved"
+              />
             </View>
           ) : (
-            <Button label={`Save my changes as a new ${noun}`} onPress={onSaveAsNew} fullWidth testID="conflict-save-new" />
+            <Button
+              label={`Save my changes as a new ${noun}`}
+              onPress={onSaveAsNew}
+              fullWidth
+              testID="conflict-save-new"
+            />
           )
         }
       >

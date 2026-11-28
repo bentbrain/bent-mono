@@ -551,7 +551,10 @@ async function checkArchive(archive, directory, oauth) {
   checkAppContents({ files: contents, code: (await readFile(binary)).toString("latin1") });
   const extension = join(bundle, "PlugIns/WorkoutActivityExtension.appex");
   checkSignedExtensionEntitlements(signedEntitlements(extension), team);
-  checkExtensionInfoPlist(JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", join(extension, "Info.plist")])), "production");
+  checkExtensionInfoPlist(
+    JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", join(extension, "Info.plist")])),
+    "production",
+  );
   checkExtensionContents((await readFile(join(bundle, extensionBinary))).toString("latin1"));
   const configs = contents.filter((path) => path.endsWith("EXConstants.bundle/app.config"));
   if (configs.length !== 1) fail("The archive must embed exactly one app config.");

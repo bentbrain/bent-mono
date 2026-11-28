@@ -187,7 +187,10 @@ function ExerciseCard({
           </AppText>
         ) : null}
         {advice ? (
-          <View className="flex-row gap-2 bg-primary-soft px-3 py-2" style={{ borderRadius: shape.control, borderCurve: "continuous" }}>
+          <View
+            className="flex-row gap-2 bg-primary-soft px-3 py-2"
+            style={{ borderRadius: shape.control, borderCurve: "continuous" }}
+          >
             <Symbol name="lightbulb" size={15} tintColorClassName="accent-primary" />
             <AppText textRole="footnote" tone="primary" className="flex-1">
               {advice.text}
@@ -315,7 +318,9 @@ function SetRow({
           icon="timer"
           fullWidth
           disabled={hold.hold !== null}
-          accessibilityHint={hold.hold ? "Another hold is running." : "Counts down 5 seconds to get into position, then the hold."}
+          accessibilityHint={
+            hold.hold ? "Another hold is running." : "Counts down 5 seconds to get into position, then the hold."
+          }
           testID={`${testBase}-start-hold`}
           onPress={() => hold.start(ei, si, targets)}
         />
@@ -413,8 +418,18 @@ function SetAction({
   onPress: () => void;
   testID: string;
 }) {
-  const surface = selected ? (tone === "done" ? "bg-done" : "bg-card-alt border border-border-strong") : "bg-card border border-border";
-  const tint = selected ? (tone === "done" ? "accent-primary-foreground" : "accent-foreground") : tone === "done" ? "accent-done" : "accent-icon";
+  const surface = selected
+    ? tone === "done"
+      ? "bg-done"
+      : "bg-card-alt border border-border-strong"
+    : "bg-card border border-border";
+  const tint = selected
+    ? tone === "done"
+      ? "accent-primary-foreground"
+      : "accent-foreground"
+    : tone === "done"
+      ? "accent-done"
+      : "accent-icon";
   return (
     <Pressable
       testID={testID}
@@ -423,7 +438,10 @@ function SetAction({
       accessibilityState={{ selected }}
       onPress={onPress}
       hitSlop={4}
-      className={cn("min-h-11 flex-row items-center justify-center gap-1.5 rounded-full px-4 active:opacity-70", surface)}
+      className={cn(
+        "min-h-11 flex-row items-center justify-center gap-1.5 rounded-full px-4 active:opacity-70",
+        surface,
+      )}
     >
       <Symbol name={icon} size={17} weight="semibold" tintColorClassName={tint} />
       <AppText

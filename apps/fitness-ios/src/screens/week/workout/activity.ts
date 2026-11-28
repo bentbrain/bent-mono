@@ -137,7 +137,16 @@ export function activityContent(
   }
 
   return content(
-    { ...base, phase: "lift", title: base.exercise, doneTitle: "", doneDetail: "", timerStart: null, timerEnd: null, finalEnd: null },
+    {
+      ...base,
+      phase: "lift",
+      title: base.exercise,
+      doneTitle: "",
+      doneDetail: "",
+      timerStart: null,
+      timerEnd: null,
+      finalEnd: null,
+    },
     null,
   );
 }

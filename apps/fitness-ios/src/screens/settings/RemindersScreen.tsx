@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { AppState, Linking } from "react-native";
 import { addDays, formatShortDate } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
-import { reminderPermission, reminderSettings, requestReminderPermission, useReminderSettings } from "../../data/reminders";
+import {
+  reminderPermission,
+  reminderSettings,
+  requestReminderPermission,
+  useReminderSettings,
+} from "../../data/reminders";
 import { fireTimeText, reminderPlan } from "../../logic/reminders";
 import { Button } from "../../ui/Button";
 import { TimeField } from "../../ui/Form";

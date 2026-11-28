@@ -112,7 +112,14 @@ export function SyncDetails() {
           />
         ) : null}
         {sync.conflict ? null : (
-          <Button label="Retry connection" icon="arrow.clockwise" onPress={() => void retry()} busy={busy} fullWidth testID="sync-retry" />
+          <Button
+            label="Retry connection"
+            icon="arrow.clockwise"
+            onPress={() => void retry()}
+            busy={busy}
+            fullWidth
+            testID="sync-retry"
+          />
         )}
         {sync.unsaved() || sync.conflict ? (
           <Button
@@ -143,7 +150,14 @@ export function SyncDetails() {
             Changes on this iPhone
           </AppText>
           <JsonBlock text={sync.draftExport()} />
-          <Button label="Use cloud version for this record" tone="danger" onPress={useCloud} busy={busy} fullWidth testID="sync-use-cloud" />
+          <Button
+            label="Use cloud version for this record"
+            tone="danger"
+            onPress={useCloud}
+            busy={busy}
+            fullWidth
+            testID="sync-use-cloud"
+          />
           <AppText textRole="footnote" tone="muted" className="px-1">
             To keep parts of your changes, export them, use the cloud version, then enter your changes again.
           </AppText>

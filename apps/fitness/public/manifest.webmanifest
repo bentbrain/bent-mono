@@ -1,1 +1,18 @@
-{"name":"Fitness · bent.build","short_name":"Fitness","start_url":"/","scope":"/","display":"standalone","background_color":"#f7f8f6","theme_color":"#0647ff","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}
+{
+  "name": "Fitness · bent.build",
+  "short_name": "Fitness",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f6",
+  "theme_color": "#0647ff",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

@@ -60,7 +60,10 @@ function ProfileEditor() {
                 haptic("selection");
                 update({ timezone: zone });
               }}
-              className={cn("rounded-full px-3 py-1.5 active:opacity-70", draft.timezone === zone ? "bg-primary" : "bg-card-alt")}
+              className={cn(
+                "rounded-full px-3 py-1.5 active:opacity-70",
+                draft.timezone === zone ? "bg-primary" : "bg-card-alt",
+              )}
             >
               <AppText textRole="footnote" weight="medium" tone={draft.timezone === zone ? "inverse" : "secondary"}>
                 {zone === deviceZone ? `${zone} · this iPhone` : zone}

@@ -11,7 +11,7 @@
 //   node scripts/native.mjs flows [filter]      run the Simulator flows on a new Simulator
 //   node scripts/native.mjs replay-swift [scope] compile the first-party Swift again from
 //                                               the build logs, for CodeQL: all (the
-//                                               default), app or seeder
+//                                               default), app, modules or seeder
 //
 // Build output goes to NATIVE_BUILD_DIR, or ~/Library/Caches/fitness-ios-build,
 // never into the repository.
@@ -87,11 +87,31 @@ function swiftCommands(log, targets) {
 /** Extra xcodebuild settings, such as CodeQL's, from XCODEBUILD_SETTINGS. */
 const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filter(Boolean);
 
-/** The replay-swift scope: all, app or seeder, with all as the default. */
+/**
+ * The builds a replay-swift scope reads, with the targets each must show.
+ * The app scope is the app target and the widget extension; the modules scope
+ * is the fitness-health, fitness-charts and workout-activity modules from the
+ * same app build, which balances the two jobs' replay times; the seeder scope
+ * is the seeder and its UI tests. `project` names the generated app project
+ * and is read only for the app target, because the modules and seeder scopes
+ * can run without it.
+ */
+export function replayBuilds(scope, project) {
+  const app = [];
+  if (scope === "all" || scope === "modules") app.push("FitnessHealth", "FitnessCharts", "WorkoutActivity");
+  if (scope === "all" || scope === "app") app.push("WorkoutActivityExtension", project());
+  const builds = app.length ? [{ log: "app-build.log", targets: app }] : [];
+  if (scope === "all" || scope === "seeder")
+    builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+  return builds;
+}
+
+/** The replay-swift scope: all, app, modules or seeder, with all as the default. */
 export function replayScope(args) {
-  if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app or seeder.");
+  if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app, modules or seeder.");
   const [scope = "all"] = args;
-  if (!["all", "app", "seeder"].includes(scope)) throw new Error("Choose a replay-swift scope: all, app or seeder.");
+  if (!["all", "app", "modules", "seeder"].includes(scope))
+    throw new Error("Choose a replay-swift scope: all, app, modules or seeder.");
   return scope;
 }
 
@@ -178,15 +198,11 @@ const commands = {
    * with the Swift prebuild generates, the fitness-health, fitness-charts and
    * workout-activity modules, the Live Activity extension, the seeder and its
    * UI tests. CodeQL traces this instead of a whole Xcode build.
-   * The app scope reads only the app build, and the seeder scope only the
-   * seeder build.
+   * The app and modules scopes read only the app build, and the seeder scope
+   * only the seeder build; see replayBuilds.
    */
   "replay-swift"(args) {
-    const scope = replayScope(args);
-    const builds = [];
-    const appTargets = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()];
-    if (scope !== "seeder") builds.push({ log: "app-build.log", targets: appTargets });
-    if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+    const builds = replayBuilds(replayScope(args), project);
     const targets = builds.flatMap((build) => swiftCommands(join(buildDir, build.log), build.targets));
     const expected = builds.flatMap((build) => build.targets);
     const missing = expected.filter((target) => !targets.some((entry) => entry.target === target));
@@ -219,7 +235,9 @@ const commands = {
     const entitlementsOf = (file) =>
       JSON.parse(
         output("plutil", ["-convert", "json", "-o", "-", "-"], {
-          input: Buffer.from(otoolSectionBytes(output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", file]))),
+          input: Buffer.from(
+            otoolSectionBytes(output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", file])),
+          ),
         }),
       );
     const health = checkAppEntitlements(entitlementsOf(binary), variant);
@@ -229,7 +247,15 @@ const commands = {
     const extension = join(appPath(), extensionBinary);
     checkExtensionEntitlements(entitlementsOf(extension), variant);
     checkExtensionInfoPlist(
-      JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "PlugIns/WorkoutActivityExtension.appex/Info.plist")])),
+      JSON.parse(
+        output("plutil", [
+          "-convert",
+          "json",
+          "-o",
+          "-",
+          join(appPath(), "PlugIns/WorkoutActivityExtension.appex/Info.plist"),
+        ]),
+      ),
       variant,
     );
     // The widget types are named in the binary's Swift metadata, not its exported symbols.

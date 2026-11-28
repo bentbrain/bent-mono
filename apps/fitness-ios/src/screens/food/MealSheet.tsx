@@ -53,7 +53,15 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
   useLayoutEffect(() => {
     navigation.setOptions({
       title: editing ? "Edit food" : "Add food",
-      headerLeft: () => <IconButton tone="plain" icon="xmark" label={editing ? "Cancel edit" : "Cancel"} onPress={() => navigation.goBack()} testID="meal-cancel" />,
+      headerLeft: () => (
+        <IconButton
+          tone="plain"
+          icon="xmark"
+          label={editing ? "Cancel edit" : "Cancel"}
+          onPress={() => navigation.goBack()}
+          testID="meal-cancel"
+        />
+      ),
     });
   }, [navigation, editing]);
 
@@ -66,7 +74,9 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
 
   function savedVersion(): Opened<Meal> | undefined {
     const current = editing ? sync.latest(editing.id) : undefined;
-    return editing && current?.data?.kind === "meal" ? { id: editing.id, revision: current.revision, data: current.data } : undefined;
+    return editing && current?.data?.kind === "meal"
+      ? { id: editing.id, revision: current.revision, data: current.data }
+      : undefined;
   }
 
   /**
@@ -103,7 +113,9 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
 
   return (
     <Screen testID="screen-food-meal">
-      {missing ? <Notice tone="warning">This food was removed on another device. Saving adds it as new food.</Notice> : null}
+      {missing ? (
+        <Notice tone="warning">This food was removed on another device. Saving adds it as new food.</Notice>
+      ) : null}
       <View className="gap-4">
         <TextField
           label="Meal or snack"
@@ -174,10 +186,21 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
                   fullWidth
                   testID="meal-keep-mine"
                 />
-                <Button label="Load saved version" tone="secondary" onPress={() => open(savedVersion())} fullWidth testID="meal-use-saved" />
+                <Button
+                  label="Load saved version"
+                  tone="secondary"
+                  onPress={() => open(savedVersion())}
+                  fullWidth
+                  testID="meal-use-saved"
+                />
               </View>
             ) : (
-              <Button label="Save my changes as new food" onPress={() => save(undefined, editing)} fullWidth testID="meal-save-new" />
+              <Button
+                label="Save my changes as new food"
+                onPress={() => save(undefined, editing)}
+                fullWidth
+                testID="meal-save-new"
+              />
             )
           }
         >

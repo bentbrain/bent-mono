@@ -16,7 +16,14 @@ import type { CorrectionInputs } from "./CorrectionSets";
 import { EditConflict } from "./EditConflict";
 import { changeSet, commitTyped, fieldText, setKeys, without } from "./correction-inputs";
 import type { Typed } from "./correction-inputs";
-import { correctionStatus, correctionText, correctionsByWorkout, finishedOriginals, openCorrection, otherCorrection } from "./history";
+import {
+  correctionStatus,
+  correctionText,
+  correctionsByWorkout,
+  finishedOriginals,
+  openCorrection,
+  otherCorrection,
+} from "./history";
 import type { CorrectionEntry, OpenedCorrection, WorkoutEntry } from "./history";
 import { historyNotice } from "./notice";
 
@@ -45,7 +52,13 @@ export function CorrectionScreen({ route }: StaticScreenProps<Params>) {
   return <CorrectionEditor key={original.id} original={original} correction={correction} />;
 }
 
-function CorrectionEditor({ original, correction }: { original: WorkoutEntry; correction: CorrectionEntry | undefined }) {
+function CorrectionEditor({
+  original,
+  correction,
+}: {
+  original: WorkoutEntry;
+  correction: CorrectionEntry | undefined;
+}) {
   const navigation = useTabNavigation<"ProgressTab">();
   const { sync, settings, today } = useConfiguredAccount();
   const units = settings.units;
@@ -64,7 +77,10 @@ function CorrectionEditor({ original, correction }: { original: WorkoutEntry; co
   const [closing, setClosing] = useState(false);
 
   const label = `${original.data.name} on ${formatDate(original.data.date)}`;
-  useLayoutEffect(() => navigation.setOptions({ title: `Correct ${original.data.name}` }), [navigation, original.data.name]);
+  useLayoutEffect(
+    () => navigation.setOptions({ title: `Correct ${original.data.name}` }),
+    [navigation, original.data.name],
+  );
 
   function writeTyped(next: Typed) {
     typedRef.current = next;
@@ -118,7 +134,11 @@ function CorrectionEditor({ original, correction }: { original: WorkoutEntry; co
 
   const live = sync.records.find((record) => record.id === opened.version.id);
   const liveOther = otherCorrection(sync.records, original.id, opened.version.id);
-  const derived = correctionStatus(opened.version, { revision: live?.revision ?? 0, data: live?.data ?? null }, liveOther);
+  const derived = correctionStatus(
+    opened.version,
+    { revision: live?.revision ?? 0, data: live?.data ?? null },
+    liveOther,
+  );
   const status = derived === "current" ? checked : derived;
   const saved = liveOther?.data ?? (live?.data.kind === "workoutCorrection" ? live.data : undefined);
   const dirty =
@@ -173,7 +193,11 @@ function CorrectionEditor({ original, correction }: { original: WorkoutEntry; co
       haptic("error");
       return;
     }
-    const state = correctionStatus(target, sync.latest(target.id), otherCorrection(sync.records, original.id, target.id));
+    const state = correctionStatus(
+      target,
+      sync.latest(target.id),
+      otherCorrection(sync.records, original.id, target.id),
+    );
     if (state !== "current") {
       setChecked(state);
       setError("");

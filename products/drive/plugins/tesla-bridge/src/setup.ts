@@ -42,7 +42,7 @@ const vehiclesResponseSchema = z.object({
     z.object({
       display_name: z.string().nullable().optional(),
       state: z.string().optional(),
-    })
+    }),
   ),
 });
 
@@ -54,7 +54,9 @@ try {
   const config = setupEnvironmentSchema.parse(loadTeslaEnvironment());
   switch (command) {
     case undefined:
-      throw new Error("Usage: setup <register|authorize-url|exchange-code --code-file PATH|check>");
+      throw new Error(
+        "Usage: setup <register|authorize-url|exchange-code --code-file PATH|check>",
+      );
     case "register":
       await registerPartner(config);
       break;
@@ -68,10 +70,13 @@ try {
       await checkConnection(config);
       break;
     default:
-      throw new Error("Usage: setup <register|authorize-url|exchange-code --code-file PATH|check>");
+      throw new Error(
+        "Usage: setup <register|authorize-url|exchange-code --code-file PATH|check>",
+      );
   }
 } catch (error) {
-  const message = error instanceof Error ? error.message : "Tesla setup failed.";
+  const message =
+    error instanceof Error ? error.message : "Tesla setup failed.";
   console.error(message);
   process.exitCode = 1;
 }
@@ -79,23 +84,32 @@ try {
 async function registerPartner(config: SetupConfig): Promise<void> {
   const partnerToken = await createPartnerToken(config);
   if (await publicKeyIsRegistered(config, partnerToken)) {
-    console.log(`Partner account already registered for ${config.TESLA_APP_DOMAIN}.`);
+    console.log(
+      `Partner account already registered for ${config.TESLA_APP_DOMAIN}.`,
+    );
     return;
   }
 
-  const response = await fetch(new URL("/api/1/partner_accounts", config.TESLA_FLEET_API_BASE_URL), {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${partnerToken}`,
-      "content-type": "application/json",
+  const response = await fetch(
+    new URL("/api/1/partner_accounts", config.TESLA_FLEET_API_BASE_URL),
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${partnerToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ domain: config.TESLA_APP_DOMAIN }),
     },
-    body: JSON.stringify({ domain: config.TESLA_APP_DOMAIN }),
-  });
+  );
   if (!response.ok && response.status !== 409) {
-    throw new Error(`Tesla partner registration failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Tesla partner registration failed with HTTP ${response.status}.`,
+    );
   }
   if (!(await publicKeyIsRegistered(config, partnerToken))) {
-    throw new Error("Tesla did not return the registered public key after registration.");
+    throw new Error(
+      "Tesla did not return the registered public key after registration.",
+    );
   }
   console.log(`Partner account registered for ${config.TESLA_APP_DOMAIN}.`);
 }
@@ -115,13 +129,21 @@ async function createPartnerToken(config: SetupConfig): Promise<string> {
   });
   const responseBody: unknown = await response.json();
   if (!response.ok) {
-    throw new Error(`Tesla partner-token request failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Tesla partner-token request failed with HTTP ${response.status}.`,
+    );
   }
   return partnerTokenSchema.parse(responseBody).access_token;
 }
 
-async function publicKeyIsRegistered(config: SetupConfig, partnerToken: string): Promise<boolean> {
-  const url = new URL("/api/1/partner_accounts/public_key", config.TESLA_FLEET_API_BASE_URL);
+async function publicKeyIsRegistered(
+  config: SetupConfig,
+  partnerToken: string,
+): Promise<boolean> {
+  const url = new URL(
+    "/api/1/partner_accounts/public_key",
+    config.TESLA_FLEET_API_BASE_URL,
+  );
   url.searchParams.set("domain", config.TESLA_APP_DOMAIN);
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${partnerToken}` },
@@ -157,11 +179,20 @@ async function printAuthorizationUrl(config: SetupConfig): Promise<void> {
   console.log(url.toString());
 }
 
-async function exchangeAuthorizationCode(config: SetupConfig, codeFile: string): Promise<void> {
-  const pending = oauthStateSchema.parse(JSON.parse(await readFile(oauthStateFile(), "utf8")));
-  const callback = callbackFileSchema.parse(JSON.parse(await readFile(codeFile, "utf8")));
+async function exchangeAuthorizationCode(
+  config: SetupConfig,
+  codeFile: string,
+): Promise<void> {
+  const pending = oauthStateSchema.parse(
+    JSON.parse(await readFile(oauthStateFile(), "utf8")),
+  );
+  const callback = callbackFileSchema.parse(
+    JSON.parse(await readFile(codeFile, "utf8")),
+  );
   if (callback.state !== pending.state) {
-    throw new Error("Tesla OAuth state did not match the pending authorization request.");
+    throw new Error(
+      "Tesla OAuth state did not match the pending authorization request.",
+    );
   }
 
   try {
@@ -181,10 +212,15 @@ async function exchangeAuthorizationCode(config: SetupConfig, codeFile: string):
     });
     const responseBody: unknown = await response.json();
     if (!response.ok) {
-      throw new Error(`Tesla authorization-code exchange failed with HTTP ${response.status}.`);
+      throw new Error(
+        `Tesla authorization-code exchange failed with HTTP ${response.status}.`,
+      );
     }
     const tokenFile = config.TESLA_TOKEN_FILE ?? defaultTeslaTokenFile();
-    await new TeslaTokenStore(tokenFile, config.TESLA_TOKEN_ENDPOINT).saveResponse(responseBody);
+    await new TeslaTokenStore(
+      tokenFile,
+      config.TESLA_TOKEN_ENDPOINT,
+    ).saveResponse(responseBody);
     console.log(`Tesla OAuth tokens stored securely at ${tokenFile}.`);
   } finally {
     await unlink(codeFile).catch(() => undefined);
@@ -193,12 +229,16 @@ async function exchangeAuthorizationCode(config: SetupConfig, codeFile: string):
 
 async function checkConnection(config: SetupConfig): Promise<void> {
   const tokenFile = config.TESLA_TOKEN_FILE ?? defaultTeslaTokenFile();
-  const accessToken = await new TeslaTokenStore(tokenFile, config.TESLA_TOKEN_ENDPOINT).getAccessToken(
-    config.TESLA_CLIENT_ID
+  const accessToken = await new TeslaTokenStore(
+    tokenFile,
+    config.TESLA_TOKEN_ENDPOINT,
+  ).getAccessToken(config.TESLA_CLIENT_ID);
+  const response = await fetch(
+    new URL("/api/1/vehicles", config.TESLA_FLEET_API_BASE_URL),
+    {
+      headers: { authorization: `Bearer ${accessToken}` },
+    },
   );
-  const response = await fetch(new URL("/api/1/vehicles", config.TESLA_FLEET_API_BASE_URL), {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
   const responseBody: unknown = await response.json();
   if (!response.ok) {
     throw new Error(`Tesla vehicle check failed with HTTP ${response.status}.`);
@@ -206,7 +246,9 @@ async function checkConnection(config: SetupConfig): Promise<void> {
   const vehicles = vehiclesResponseSchema.parse(responseBody).response;
   console.log(`Connected to ${vehicles.length} vehicle(s).`);
   for (const vehicle of vehicles) {
-    console.log(`- ${vehicle.display_name ?? "Unnamed vehicle"}: ${vehicle.state ?? "unknown"}`);
+    console.log(
+      `- ${vehicle.display_name ?? "Unnamed vehicle"}: ${vehicle.state ?? "unknown"}`,
+    );
   }
 }
 

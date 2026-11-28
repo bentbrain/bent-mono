@@ -32,7 +32,10 @@ const bufferSchema = z.record(
   }),
 );
 /** Typed values kept before units were recorded with them. */
-const legacyBufferSchema = z.record(z.string().max(40), z.object({ text: z.string().max(2000), base: z.string().max(2000) }));
+const legacyBufferSchema = z.record(
+  z.string().max(40),
+  z.object({ text: z.string().max(2000), base: z.string().max(2000) }),
+);
 
 const fieldPattern = /^(\d+):(\d+):(loadKg|value|right|rir)$/;
 const isLoad = (key: string) => key.endsWith(":loadKg");
@@ -83,9 +86,17 @@ export function applyText(workout: Workout, key: string, text: string, units: Un
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
   // A weight typed for an exercise that records none, such as a band exercise, has no field to apply to.
-  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)) return null;
+  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed))
+    return null;
   const prescription = exercise.prescription;
-  const label = field === "loadKg" ? "weight" : field === "rir" ? "reps left" : prescription.mode === "seconds" ? "seconds" : "reps";
+  const label =
+    field === "loadKg"
+      ? "weight"
+      : field === "rir"
+        ? "reps left"
+        : prescription.mode === "seconds"
+          ? "seconds"
+          : "reps";
   const trimmed = text.trim();
   const number = Number(trimmed);
   if (!trimmed || !Number.isFinite(number) || number < 0) return `Enter ${label} as a number of 0 or more.`;
@@ -226,14 +237,26 @@ export type CommitPlan =
   /** The resulting workout breaks a workout rule; nothing is saved. */
   | { status: "rejected"; message: string; failed: Record<string, string>; kept: string[]; done: string[] }
   /** The workout to save, and whether it differs from the saved one. */
-  | { status: "ready"; workout: Workout; changed: boolean; failed: Record<string, string>; kept: string[]; done: string[] };
+  | {
+      status: "ready";
+      workout: Workout;
+      changed: boolean;
+      failed: Record<string, string>;
+      kept: string[];
+      done: string[];
+    };
 
 /**
  * Works out what a save of typed values would do. `done` lists the keys the
  * save consumes, `failed` the keys with invalid text and `kept` the keys a
  * background save leaves for the person to review.
  */
-export function planCommit(workout: Workout, buffer: InputBuffer, units: Units, options: CommitOptions = {}): CommitPlan {
+export function planCommit(
+  workout: Workout,
+  buffer: InputBuffer,
+  units: Units,
+  options: CommitOptions = {},
+): CommitPlan {
   let next = workout;
   const done: string[] = [];
   const failed: Record<string, string> = {};
@@ -260,7 +283,13 @@ export function planCommit(workout: Workout, buffer: InputBuffer, units: Units, 
   if (options.change) next = options.change(next);
   const parsed = workoutSchema.safeParse(next);
   if (!parsed.success)
-    return { status: "rejected", message: parsed.error.issues[0]?.message ?? "Check your results.", failed, kept, done };
+    return {
+      status: "rejected",
+      message: parsed.error.issues[0]?.message ?? "Check your results.",
+      failed,
+      kept,
+      done,
+    };
   return {
     status: "ready",
     workout: parsed.data,
@@ -291,7 +320,13 @@ export function setInputs(prescription: Exercise, units: Units): SetInput[] {
   const amount = seconds ? "seconds" : "reps";
   const inputs: SetInput[] = [];
   if (wording.weighed)
-    inputs.push({ field: "loadKg", heading: wording.heading, spoken: "weight", integer: false, hint: `In ${wording.unit}` });
+    inputs.push({
+      field: "loadKg",
+      heading: wording.heading,
+      spoken: "weight",
+      integer: false,
+      hint: `In ${wording.unit}`,
+    });
   inputs.push({
     field: "value",
     heading: seconds ? (prescription.side ? "Left seconds" : "Seconds") : prescription.side ? "Left reps" : "Reps",
@@ -299,7 +334,12 @@ export function setInputs(prescription: Exercise, units: Units): SetInput[] {
     integer: !seconds,
   });
   if (prescription.side)
-    inputs.push({ field: "right", heading: seconds ? "Right seconds" : "Right reps", spoken: `right ${amount}`, integer: !seconds });
+    inputs.push({
+      field: "right",
+      heading: seconds ? "Right seconds" : "Right reps",
+      spoken: `right ${amount}`,
+      integer: !seconds,
+    });
   if (!seconds) inputs.push({ field: "rir", heading: "Reps left", spoken: "reps in reserve", integer: true });
   return inputs;
 }

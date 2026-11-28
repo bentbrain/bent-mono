@@ -39,13 +39,7 @@ export function mapVacuumPointToApartment(
   const sine = Math.sin(calibration.rotationRadians);
 
   return {
-    x:
-      scaledX * cosine -
-      scaledY * sine +
-      calibration.translation.x,
-    z:
-      scaledX * sine +
-      scaledY * cosine +
-      calibration.translation.z,
+    x: scaledX * cosine - scaledY * sine + calibration.translation.x,
+    z: scaledX * sine + scaledY * cosine + calibration.translation.z,
   };
 }

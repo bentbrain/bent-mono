@@ -16,7 +16,7 @@ class CallbackStateError extends Data.TaggedError("CallbackStateError")<{
 }> {}
 
 class AuthorizationCodeGenerationError extends Data.TaggedError(
-  "AuthorizationCodeGenerationError"
+  "AuthorizationCodeGenerationError",
 )<{ message: string }> {}
 
 export function GET(request: Request): Promise<Response> {
@@ -33,14 +33,17 @@ export function GET(request: Request): Promise<Response> {
         try: () => openAuthorizeState(sealedState, config),
         catch: (error) =>
           new CallbackStateError({
-            message: error instanceof Error ? error.message : "Invalid authorization state.",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Invalid authorization state.",
           }),
-      }).pipe(Effect.withSpan("oauth.callback.open_state"))
+      }).pipe(Effect.withSpan("oauth.callback.open_state")),
     );
     if (Either.isLeft(stateResult)) {
       return Response.json(
         { error: "invalid_state", error_description: stateResult.left.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
     const state = stateResult.right;
@@ -66,7 +69,10 @@ export function GET(request: Request): Promise<Response> {
         try: () => randomToken("tbc_code_"),
         catch: (error) =>
           new AuthorizationCodeGenerationError({
-            message: error instanceof Error ? error.message : "Could not generate an OAuth code.",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not generate an OAuth code.",
           }),
       }).pipe(Effect.withSpan("oauth.callback.generate_code"));
       yield* completeTeslaAuthorization(
@@ -82,7 +88,7 @@ export function GET(request: Request): Promise<Response> {
           codeChallenge: state.codeChallenge,
         },
         Math.floor(Date.now() / 1000) + 5 * 60,
-        randomUUID()
+        randomUUID(),
       );
       return { connectionId: connection.id, authorizationCode };
     });
@@ -90,11 +96,12 @@ export function GET(request: Request): Promise<Response> {
     const completionResult = yield* Effect.either(completion);
     if (Either.isLeft(completionResult)) {
       yield* Effect.logError("oauth.callback.failed").pipe(
-        Effect.annotateLogs({ clientId: state.clientId })
+        Effect.annotateLogs({ clientId: state.clientId }),
       );
       return redirectWithOAuthResult(state.redirectUri, state.clientState, {
         error: "server_error",
-        description: "Bent Drive Copilot could not complete the Tesla connection.",
+        description:
+          "Bent Drive Copilot could not complete the Tesla connection.",
       });
     }
 
@@ -102,7 +109,7 @@ export function GET(request: Request): Promise<Response> {
       Effect.annotateLogs({
         clientId: state.clientId,
         connectionId: completionResult.right.connectionId,
-      })
+      }),
     );
     return redirectWithOAuthResult(state.redirectUri, state.clientState, {
       code: completionResult.right.authorizationCode,

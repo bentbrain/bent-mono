@@ -62,9 +62,9 @@ export function InAppBrowserDetector({
       <CardContent>
         <div>
           <p className="text-sm">
-            Open this page in your device&apos;s browser to use the collage editor.
-            The {browserType} in-app browser is unsupported and may have trouble
-            with sign-in and other features.
+            Open this page in your device&apos;s browser to use the collage
+            editor. The {browserType} in-app browser is unsupported and may have
+            trouble with sign-in and other features.
           </p>
         </div>
       </CardContent>

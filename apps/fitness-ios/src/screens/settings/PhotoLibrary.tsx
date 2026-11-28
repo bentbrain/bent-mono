@@ -15,7 +15,8 @@ import { shape } from "../../ui/typography";
 import { clearPickerCopies } from "./pickerFiles";
 import { checkPhoto, photoId, photoLimits, photoName, tooManyPhotos } from "./rules";
 
-const message = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
+const message = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback;
 
 /** Private equipment photos: choose from the library, view and remove. */
 export function PhotoLibrary() {
@@ -131,7 +132,16 @@ export function PhotoLibrary() {
         <Notice
           tone="danger"
           testID="photo-error"
-          action={photos === null ? <Button label="Retry" tone="plain" size="compact" onPress={() => void load().then((ok) => ok && setError(""))} /> : undefined}
+          action={
+            photos === null ? (
+              <Button
+                label="Retry"
+                tone="plain"
+                size="compact"
+                onPress={() => void load().then((ok) => ok && setError(""))}
+              />
+            ) : undefined
+          }
         >
           {error}
         </Notice>
@@ -170,7 +180,10 @@ function PhotoTile({ photo, onRemove }: { photo: PhotoSummary; onRemove: () => v
   return (
     <View className="w-1/2 p-1" testID={`photo-${photo.id}`}>
       <View className="gap-1.5 bg-card p-1.5" style={{ borderRadius: shape.card, borderCurve: "continuous" }}>
-        <View className="aspect-square items-center justify-center overflow-hidden bg-card-alt" style={{ borderRadius: shape.control, borderCurve: "continuous" }}>
+        <View
+          className="aspect-square items-center justify-center overflow-hidden bg-card-alt"
+          style={{ borderRadius: shape.control, borderCurve: "continuous" }}
+        >
           {source && !failed ? (
             <Image
               source={source}
@@ -187,7 +200,13 @@ function PhotoTile({ photo, onRemove }: { photo: PhotoSummary; onRemove: () => v
             <ActivityIndicator />
           )}
           <View className="absolute right-1.5 top-1.5">
-            <IconButton icon="trash" label={`Remove photo ${photo.name}`} tone="secondary" size={32} onPress={onRemove} />
+            <IconButton
+              icon="trash"
+              label={`Remove photo ${photo.name}`}
+              tone="secondary"
+              size={32}
+              onPress={onRemove}
+            />
           </View>
         </View>
         <AppText textRole="caption" tone="secondary" numberOfLines={1} className="px-1 pb-0.5">

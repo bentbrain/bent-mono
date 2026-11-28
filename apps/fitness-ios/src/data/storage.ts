@@ -87,7 +87,10 @@ export const sqliteStorage: SyncStorage = {
 /** Small values kept on this iPhone for one account, such as typed workout fields. */
 export const drafts = {
   get(owner: string, key: string): string | null {
-    return database().getFirstSync<{ value: string }>("SELECT value FROM drafts WHERE owner = ? AND key = ?", owner, key)?.value ?? null;
+    return (
+      database().getFirstSync<{ value: string }>("SELECT value FROM drafts WHERE owner = ? AND key = ?", owner, key)
+        ?.value ?? null
+    );
   },
   set(owner: string, key: string, value: string) {
     database().runSync(
@@ -103,10 +106,12 @@ export const drafts = {
   /** Every draft the account keeps on this iPhone, by key. */
   all(owner: string): Record<string, string> {
     const rows = database().getAllSync("SELECT key, value FROM drafts WHERE owner = ? ORDER BY key", owner);
-    return Object.fromEntries(rows.map((row) => {
-      const parsed = draftRow.parse(row);
-      return [parsed.key, parsed.value];
-    }));
+    return Object.fromEntries(
+      rows.map((row) => {
+        const parsed = draftRow.parse(row);
+        return [parsed.key, parsed.value];
+      }),
+    );
   },
 };
 

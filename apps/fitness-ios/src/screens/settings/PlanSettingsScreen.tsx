@@ -37,13 +37,19 @@ function PlanEditor() {
   return (
     <Screen testID="screen-plan-settings">
       <EditorIntro>
-        Strength days take turns through your routines in calendar order, counted from the plan start date. A missed day keeps its routine,
-        so the next strength day still moves on to the next routine. To catch up, open the missed day in Your week and choose Do this
-        workout today. Changing the start date can change which routine falls on each future day. Recorded workouts keep their results.
+        Strength days take turns through your routines in calendar order, counted from the plan start date. A missed day
+        keeps its routine, so the next strength day still moves on to the next routine. To catch up, open the missed day
+        in Your week and choose Do this workout today. Changing the start date can change which routine falls on each
+        future day. Recorded workouts keep their results.
       </EditorIntro>
 
       <Card>
-        <DateField label="Plan start date" value={draft.startDate} onChange={(startDate) => update({ startDate })} testID="plan-start-date" />
+        <DateField
+          label="Plan start date"
+          value={draft.startDate}
+          onChange={(startDate) => update({ startDate })}
+          testID="plan-start-date"
+        />
         <NumberInput
           label="Introduction · weeks at 2 sets"
           value={draft.introductionWeeks}
@@ -119,7 +125,13 @@ function PlanEditor() {
         />
       </View>
 
-      <SaveBar onSave={() => editor.save(draft)} status={editor.status} error={editor.error} syncError={editor.sync.error} onGoTo={goTo} />
+      <SaveBar
+        onSave={() => editor.save(draft)}
+        status={editor.status}
+        error={editor.error}
+        syncError={editor.sync.error}
+        onGoTo={goTo}
+      />
     </Screen>
   );
 }

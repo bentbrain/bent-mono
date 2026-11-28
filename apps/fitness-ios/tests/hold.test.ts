@@ -27,13 +27,34 @@ function workout(): Workout {
   const routine = settings.routines[0];
   if (!routine) throw new Error("Missing template");
   const base = createWorkout(settings, routine, "2026-01-05", false, []);
-  const plank = { name: "Forearm plank", id: "plank", sets: 2, min: 30, max: 45, side: false, rest: 60, mode: "seconds" as const };
+  const plank = {
+    name: "Forearm plank",
+    id: "plank",
+    sets: 2,
+    min: 30,
+    max: 45,
+    side: false,
+    rest: 60,
+    mode: "seconds" as const,
+  };
   const sidePlank = { ...plank, id: "side-plank", name: "Side plank", min: 20, max: 30, side: true };
   const row = base.exercises.find((exercise) => exercise.prescription.mode === "reps");
   if (!row) throw new Error("Missing reps exercise");
   const sets = (p: typeof plank) =>
-    Array.from({ length: p.sets }, () => ({ loadKg: 0, value: p.min, right: p.side ? p.min : null, done: false, skipped: false, rir: 3, controlled: true }));
-  return { ...base, restUntil: null, exercises: [{ prescription: plank, sets: sets(plank) }, { prescription: sidePlank, sets: sets(sidePlank) }, row] };
+    Array.from({ length: p.sets }, () => ({
+      loadKg: 0,
+      value: p.min,
+      right: p.side ? p.min : null,
+      done: false,
+      skipped: false,
+      rir: 3,
+      controlled: true,
+    }));
+  return {
+    ...base,
+    restUntil: null,
+    exercises: [{ prescription: plank, sets: sets(plank) }, { prescription: sidePlank, sets: sets(sidePlank) }, row],
+  };
 }
 
 describe("hold timer", () => {
@@ -72,7 +93,16 @@ describe("hold timer", () => {
       const phase = holdPhase(hold, s(at));
       return phase.kind === "done" ? "done" : `${phase.kind}:${phase.side}`;
     });
-    expect(phases).toEqual(["ready:left", "hold:left", "hold:left", "ready:right", "ready:right", "hold:right", "hold:right", "done"]);
+    expect(phases).toEqual([
+      "ready:left",
+      "hold:left",
+      "hold:left",
+      "ready:right",
+      "ready:right",
+      "hold:right",
+      "hold:right",
+      "done",
+    ]);
     expect(phaseTitle(holdPhase(hold, s(25)))).toBe("Switch to right");
     expect(phaseAnnouncement(hold, holdPhase(hold, s(30)))).toBe("Hold right for 25 seconds.");
     expect(phaseKey(holdPhase(hold, s(26)))).toBe(phaseKey(holdPhase(hold, s(28))));
@@ -86,7 +116,10 @@ describe("hold timer", () => {
     expect(holdResult(one, holdEndsAt(one))).toEqual({ value: 40, done: true, skipped: false });
     expect(holdResult(both, holdEndsAt(both) + 60_000)).toEqual({ value: 20, right: 25, done: true, skipped: false });
     // Recording it starts the exercise's rest from the moment the hold ended.
-    const recorded = applySetChange(workout(), 0, 0, holdResult(one, holdEndsAt(one)) ?? {}, { startRest: true, now: holdEndsAt(one) });
+    const recorded = applySetChange(workout(), 0, 0, holdResult(one, holdEndsAt(one)) ?? {}, {
+      startRest: true,
+      now: holdEndsAt(one),
+    });
     expect(recorded.exercises[0]?.sets[0]).toMatchObject({ value: 40, done: true });
     expect(recorded.restUntil).toBe(holdEndsAt(one) + 60_000);
   });
@@ -144,7 +177,11 @@ describe("workout Live Activity", () => {
       },
     });
     // A weighted exercise shows the load and rep range; side exercises say each side.
-    const lifted = [0, 1].reduce((value, ei) => [0, 1].reduce((v, si) => applySetChange(v, ei, si, { done: true }, { startRest: false, now: t0 }), value), w);
+    const lifted = [0, 1].reduce(
+      (value, ei) =>
+        [0, 1].reduce((v, si) => applySetChange(v, ei, si, { done: true }, { startRest: false, now: t0 }), value),
+      w,
+    );
     const row = activityContent("w1", lifted, null, "kg", t0)?.state;
     const p = w.exercises[2]?.prescription;
     expect(row?.exercise).toBe(p?.name);
@@ -154,14 +191,22 @@ describe("workout Live Activity", () => {
     const banded = {
       ...w,
       exercises: w.exercises.map((e, i) =>
-        i === 0 ? { ...e, prescription: { ...e.prescription, id: "custom-band", mode: "reps" as const, load: "band" as const }, sets: e.sets.map((set) => ({ ...set, loadKg: 4 })) } : e,
+        i === 0
+          ? {
+              ...e,
+              prescription: { ...e.prescription, id: "custom-band", mode: "reps" as const, load: "band" as const },
+              sets: e.sets.map((set) => ({ ...set, loadKg: 4 })),
+            }
+          : e,
       ),
     };
     expect(activityContent("w1", banded, null, "kg", t0)?.state.detail).not.toContain("kg");
     // Other weighed loads say what the weight measures.
     const barred = {
       ...banded,
-      exercises: banded.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...e.prescription, id: "custom-squat", load: "barbell" as const } } : e)),
+      exercises: banded.exercises.map((e, i) =>
+        i === 0 ? { ...e, prescription: { ...e.prescription, id: "custom-squat", load: "barbell" as const } } : e,
+      ),
     };
     expect(activityContent("w1", barred, null, "kg", t0)?.state.detail).toContain("4 kg on the bar × ");
     expect(activityContent("w1", { ...w, finishedAt: "2026-01-05T08:00:00.000Z" }, null, "kg", t0)).toBeNull();
@@ -187,7 +232,9 @@ describe("workout Live Activity", () => {
     expect(activityContent("w1", rested, null, "kg", s(60))?.state.phase).toBe("lift");
     // The same rest seen a moment later is the same activity.
     expect(sameActivity(content, activityContent("w1", rested, null, "kg", s(20)))).toBe(true);
-    expect(sameActivity(content, activityContent("w1", { ...rested, restUntil: s(90) }, null, "kg", s(20)))).toBe(false);
+    expect(sameActivity(content, activityContent("w1", { ...rested, restUntil: s(90) }, null, "kg", s(20)))).toBe(
+      false,
+    );
   });
 
   test("shows each hold phase, with an alert when the whole hold ends", () => {
@@ -209,10 +256,27 @@ describe("workout Live Activity", () => {
     // the end of getting ready or of the left side, so the Lock Screen never
     // says the hold is done early while the app is suspended.
     for (const at of [1, 6, 26, 31]) expect(activityContent("w1", w, hold, "kg", s(at))?.staleAt).toBe(s(55));
-    expect(ready?.alert).toEqual({ at: s(55), title: "Hold done", body: "Side plank, set 1. Open the workout to record it." });
-    expect(activityContent("w1", w, hold, "kg", s(6))?.state).toMatchObject({ phase: "hold", title: "Hold left", timerStart: s(5), timerEnd: s(25), finalEnd: s(55) });
-    expect(activityContent("w1", w, hold, "kg", s(26))?.state).toMatchObject({ phase: "ready", title: "Switch to right" });
-    expect(activityContent("w1", w, hold, "kg", s(31))?.state).toMatchObject({ phase: "hold", title: "Hold right", timerEnd: s(55) });
+    expect(ready?.alert).toEqual({
+      at: s(55),
+      title: "Hold done",
+      body: "Side plank, set 1. Open the workout to record it.",
+    });
+    expect(activityContent("w1", w, hold, "kg", s(6))?.state).toMatchObject({
+      phase: "hold",
+      title: "Hold left",
+      timerStart: s(5),
+      timerEnd: s(25),
+      finalEnd: s(55),
+    });
+    expect(activityContent("w1", w, hold, "kg", s(26))?.state).toMatchObject({
+      phase: "ready",
+      title: "Switch to right",
+    });
+    expect(activityContent("w1", w, hold, "kg", s(31))?.state).toMatchObject({
+      phase: "hold",
+      title: "Hold right",
+      timerEnd: s(55),
+    });
     expect(activityContent("w1", w, hold, "kg", s(56))?.state.phase).toBe("lift");
     // A hold held once shows its single target.
     const plank = startHold(w, 0, 0, { seconds: 30, right: null }, t0);

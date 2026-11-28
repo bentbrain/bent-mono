@@ -17,7 +17,10 @@ const environmentSchema = z.object({
     .string()
     .url()
     .default("https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token"),
-  TESLA_FLEET_API_BASE_URL: z.string().url().default("https://fleet-api.prd.na.vn.cloud.tesla.com"),
+  TESLA_FLEET_API_BASE_URL: z
+    .string()
+    .url()
+    .default("https://fleet-api.prd.na.vn.cloud.tesla.com"),
   TESLA_COMMAND_PROXY_URL: z.string().url().optional(),
   TESLA_BRIDGE_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
 });
@@ -34,13 +37,19 @@ export type TeslaBridgeConfig = {
   port: number;
 };
 
-export function loadConfig(environment: NodeJS.ProcessEnv = process.env): TeslaBridgeConfig {
-  const resolvedEnvironment = environment === process.env ? loadTeslaEnvironment(environment) : environment;
+export function loadConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): TeslaBridgeConfig {
+  const resolvedEnvironment =
+    environment === process.env
+      ? loadTeslaEnvironment(environment)
+      : environment;
   const parsed = environmentSchema.parse(resolvedEnvironment);
   const tokenFile = parsed.TESLA_TOKEN_FILE ?? defaultTeslaTokenFile();
   const mode =
     parsed.TESLA_MODE === "auto"
-      ? parsed.TESLA_ACCESS_TOKEN || (parsed.TESLA_CLIENT_ID && existsSync(tokenFile))
+      ? parsed.TESLA_ACCESS_TOKEN ||
+        (parsed.TESLA_CLIENT_ID && existsSync(tokenFile))
         ? "live"
         : "mock"
       : parsed.TESLA_MODE;
@@ -73,7 +82,9 @@ export function defaultTeslaTokenFile(): string {
   return join(defaultTeslaConfigDirectory(), "tokens.json");
 }
 
-export function loadTeslaEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function loadTeslaEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
   const configFile = environment.TESLA_CONFIG_FILE ?? defaultTeslaConfigFile();
   if (!existsSync(configFile)) {
     return environment;

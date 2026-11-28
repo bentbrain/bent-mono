@@ -20,7 +20,11 @@ export function POST(request: Request): Promise<Response> {
   const program = Effect.gen(function* () {
     const declaredLength = Number(request.headers.get("content-length") ?? "0");
     if (Number.isFinite(declaredLength) && declaredLength > 16_384) {
-      return oauthErrorResponse("invalid_client_metadata", "The client metadata is too large.", 413);
+      return oauthErrorResponse(
+        "invalid_client_metadata",
+        "The client metadata is too large.",
+        413,
+      );
     }
     const bodyResult = yield* Effect.either(
       Effect.tryPromise({
@@ -39,42 +43,65 @@ export function POST(request: Request): Promise<Response> {
                 ? error.message
                 : "The request body must be valid JSON.",
           }),
-      })
+      }),
     );
     if (Either.isLeft(bodyResult)) {
-      return oauthErrorResponse("invalid_client_metadata", bodyResult.left.message);
+      return oauthErrorResponse(
+        "invalid_client_metadata",
+        bodyResult.left.message,
+      );
     }
 
     const parsed = dynamicClientRegistrationSchema.safeParse(bodyResult.right);
     if (!parsed.success) {
-      return oauthErrorResponse("invalid_client_metadata", "The client metadata is invalid.");
+      return oauthErrorResponse(
+        "invalid_client_metadata",
+        "The client metadata is invalid.",
+      );
     }
 
     const config = yield* AppConfigService;
     if (
       parsed.data.redirect_uris.some(
-        (redirectUri) => !isAllowedOAuthRedirect(redirectUri, config.allowLocalOAuthRedirects)
+        (redirectUri) =>
+          !isAllowedOAuthRedirect(redirectUri, config.allowLocalOAuthRedirects),
       )
     ) {
       return oauthErrorResponse(
         "invalid_redirect_uri",
-        "Redirect URIs must be ChatGPT connector callbacks or explicitly enabled local development callbacks."
+        "Redirect URIs must be ChatGPT connector callbacks or explicitly enabled local development callbacks.",
       );
     }
-    if (parsed.data.grant_types && !parsed.data.grant_types.includes("authorization_code")) {
+    if (
+      parsed.data.grant_types &&
+      !parsed.data.grant_types.includes("authorization_code")
+    ) {
       return oauthErrorResponse(
         "invalid_client_metadata",
-        "The authorization_code grant type is required."
+        "The authorization_code grant type is required.",
       );
     }
-    if (parsed.data.response_types && !parsed.data.response_types.includes("code")) {
-      return oauthErrorResponse("invalid_client_metadata", "The code response type is required.");
+    if (
+      parsed.data.response_types &&
+      !parsed.data.response_types.includes("code")
+    ) {
+      return oauthErrorResponse(
+        "invalid_client_metadata",
+        "The code response type is required.",
+      );
     }
 
     const clientId = randomToken("tbc_client_");
-    yield* registerOAuthClient(clientId, parsed.data.redirect_uris, parsed.data.client_name ?? null);
+    yield* registerOAuthClient(
+      clientId,
+      parsed.data.redirect_uris,
+      parsed.data.client_name ?? null,
+    );
     yield* Effect.logInfo("oauth.client.registered").pipe(
-      Effect.annotateLogs({ clientId, redirectCount: parsed.data.redirect_uris.length })
+      Effect.annotateLogs({
+        clientId,
+        redirectCount: parsed.data.redirect_uris.length,
+      }),
     );
     return Response.json(
       {
@@ -89,7 +116,7 @@ export function POST(request: Request): Promise<Response> {
       {
         status: 201,
         headers: { "cache-control": "no-store" },
-      }
+      },
     );
   });
 

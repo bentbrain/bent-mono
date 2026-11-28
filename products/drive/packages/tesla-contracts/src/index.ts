@@ -2,7 +2,12 @@ import { z } from "zod";
 
 export const vinSchema = z.string().min(5).max(32);
 
-export const vehicleStateSchema = z.enum(["online", "asleep", "offline", "unknown"]);
+export const vehicleStateSchema = z.enum([
+  "online",
+  "asleep",
+  "offline",
+  "unknown",
+]);
 
 export type VehicleState = z.infer<typeof vehicleStateSchema>;
 

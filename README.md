@@ -29,7 +29,11 @@ bun run dev --filter=japan-blog
 bun run dev --filter=@bent/stay
 bun run check:source
 bun run test:workspace
+bun run format
+bun run format:check
 ```
+
+Prettier formats the whole repository from the root. `bun run format` rewrites files and `bun run format:check` reports unformatted ones; the `lint` check in CI runs it on every pull request. The root `.prettierrc.json` uses Prettier's defaults, and apps with their own Prettier config keep it. The commands format the files Git manages: tracked files and new files Git doesn't ignore. Local files such as credentials and tool output stay untouched. `.prettierignore` adds generated output, lockfiles and files whose exact bytes tools check. Each file uses the nearest tracked Prettier config.
 
 Run app commands from their directories or use Bun workspace filters. Each app's example environment file describes its configuration. Store credentials and production content in the app's protected environment and storage.
 
@@ -41,7 +45,7 @@ Quality runs full CodeQL analysis of the JavaScript and TypeScript with both sec
 
 Every Quality job stops within 20 minutes, and the longest chain of dependent jobs, from CI scope through the native iPhone suite to `Release qualification`, stays under 30 minutes. Browser shards stop at 15 minutes.
 
-Fitness iOS Verification (`.github/workflows/fitness-ios-verify.yml`) runs on main pushes that touch a path in `iosNativeInputs`, daily at 17:00 UTC, and on dispatch. It reports on main, and releases do not wait for it. Its five macOS jobs start together and none waits for another: two Swift CodeQL jobs with both security suites, one for the app and one for the Health Seed tool with the Health module's Swift package, and one job for each Simulator flow. The flow jobs also run the native suite: the production build and artifact check beside the denied flow, and SwiftLint, the XCTest suite and the contract round trip beside the allowed flow. The CodeQL jobs and the denied flow stop at 27 minutes, the other flows at 25, and the final `Fitness iOS verification` job at 2, so once runners are available a run executes within 29 minutes. Each CodeQL job runs with `upload: never` and `upload-database: false`, requires zero raw findings through `scripts/check-sarif.mjs`, and keeps its original SARIF report as a workflow artifact for 90 days. The Swift reports stay in these artifacts and the run's log, and the Security tab lists Quality's CodeQL analysis.
+Fitness iOS Verification (`.github/workflows/fitness-ios-verify.yml`) runs on main pushes that touch a path in `iosNativeInputs`, daily at 17:00 UTC, and on dispatch. It reports on main, and releases do not wait for it. Five macOS jobs start together: three Swift CodeQL jobs with both security suites, one for the app target with the widget extension, one for the Health, chart and workout-activity modules, and one for the Health Seed tool with the Health module's Swift package, a production build that also runs the rest of the native suite (the artifact check, SwiftLint, the XCTest suite and the contract round trip), and a build of the development app and seeder for the Simulator flows. The three Simulator flows start when that build finishes and a runner is free, and run its app. The CodeQL jobs stop at 27 minutes, the flows at 25, the builds at 20, and the final `Fitness iOS verification` job at 2; with runners free, a run takes about 30 minutes. Each CodeQL job runs with `upload: never` and `upload-database: false`, requires zero raw findings through `scripts/check-sarif.mjs`, and keeps its original SARIF report as a workflow artifact for 90 days. The Swift reports stay in these artifacts and the run's log, and the Security tab lists Quality's CodeQL analysis.
 
 ## Trackmap
 

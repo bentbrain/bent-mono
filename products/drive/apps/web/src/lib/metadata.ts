@@ -12,10 +12,10 @@ export const mcpProtectedResourceMetadataResponse = AppConfigService.pipe(
         bearer_methods_supported: ["header"],
         resource_documentation: `${config.appUrl}/docs`,
       },
-      { headers: { "cache-control": "public, max-age=300" } }
-    )
+      { headers: { "cache-control": "public, max-age=300" } },
+    ),
   ),
-  Effect.withSpan("oauth.metadata.protected_resource")
+  Effect.withSpan("oauth.metadata.protected_resource"),
 );
 
 export const rootProtectedResourceMetadataResponse = AppConfigService.pipe(
@@ -28,10 +28,10 @@ export const rootProtectedResourceMetadataResponse = AppConfigService.pipe(
         bearer_methods_supported: ["header"],
         resource_documentation: `${config.appUrl}/docs`,
       },
-      { headers: { "cache-control": "public, max-age=300" } }
-    )
+      { headers: { "cache-control": "public, max-age=300" } },
+    ),
   ),
-  Effect.withSpan("oauth.metadata.protected_resource_root")
+  Effect.withSpan("oauth.metadata.protected_resource_root"),
 );
 
 export const authorizationServerMetadataResponse = AppConfigService.pipe(
@@ -48,8 +48,8 @@ export const authorizationServerMetadataResponse = AppConfigService.pipe(
         code_challenge_methods_supported: ["S256"],
         scopes_supported: ["tesla.read"],
       },
-      { headers: { "cache-control": "public, max-age=300" } }
-    )
+      { headers: { "cache-control": "public, max-age=300" } },
+    ),
   ),
-  Effect.withSpan("oauth.metadata.authorization_server")
+  Effect.withSpan("oauth.metadata.authorization_server"),
 );

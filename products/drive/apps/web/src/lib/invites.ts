@@ -12,7 +12,10 @@ const githubUsernameSchema = z
       .min(1)
       .max(39)
       .regex(/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/)
-      .refine((username) => !username.includes("--"), "GitHub usernames cannot contain --.")
+      .refine(
+        (username) => !username.includes("--"),
+        "GitHub usernames cannot contain --.",
+      ),
   );
 
 export const createInviteInputSchema = z.object({

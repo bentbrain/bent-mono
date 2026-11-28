@@ -51,8 +51,7 @@ export function placeCard({
   const clamp = (value: number, max: number) =>
     Math.max(0, Math.min(value, Math.max(0, max)));
   const right = anchorX + gap;
-  const left =
-    right + cardWidth <= width ? right : anchorX - gap - cardWidth;
+  const left = right + cardWidth <= width ? right : anchorX - gap - cardWidth;
   return {
     left: clamp(left, width - cardWidth),
     top: clamp(anchorY - cardHeight / 2, height - cardHeight),
@@ -126,9 +125,7 @@ export function ChartCard({
         {detail.rows.map((row) => (
           <div key={row.label}>
             <dt>
-              {row.marker && (
-                <i className={`chart-marker is-${row.marker}`} />
-              )}
+              {row.marker && <i className={`chart-marker is-${row.marker}`} />}
               {row.label}
             </dt>
             <dd>{row.value}</dd>
@@ -149,7 +146,10 @@ export function touchIntent(dx: number, dy: number, slop = 8) {
 }
 
 /** Whether a card of this size fits over a chart of this size. */
-export function cardFits(card: { width: number; height: number }, chart: { width: number; height: number }) {
+export function cardFits(
+  card: { width: number; height: number },
+  chart: { width: number; height: number },
+) {
   return card.width <= chart.width && card.height <= chart.height;
 }
 

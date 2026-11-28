@@ -1,7 +1,11 @@
-import {telemetryApi} from '../app/public-view/telemetryApi';
-import {publicLayoutApi,type PublicEnv} from '../app/public-view/api';
+import { telemetryApi } from "../app/public-view/telemetryApi";
+import { publicLayoutApi, type PublicEnv } from "../app/public-view/api";
 /** Cloudflare Worker entry point for the vinext-starter template. */
-import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
+import {
+  handleImageOptimization,
+  DEFAULT_DEVICE_SIZES,
+  DEFAULT_IMAGE_SIZES,
+} from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
 interface Env extends PublicEnv {
@@ -10,7 +14,10 @@ interface Env extends PublicEnv {
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
+        output(options: {
+          format: string;
+          quality: number;
+        }): Promise<{ response(): Response }>;
       };
     };
   };
@@ -28,29 +35,52 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
-    if(url.pathname === "/api/release") {
-      if (request.method !== 'GET' && request.method !== 'HEAD')
-        return new Response(null, {status: 405, headers: {Allow: 'GET, HEAD'}});
+    if (url.pathname === "/api/release") {
+      if (request.method !== "GET" && request.method !== "HEAD")
+        return new Response(null, {
+          status: 405,
+          headers: { Allow: "GET, HEAD" },
+        });
       const sha = process.env.PUBLIC_HOME_RELEASE_SHA;
-      if (!sha || !/^[a-f0-9]{40}$/.test(sha)) return new Response(null, {status: 503});
-      return new Response(request.method === 'HEAD' ? null : JSON.stringify({sourceRevision: sha}), {
-        headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store'},
-      });
+      if (!sha || !/^[a-f0-9]{40}$/.test(sha))
+        return new Response(null, { status: 503 });
+      return new Response(
+        request.method === "HEAD"
+          ? null
+          : JSON.stringify({ sourceRevision: sha }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+          },
+        },
+      );
     }
-    if(url.pathname === "/api/telemetry")return telemetryApi(request);
-    if(url.pathname === "/api/layout")return publicLayoutApi(request,env);
+    if (url.pathname === "/api/telemetry") return telemetryApi(request);
+    if (url.pathname === "/api/layout") return publicLayoutApi(request, env);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
-          return result.response();
+      return handleImageOptimization(
+        request,
+        {
+          fetchAsset: (path) =>
+            env.ASSETS.fetch(new Request(new URL(path, request.url))),
+          transformImage: async (body, { width, format, quality }) => {
+            const result = await env.IMAGES.input(body)
+              .transform(width > 0 ? { width } : {})
+              .output({ format, quality });
+            return result.response();
+          },
         },
-      }, allowedWidths);
+        allowedWidths,
+      );
     }
 
     return handler.fetch(request, env, ctx);

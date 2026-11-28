@@ -57,23 +57,23 @@ The bodyweight and strength charts show a card for the nearest point when you ho
 
 Fitness runs an MCP server at `/api/mcp` on the app's origin. ChatGPT, Claude and other MCP clients can use it to read and edit food, saved meals, bodyweight and runs, and to read planned and completed training. Tell an assistant what you ate and it logs each item with estimated calories, protein and the nutrients you track, then reports the day's totals. Ask it to change your targets or start tracking fibre, and it updates Settings. Ask it to save a meal and the meal appears in Food for one-tap logging.
 
-| Tool                        | What it does                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------ |
-| `fitness_get_day`           | One day's meals with IDs, totals and what is left of the targets, the tracked nutrients, weigh-in, plan, workouts, runs |
-| `fitness_get_history`       | Daily calories, protein, tracked nutrients, weigh-ins, workouts and runs for up to 62 days        |
-| `fitness_list_saved_meals`  | Saved meals with IDs, calories, protein, carbs, fat and fibre                                    |
-| `fitness_add_meals`         | Logs one or more meals to a day                                                                  |
-| `fitness_update_meal`       | Changes a meal's name, calories, protein, carbs, fat, fibre or date                              |
-| `fitness_add_saved_meals`   | Saves one or more meals for one-tap logging; with `fitness:read`, skips meals already saved      |
-| `fitness_update_saved_meal` | Changes a saved meal's name, calories, protein, carbs, fat or fibre                              |
-| `fitness_update_food_targets` | Changes the calorie and protein targets, and which of carbs, fat and fibre to track with their daily targets |
-| `fitness_delete_entries`    | Removes meals, saved meals, runs or weigh-ins by ID                                              |
-| `fitness_log_weight`        | Records the day's bodyweight in kg or lb, replacing an earlier value for that date               |
-| `fitness_log_run`           | Records a run on today or an earlier date                                                        |
-| `fitness_list_exercises`    | The exercise catalogue with each exercise's equipment, load type, movement pattern, muscles, level and starting prescription, and the equipment types an account can list |
-| `fitness_get_training_plan` | The goal, repeating week, routines, dumbbell weights, planning profile and any proposal waiting for review |
-| `fitness_propose_plan`      | Proposes a repeating week and routines for the owner to accept in Fitness                        |
-| `fitness_get_plan_proposal` | Whether a proposal is pending, accepted, dismissed or replaced                                   |
+| Tool                          | What it does                                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fitness_get_day`             | One day's meals with IDs, totals and what is left of the targets, the tracked nutrients, weigh-in, plan, workouts, runs                                                   |
+| `fitness_get_history`         | Daily calories, protein, tracked nutrients, weigh-ins, workouts and runs for up to 62 days                                                                                |
+| `fitness_list_saved_meals`    | Saved meals with IDs, calories, protein, carbs, fat and fibre                                                                                                             |
+| `fitness_add_meals`           | Logs one or more meals to a day                                                                                                                                           |
+| `fitness_update_meal`         | Changes a meal's name, calories, protein, carbs, fat, fibre or date                                                                                                       |
+| `fitness_add_saved_meals`     | Saves one or more meals for one-tap logging; with `fitness:read`, skips meals already saved                                                                               |
+| `fitness_update_saved_meal`   | Changes a saved meal's name, calories, protein, carbs, fat or fibre                                                                                                       |
+| `fitness_update_food_targets` | Changes the calorie and protein targets, and which of carbs, fat and fibre to track with their daily targets                                                              |
+| `fitness_delete_entries`      | Removes meals, saved meals, runs or weigh-ins by ID                                                                                                                       |
+| `fitness_log_weight`          | Records the day's bodyweight in kg or lb, replacing an earlier value for that date                                                                                        |
+| `fitness_log_run`             | Records a run on today or an earlier date                                                                                                                                 |
+| `fitness_list_exercises`      | The exercise catalogue with each exercise's equipment, load type, movement pattern, muscles, level and starting prescription, and the equipment types an account can list |
+| `fitness_get_training_plan`   | The goal, repeating week, routines, dumbbell weights, planning profile and any proposal waiting for review                                                                |
+| `fitness_propose_plan`        | Proposes a repeating week and routines for the owner to accept in Fitness                                                                                                 |
+| `fitness_get_plan_proposal`   | Whether a proposal is pending, accepted, dismissed or replaced                                                                                                            |
 
 Dates use the account timezone, and a tool without a date uses today. Carbs, fat and fibre are optional grams on each meal and saved meal; in an update, `null` removes a value. `trackedNutrients` in day results lists the nutrients the account tracks, `recordedIn` in day and history results counts the day's meals that recorded each one, and a tracked nutrient without a target has `null` as its target and what is left. Read results include each meal, saved meal, run and weigh-in's ID and revision. Updates and deletions send the revision they read, and fail if the entry has changed since. Every change carries a `requestId` chosen by the assistant. Retrying the same call with the same ID returns the first result without saving again, and reusing an ID for different input fails. Retry a saved meal addition with the same access: a retry after the connection gains or loses `fitness:read` fails with the request ID error. Each tool call saves its changes and its result in one transaction, so a failed call saves nothing. Strength workouts are read-only here; record and correct them in the app.
 
@@ -120,17 +120,17 @@ Each request also sends `X-Fitness-Contract` with the highest version of the rec
 - `GET /api/app/photos` lists equipment photos as `{"photos": [{"id", "name", "type"}]}`. `POST /api/app/photos` saves one with `{"id", "name", "type", "base64"}`; a repeated `id` saves once. `GET /api/app/photos/<id>` replies with the photo, and `DELETE /api/app/photos/<id>` removes it.
 - `GET /api/app/export` replies with the same `bent-fitness-v1` download as Settings → Export.
 
-| Reply                    | Cause                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| `400 invalid_request`    | The body is not JSON or fails validation; `error` names the first problem                         |
-| `401 unauthorized`       | The token is missing, unknown, expired or issued for another audience. Refresh it or sign in      |
-| `403 client_not_allowed` | The token's OAuth application is not in `FITNESS_DEVICE_CLIENT_IDS`                               |
-| `403 insufficient_scope` | The token lacks a scope the route needs                                                           |
-| `403 not_invited`        | The account's verified primary email is not on the invitation list                                |
-| `413 payload_too_large`  | A record change over 4.5 MB, or a photo upload over 3 MB                                          |
-| `422 invalid_request`    | A record or photo rule refused the change; `error` says which and is safe to show                 |
+| Reply                    | Cause                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `400 invalid_request`    | The body is not JSON or fails validation; `error` names the first problem                                        |
+| `401 unauthorized`       | The token is missing, unknown, expired or issued for another audience. Refresh it or sign in                     |
+| `403 client_not_allowed` | The token's OAuth application is not in `FITNESS_DEVICE_CLIENT_IDS`                                              |
+| `403 insufficient_scope` | The token lacks a scope the route needs                                                                          |
+| `403 not_invited`        | The account's verified primary email is not on the invitation list                                               |
+| `413 payload_too_large`  | A record change over 4.5 MB, or a photo upload over 3 MB                                                         |
+| `422 invalid_request`    | A record or photo rule refused the change; `error` says which and is safe to show                                |
 | `426` (no code)          | The app build is older than the oldest version Fitness serves. Update the app; queued changes stay on the iPhone |
-| `503 auth_unavailable`   | Clerk did not answer within 10 seconds, or account services need configuration. Try again shortly |
+| `503 auth_unavailable`   | Clerk did not answer within 10 seconds, or account services need configuration. Try again shortly                |
 
 ## Apple Health
 

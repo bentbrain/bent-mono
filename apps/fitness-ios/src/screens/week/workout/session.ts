@@ -49,7 +49,9 @@ export function suggestedRest(workout: Workout) {
 
 /** Rest lengths to choose from: common lengths and every prescribed rest, shortest first. */
 export function restChoices(workout: Workout) {
-  return [...new Set([30, 60, 90, 120, 180, ...workout.exercises.map((exercise) => exercise.prescription.rest)])].sort((a, b) => a - b);
+  return [...new Set([30, 60, 90, 120, 180, ...workout.exercises.map((exercise) => exercise.prescription.rest)])].sort(
+    (a, b) => a - b,
+  );
 }
 
 /** Whether the "Rest done" state shows for the rest that ended at `endedDeadline`. */
@@ -80,7 +82,9 @@ export function applySetChange(
     ...workout,
     restUntil: startsRest && exercise ? options.now + exercise.prescription.rest * 1000 : workout.restUntil,
     exercises: workout.exercises.map((item, i) =>
-      i !== exerciseIndex ? item : { ...item, sets: item.sets.map((value, j) => (j === setIndex ? { ...value, ...change } : value)) },
+      i !== exerciseIndex
+        ? item
+        : { ...item, sets: item.sets.map((value, j) => (j === setIndex ? { ...value, ...change } : value)) },
     ),
   };
 }

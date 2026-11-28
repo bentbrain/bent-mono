@@ -92,7 +92,10 @@ export function clerkOAuth(settings: OAuthSettings): OAuthClient {
           ),
         );
       } catch (error) {
-        if (error instanceof TokenError && ["invalid_grant", "invalid_client", "unauthorized_client"].includes(error.code))
+        if (
+          error instanceof TokenError &&
+          ["invalid_grant", "invalid_client", "unauthorized_client"].includes(error.code)
+        )
           throw new RefreshRejected(error.message);
         throw error;
       }

@@ -1,50 +1,81 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { installationArguments, installPlaywright } from "./install-playwright.mjs";
+import {
+  installationArguments,
+  installPlaywright,
+} from "./install-playwright.mjs";
 
 const version = "1.64.1";
-const imageName = version => `mcr.microsoft.com/playwright:v${version}-noble`;
+const imageName = (version) => `mcr.microsoft.com/playwright:v${version}-noble`;
 const hosted = {
-  platform: "linux", arch: "x64",
+  platform: "linux",
+  arch: "x64",
   env: { GITHUB_ACTIONS: "true", PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright" },
   read: (path, encoding) => {
     assert.equal(path, "/ms-playwright/.docker-info");
     assert.equal(encoding, "utf8");
-    return JSON.stringify({ driverVersion: version, dockerImageName: imageName(version) });
+    return JSON.stringify({
+      driverVersion: version,
+      dockerImageName: imageName(version),
+    });
   },
 };
-const read = path => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path) =>
+  readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const job = (path, name) => {
   const text = read(path).split(`\n  ${name}:\n`)[1];
   assert(text, `${path} requires job ${name}`);
   return text.split(/\n  [a-zA-Z][\w-]*:\n/)[0];
 };
-const applicationFixture = context => {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), "playwright-install-fixture-")));
+const applicationFixture = (context) => {
+  const directory = realpathSync(
+    mkdtempSync(join(tmpdir(), "playwright-install-fixture-")),
+  );
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   const installed = join(directory, "node_modules/@playwright/test");
   mkdirSync(installed, { recursive: true });
   writeFileSync(join(directory, "package.json"), "{}\n");
-  writeFileSync(join(installed, "package.json"), JSON.stringify({
-    name: "@playwright/test", version,
-    exports: { "./package.json": "./package.json", "./cli": "./cli.mjs" },
-  }));
-  writeFileSync(join(installed, "cli.mjs"), "// Synthetic CLI. Execution is captured by the test runner.\n");
+  writeFileSync(
+    join(installed, "package.json"),
+    JSON.stringify({
+      name: "@playwright/test",
+      version,
+      exports: { "./package.json": "./package.json", "./cli": "./cli.mjs" },
+    }),
+  );
+  writeFileSync(
+    join(installed, "cli.mjs"),
+    "// Synthetic CLI. Execution is captured by the test runner.\n",
+  );
   return directory;
 };
 
-test("the matched official image installs exact browsers without invoking apt", context => {
+test("the matched official image installs exact browsers without invoking apt", (context) => {
   const application = applicationFixture(context);
-  assert.deepEqual(installationArguments(version, ["chromium", "webkit"], hosted), ["install", "chromium", "webkit"]);
+  assert.deepEqual(
+    installationArguments(version, ["chromium", "webkit"], hosted),
+    ["install", "chromium", "webkit"],
+  );
   let calls = 0;
-  installPlaywright(application, ["chromium"], { ...hosted,
+  installPlaywright(application, ["chromium"], {
+    ...hosted,
     run: (command, args) => {
       calls++;
       assert.equal(command, process.execPath);
-      assert.equal(args[0], join(application, "node_modules/@playwright/test/cli.mjs"));
+      assert.equal(
+        args[0],
+        join(application, "node_modules/@playwright/test/cli.mjs"),
+      );
       assert.deepEqual(args.slice(1), ["install", "chromium"]);
       return { status: 0 };
     },
@@ -52,49 +83,108 @@ test("the matched official image installs exact browsers without invoking apt", 
   assert.equal(calls, 1);
 });
 
-test("missing or mismatched containers fail before any install or privileged command", context => {
+test("missing or mismatched containers fail before any install or privileged command", (context) => {
   const application = applicationFixture(context);
   const invalid = [
-    { read: () => { throw new Error("missing image"); } },
+    {
+      read: () => {
+        throw new Error("missing image");
+      },
+    },
     { read: () => "{}" },
     { read: () => "not JSON" },
-    { read: () => JSON.stringify({ driverVersion: "1.62.1", dockerImageName: imageName("1.62.1") }) },
-    { read: () => JSON.stringify({ driverVersion: version, dockerImageName: imageName(version) + ".invalid" }) },
+    {
+      read: () =>
+        JSON.stringify({
+          driverVersion: "1.62.1",
+          dockerImageName: imageName("1.62.1"),
+        }),
+    },
+    {
+      read: () =>
+        JSON.stringify({
+          driverVersion: version,
+          dockerImageName: imageName(version) + ".invalid",
+        }),
+    },
     { arch: "arm64" },
-    { env: { GITHUB_ACTIONS: "true", PLAYWRIGHT_BROWSERS_PATH: "/other-cache" } },
+    {
+      env: { GITHUB_ACTIONS: "true", PLAYWRIGHT_BROWSERS_PATH: "/other-cache" },
+    },
   ];
   for (const overrides of invalid) {
     let calls = 0;
-    assert.throws(() => installPlaywright(application, ["chromium"], {
-      ...hosted, ...overrides, run: () => { calls++; return { status: 0 }; },
-    }), error => error.code !== "MODULE_NOT_FOUND");
+    assert.throws(
+      () =>
+        installPlaywright(application, ["chromium"], {
+          ...hosted,
+          ...overrides,
+          run: () => {
+            calls++;
+            return { status: 0 };
+          },
+        }),
+      (error) => error.code !== "MODULE_NOT_FOUND",
+    );
     assert.equal(calls, 0);
   }
 });
 
-test("local browser setup retains dependency installation and propagates CLI failures", context => {
+test("local browser setup retains dependency installation and propagates CLI failures", (context) => {
   const application = applicationFixture(context);
-  for (const options of [{ platform: "darwin", env: {} }, { platform: "linux", env: {} }]) {
-    assert.deepEqual(installationArguments(version, ["chromium"], {
-      ...options, read: () => assert.fail("unexpected container read"),
-    }), ["install", "--with-deps", "chromium"]);
+  for (const options of [
+    { platform: "darwin", env: {} },
+    { platform: "linux", env: {} },
+  ]) {
+    assert.deepEqual(
+      installationArguments(version, ["chromium"], {
+        ...options,
+        read: () => assert.fail("unexpected container read"),
+      }),
+      ["install", "--with-deps", "chromium"],
+    );
   }
-  assert.throws(() => installPlaywright(application, ["chromium"], {
-    ...hosted, run: () => ({ status: 1 }),
-  }), /installation failed/);
-  assert.throws(() => installPlaywright(application, ["chromium"], {
-    ...hosted, run: () => ({ status: null, error: new Error("spawn failed") }),
-  }), /spawn failed/);
+  assert.throws(
+    () =>
+      installPlaywright(application, ["chromium"], {
+        ...hosted,
+        run: () => ({ status: 1 }),
+      }),
+    /installation failed/,
+  );
+  assert.throws(
+    () =>
+      installPlaywright(application, ["chromium"], {
+        ...hosted,
+        run: () => ({ status: null, error: new Error("spawn failed") }),
+      }),
+    /spawn failed/,
+  );
 });
 
 test("every active browser job pins the official image to its installed Playwright version", () => {
   const browser = job(".github/workflows/quality.yml", "browser-suite");
-  const digest = "ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0";
+  const digest =
+    "ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0";
   assert(browser.includes("    runs-on: ubuntu-24.04\n"));
-  assert(browser.includes(`    container:\n      image: ${imageName(version)}@sha256:${digest}\n      options: --ipc=host --init\n`));
+  assert(
+    browser.includes(
+      `    container:\n      image: ${imageName(version)}@sha256:${digest}\n      options: --ipc=host --init\n`,
+    ),
+  );
   assert(browser.includes("    defaults:\n      run:\n        shell: bash\n"));
-  for (const directory of ["apps/jp", "apps/toolbar", "apps/trackmap", "apps/fitness"]) {
-    assert.equal(JSON.parse(read(`${directory}/package.json`)).devDependencies["@playwright/test"].replace(/^\^/, ""), version);
+  for (const directory of [
+    "apps/jp",
+    "apps/toolbar",
+    "apps/trackmap",
+    "apps/fitness",
+  ]) {
+    assert.equal(
+      JSON.parse(read(`${directory}/package.json`)).devDependencies[
+        "@playwright/test"
+      ].replace(/^\^/, ""),
+      version,
+    );
     assert(read("scripts/install-browsers.mjs").includes(`"${directory}"`));
   }
 });

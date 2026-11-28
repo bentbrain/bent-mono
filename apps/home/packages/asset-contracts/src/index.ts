@@ -139,11 +139,7 @@ function validateFootprint(
   }
 }
 
-function validateSprite(
-  value: unknown,
-  path: string,
-  errors: string[],
-): void {
+function validateSprite(value: unknown, path: string, errors: string[]): void {
   if (!isRecord(value)) {
     errors.push(`${path} must be an object.`);
     return;
@@ -205,11 +201,7 @@ function validateFourDirections(
   value: unknown,
   path: string,
   errors: string[],
-  validateView: (
-    view: unknown,
-    viewPath: string,
-    viewErrors: string[],
-  ) => void,
+  validateView: (view: unknown, viewPath: string, viewErrors: string[]) => void,
 ): void {
   if (!isRecord(value)) {
     errors.push(`${path} must be an object.`);
@@ -236,14 +228,20 @@ function validateSharedManifestFields(
   if (value.kind !== expectedKind) {
     errors.push(`kind must equal "${expectedKind}".`);
   }
-  if (!isNonEmptyString(value.id) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.id)) {
+  if (
+    !isNonEmptyString(value.id) ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.id)
+  ) {
     errors.push("id must be a non-empty kebab-case identifier.");
   }
   if (!isNonEmptyString(value.displayName)) {
     errors.push("displayName must be a non-empty string.");
   }
-  if (value.palette !== "apartment-hotel-v1" && value.palette !== "apartment-fixtures-v2") {
-    errors.push('palette must be apartment-hotel-v1 or apartment-fixtures-v2.');
+  if (
+    value.palette !== "apartment-hotel-v1" &&
+    value.palette !== "apartment-fixtures-v2"
+  ) {
+    errors.push("palette must be apartment-hotel-v1 or apartment-fixtures-v2.");
   }
   validateFootprint(value.footprint, "footprint", errors);
 }
@@ -296,7 +294,10 @@ export function validateCharacterManifest(value: unknown): ValidationResult {
   }
   validateSharedManifestFields(value, "character", errors);
 
-  if (!isRecord(value.animations) || Object.keys(value.animations).length === 0) {
+  if (
+    !isRecord(value.animations) ||
+    Object.keys(value.animations).length === 0
+  ) {
     errors.push("animations must contain at least one named animation.");
   } else {
     for (const [animationName, animation] of Object.entries(value.animations)) {

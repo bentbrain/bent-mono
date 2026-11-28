@@ -62,7 +62,13 @@ export function DayPanel({ day }: { day: string }) {
           {following.plan.routine.name}
         </AppText>
       ) : (
-        <AppText textRole="footnote" weight="semibold" tone="primary" accessibilityRole="link" onPress={() => openRun(following.date)}>
+        <AppText
+          textRole="footnote"
+          weight="semibold"
+          tone="primary"
+          accessibilityRole="link"
+          onPress={() => openRun(following.date)}
+        >
           Easy run
         </AppText>
       )}
@@ -87,7 +93,13 @@ export function DayPanel({ day }: { day: string }) {
           {recorded ? (
             <>
               <Body>{recordedText(info, day, today)}</Body>
-              <Button label="View results" tone="secondary" icon="list.bullet.clipboard" onPress={openHistory} testID="view-results" />
+              <Button
+                label="View results"
+                tone="secondary"
+                icon="list.bullet.clipboard"
+                onPress={openHistory}
+                testID="view-results"
+              />
               {next}
             </>
           ) : routine ? (

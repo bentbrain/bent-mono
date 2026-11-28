@@ -18,7 +18,8 @@ import { SidebarProvider } from "../_components/ui/sidebar";
 export const metadata: Metadata = {
   metadataBase: new URL("https://maya-collage.bent.build"),
   title: "Maya's Collages",
-  description: "Browse public collages or sign in to create digital collages in your browser.",
+  description:
+    "Browse public collages or sign in to create digital collages in your browser.",
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 

@@ -126,19 +126,22 @@ function dayFood(settings: Settings, records: RecordEntry[], day: string): Widge
  * timezone, each with its plan, its food against the targets and its links.
  * `scheme` is the app's URL scheme.
  */
-export function widgetSnapshot(settings: Settings, records: RecordEntry[], now: number, scheme: string): WidgetSnapshot {
+export function widgetSnapshot(
+  settings: Settings,
+  records: RecordEntry[],
+  now: number,
+  scheme: string,
+): WidgetSnapshot {
   const timezone = settings.timezone;
   const today = localDate(timezone, new Date(now));
-  const days = Array.from({ length: widgetDays }, (_, index) => addDays(today, index)).map(
-    (day): WidgetDay => ({
-      day,
-      start: zonedTime(day, 0, timezone),
-      end: zonedTime(addDays(day, 1), 0, timezone),
-      plan: dayPlan(settings, records, day, today),
-      food: dayFood(settings, records, day),
-      links: { week: link(scheme, "week", day), food: link(scheme, "food", day) },
-    }),
-  );
+  const days = Array.from({ length: widgetDays }, (_, index) => addDays(today, index)).map((day): WidgetDay => ({
+    day,
+    start: zonedTime(day, 0, timezone),
+    end: zonedTime(addDays(day, 1), 0, timezone),
+    plan: dayPlan(settings, records, day, today),
+    food: dayFood(settings, records, day),
+    links: { week: link(scheme, "week", day), food: link(scheme, "food", day) },
+  }));
   return { version: snapshotVersion, status: "signedIn", timezone, days };
 }
 

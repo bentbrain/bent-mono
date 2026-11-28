@@ -32,28 +32,30 @@ const rawConfig = Config.all({
   teslaClientId: Config.string("TESLA_CLIENT_ID"),
   teslaClientSecret: Config.redacted("TESLA_CLIENT_SECRET"),
   teslaRedirectUri: Config.string("TESLA_REDIRECT_URI"),
-  teslaAuthorizationEndpoint: Config.string("TESLA_AUTHORIZATION_ENDPOINT").pipe(
-    Config.withDefault("https://auth.tesla.com/oauth2/v3/authorize")
-  ),
+  teslaAuthorizationEndpoint: Config.string(
+    "TESLA_AUTHORIZATION_ENDPOINT",
+  ).pipe(Config.withDefault("https://auth.tesla.com/oauth2/v3/authorize")),
   teslaTokenEndpoint: Config.string("TESLA_TOKEN_ENDPOINT").pipe(
-    Config.withDefault("https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token")
+    Config.withDefault(
+      "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token",
+    ),
   ),
   teslaFleetApiBaseUrl: Config.string("TESLA_FLEET_API_BASE_URL").pipe(
-    Config.withDefault("https://fleet-api.prd.na.vn.cloud.tesla.com")
+    Config.withDefault("https://fleet-api.prd.na.vn.cloud.tesla.com"),
   ),
   teslaScopes: Config.string("TESLA_SCOPES").pipe(
-    Config.withDefault("openid offline_access vehicle_device_data")
+    Config.withDefault("openid offline_access vehicle_device_data"),
   ),
   adminGithubUsers: Config.string("BENT_DRIVE_ADMIN_GITHUB_USERS"),
   allowedGithubUsers: Config.string("BENT_DRIVE_ALLOWED_GITHUB_USERS"),
   allowLocalOAuthRedirects: Config.boolean("ALLOW_LOCAL_OAUTH_REDIRECTS").pipe(
-    Config.withDefault(false)
+    Config.withDefault(false),
   ),
   mcpAccessTokenTtlSeconds: Config.integer("MCP_ACCESS_TOKEN_TTL_SECONDS").pipe(
-    Config.withDefault(3_600)
+    Config.withDefault(3_600),
   ),
   mcpRefreshTokenTtlDays: Config.integer("MCP_REFRESH_TOKEN_TTL_DAYS").pipe(
-    Config.withDefault(90)
+    Config.withDefault(90),
   ),
 });
 
@@ -62,7 +64,10 @@ const loadAppConfig = rawConfig.pipe(
     const appUrl = config.appUrl.replace(/\/$/, "");
     const adminGithubUsers = parseGithubUserList(config.adminGithubUsers);
     const allowedGithubUsers = Array.from(
-      new Set([...parseGithubUserList(config.allowedGithubUsers), ...adminGithubUsers])
+      new Set([
+        ...parseGithubUserList(config.allowedGithubUsers),
+        ...adminGithubUsers,
+      ]),
     );
     return {
       appUrl,
@@ -84,7 +89,7 @@ const loadAppConfig = rawConfig.pipe(
       mcpRefreshTokenTtlSeconds: config.mcpRefreshTokenTtlDays * 24 * 60 * 60,
     };
   }),
-  Effect.withSpan("config.load")
+  Effect.withSpan("config.load"),
 );
 
 export const AppConfigLive = Layer.effect(AppConfigService, loadAppConfig);
@@ -93,10 +98,16 @@ export function reveal(value: Redacted.Redacted<string>): string {
   return Redacted.value(value);
 }
 
-function strictTlsDatabaseUrl(value: Redacted.Redacted<string>): Redacted.Redacted<string> {
+function strictTlsDatabaseUrl(
+  value: Redacted.Redacted<string>,
+): Redacted.Redacted<string> {
   const url = new URL(Redacted.value(value));
   const sslMode = url.searchParams.get("sslmode");
-  if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+  if (
+    sslMode === "prefer" ||
+    sslMode === "require" ||
+    sslMode === "verify-ca"
+  ) {
     url.searchParams.set("sslmode", "verify-full");
   }
   return Redacted.make(url.toString());

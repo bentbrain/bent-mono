@@ -12,7 +12,8 @@ export type SessionEntry = WorkoutEntry | RunEntry;
 export function correctionsByWorkout(records: RecordEntry[]) {
   const corrections = new Map<string, CorrectionEntry>();
   for (const record of records)
-    if (record.data.kind === "workoutCorrection") corrections.set(record.data.workoutId, { ...record, data: record.data });
+    if (record.data.kind === "workoutCorrection")
+      corrections.set(record.data.workoutId, { ...record, data: record.data });
   return corrections;
 }
 
@@ -20,7 +21,8 @@ export function correctionsByWorkout(records: RecordEntry[]) {
 export function finishedOriginals(records: RecordEntry[]) {
   const originals = new Map<string, WorkoutEntry>();
   for (const record of records)
-    if (record.data.kind === "workout" && record.data.finishedAt) originals.set(record.id, { ...record, data: record.data });
+    if (record.data.kind === "workout" && record.data.finishedAt)
+      originals.set(record.id, { ...record, data: record.data });
   return originals;
 }
 
@@ -64,7 +66,12 @@ export function sessionLabel(session: SessionEntry) {
 /** The change a workout's Remove action saves: a correction with no replacement. */
 export function removalFor(workout: WorkoutEntry, correction: CorrectionEntry | undefined) {
   return {
-    data: { kind: "workoutCorrection", workoutId: workout.id, replacement: null, reason: "Removed from history" } satisfies Correction,
+    data: {
+      kind: "workoutCorrection",
+      workoutId: workout.id,
+      replacement: null,
+      reason: "Removed from history",
+    } satisfies Correction,
     id: correction?.id,
     revision: correction?.revision ?? 0,
   };

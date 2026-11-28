@@ -23,7 +23,11 @@ export class TeslaTokenStore {
   readonly #tokenEndpoint: string;
   readonly #fetch: typeof fetch;
 
-  constructor(path: string, tokenEndpoint: string, fetcher: typeof fetch = fetch) {
+  constructor(
+    path: string,
+    tokenEndpoint: string,
+    fetcher: typeof fetch = fetch,
+  ) {
     this.#path = path;
     this.#tokenEndpoint = tokenEndpoint;
     this.#fetch = fetcher;
@@ -35,7 +39,10 @@ export class TeslaTokenStore {
     return storedTokenSchema.parse(parsedJson);
   }
 
-  async saveResponse(response: unknown, now = Date.now()): Promise<StoredTeslaToken> {
+  async saveResponse(
+    response: unknown,
+    now = Date.now(),
+  ): Promise<StoredTeslaToken> {
     const token = tokenResponseSchema.parse(response);
     const stored = storedTokenSchema.parse({
       ...token,
@@ -45,7 +52,9 @@ export class TeslaTokenStore {
     const temporaryPath = join(directory, `.tokens-${randomUUID()}.json`);
 
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, {
+      mode: 0o600,
+    });
     await rename(temporaryPath, this.#path);
     await chmod(this.#path, 0o600);
     return stored;
@@ -73,7 +82,9 @@ export class TeslaTokenStore {
     });
     const responseBody: unknown = await response.json();
     if (!response.ok) {
-      throw new Error(`Tesla refresh-token exchange failed with HTTP ${response.status}.`);
+      throw new Error(
+        `Tesla refresh-token exchange failed with HTTP ${response.status}.`,
+      );
     }
     const refreshed = await this.saveResponse(responseBody);
     return refreshed.access_token;

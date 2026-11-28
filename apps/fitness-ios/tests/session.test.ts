@@ -343,6 +343,9 @@ describe("account session", () => {
       throw new Error("disk");
     });
     expect(seen).toEqual(["signingOut"]);
-    expect(session.getState()).toMatchObject({ status: "signedOut", message: expect.stringContaining("could not be removed") });
+    expect(session.getState()).toMatchObject({
+      status: "signedOut",
+      message: expect.stringContaining("could not be removed"),
+    });
   });
 });

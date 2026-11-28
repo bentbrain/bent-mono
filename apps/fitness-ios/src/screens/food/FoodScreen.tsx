@@ -12,7 +12,16 @@ import { SelectableChart, useSelectionColors } from "../../ui/charts";
 import { haptic } from "../../ui/haptics";
 import { cn } from "../../ui/typography";
 import { DateBar } from "../shared/DateBar";
-import { dayLabels, daySummary, lastSevenDays, mealFromRegular, mealSummary, mealsOn, regulars, weekDescription } from "./meals";
+import {
+  dayLabels,
+  daySummary,
+  lastSevenDays,
+  mealFromRegular,
+  mealSummary,
+  mealsOn,
+  regulars,
+  weekDescription,
+} from "./meals";
 import { useFoodNavigation } from "./navigation";
 import { setFoodNotice, useFoodNotice } from "./notice";
 
@@ -45,7 +54,13 @@ export function FoodScreen(): JSX.Element {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <IconButton tone="plain" icon="plus" label="Add food" onPress={() => navigation.navigate("FoodMeal", { date })} testID="food-add" />
+        <IconButton
+          tone="plain"
+          icon="plus"
+          label="Add food"
+          onPress={() => navigation.navigate("FoodMeal", { date })}
+          testID="food-add"
+        />
       ),
     });
   }, [navigation, date]);
@@ -179,7 +194,14 @@ export function FoodScreen(): JSX.Element {
             />
           )}
         </ListSection>
-        <Button label="Add food" icon="plus" tone="tinted" fullWidth onPress={() => navigation.navigate("FoodMeal", { date })} testID="food-add-meal" />
+        <Button
+          label="Add food"
+          icon="plus"
+          tone="tinted"
+          fullWidth
+          onPress={() => navigation.navigate("FoodMeal", { date })}
+          testID="food-add-meal"
+        />
       </View>
 
       <ListSection
@@ -287,7 +309,12 @@ function Total({
 }) {
   const spoken = [`${label}: ${value} ${target}`, note, detail].filter(Boolean).join(". ");
   return (
-    <View className={cn("min-w-0 flex-1", compact ? "gap-1" : "gap-1.5")} accessible accessibilityLabel={`${spoken}.`} testID={testID}>
+    <View
+      className={cn("min-w-0 flex-1", compact ? "gap-1" : "gap-1.5")}
+      accessible
+      accessibilityLabel={`${spoken}.`}
+      testID={testID}
+    >
       <AppText textRole="caption" weight="medium" tone="muted" className="uppercase">
         {label}
       </AppText>
@@ -304,7 +331,10 @@ function Total({
           accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
         >
           <View
-            className={cn("h-full rounded-full", tone === "missed" ? "bg-missed" : tone === "done" ? "bg-done" : "bg-primary")}
+            className={cn(
+              "h-full rounded-full",
+              tone === "missed" ? "bg-missed" : tone === "done" ? "bg-done" : "bg-primary",
+            )}
             style={{ width: `${progress * 100}%` }}
           />
         </View>
