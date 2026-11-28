@@ -33,7 +33,9 @@ export function pointText(
   const amount =
     series.mode === "seconds"
       ? `${point.value} s`
-      : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
+      : series.load === "band"
+        ? `${point.value} reps`
+        : `${displayLoad(point.loadKg, units)} ${units} × ${point.value}`;
   return series.side ? `${amount} each side` : amount;
 }
 
@@ -52,8 +54,7 @@ export function strengthChange(
   if (series.mode === "reps") {
     const load =
       Math.round(
-        (displayLoad(to.loadKg, units) - displayLoad(from.loadKg, units)) *
-          100,
+        (displayLoad(to.loadKg, units) - displayLoad(from.loadKg, units)) * 100,
       ) / 100;
     if (load) return signed(load, units);
   }

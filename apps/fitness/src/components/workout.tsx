@@ -4,6 +4,8 @@ import {
   displayLoad,
   formatDate,
   lastExercise,
+  loadNote,
+  loadWording,
   progression,
   setResult,
 } from "@bent/fitness-contracts/domain";
@@ -194,7 +196,12 @@ export function WorkoutEditor({
       </details>
       <p className="session-guidance">
         Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in
-        reserve. Weights are for one dumbbell; each side has its own reps.
+        reserve.{" "}
+        {loadNote(
+          workout.exercises.map((exercise) => exercise.prescription),
+          settings.units,
+        )}{" "}
+        Each side has its own reps.
       </p>
       <InputNotices inputs={inputs} />
       <ExerciseList
@@ -458,9 +465,9 @@ export function ExerciseList({
                 }}
               >
                 <span className="set-index">{si + 1}</span>
-                {p.mode === "reps" && (
+                {loadWording(p, settings.units).weighed && (
                   <label>
-                    <span>{settings.units} / dumbbell</span>
+                    <span>{loadWording(p, settings.units).heading}</span>
                     {numberInput(si, "loadKg", `${name} weight`, {
                       inputMode: "decimal",
                       max: Math.floor(displayLoad(1000, settings.units)),

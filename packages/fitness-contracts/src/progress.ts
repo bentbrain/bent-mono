@@ -1,5 +1,12 @@
-import { addDays, mondayOf, scheduled, trainingRecords } from "./domain";
+import {
+  addDays,
+  loadTypeOf,
+  mondayOf,
+  scheduled,
+  trainingRecords,
+} from "./domain";
 import type { Exercise, RecordEntry, Settings, Workout } from "./domain";
+import type { LoadType } from "./catalogue";
 
 export type WeekSummary = {
   monday: string;
@@ -65,6 +72,8 @@ export type StrengthSeries = {
   name: string;
   mode: Exercise["mode"];
   side: boolean;
+  /** How the series' weights were recorded. */
+  load: LoadType;
   points: StrengthPoint[];
 };
 
@@ -108,12 +117,18 @@ export function strengthSeries(records: RecordEntry[]): StrengthSeries[] {
       const best = bestSet(exercise);
       if (!best) continue;
       const p = exercise.prescription;
-      const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}`;
+      const load = loadTypeOf(p);
+      // Prescriptions that name a load type chart apart from ones recorded
+      // another way. Others keep the key they always had.
+      const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}${
+        p.load === undefined ? "" : `:${load}`
+      }`;
       const entry = series.get(key) ?? {
         key,
         name: p.name,
         mode: p.mode,
         side: p.side,
+        load,
         points: [],
       };
       entry.name = p.name;

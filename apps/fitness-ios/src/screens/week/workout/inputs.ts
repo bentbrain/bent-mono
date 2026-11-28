@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { displayLoad, toKg, workoutSchema } from "@bent/fitness-contracts/domain";
+import { displayLoad, loadWording, toKg, workoutSchema } from "@bent/fitness-contracts/domain";
 import type { Exercise, Settings, Workout } from "@bent/fitness-contracts/domain";
 
 /*
@@ -272,14 +272,18 @@ export type SetInput = {
   spoken: string;
   /** Whole numbers only, which shows the number pad without a decimal point. */
   integer: boolean;
+  /** What VoiceOver adds about the value, such as "In kg per dumbbell". */
+  hint?: string;
 };
 
 /** The inputs a set of this exercise records, in display order. */
 export function setInputs(prescription: Exercise, units: Units): SetInput[] {
   const seconds = prescription.mode === "seconds";
+  const wording = loadWording(prescription, units);
   const amount = seconds ? "seconds" : "reps";
   const inputs: SetInput[] = [];
-  if (!seconds) inputs.push({ field: "loadKg", heading: `${units} / dumbbell`, spoken: "weight", integer: false });
+  if (wording.weighed)
+    inputs.push({ field: "loadKg", heading: wording.heading, spoken: "weight", integer: false, hint: `In ${wording.unit}` });
   inputs.push({
     field: "value",
     heading: seconds ? (prescription.side ? "Left seconds" : "Seconds") : prescription.side ? "Left reps" : "Reps",

@@ -118,6 +118,7 @@ describe("progress summary", () => {
       name: "Goblet squat",
       mode: "reps",
       side: false,
+      load: "dumbbell",
       points: [
         { date: "2026-11-02", loadKg: 10, value: 10 },
         { date: "2026-11-09", loadKg: 12.5, value: 8 },
@@ -140,6 +141,7 @@ describe("progress summary", () => {
       name: "Forearm plank",
       mode: "seconds",
       side: true,
+      load: "bodyweight",
       points: [
         { date: "2026-11-02", loadKg: 0, value: 30 },
         { date: "2026-11-09", loadKg: 0, value: 30 },
@@ -214,6 +216,7 @@ describe("chart popovers", () => {
     name: "Goblet squat",
     mode: "reps",
     side: false,
+    load: "dumbbell",
     points: [
       { date: "2026-11-02", loadKg: 10, value: 8 },
       { date: "2026-11-04", loadKg: 12, value: 8 },
@@ -238,6 +241,7 @@ describe("chart popovers", () => {
       name: "Plank",
       mode: "seconds",
       side: false,
+      load: "bodyweight",
       points: [
         { date: "2026-11-02", loadKg: 0, value: 30 },
         { date: "2026-11-04", loadKg: 0, value: 45 },

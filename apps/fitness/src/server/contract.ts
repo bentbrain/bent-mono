@@ -9,11 +9,11 @@
  * Release the iPhone build that declares 2 to TestFlight before the
  * website release that raises the minimum to 2.
  *
- * Before raising it to 3, label weights by load type in both apps (plan
- * suggestions, workout and correction loggers, VoiceOver hints, guides and
- * strength charts all say "per dumbbell" today), leave weight entry out of
- * band exercises, and ship an iPhone build that declares contract 3.
- * Records below contract 3 hold only dumbbell loads.
+ * Both apps label weights by load type (loadWording in the shared domain)
+ * and leave weight entry out of band exercises. Before raising the minimum
+ * to 3, ship an iPhone build that declares contract 3, then release it to
+ * TestFlight ahead of the website. Records below contract 3 hold only
+ * dumbbell loads.
  */
 const defaultMinimum = 2;
 let minimum = defaultMinimum;

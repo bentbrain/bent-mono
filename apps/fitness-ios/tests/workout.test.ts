@@ -170,6 +170,15 @@ describe("typed workout values", () => {
     expect(hold.every((i) => !i.integer)).toBe(true);
     expect(setInputs({ ...base, mode: "reps", side: false }, "kg").map((i) => i.integer)).toEqual([false, true, true]);
   });
+  test("weights follow the load type, and bands record none", () => {
+    const base = workout.exercises[0]?.prescription;
+    if (!base) throw new Error("Missing exercise");
+    const custom = { ...base, id: "custom-press", mode: "reps" as const, side: false };
+    const bar = setInputs({ ...custom, load: "barbell" }, "kg");
+    expect(bar[0]).toMatchObject({ field: "loadKg", heading: "kg on bar", hint: "In kg on the bar" });
+    expect(setInputs({ ...custom, load: "band" }, "kg").map((i) => i.field)).toEqual(["value", "rir"]);
+    expect(setInputs(custom, "lb")[0]?.hint).toBe("In lb per dumbbell");
+  });
 });
 
 describe("saving typed values", () => {

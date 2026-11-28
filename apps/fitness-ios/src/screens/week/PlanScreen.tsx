@@ -5,6 +5,8 @@ import {
   effectivePrescription,
   formatDate,
   lastExercise,
+  loadNote,
+  loadWording,
   progression,
   sessionMinutes,
   setResult,
@@ -48,7 +50,9 @@ export function PlanScreen({ route }: StaticScreenProps<{ date: string; routineI
         </AppText>
       </View>
 
-      <Notice>Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve. Weights mean one dumbbell.</Notice>
+      <Notice>
+        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve. {loadNote(routine.exercises, settings.units)}
+      </Notice>
       {recorded ? (
         <Notice
           tone="success"
@@ -115,9 +119,10 @@ export function PlanScreen({ route }: StaticScreenProps<{ date: string; routineI
           const last = previous
             ? previous.sets.map((set) => setResult(set, previous.prescription, settings.units)).join(" · ")
             : "Your first recorded session";
+          const wording = loadWording(exercise, settings.units);
           const load =
-            exercise.mode === "reps" && advice.loadKg !== null
-              ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${settings.units} per dumbbell.`
+            wording.weighed && advice.loadKg !== null
+              ? ` Suggested load: ${displayLoad(advice.loadKg, settings.units)} ${wording.unit}.`
               : "";
           return (
             <View key={`${exercise.id}:${index}`} className="gap-3 px-4 py-3.5" testID={`plan-exercise-${index}`}>
