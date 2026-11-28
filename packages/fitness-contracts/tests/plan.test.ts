@@ -19,6 +19,11 @@ import {
 } from "../src/index";
 import { checkPlan } from "../src/plan";
 
+/** A fixture value, or a clear failure when the catalogue or defaults lack it. */
+function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`Missing fixture: ${what}`);
+  return value;
+}
 const base = () => defaultSettings("2026-11-30", "Australia/Brisbane");
 
 function completed(prescription: Exercise, loadKg: number) {
@@ -151,7 +156,10 @@ describe("progression by load type", () => {
   });
   test("keeps dumbbell suggestions for a plank changed to reps", () => {
     // The routine editors let any exercise change between reps and seconds.
-    const plank = exercises.find((item) => item.id === "plank")!;
+    const plank = present(
+      exercises.find((item) => item.id === "plank"),
+      "plank",
+    );
     const reps: Exercise = { ...plank, mode: "reps", min: 8, max: 12 };
     expect(loadTypeOf(reps)).toBe("dumbbell");
     const advice = progression(reps, completed(reps, 10), {
@@ -161,18 +169,27 @@ describe("progression by load type", () => {
     expect(advice.text).toContain("next available dumbbell");
   });
   test("keeps a weight saved on a timed plank when it changes to reps", () => {
-    const plank = exercises.find((item) => item.id === "plank")!;
+    const plank = present(
+      exercises.find((item) => item.id === "plank"),
+      "plank",
+    );
     const reps: Exercise = { ...plank, mode: "reps", min: 8, max: 12 };
     const held = completed(plank, 10);
-    held.sets[0] = { ...held.sets[0]!, value: plank.min };
+    held.sets[0] = { ...present(held.sets[0], "sets"), value: plank.min };
     const advice = progression(reps, held, { dumbbellsKg: [10, 12] });
     expect(advice.loadKg).toBe(10);
     expect(advice.text).toContain("Repeat the load");
   });
   test("keeps a weight set by a correction on a timed plank", () => {
     const settings = base();
-    const plank = exercises.find((item) => item.id === "plank")!;
-    const routine = { ...settings.routines[0]!, exercises: [plank] };
+    const plank = present(
+      exercises.find((item) => item.id === "plank"),
+      "plank",
+    );
+    const routine = {
+      ...present(settings.routines[0], "routines"),
+      exercises: [plank],
+    };
     const draft = createWorkout(settings, routine, "2026-11-30", false, []);
     const finished = {
       ...draft,
@@ -267,7 +284,7 @@ describe("progression by load type", () => {
   test("keeps the load until every set reaches the top of the range", () => {
     const p = prescription("custom-squat", "barbell");
     const short = completed(p, 60);
-    short.sets[0] = { ...short.sets[0]!, value: 10 };
+    short.sets[0] = { ...present(short.sets[0], "sets"), value: 10 };
     expect(progression(p, short, { dumbbellsKg: [] }).loadKg).toBe(60);
   });
 });
@@ -285,7 +302,7 @@ describe("plan check", () => {
   });
   test("refuses exercises outside the catalogue unless the account defines them", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const sled: Exercise = {
       id: "custom-sled",
       name: "Sled push",
@@ -318,7 +335,7 @@ describe("plan check", () => {
   });
   test("refuses a prescription that records differently from its catalogue entry", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const result = checkPlan({
       ...settings,
       routines: [
@@ -337,12 +354,12 @@ describe("plan check", () => {
   });
   test("refuses load types that differ from the catalogue or the account's definition", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const withExercises = (exercises: Exercise[]) => ({
       ...settings,
       routines: [{ ...routine, exercises }, ...settings.routines.slice(1)],
     });
-    const squat = routine.exercises[0]!;
+    const squat = present(routine.exercises[0], "exercises");
     const explicit = checkPlan(withExercises([{ ...squat, load: "dumbbell" }]));
     expect(explicit.ok).toBe(false);
     if (!explicit.ok)
@@ -372,7 +389,7 @@ describe("plan check", () => {
   });
   test("checks dated strength routines", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const result = checkPlan({
       ...settings,
       dayPlans: {
@@ -380,7 +397,9 @@ describe("plan check", () => {
           type: "strength",
           routine: {
             ...routine,
-            exercises: [{ ...routine.exercises[0]!, id: "mystery" }],
+            exercises: [
+              { ...present(routine.exercises[0], "exercises"), id: "mystery" },
+            ],
           },
         },
       },
@@ -393,13 +412,15 @@ describe("plan check", () => {
   });
   test("refuses rep ranges that are not whole numbers", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const result = checkPlan({
       ...settings,
       routines: [
         {
           ...routine,
-          exercises: [{ ...routine.exercises[0]!, min: 8.5 }],
+          exercises: [
+            { ...present(routine.exercises[0], "exercises"), min: 8.5 },
+          ],
         },
       ],
     });
@@ -409,7 +430,7 @@ describe("plan check", () => {
   });
   test("counts both sides of timed exercises in dated routines against the session length", () => {
     const settings = base();
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const hold: Exercise = {
       id: "custom-side-hold",
       name: "Side plank",
@@ -455,7 +476,7 @@ describe("plan check", () => {
   test("keeps workouts created from checked plans valid", () => {
     const result = checkPlan(base());
     if (!result.ok) throw new Error("Expected a valid plan");
-    const routine = result.settings.routines[0]!;
+    const routine = present(result.settings.routines[0], "routines");
     expect(() =>
       createWorkout(result.settings, routine, "2026-11-30", false, []),
     ).not.toThrow();
@@ -475,10 +496,15 @@ describe("app contract", () => {
     const settings = base();
     expect(requiredContract(settings)).toBe(1);
     expect(requiredContract({ ...settings, sessionMinutes: 45 })).toBe(2);
-    const routine = settings.routines[0]!;
+    const routine = present(settings.routines[0], "routines");
     const loaded = {
       ...routine,
-      exercises: [{ ...routine.exercises[0]!, load: "barbell" as const }],
+      exercises: [
+        {
+          ...present(routine.exercises[0], "exercises"),
+          load: "barbell" as const,
+        },
+      ],
     };
     expect(requiredContract({ ...settings, routines: [loaded] })).toBe(2);
     expect(
@@ -489,7 +515,7 @@ describe("app contract", () => {
     ).toBe(2);
     const workout = createWorkout(settings, routine, "2026-11-30", false, []);
     expect(requiredContract(workout)).toBe(1);
-    const first = workout.exercises[0]!;
+    const first = present(workout.exercises[0], "exercises");
     expect(
       requiredContract({
         ...workout,
