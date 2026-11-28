@@ -29,8 +29,8 @@ import {
 } from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
 import {
-  distinctLabels,
   matchKey,
+  savedMealLabels,
   variantNames,
 } from "../src/components/meal-names";
 import {
@@ -1107,6 +1107,7 @@ describe("saved meal variant names", () => {
   test("groups names the way the agent bridge compares them", () => {
     expect(matchKey("  Péanut,  BUTTER ")).toBe(matchKey("peanut butter"));
     expect(matchKey("Straße")).toBe("strasse");
+    expect(matchKey("Smør")).toBe("smor");
     const names = variantNames([
       meal("a", { name: "Peanut butter", calories: 350 }),
       meal("b", { name: "Peanut  butter", calories: 400 }),
@@ -1115,20 +1116,32 @@ describe("saved meal variant names", () => {
     expect(names.get("b")).toBe("400 kcal");
   });
 
-  test("gives labels that still match another their place", () => {
-    const labels = distinctLabels(
-      [
-        { id: "a", label: "Remove regular Oats, 12.1g protein" },
-        { id: "b", label: "Remove regular Oats, 12.4g protein" },
-        { id: "c", label: "Remove regular Oats, 12.1g protein" },
-      ],
-      "saved meal",
-    );
-    expect([...labels.values()]).toEqual([
-      "Remove regular Oats, 12.1g protein, saved meal 1",
-      "Remove regular Oats, 12.4g protein",
-      "Remove regular Oats, 12.1g protein, saved meal 3",
-    ]);
-    expect(new Set([...labels.values()].map(matchKey)).size).toBe(3);
+  test("saved meal labels never match one another", () => {
+    const meals = [
+      meal("a", { protein: 12.1 }),
+      meal("b", { protein: 12.4 }),
+      meal("c", { name: "Oats, 12.1g protein" }),
+      meal("d", { name: "Oats, 12.1g protein, saved meal 1" }),
+      meal("e", { name: "Oats with banana" }),
+      meal("f", { name: "Smør", protein: 12.1 }),
+      meal("g", { name: "Smor", protein: 12.4 }),
+    ];
+    const labels = [...savedMealLabels(meals, "Sat 28 Nov 2026").values()];
+    expect(labels[0]).toEqual({
+      add: "Add saved meal 1: Oats to Sat 28 Nov 2026, 12.1g protein",
+      remove: "Remove saved meal 1: Oats, 12.1g protein",
+    });
+    expect(labels[6]?.remove).toBe("Remove saved meal 7: Smor, 12.4g protein");
+    for (const kind of ["add", "remove"] as const) {
+      const keys = labels.map((label) => matchKey(label[kind]));
+      expect(new Set(keys).size).toBe(keys.length);
+      // The bridge matches a label as a run of whole words, so for titles that
+      // don't copy another label, none may sit inside another.
+      const plain = keys.filter((_, index) => index !== 2 && index !== 3);
+      for (const mine of plain)
+        for (const other of plain)
+          if (mine !== other)
+            expect(` ${other} `.includes(` ${mine} `)).toBe(false);
+    }
   });
 });

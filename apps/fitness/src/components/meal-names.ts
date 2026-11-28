@@ -17,6 +17,18 @@ function field(value: number | undefined, key: (typeof fields)[number]) {
   return key === "calories" ? `${value} kcal` : `${value}g ${label}`;
 }
 
+// Letters that Unicode normalization leaves whole.
+const folded: Record<string, string> = {
+  ß: "ss",
+  æ: "ae",
+  œ: "oe",
+  ø: "o",
+  ł: "l",
+  đ: "d",
+  ı: "i",
+  þ: "th",
+};
+
 /**
  * Text as the agent bridge compares labels: by whole words, regardless of
  * case, accents, punctuation and spacing.
@@ -26,7 +38,7 @@ export function matchKey(text: string) {
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replaceAll("ß", "ss")
+    .replace(/[ßæœøłđıþ]/g, (letter) => folded[letter] ?? letter)
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
@@ -58,25 +70,27 @@ export function variantNames(meals: { id: string; data: Values }[]) {
 }
 
 /**
- * Labels by id, so that no two match each other the way the agent bridge
- * compares them. A label that still matches another, as a typed title can,
- * gets the item's place in the list.
+ * The Add and Remove labels of each saved meal, by id. Each names the meal's
+ * place in the list before its title, so no label matches another however a
+ * title is written, and meals that share a name add what tells them apart.
  */
-export function distinctLabels(
-  items: { id: string; label: string }[],
-  place: string,
+export function savedMealLabels(
+  meals: { id: string; data: Values }[],
+  day: string,
 ) {
-  let labels = items.map((item) => item.label);
-  for (let round = 0; round < 3; round++) {
-    const counts = new Map<string, number>();
-    for (const label of labels)
-      counts.set(matchKey(label), (counts.get(matchKey(label)) ?? 0) + 1);
-    if (![...counts.values()].some((count) => count > 1)) break;
-    labels = labels.map((label, index) =>
-      (counts.get(matchKey(label)) ?? 0) > 1
-        ? `${label}, ${place} ${index + 1}`
-        : label,
-    );
-  }
-  return new Map(items.map((item, index) => [item.id, labels[index] ?? ""]));
+  const variants = variantNames(meals);
+  return new Map(
+    meals.map((meal, index) => {
+      const place = `saved meal ${index + 1}: ${meal.data.name}`;
+      const variant = variants.get(meal.id);
+      const detail = variant ? `, ${variant}` : "";
+      return [
+        meal.id,
+        {
+          add: `Add ${place} to ${day}${detail}`,
+          remove: `Remove ${place}${detail}`,
+        },
+      ];
+    }),
+  );
 }

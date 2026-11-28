@@ -447,7 +447,7 @@ test("an agent tells saved meals with the same name apart", async ({
     await expect(page.locator(".sync-state")).toHaveText("Saved");
   }
   const quickAdds = (await snapshot(page)).filter((entry) =>
-    entry.label?.startsWith("Add Oats"),
+    /^Add saved meal \d+: Oats to /.test(entry.label ?? ""),
   );
   expect(quickAdds.map((entry) => entry.label?.split(", ").at(-1))).toEqual([
     "12.1g protein",

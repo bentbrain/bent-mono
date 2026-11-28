@@ -1069,7 +1069,9 @@ test("food entries can be edited and removed, and the body chart labels recorded
     page.getByText("It is already in Regular meals.", { exact: false }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /^Add Synthetic oats to / }),
+    page.getByRole("button", {
+      name: /^Add saved meal \d+: Synthetic oats to /,
+    }),
   ).toHaveCount(1);
   await page
     .getByRole("button", { name: "Edit synthetic oats", exact: true })
@@ -2013,7 +2015,9 @@ test("food steps between days, adds saved meals in one tap and compares the week
   await expect(page).toHaveURL(/\/food\?date=2026-01-06$/);
   await expect(page.locator(".food-screen > .entries")).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Add Synthetic oats to Tue 6 Jan 2026" })
+    .getByRole("button", {
+      name: "Add saved meal 1: Synthetic oats to Tue 6 Jan 2026",
+    })
     .click();
   await expect(
     page.getByText("Added Synthetic oats for Tue 6 Jan 2026."),
