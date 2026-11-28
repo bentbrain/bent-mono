@@ -146,9 +146,12 @@ export function instructions(access: AgentAccess) {
       access.read
         ? "Before editing or removing entries, call fitness_get_day, or fitness_list_saved_meals for saved meals, to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
         : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
-      "Use fitness_update_food_targets when the user wants to change their calorie or protein target, or start or stop tracking carbs, fat or fibre and set their daily targets.",
       "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
       "Weights are stored in kilograms; pass the unit the user gave.",
+    );
+  if (access.targets)
+    lines.push(
+      "Use fitness_update_food_targets when the user wants to change their calorie or protein target, or start or stop tracking carbs, fat or fibre and set their daily targets.",
     );
   return lines.join(" ");
 }
@@ -300,40 +303,6 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
     );
 
     server.registerTool(
-      "fitness_update_food_targets",
-      {
-        title: "Update food targets",
-        description:
-          "Changes the daily calorie and protein targets, and which of carbs, fat and fibre the user tracks with their daily targets. Omitted values keep their current settings. Tracked nutrients show on the Food screen and in day totals.",
-        inputSchema: {
-          requestId,
-          calories: z
-            .number()
-            .int()
-            .min(800)
-            .max(10000)
-            .optional()
-            .describe("Daily calorie target (kcal)"),
-          protein: z
-            .number()
-            .min(20)
-            .max(400)
-            .optional()
-            .describe("Daily protein target in grams"),
-          nutrients: z
-            .object({
-              carbs: tracking("carbs"),
-              fat: tracking("fat"),
-              fibre: tracking("fibre"),
-            })
-            .optional(),
-        },
-        annotations: { ...replace, idempotentHint: true },
-      },
-      (input) => run(() => updateFoodTargets(owner, access, input)),
-    );
-
-    server.registerTool(
       "fitness_log_weight",
       {
         title: "Log bodyweight",
@@ -368,6 +337,42 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         annotations: add,
       },
       (input) => run(() => logRun(owner, access, input)),
+    );
+  }
+
+  if (access.targets) {
+    server.registerTool(
+      "fitness_update_food_targets",
+      {
+        title: "Update food targets",
+        description:
+          "Changes the daily calorie and protein targets, and which of carbs, fat and fibre the user tracks with their daily targets. Omitted values keep their current settings. Tracked nutrients show on the Food screen and in day totals.",
+        inputSchema: {
+          requestId,
+          calories: z
+            .number()
+            .int()
+            .min(800)
+            .max(10000)
+            .optional()
+            .describe("Daily calorie target (kcal)"),
+          protein: z
+            .number()
+            .min(20)
+            .max(400)
+            .optional()
+            .describe("Daily protein target in grams"),
+          nutrients: z
+            .object({
+              carbs: tracking("carbs"),
+              fat: tracking("fat"),
+              fibre: tracking("fibre"),
+            })
+            .optional(),
+        },
+        annotations: { ...replace, idempotentHint: true },
+      },
+      (input) => run(() => updateFoodTargets(owner, access, input)),
     );
   }
 

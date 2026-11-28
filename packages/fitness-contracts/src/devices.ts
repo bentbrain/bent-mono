@@ -6,6 +6,8 @@ export const fitnessScopes = {
   read: "fitness:read",
   /** Add, change and remove meals, saved meals, bodyweight and runs. */
   write: "fitness:write",
+  /** Change the calorie and protein targets and the nutrients tracked. */
+  targets: "fitness:targets",
   /** Import Apple Health weigh-ins and runs. Device keys hold only this scope. */
   healthImport: "fitness:health:import",
   /** Exchange a one-time OAuth token for a device key. */
