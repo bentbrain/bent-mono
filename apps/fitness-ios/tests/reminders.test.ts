@@ -5,6 +5,8 @@ import {
   ReminderScheduler,
   clockText,
   defaultReminderSettings,
+  fireTimeText,
+  openedDay,
   parseReminderSettings,
   reminderDays,
   reminderPlan,
@@ -140,6 +142,16 @@ describe("reminderText", () => {
     expect(reminderText(settings, [record(run("2026-11-23"))], "2026-11-23", false)).toBeNull();
   });
 
+  test("follows corrections: a removed workout frees its day and a moved one counts on its new date", () => {
+    const original = record(workout("2026-11-23", true));
+    const removed = record({ kind: "workoutCorrection", workoutId: original.id, replacement: null, reason: "Removed from history" });
+    expect(reminderText(settings, [original, removed], "2026-11-23", false)?.title).toBe("Today: Strength A");
+    const movedWorkout = { ...workout("2026-11-25", true), date: "2026-11-25" };
+    const moved = record({ kind: "workoutCorrection", workoutId: original.id, replacement: movedWorkout, reason: "Wrong day" });
+    expect(reminderText(settings, [original, moved], "2026-11-23", false)?.title).toBe("Today: Strength A");
+    expect(reminderText(settings, [original, moved], "2026-11-25", false)).toBeNull();
+  });
+
   test("follows a dated plan", () => {
     // Thursday's rest and Friday's Strength A swap.
     const moved = reorganiseDays(settings, "2026-11-27", "2026-11-26", "2026-11-23", []);
@@ -208,17 +220,40 @@ describe("reminderPlan", () => {
   });
 });
 
+describe("tapped reminders", () => {
+  test("open their day only for the account they were scheduled for", () => {
+    expect(openedDay({ day: "2026-11-23", owner: "account-1" }, "account-1")).toBe("2026-11-23");
+    expect(openedDay({ day: "2026-11-23", owner: "account-1" }, "account-2")).toBeNull();
+    expect(openedDay({ day: "23 Nov", owner: "account-1" }, "account-1")).toBeNull();
+    expect(openedDay(null, "account-1")).toBeNull();
+  });
+});
+
+describe("fireTimeText", () => {
+  test("shows when the reminder fires in the account timezone", () => {
+    const at = zonedTime("2026-11-23", 420, "Australia/Brisbane");
+    expect(fireTimeText(at, "Australia/Brisbane", "en-GB")).toBe("7:00");
+    expect(fireTimeText(at, "Australia/Brisbane", "en-US")).toBe("7:00 AM");
+  });
+
+  test("shows the moved time when a daylight-saving change skips the chosen one", () => {
+    const at = zonedTime("2026-10-04", 150, "Australia/Sydney");
+    expect(fireTimeText(at, "Australia/Sydney", "en-GB")).toBe("3:30");
+  });
+});
+
 describe("ReminderScheduler", () => {
   const reminder = (day: string): Reminder => ({ day, at: 0, title: "Today: Strength A", body: "" });
+  const owner = "account-1";
 
-  function fakeCenter(result: "scheduled" | "denied" = "scheduled") {
+  function fakeCenter(result: "scheduled" | "denied" | "fails" = "scheduled") {
     const calls: string[] = [];
     const gates: (() => void)[] = [];
     const center: ReminderCenter = {
-      scheduleReminders: (reminders) =>
-        new Promise((resolve) => {
-          calls.push(`schedule ${reminders.map((item) => item.day).join(",")}`);
-          gates.push(() => resolve(result));
+      scheduleReminders: (owner, reminders) =>
+        new Promise((resolve, reject) => {
+          calls.push(`schedule ${owner} ${reminders.map((item) => item.day).join(",")}`);
+          gates.push(() => (result === "fails" ? reject(new Error("1 workout reminders could not be scheduled.")) : resolve(result)));
         }),
       cancelReminders: () => {
         calls.push("cancel");
@@ -240,30 +275,30 @@ describe("ReminderScheduler", () => {
   test("runs in order and skips a schedule the same as the last", async () => {
     const { center, calls, release } = fakeCenter();
     const scheduler = new ReminderScheduler(center);
-    const first = scheduler.schedule([reminder("2026-11-23")]);
-    const second = scheduler.schedule([reminder("2026-11-23")]);
-    const forced = scheduler.schedule([reminder("2026-11-23")], true);
+    const first = scheduler.schedule(owner, [reminder("2026-11-23")]);
+    const second = scheduler.schedule(owner, [reminder("2026-11-23")]);
+    const forced = scheduler.schedule(owner, [reminder("2026-11-23")], true);
     await release();
     expect(await first).toBe("scheduled");
     expect(await second).toBe("unchanged");
     expect(await forced).toBe("scheduled");
-    expect(calls).toEqual(["schedule 2026-11-23", "schedule 2026-11-23"]);
+    expect(calls).toEqual(["schedule account-1 2026-11-23", "schedule account-1 2026-11-23"]);
   });
 
   test("a cancel drops schedules still waiting and clears what was scheduled", async () => {
     const { center, calls, release, tick } = fakeCenter();
     const scheduler = new ReminderScheduler(center);
-    const running = scheduler.schedule([reminder("2026-11-23")]);
+    const running = scheduler.schedule(owner, [reminder("2026-11-23")]);
     await tick();
-    const waiting = scheduler.schedule([reminder("2026-11-24")]);
+    const waiting = scheduler.schedule(owner, [reminder("2026-11-24")]);
     const cancelled = scheduler.cancel();
     await release();
     await cancelled;
     expect(await running).toBe("scheduled");
     expect(await waiting).toBe("unchanged");
-    expect(calls).toEqual(["schedule 2026-11-23", "cancel"]);
+    expect(calls).toEqual(["schedule account-1 2026-11-23", "cancel"]);
     // After a cancel, the same reminders are scheduled again.
-    const again = scheduler.schedule([reminder("2026-11-23")]);
+    const again = scheduler.schedule(owner, [reminder("2026-11-23")]);
     await release();
     expect(await again).toBe("scheduled");
   });
@@ -271,18 +306,40 @@ describe("ReminderScheduler", () => {
   test("schedules again after notifications were off", async () => {
     const { center, calls, release } = fakeCenter("denied");
     const scheduler = new ReminderScheduler(center);
-    const first = scheduler.schedule([reminder("2026-11-23")]);
+    const first = scheduler.schedule(owner, [reminder("2026-11-23")]);
     await release();
     expect(await first).toBe("denied");
-    const second = scheduler.schedule([reminder("2026-11-23")]);
+    const second = scheduler.schedule(owner, [reminder("2026-11-23")]);
     await release();
     expect(await second).toBe("denied");
     expect(calls).toHaveLength(2);
   });
 
+  test("reports a refused reminder and runs the same schedule again next time", async () => {
+    const { center, calls, release } = fakeCenter("fails");
+    const scheduler = new ReminderScheduler(center);
+    const first = scheduler.schedule(owner, [reminder("2026-11-23")]);
+    await release();
+    expect(await first).toBe("failed");
+    const second = scheduler.schedule(owner, [reminder("2026-11-23")]);
+    await release();
+    expect(await second).toBe("failed");
+    expect(calls).toHaveLength(2);
+  });
+
+  test("schedules again for another account", async () => {
+    const { center, calls, release } = fakeCenter();
+    const scheduler = new ReminderScheduler(center);
+    const first = scheduler.schedule(owner, [reminder("2026-11-23")]);
+    const other = scheduler.schedule("account-2", [reminder("2026-11-23")]);
+    await release();
+    expect([await first, await other]).toEqual(["scheduled", "scheduled"]);
+    expect(calls).toEqual(["schedule account-1 2026-11-23", "schedule account-2 2026-11-23"]);
+  });
+
   test("does nothing without the native module", async () => {
     const scheduler = new ReminderScheduler(null);
-    expect(await scheduler.schedule([reminder("2026-11-23")])).toBe("unchanged");
+    expect(await scheduler.schedule(owner, [reminder("2026-11-23")])).toBe("unchanged");
     await scheduler.cancel();
   });
 });

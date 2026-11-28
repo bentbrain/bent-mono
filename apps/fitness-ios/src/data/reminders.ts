@@ -40,8 +40,8 @@ export function useReminderSettings() {
 const native = WorkoutReminders;
 const center: ReminderCenter | null = native
   ? {
-      scheduleReminders: async (reminders) =>
-        (await native.schedule(reminders)) === "denied" ? "denied" : "scheduled",
+      scheduleReminders: async (owner, reminders) =>
+        (await native.schedule(owner, reminders)) === "denied" ? "denied" : "scheduled",
       cancelReminders: () => native.cancel(),
     }
   : null;

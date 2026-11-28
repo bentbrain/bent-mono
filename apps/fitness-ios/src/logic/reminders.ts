@@ -6,9 +6,10 @@ import {
   localDate,
   nextSession,
   sessionMinutes,
+  trainingRecords,
 } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings } from "@bent/fitness-contracts/domain";
-import { dayInfo } from "../screens/week/logic";
+import { dayInfo, isDay } from "../screens/week/logic";
 
 /*
  * Daily workout reminders: what each day's notification says and when it
@@ -91,10 +92,12 @@ export function reminderText(
   day: string,
   restDays: boolean,
 ): { title: string; body: string } | null {
-  const info = dayInfo(settings, completedActivity(records), day, day);
+  // Corrections apply first, so a removed workout frees its day and a moved one counts on its new date.
+  const training = trainingRecords(records);
+  const info = dayInfo(settings, completedActivity(training), day, day);
   // A day with a recorded or started session needs no reminder.
   if (info.state === "done") return null;
-  if (records.some(({ data }) => data.kind === "workout" && data.date === day)) return null;
+  if (training.some(({ data }) => data.kind === "workout" && data.date === day)) return null;
   const { plan } = info;
   if (plan.type === "strength") {
     if (!plan.routine) return { title: `Today: ${info.name}`, body: "Strength session" };
@@ -141,17 +144,24 @@ export function reminderPlan(
 
 /** Schedules and cancels reminders on the iPhone. */
 export type ReminderCenter = {
-  /** Replaces every pending reminder. Resolves "denied" when notifications are off for the app. */
-  scheduleReminders(reminders: Reminder[]): Promise<"scheduled" | "denied">;
-  /** Removes pending and delivered reminders. */
+  /**
+   * Brings the pending reminders for the account `owner` in line with
+   * these. Resolves "denied" when notifications are off for the app, and
+   * rejects when iOS refused to add one.
+   */
+  scheduleReminders(owner: string, reminders: Reminder[]): Promise<"scheduled" | "denied">;
+  /** Removes pending and delivered reminders, and forgets a tap not yet handled. */
   cancelReminders(): Promise<void>;
 };
+
+export type ScheduleResult = "scheduled" | "denied" | "unchanged" | "failed";
 
 /**
  * Sends schedules and cancels to the iPhone one at a time, in order. A
  * cancel, as on signing out, drops schedules still waiting before it, so a
  * slow schedule never brings reminders back after it. A schedule the same
- * as the last one is skipped unless it is forced.
+ * as the last one is skipped unless it is forced; after a failure, the next
+ * schedule always runs.
  */
 export class ReminderScheduler {
   private chain: Promise<unknown> = Promise.resolve();
@@ -160,19 +170,19 @@ export class ReminderScheduler {
 
   constructor(private readonly center: ReminderCenter | null) {}
 
-  schedule(reminders: Reminder[], force = false): Promise<"scheduled" | "denied" | "unchanged"> {
+  schedule(owner: string, reminders: Reminder[], force = false): Promise<ScheduleResult> {
     const generation = this.generation;
-    const key = JSON.stringify(reminders);
-    const run = this.chain.then(async (): Promise<"scheduled" | "denied" | "unchanged"> => {
+    const key = JSON.stringify({ owner, reminders });
+    const run = this.chain.then(async (): Promise<ScheduleResult> => {
       if (!this.center || generation !== this.generation) return "unchanged";
       if (!force && key === this.last) return "unchanged";
       try {
-        const result = await this.center.scheduleReminders(reminders);
+        const result = await this.center.scheduleReminders(owner, reminders);
         this.last = result === "scheduled" ? key : null;
         return result;
       } catch {
         this.last = null;
-        return "unchanged";
+        return "failed";
       }
     });
     this.chain = run;
@@ -188,4 +198,14 @@ export class ReminderScheduler {
     this.chain = run;
     return run;
   }
+}
+
+/** "7:00 am" in `timezone`, the moment a reminder fires. */
+export function fireTimeText(at: number, timezone: string, locale?: string) {
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(new Date(at));
+}
+
+/** The day a tapped reminder opens: only a calendar day scheduled for the account signed in. */
+export function openedDay(tap: { day: string; owner: string } | null | undefined, owner: string) {
+  return tap && tap.owner === owner && isDay(tap.day) ? tap.day : null;
 }

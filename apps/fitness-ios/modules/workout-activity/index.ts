@@ -42,13 +42,16 @@ type WorkoutRemindersNative = {
   permission(): Promise<"granted" | "denied" | "undetermined">;
   /** Asks iOS for notification permission if it hasn't asked, and resolves whether reminders can show. */
   requestPermission(): Promise<boolean>;
-  /** Replaces every pending reminder. Resolves "denied" when notifications are off for the app. */
-  schedule(reminders: { day: string; at: number; title: string; body: string }[]): Promise<"scheduled" | "denied">;
-  /** Removes pending and delivered reminders. */
+  /**
+   * Brings the pending reminders for the account `owner` in line with these.
+   * Resolves "denied" when notifications are off for the app; rejects when iOS refused one.
+   */
+  schedule(owner: string, reminders: { day: string; at: number; title: string; body: string }[]): Promise<"scheduled" | "denied">;
+  /** Removes pending and delivered reminders, and forgets a tap not yet handled. */
   cancel(): Promise<void>;
-  /** The day of a reminder tapped before JavaScript listened, once. */
-  takeOpened(): string | null;
-  addListener(event: "onReminderOpened", listener: (event: { day: string }) => void): EventSubscription;
+  /** The reminder tapped before JavaScript listened, once: its day and account. */
+  takeOpened(): { day: string; owner: string } | null;
+  addListener(event: "onReminderOpened", listener: (event: { day: string; owner: string }) => void): EventSubscription;
 };
 
 /** The native module, or null where it isn't linked, such as in unit tests. */

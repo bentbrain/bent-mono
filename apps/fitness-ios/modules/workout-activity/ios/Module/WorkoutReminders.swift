@@ -11,6 +11,12 @@ struct ReminderRecord: Record {
   @Field var body: String = ""
 }
 
+/// Reminders iOS could not add. The scheduler tries again on its next run.
+struct ReminderAddFailed: Error, CustomStringConvertible {
+  let count: Int
+  var description: String { "\(count) workout reminders could not be scheduled." }
+}
+
 /// Schedules the daily workout reminders and reports the reminder a tap opened.
 public final class WorkoutRemindersModule: Module {
   public func definition() -> ModuleDefinition {
@@ -20,7 +26,7 @@ public final class WorkoutRemindersModule: Module {
 
     OnStartObserving {
       let listener = ReminderListener(module: self)
-      ReminderTaps.listen { day in listener.send(day) }
+      ReminderTaps.listen { tap in listener.send(tap) }
     }
 
     OnStopObserving {
@@ -35,19 +41,23 @@ public final class WorkoutRemindersModule: Module {
       await WorkoutReminders.requestPermission()
     }
 
-    // Replaces every pending reminder. Resolves "denied" when notifications
-    // are off for the app, after removing the pending ones.
-    AsyncFunction("schedule") { (reminders: [ReminderRecord]) async -> String in
-      await WorkoutReminders.replace(reminders)
+    // Brings the pending reminders in line with these, for the account
+    // `owner`. Resolves "denied" when notifications are off for the app,
+    // after removing the pending ones, and rejects when iOS refused one.
+    AsyncFunction("schedule") { (owner: String, reminders: [ReminderRecord]) async throws -> String in
+      try await WorkoutReminders.replace(owner: owner, reminders)
     }
 
+    // Removes pending and delivered reminders and forgets a tap not yet
+    // handled, as at the end of a sign-in.
     AsyncFunction("cancel") { () async in
+      ReminderTaps.clear()
       await WorkoutReminders.cancel()
     }
 
-    // The day of a reminder tapped before JavaScript was listening.
-    Function("takeOpened") { () -> String? in
-      ReminderTaps.take()
+    // The reminder tapped before JavaScript was listening.
+    Function("takeOpened") { () -> [String: String]? in
+      ReminderTaps.take()?.json
     }
   }
 }
@@ -56,7 +66,7 @@ public final class WorkoutRemindersModule: Module {
 private final class ReminderListener: @unchecked Sendable {
   weak var module: WorkoutRemindersModule?
   init(module: WorkoutRemindersModule) { self.module = module }
-  func send(_ day: String) { module?.sendEvent("onReminderOpened", ["day": day]) }
+  func send(_ tap: ReminderTap) { module?.sendEvent("onReminderOpened", tap.json) }
 }
 
 /// The daily workout reminders: local notifications with their own
@@ -84,14 +94,31 @@ enum WorkoutReminders {
     return allowed(await center.notificationSettings().authorizationStatus)
   }
 
-  /// Replaces every pending reminder with these. Without permission the
-  /// pending reminders are removed and nothing is added.
-  static func replace(_ reminders: [ReminderRecord]) async -> String {
+  /// Whether a pending request already is this reminder, for this account.
+  private static func same(_ request: UNNotificationRequest, _ reminder: ReminderRecord, owner: String) -> Bool {
+    let info = request.content.userInfo
+    return request.identifier == prefix + reminder.day && request.content.title == reminder.title
+      && request.content.body == reminder.body && info["at"] as? Double == reminder.at
+      && info["owner"] as? String == owner
+  }
+
+  /// Brings the pending reminders in line with these. A pending reminder
+  /// that matches one of them stays, so one about to fire is never removed
+  /// and added again too late; the others are removed, and the missing ones
+  /// added. Without permission every pending reminder is removed. Throws
+  /// when iOS refuses to add one.
+  static func replace(owner: String, _ reminders: [ReminderRecord]) async throws -> String {
     let center = UNUserNotificationCenter.current()
-    let pending = await center.pendingNotificationRequests().map(\.identifier).filter(isReminder)
-    center.removePendingNotificationRequests(withIdentifiers: pending)
-    guard allowed(await center.notificationSettings().authorizationStatus) else { return "denied" }
-    for reminder in reminders {
+    let pending = await center.pendingNotificationRequests().filter { isReminder($0.identifier) }
+    guard allowed(await center.notificationSettings().authorizationStatus) else {
+      center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier))
+      return "denied"
+    }
+    let kept = Set(
+      pending.filter { request in reminders.contains { same(request, $0, owner: owner) } }.map(\.identifier))
+    center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier).filter { !kept.contains($0) })
+    var failed = 0
+    for reminder in reminders where !kept.contains(prefix + reminder.day) {
       let interval = Date(timeIntervalSince1970: reminder.at / 1000).timeIntervalSinceNow
       guard interval >= 1 else { continue }
       let content = UNMutableNotificationContent()
@@ -99,50 +126,69 @@ enum WorkoutReminders {
       content.body = reminder.body
       content.sound = .default
       content.threadIdentifier = prefix
-      content.userInfo = ["day": reminder.day]
+      content.userInfo = ["day": reminder.day, "at": reminder.at, "owner": owner]
       let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
-      try? await center.add(UNNotificationRequest(identifier: prefix + reminder.day, content: content, trigger: trigger))
+      do {
+        try await center.add(UNNotificationRequest(identifier: prefix + reminder.day, content: content, trigger: trigger))
+      } catch {
+        failed += 1
+      }
     }
+    if failed > 0 { throw ReminderAddFailed(count: failed) }
     return "scheduled"
   }
 
-  /// Removes pending and delivered reminders, as on signing out.
+  /// Removes pending and delivered reminders, as on signing out. Pending
+  /// ones go first; one that fires meanwhile is then among the delivered.
   static func cancel() async {
     let center = UNUserNotificationCenter.current()
     let pending = await center.pendingNotificationRequests().map(\.identifier).filter(isReminder)
-    let delivered = await center.deliveredNotifications().map(\.request.identifier).filter(isReminder)
     center.removePendingNotificationRequests(withIdentifiers: pending)
-    center.removeDeliveredNotifications(withIdentifiers: delivered)
+    let delivered = await center.deliveredNotifications().map(\.request.identifier).filter(isReminder)
+    center.removeDeliveredNotifications(withIdentifiers: delivered + pending)
   }
 }
 
-/// The day of the last reminder tapped, until JavaScript takes it. A tap
-/// that opens the app arrives before JavaScript listens, so it waits here.
+/// A tapped reminder: its day and the account it was scheduled for.
+struct ReminderTap {
+  let day: String
+  let owner: String
+  var json: [String: String] { ["day": day, "owner": owner] }
+}
+
+/// The last reminder tapped, until JavaScript takes it. A tap that opens
+/// the app arrives before JavaScript listens, so it waits here.
 enum ReminderTaps {
   private static let lock = NSLock()
-  private static var pending: String?
-  private static var listener: ((String) -> Void)?
+  private static var pending: ReminderTap?
+  private static var listener: ((ReminderTap) -> Void)?
 
-  static func opened(_ day: String) {
+  static func opened(_ tap: ReminderTap) {
     lock.lock()
     let current = listener
-    if current == nil { pending = day }
+    if current == nil { pending = tap }
     lock.unlock()
-    current?(day)
+    current?(tap)
   }
 
-  static func listen(_ next: ((String) -> Void)?) {
+  static func listen(_ next: ((ReminderTap) -> Void)?) {
     lock.lock()
     defer { lock.unlock() }
     listener = next
   }
 
-  static func take() -> String? {
+  static func take() -> ReminderTap? {
     lock.lock()
     defer { lock.unlock() }
-    let day = pending
+    let tap = pending
     pending = nil
-    return day
+    return tap
+  }
+
+  static func clear() {
+    lock.lock()
+    defer { lock.unlock() }
+    pending = nil
   }
 }
 
@@ -165,10 +211,11 @@ final class NotificationResponder: NSObject, UNUserNotificationCenterDelegate {
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let request = response.notification.request
+    let info = request.content.userInfo
     if WorkoutReminders.isReminder(request.identifier),
       response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-      let day = request.content.userInfo["day"] as? String {
-      ReminderTaps.opened(day)
+      let day = info["day"] as? String, let owner = info["owner"] as? String {
+      ReminderTaps.opened(ReminderTap(day: day, owner: owner))
     }
     completionHandler()
   }
