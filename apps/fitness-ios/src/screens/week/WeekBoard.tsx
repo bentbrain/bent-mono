@@ -7,7 +7,8 @@ import { Symbol } from "../../ui/Symbol";
 import { AppText } from "../../ui/Text";
 import { cn, shape } from "../../ui/typography";
 import type { DayState } from "./logic";
-import { boardLabel, dayInfo, weekDays } from "./logic";
+import { weekDays } from "@bent/fitness-contracts/week";
+import { boardLabel, dayInfo } from "./logic";
 
 const surfaces: Record<DayState, string> = {
   done: "bg-done-soft",

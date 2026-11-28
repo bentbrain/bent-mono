@@ -21,6 +21,7 @@ import type {
 } from "@bent/fitness-contracts/domain";
 import { elapsedSeconds, formatDuration } from "@bent/fitness-contracts/timing";
 import { weeklySummary } from "@bent/fitness-contracts/progress";
+import { planProgress } from "@bent/fitness-contracts/week";
 import { useAccount } from "./account-context";
 import { ProposalNotice } from "./plan-proposal";
 import { DateBar } from "./date-bar";
@@ -427,6 +428,21 @@ function DayPanel({ day }: { day: string }) {
   );
 }
 
+/** A check once the week's plan is met, otherwise a bar of the sessions done. */
+function PlanProgress({ value }: { value: { done: number; planned: number } }) {
+  const progress = planProgress(value);
+  if (!progress) return null;
+  return progress.met ? (
+    <span className="plan-met" aria-hidden="true">
+      <Icon name="check" size={14} />
+    </span>
+  ) : (
+    <span className="plan-meter" aria-hidden="true">
+      <span style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
+    </span>
+  );
+}
+
 function WeekTotals({
   monday,
   records,
@@ -451,14 +467,7 @@ function WeekTotals({
             <dt>{name}</dt>
             <dd>
               <strong>{value.done}</strong> of {value.planned} planned
-              <span className="pips" aria-hidden="true">
-                {Array.from(
-                  { length: Math.min(7, Math.max(value.planned, value.done)) },
-                  (_, i) => (
-                    <i key={i} className={i < value.done ? "is-on" : ""} />
-                  ),
-                )}
-              </span>
+              <PlanProgress value={value} />
             </dd>
           </div>
         ))}

@@ -30,11 +30,11 @@ import {
   reorderPreview,
   reorderWeek,
   resetWeek,
-  saveStatus,
   weekDays,
   weekSlots,
-} from "./logic";
-import type { WeekSlot } from "./logic";
+} from "@bent/fitness-contracts/week";
+import type { WeekSlot } from "@bent/fitness-contracts/week";
+import { saveStatus } from "./logic";
 import { useWeekNavigation } from "./navigation";
 
 type Origin = { settings: Settings; revision: number };
