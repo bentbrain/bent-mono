@@ -11,26 +11,44 @@ type Limits = {
   min?: string | number;
   max?: string | number;
   step?: string | number;
+  required?: boolean;
 };
 
-/** Whether a value suits the field's type, range and step. */
-export function fits(value: string, { type, min, max, step }: Limits) {
-  if (value === "") return true;
+const isoDate = /^(\d{4})-(\d{2})-(\d{2})$/;
+// A valid floating-point number as HTML defines it: no "+", spaces or hex.
+const decimal = /^-?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?$/;
+
+/** Whether a value suits the field's type, range, step and whether it's required. */
+export function fits(
+  value: string,
+  { type, min, max, step, required }: Limits,
+) {
+  if (value === "") return !required;
   if (type === "date") {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    if (Number.isNaN(Date.parse(`${value}T00:00:00Z`))) return false;
+    const parts = isoDate.exec(value);
+    if (!parts) return false;
+    const [year, month, day] = parts.slice(1).map(Number);
+    if (!year || !month || !day) return false;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    )
+      return false;
     return (
       (min === undefined || value >= String(min)) &&
       (max === undefined || value <= String(max))
     );
   }
   if (type === "number") {
+    if (!decimal.test(value)) return false;
     const number = Number(value);
-    if (value.trim() === "" || !Number.isFinite(number)) return false;
+    if (!Number.isFinite(number)) return false;
     if (min !== undefined && number < Number(min)) return false;
     if (max !== undefined && number > Number(max)) return false;
-    if (step === undefined || step === "any") return true;
-    const steps = (number - Number(min ?? 0)) / Number(step);
+    if (step === "any") return true;
+    const steps = (number - Number(min ?? 0)) / Number(step ?? 1);
     return Math.abs(steps - Math.round(steps)) < 1e-9;
   }
   return true;

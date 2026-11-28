@@ -539,7 +539,7 @@ test("an agent edits a routine by its exercises' names and adds one", async ({
   );
   expect(routine).toBeTruthy();
   const squat = sets.find((name) =>
-    /^Sets \(Goblet squat, .*routine 1\)$/.test(name),
+    /^Sets \(\d+\. Goblet squat, .*routine 1\)$/.test(name),
   );
   const add = names.find((name) =>
     /^Add an exercise \(.*routine 1\)$/.test(name),
@@ -553,7 +553,7 @@ test("an agent edits a routine by its exercises' names and adds one", async ({
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   const first = page.locator(".routine-editor").first();
   await expect(first.locator("legend").last()).toContainText("Hammer curl");
-  await expect(first.getByLabel(/^Sets \(Goblet squat/)).toHaveValue("4");
+  await expect(first.getByLabel(/^Sets \(\d+\. Goblet squat/)).toHaveValue("4");
 });
 
 test("an agent can't enter a date or number the field doesn't take", async ({
@@ -570,4 +570,11 @@ test("an agent can't enter a date or number the field doesn't take", async ({
     ]);
     expect(result.ok, `${ref} took ${value}`).toBe(false);
   }
+  await page.goto("/food?date=2026-11-20");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const refused = await act(page, [
+    { ref: "Choose date", action: "setValue", args: ["2026-02-30"] },
+  ]);
+  expect(refused.ok).toBe(false);
+  await expect(page).toHaveURL(/date=2026-11-20/);
 });

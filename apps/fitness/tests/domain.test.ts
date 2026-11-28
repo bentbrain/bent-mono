@@ -1154,6 +1154,10 @@ describe("text field limits", () => {
     expect(fits("06/01/2026", { type: "date" })).toBe(false);
     expect(fits("2026-02-30x", { type: "date" })).toBe(false);
     expect(fits("2026-11-29", { type: "date", max: "2026-11-28" })).toBe(false);
+    expect(fits("2026-02-29", { type: "date" })).toBe(false);
+    expect(fits("2028-02-29", { type: "date" })).toBe(true);
+    expect(fits("2026-04-31", { type: "date" })).toBe(false);
+    expect(fits("0000-01-01", { type: "date" })).toBe(false);
   });
 
   test("numbers need a finite value within range and on the step", () => {
@@ -1165,5 +1169,11 @@ describe("text field limits", () => {
     expect(fits("2.5", { type: "number", min: 1, step: 1 })).toBe(false);
     expect(fits("3", { type: "number", min: 1, step: 1 })).toBe(true);
     expect(fits("", { type: "number", min: 1 })).toBe(true);
+    expect(fits("", { type: "number", min: 1, required: true })).toBe(false);
+    for (const odd of ["0x50", "+68", " 69", "69 ", "1."])
+      expect(fits(odd, { type: "number" }), odd).toBe(false);
+    expect(fits("-2", { type: "number", min: -5, step: 1 })).toBe(true);
+    expect(fits("2.5", { type: "number", min: 1 })).toBe(false);
+    expect(fits("1e2", { type: "number" })).toBe(true);
   });
 });

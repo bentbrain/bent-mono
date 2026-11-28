@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/sdk/button";
 import { Field, FieldLabel, Input } from "@bent/ui/sdk/field";
+import { fits } from "./fields";
 import {
   addDays,
   dateSearch,
@@ -92,12 +93,16 @@ export function DateBar({
           <Input
             type="date"
             value={date}
-            onValueChange={(value) =>
+            onValueChange={(value, details) => {
+              if (!fits(value, { type: "date" })) {
+                details.cancel();
+                return;
+              }
               void navigate({
                 to: path,
                 search: dateSearch(value || today, today),
-              })
-            }
+              });
+            }}
           />
         </Field>
       </div>

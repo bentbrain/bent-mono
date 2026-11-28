@@ -329,6 +329,7 @@ export function SettingsEditor({
               <TextField
                 label="Daily calorie trial · kcal"
                 id="calories"
+                required
                 type="number"
                 min={800}
                 max={10000}
@@ -338,6 +339,7 @@ export function SettingsEditor({
               <TextField
                 label="Daily protein target · g"
                 id="protein"
+                required
                 type="number"
                 min={20}
                 max={400}
@@ -483,6 +485,7 @@ export function SettingsEditor({
               <TextField
                 label="Introduction · weeks at 2 sets"
                 id="introduction"
+                required
                 type="number"
                 min={0}
                 max={8}
@@ -543,7 +546,7 @@ export function SettingsEditor({
                     }
                   />
                   {routine.exercises.map((ex, ei) => {
-                    const at = `${ex.name}, ${where}`;
+                    const at = `${ei + 1}. ${ex.name}, ${where}`;
                     function change(patch: Partial<typeof ex>) {
                       changeRoutine({
                         ...routine,
@@ -560,7 +563,6 @@ export function SettingsEditor({
                         <div className="row">
                           <Button
                             appearance="ghost"
-                            aria-label={`Move ${ex.name} up`}
                             disabled={ei === 0}
                             onClick={() => {
                               const next = [...routine.exercises];
@@ -573,10 +575,10 @@ export function SettingsEditor({
                             }}
                           >
                             Move up
+                            <Hidden>{at}</Hidden>
                           </Button>
                           <Button
                             appearance="ghost"
-                            aria-label={`Move ${ex.name} down`}
                             disabled={ei === routine.exercises.length - 1}
                             onClick={() => {
                               const next = [...routine.exercises];
@@ -589,6 +591,7 @@ export function SettingsEditor({
                             }}
                           >
                             Move down
+                            <Hidden>{at}</Hidden>
                           </Button>
                         </div>
                         <div className="prescription-grid">
@@ -596,6 +599,7 @@ export function SettingsEditor({
                             label="Sets"
                             context={at}
                             id={`sets-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={8}
@@ -608,6 +612,7 @@ export function SettingsEditor({
                             label="Minimum"
                             context={at}
                             id={`min-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={600}
@@ -620,6 +625,7 @@ export function SettingsEditor({
                             label="Maximum"
                             context={at}
                             id={`max-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={600}
@@ -632,6 +638,7 @@ export function SettingsEditor({
                             label="Rest · seconds"
                             context={at}
                             id={`rest-${ri}-${ei}`}
+                            required
                             type="number"
                             min={15}
                             max={600}

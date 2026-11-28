@@ -988,7 +988,9 @@ test("settings confirm saves, explain errors, warn before losing edits and expor
   ).toHaveAttribute("aria-disabled", "true");
   await page.keyboard.press("Escape");
   await routine
-    .getByRole("button", { name: "Move Flat dumbbell bench press up" })
+    .getByRole("button", {
+      name: "Move up (2. Flat dumbbell bench press, Strength A, routine 1)",
+    })
     .click();
   await expect(routine.locator("legend").first()).toHaveText(
     "1. Flat dumbbell bench press",
