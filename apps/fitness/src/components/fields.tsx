@@ -12,6 +12,7 @@ type Limits = {
   max?: string | number;
   step?: string | number;
   required?: boolean;
+  maxLength?: number;
   /** Refuses an empty value from an agent. People get the form's own error. */
   keepFilled?: boolean;
 };
@@ -23,9 +24,10 @@ const decimal = /^-?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?$/;
 /** Whether a value suits the field's type, range, step and whether it's required. */
 export function fits(
   value: string,
-  { type, min, max, step, required, keepFilled }: Limits,
+  { type, min, max, step, required, maxLength, keepFilled }: Limits,
 ) {
   if (value === "") return !required && !keepFilled;
+  if (maxLength !== undefined && value.length > maxLength) return false;
   if (type === "date") {
     const parts = isoDate.exec(value);
     if (!parts) return false;

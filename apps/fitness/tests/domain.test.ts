@@ -1162,6 +1162,8 @@ describe("text field limits", () => {
     expect(fits("0099-01-01", { type: "date" })).toBe(true);
     expect(fits("0097-02-29", { type: "date" })).toBe(false);
     expect(fits("", { type: "date", keepFilled: true })).toBe(false);
+    expect(fits("x".repeat(160), { maxLength: 160 })).toBe(true);
+    expect(fits("x".repeat(161), { maxLength: 160 })).toBe(false);
   });
 
   test("numbers need a finite value within range and on the step", () => {

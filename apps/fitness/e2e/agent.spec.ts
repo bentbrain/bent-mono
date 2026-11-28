@@ -577,4 +577,10 @@ test("an agent can't enter a date or number the field doesn't take", async ({
   ]);
   expect(refused.ok).toBe(false);
   await expect(page).toHaveURL(/date=2026-11-20/);
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const long = await act(page, [
+    { ref: "Goal", action: "setValue", args: ["x".repeat(161)] },
+  ]);
+  expect(long.ok).toBe(false);
 });
