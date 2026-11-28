@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assistantEndpoint } from "../src/server/config";
+import { assistantEndpoint, localEndpoint } from "../src/server/config";
 import { assistantGuide } from "../src/server/guide";
 import { setUpTraining } from "../src/server/mcp";
 
@@ -116,5 +116,13 @@ test("permissions follow what sign-in can grant, and local endpoints skip hosted
     planning: true,
   });
   expect(local).toContain("local development server");
+  expect(local).toContain("can't connect directly to this local address");
   expect(local).not.toContain("help.openai.com");
+});
+
+test("only loopback endpoints count as local", () => {
+  expect(localEndpoint("http://127.0.0.1:3025/api/mcp")).toBe(true);
+  expect(localEndpoint("http://localhost:3025/api/mcp")).toBe(true);
+  expect(localEndpoint("http://[::1]:3025/api/mcp")).toBe(true);
+  expect(localEndpoint("https://fitness.bent.build/api/mcp")).toBe(false);
 });

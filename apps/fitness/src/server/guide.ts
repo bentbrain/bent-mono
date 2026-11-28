@@ -1,5 +1,6 @@
 import {
   assistantEndpoint,
+  localEndpoint,
   planScopeEnabled,
   targetsScopeEnabled,
 } from "./config";
@@ -40,12 +41,9 @@ This Fitness server's assistant connection isn't configured, so assistants can't
       : "A person can connect their own AI assistant to log food, bodyweight and runs and to read their training."
   }
 `;
-  const url = new URL(resource);
-  const origin = url.origin;
-  // Hosted chat apps reach only public HTTPS endpoints.
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  const chatApps = local
-    ? "This is a local development server, so connect an assistant running on the same computer. Hosted chat apps such as ChatGPT and Claude need a public HTTPS endpoint."
+  const origin = new URL(resource).origin;
+  const chatApps = localEndpoint(resource)
+    ? "This is a local development server, so connect an assistant running on the same computer. Hosted chat apps such as ChatGPT and Claude can't connect directly to this local address."
     : `In a chat app, the person adds it as a custom connector, then signs in to Fitness and approves access. Custom connectors depend on the app, plan and workspace: see the instructions for ChatGPT (${chatGptSetup}) and Claude (${claudeSetup}). In a team or enterprise workspace, an admin may need to add the connector first. Walk the person through it and wait until they've connected. If their chat app can't add a custom connector, a desktop or command-line assistant that supports remote MCP servers can.`;
   const setup = planning
     ? `

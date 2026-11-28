@@ -106,3 +106,9 @@ export function assistantEndpoint() {
     ? resource
     : null;
 }
+/** Whether an endpoint is on this computer, where hosted chat apps can't reach it. */
+export function localEndpoint(resource: string) {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(
+    new URL(resource).hostname,
+  );
+}
