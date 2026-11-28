@@ -28,6 +28,7 @@ import {
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
+import { fits } from "../src/components/fields";
 import {
   matchKey,
   savedMealLabels,
@@ -1144,5 +1145,25 @@ describe("saved meal variant names", () => {
           if (mine !== other)
             expect(` ${other} `.includes(` ${mine} `)).toBe(false);
     }
+  });
+});
+
+describe("text field limits", () => {
+  test("dates need the ISO form and the field's range", () => {
+    expect(fits("2026-01-06", { type: "date" })).toBe(true);
+    expect(fits("06/01/2026", { type: "date" })).toBe(false);
+    expect(fits("2026-02-30x", { type: "date" })).toBe(false);
+    expect(fits("2026-11-29", { type: "date", max: "2026-11-28" })).toBe(false);
+  });
+
+  test("numbers need a finite value within range and on the step", () => {
+    expect(
+      fits("12.5", { type: "number", min: 0, max: 200, step: "any" }),
+    ).toBe(true);
+    expect(fits("abc", { type: "number" })).toBe(false);
+    expect(fits("250", { type: "number", max: 200 })).toBe(false);
+    expect(fits("2.5", { type: "number", min: 1, step: 1 })).toBe(false);
+    expect(fits("3", { type: "number", min: 1, step: 1 })).toBe(true);
+    expect(fits("", { type: "number", min: 1 })).toBe(true);
   });
 });

@@ -22,7 +22,8 @@ import type { Nutrient, Settings } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sync } from "../sync";
 import { Checkbox } from "@bent/ui/sdk/field";
-import { ChoiceField, download, SelectField, TextField } from "./fields";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@ui-sdk/react/menu";
+import { ChoiceField, download, Hidden, TextField } from "./fields";
 import { deletePhoto, listPhotos, uploadPhoto } from "../server/photos";
 import { useAccount } from "./account-context";
 function formatDumbbells(values: number[], units: Settings["units"]) {
@@ -259,6 +260,7 @@ export function SettingsEditor({
             <div className="card form-grid">
               <TextField
                 label="Goal"
+                id="goal"
                 value={draft.goal}
                 onValueChange={(value) => update({ goal: value })}
                 maxLength={160}
@@ -266,6 +268,7 @@ export function SettingsEditor({
               />
               <TextField
                 label="Timezone"
+                id="timezone"
                 value={draft.timezone}
                 onValueChange={(value) => update({ timezone: value })}
                 required
@@ -284,6 +287,7 @@ export function SettingsEditor({
               </datalist>
               <TextField
                 label="Age · optional"
+                id="age"
                 type="number"
                 min={16}
                 max={120}
@@ -296,6 +300,7 @@ export function SettingsEditor({
               />
               <TextField
                 label="Height · cm, optional"
+                id="height"
                 type="number"
                 min={80}
                 max={250}
@@ -323,6 +328,7 @@ export function SettingsEditor({
               />
               <TextField
                 label="Daily calorie trial · kcal"
+                id="calories"
                 type="number"
                 min={800}
                 max={10000}
@@ -331,6 +337,7 @@ export function SettingsEditor({
               />
               <TextField
                 label="Daily protein target · g"
+                id="protein"
                 type="number"
                 min={20}
                 max={400}
@@ -362,6 +369,7 @@ export function SettingsEditor({
                     {setting && (
                       <TextField
                         label={`Daily ${label.toLowerCase()} target · g, optional`}
+                        id={`${nutrient}-target`}
                         type="number"
                         inputMode="decimal"
                         min={target.min}
@@ -384,6 +392,7 @@ export function SettingsEditor({
             </p>
             <TextField
               label={`Dumbbell sizes · ${draft.units}, comma separated`}
+              id="dumbbells"
               value={dumbbellText}
               inputMode="decimal"
               aria-invalid={Boolean(dumbbellError)}
@@ -403,6 +412,8 @@ export function SettingsEditor({
               <div className="equipment-editor card" key={item.id}>
                 <TextField
                   label="Equipment"
+                  context={`equipment ${i + 1}`}
+                  id={`equipment-${i}`}
                   value={item.name}
                   onValueChange={(value) =>
                     update({
@@ -414,6 +425,8 @@ export function SettingsEditor({
                 />
                 <TextField
                   label="Notes and confirmed sizes"
+                  context={`equipment ${i + 1}`}
+                  id={`equipment-notes-${i}`}
                   value={item.notes}
                   maxLength={500}
                   onValueChange={(value) =>
@@ -435,7 +448,7 @@ export function SettingsEditor({
                     })
                   }
                 >
-                  Remove equipment
+                  Remove equipment<Hidden>{`equipment ${i + 1}`}</Hidden>
                 </Button>
               </div>
             ))}
@@ -462,12 +475,14 @@ export function SettingsEditor({
             <div className="card form-grid">
               <TextField
                 label="Plan start date"
+                id="start-date"
                 type="date"
                 value={draft.startDate}
                 onValueChange={(value) => update({ startDate: value })}
               />
               <TextField
                 label="Introduction · weeks at 2 sets"
+                id="introduction"
                 type="number"
                 min={0}
                 max={8}
@@ -507,6 +522,7 @@ export function SettingsEditor({
               exercise list and targets.
             </p>
             {draft.routines.map((routine, ri) => {
+              const where = `${routine.name.trim() || `Routine ${ri + 1}`}, routine ${ri + 1}`;
               function changeRoutine(next: typeof routine) {
                 update({
                   routines: draft.routines.map((r, i) => (i === ri ? next : r)),
@@ -519,12 +535,15 @@ export function SettingsEditor({
                   </summary>
                   <TextField
                     label="Routine name"
+                    context={`routine ${ri + 1}`}
+                    id={`routine-${ri}`}
                     value={routine.name}
                     onValueChange={(value) =>
                       changeRoutine({ ...routine, name: value })
                     }
                   />
                   {routine.exercises.map((ex, ei) => {
+                    const at = `${ex.name}, ${where}`;
                     function change(patch: Partial<typeof ex>) {
                       changeRoutine({
                         ...routine,
@@ -575,6 +594,8 @@ export function SettingsEditor({
                         <div className="prescription-grid">
                           <TextField
                             label="Sets"
+                            context={at}
+                            id={`sets-${ri}-${ei}`}
                             type="number"
                             min={1}
                             max={8}
@@ -585,6 +606,8 @@ export function SettingsEditor({
                           />
                           <TextField
                             label="Minimum"
+                            context={at}
+                            id={`min-${ri}-${ei}`}
                             type="number"
                             min={1}
                             max={600}
@@ -595,6 +618,8 @@ export function SettingsEditor({
                           />
                           <TextField
                             label="Maximum"
+                            context={at}
+                            id={`max-${ri}-${ei}`}
                             type="number"
                             min={1}
                             max={600}
@@ -605,6 +630,8 @@ export function SettingsEditor({
                           />
                           <TextField
                             label="Rest · seconds"
+                            context={at}
+                            id={`rest-${ri}-${ei}`}
                             type="number"
                             min={15}
                             max={600}
@@ -616,6 +643,7 @@ export function SettingsEditor({
                         </div>
                         <ChoiceField
                           label="Measure"
+                          context={at}
                           items={[
                             { value: "reps", label: "Reps" },
                             { value: "seconds", label: "Seconds" },
@@ -628,7 +656,11 @@ export function SettingsEditor({
                           }
                         />
                         <Checkbox
-                          label="Log both sides"
+                          label={
+                            <>
+                              Log both sides<Hidden>{at}</Hidden>
+                            </>
+                          }
                           checked={ex.side}
                           onCheckedChange={(side) => change({ side })}
                         />
@@ -646,28 +678,13 @@ export function SettingsEditor({
                             })
                           }
                         >
-                          Remove exercise
+                          Remove exercise<Hidden>{at}</Hidden>
                         </Button>
                       </fieldset>
                     );
                   })}
-                  <SelectField
-                    label="Add an exercise"
-                    placeholder="Choose exercise"
-                    value={null}
-                    items={exercises.map((ex) => {
-                      const added = routine.exercises.some(
-                        (item) => item.id === ex.id,
-                      );
-                      return {
-                        value: ex.id,
-                        label: added
-                          ? `${ex.name} · already in this routine`
-                          : ex.name,
-                        disabled: added,
-                      };
-                    })}
-                    onValueChange={(value) => {
+                  <Menu
+                    onAction={(value) => {
                       const ex = exercises.find((v) => v.id === value);
                       if (
                         ex &&
@@ -678,7 +695,34 @@ export function SettingsEditor({
                           exercises: [...routine.exercises, { ...ex }],
                         });
                     }}
-                  />
+                  >
+                    <MenuTrigger className="bent-control bent-select-trigger add-exercise">
+                      Add an exercise<Hidden>{where}</Hidden>
+                    </MenuTrigger>
+                    <MenuContent
+                      className="bent-select-content"
+                      data-feedback-private
+                      data-feedback-redact
+                    >
+                      {exercises.map((ex) => {
+                        const added = routine.exercises.some(
+                          (item) => item.id === ex.id,
+                        );
+                        return (
+                          <MenuItem
+                            key={ex.id}
+                            value={ex.id}
+                            disabled={added}
+                            className="bent-select-item"
+                          >
+                            {added
+                              ? `${ex.name} · already in this routine`
+                              : ex.name}
+                          </MenuItem>
+                        );
+                      })}
+                    </MenuContent>
+                  </Menu>
                   <Button
                     appearance="ghost"
                     onClick={() =>
@@ -690,7 +734,7 @@ export function SettingsEditor({
                       })
                     }
                   >
-                    Remove routine
+                    Remove routine<Hidden>{where}</Hidden>
                   </Button>
                 </details>
               );

@@ -369,7 +369,10 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByRole("link", { name: /Repeating week and routines/ }).click();
   await page.locator(".routine-editor > summary").first().click();
-  await page.getByLabel("Sets", { exact: true }).first().fill("1");
+  await page
+    .getByLabel(/^Sets \(/)
+    .first()
+    .fill("1");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
@@ -415,7 +418,7 @@ test("toolbar configure, navigation and selection redact private activity URL pa
   await page.getByRole("link", { name: "Edit repeating week" }).click();
   await page.locator(".routine-editor > summary").first().click();
   await page
-    .getByLabel("Routine name", { exact: true })
+    .getByLabel(/^Routine name \(/)
     .first()
     .fill(privateRoutine);
   await page
@@ -977,9 +980,9 @@ test("settings confirm saves, explain errors, warn before losing edits and expor
   await expect(page.getByText(/Strength days take turns/)).toBeVisible();
   await page.locator(".routine-editor > summary").first().click();
   const routine = page.locator(".routine-editor").first();
-  await routine.getByRole("combobox", { name: "Add an exercise" }).click();
+  await routine.getByRole("button", { name: /^Add an exercise/ }).click();
   await expect(
-    page.getByRole("option", {
+    page.getByRole("menuitem", {
       name: /Goblet squat · already in this routine/,
     }),
   ).toHaveAttribute("aria-disabled", "true");

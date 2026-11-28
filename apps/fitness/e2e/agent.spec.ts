@@ -393,7 +393,7 @@ test("a cancelled agent call reports the steps it finished", async ({
   await page.goto("/settings");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await expect.poll(async () => (await toolNames(page)).length).toBe(3);
-  const equipment = page.getByRole("button", { name: "Remove equipment" });
+  const equipment = page.getByRole("button", { name: /^Remove equipment/ });
   const before = await equipment.count();
   await page.evaluate(() => {
     const controller = new AbortController();
@@ -521,4 +521,53 @@ test("an agent changes settings and saves them", async ({ page }) => {
       .getByRole("radiogroup", { name: "Display units" })
       .getByRole("radio", { name: "Pounds" }),
   ).toHaveAttribute("aria-checked", "true");
+});
+
+test("an agent edits a routine by its exercises' names and adds one", async ({
+  page,
+}) => {
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const summary of await page.locator(".routine-editor > summary").all())
+    await summary.click();
+  const names = (await snapshot(page)).map((entry) => entry.label ?? "");
+  const sets = names.filter((name) => name.startsWith("Sets ("));
+  expect(sets.length).toBeGreaterThan(6);
+  expect(new Set(sets).size).toBe(sets.length);
+  const routine = names.find((name) =>
+    /^Routine name \(routine 1\)$/.test(name),
+  );
+  expect(routine).toBeTruthy();
+  const squat = sets.find((name) =>
+    /^Sets \(Goblet squat, .*routine 1\)$/.test(name),
+  );
+  const add = names.find((name) =>
+    /^Add an exercise \(.*routine 1\)$/.test(name),
+  );
+  const result = await act(page, [
+    { ref: squat ?? "", action: "setValue", args: ["4"] },
+    { ref: add ?? "", action: "press", args: ["Hammer curl"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const first = page.locator(".routine-editor").first();
+  await expect(first.locator("legend").last()).toContainText("Hammer curl");
+  await expect(first.getByLabel(/^Sets \(Goblet squat/)).toHaveValue("4");
+});
+
+test("an agent can't enter a date or number the field doesn't take", async ({
+  page,
+}) => {
+  await page.goto("/body");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const [ref, value] of [
+    ["Date", "06/01/2026"],
+    ["Weight", "abc"],
+  ]) {
+    const result = await act(page, [
+      { ref, action: "setValue", args: [value] },
+    ]);
+    expect(result.ok, `${ref} took ${value}`).toBe(false);
+  }
 });

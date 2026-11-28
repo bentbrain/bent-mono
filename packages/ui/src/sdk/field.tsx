@@ -54,8 +54,14 @@ export function Select({
   disabled,
   required,
   className,
+  contentProps,
 }: {
   items: Choice[];
+  /** Props for the popup list, like privacy attributes for page capture tools. */
+  contentProps?: Omit<
+    ComponentProps<typeof SelectContent>,
+    "children" | "className"
+  >;
   value?: string | null;
   onValueChange?: (value: string | null) => void;
   placeholder?: string;
@@ -78,7 +84,7 @@ export function Select({
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent className="bent-select-content">
+      <SelectContent {...contentProps} className="bent-select-content">
         {items.map((item) => (
           <SelectItem
             key={item.value}
