@@ -2451,7 +2451,10 @@ test("reorganise keeps long sessions steady, ignores a release outside the list 
   const editor = await context.newPage();
   await editor.goto("/schedule");
   await editor.locator(".routine-editor > summary").first().click();
-  await editor.getByLabel("Routine name", { exact: true }).first().fill(long);
+  await editor
+    .getByLabel(/^Routine name \(/)
+    .first()
+    .fill(long);
   await editor
     .getByRole("button", { name: "Save settings", exact: true })
     .click();

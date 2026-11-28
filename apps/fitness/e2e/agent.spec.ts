@@ -635,14 +635,30 @@ test("people's saves still check the form's own rules", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   const protein = page.getByLabel(/^Daily protein/);
+  const saved = await protein.inputValue();
+  const status = page.locator(".save-settings [role=status]");
   await protein.fill("120.5");
+  await expect(status).toHaveText("Unsaved settings");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
-  expect(
-    await protein.evaluate((input: HTMLInputElement) => input.validity.valid),
-  ).toBe(false);
-  await expect(page.getByText("Settings queued for saving.")).toHaveCount(0);
+  await protein.press("Enter");
+  await expect(status).toHaveText("Unsaved settings");
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect(protein).toHaveValue(saved);
+
+  // An agent that saves over a person's invalid value hears which field and why.
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.locator(".routine-editor > summary").first().click();
+  await page
+    .getByLabel(/^Sets \(1\. /)
+    .first()
+    .fill("9");
+  const result = await act(page, [{ ref: "Save settings", action: "press" }]);
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toMatch(/Sets \(1\. .*: \S/);
 });
 
 test("an agent learns the equipment limit", async ({ page }) => {

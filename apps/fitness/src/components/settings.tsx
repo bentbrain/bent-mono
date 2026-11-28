@@ -802,7 +802,7 @@ export function SettingsEditor({
               if (details.source !== "agent") return;
               event.preventDefault();
               const invalid =
-                form.current?.querySelector<HTMLInputElement>(":invalid");
+                form.current?.querySelector<HTMLInputElement>("input:invalid");
               if (invalid) {
                 const label = invalid.labels?.[0]?.textContent ?? "A setting";
                 throw new Error(`${label}: ${invalid.validationMessage}`);
