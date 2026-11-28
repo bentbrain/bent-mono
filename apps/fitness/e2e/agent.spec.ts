@@ -19,7 +19,7 @@ const entrySchema = z.object({
 });
 const actSchema = z.object({
   ok: z.boolean(),
-  error: z.object({ message: z.string() }).optional(),
+  error: z.object({ step: z.number(), message: z.string() }).optional(),
 });
 type Tool = {
   execute: (
@@ -250,6 +250,16 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   );
   expect(late.ok, "a call made through the earlier registration").toBe(false);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // Signing in again in this page registers tools under new names, so a
+  // handle that looks a tool up by its earlier name can't reach them.
+  await clerk.signIn({ page, emailAddress: email });
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect
+    .poll(() =>
+      page.evaluate(() => [...(window.webmcpTools?.keys() ?? [])].sort()),
+    )
+    .toEqual(["act_1", "query_1", "snapshot_1"]);
 });
 
 test("an agent's marked step is refused while a native modal is open", async ({
@@ -301,9 +311,32 @@ test("an agent step with fields it doesn't take is refused", async ({
   page,
 }) => {
   const result = await act(page, [
+    { ref: "Food", action: "press" },
     { ref: "Food", action: "press", value: "Food" },
   ]);
   expect(result.ok).toBe(false);
+  expect(result.error?.step).toBe(1);
   expect(result.error?.message).toContain("put values in args");
   await expect(page).toHaveURL(/\/$/);
+  expect(await tool(page, "query", { name: "Food" })).toEqual({
+    error: expect.stringContaining("A query takes text"),
+  });
+});
+
+test("the account opens without WebMCP or AbortSignal.any", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(document, "modelContext");
+    Reflect.deleteProperty(AbortSignal, "any");
+  });
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Your week" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => "any" in AbortSignal)).toBe(false);
+  expect(errors).toEqual([]);
 });

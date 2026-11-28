@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useInsertionEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { agentTools, createAgent } from "@ui-sdk/react/agent";
 import {
@@ -19,6 +19,8 @@ type Bridge = {
   ask: ReturnType<typeof createConfirm<Request>>;
   lifetime: AbortSignal;
   end: () => void;
+  /** Which registration in this page the bridge's tools are, once registered. */
+  round?: number;
 };
 type ModelContext = {
   registerTool?: (
@@ -61,14 +63,38 @@ const hints: Record<string, Record<string, boolean>> = {
   act: { consequentialHint: true, untrustedContentHint: true },
 };
 
-function invalid(error: z.ZodError) {
+function invalid(error: z.ZodError, takes: string) {
   return error.issues
     .map((issue) =>
       issue.code === "unrecognized_keys"
-        ? `${["input", ...issue.path].join(".")} doesn't take ${issue.keys.join(", ")}. A step takes ref, action and args; put values in args.`
+        ? `${["input", ...issue.path].join(".")} doesn't take ${issue.keys.join(", ")}. ${takes}`
         : `${["input", ...issue.path].join(".")}: ${issue.message}`,
     )
     .join(" ");
+}
+const actTakes = "A step takes ref, action and args; put values in args.";
+const queryTakes = "A query takes text, within, kind, closed and from.";
+
+/** The step a validation error is about, or 0 for the call itself. */
+function failedStep(error: z.ZodError) {
+  const [field, index] = error.issues[0]?.path ?? [];
+  return field === "steps" && typeof index === "number" ? index : 0;
+}
+
+/** A signal that aborts when either one does, without `AbortSignal.any`. */
+function either(first: AbortSignal, second: AbortSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const release = () => {
+    first.removeEventListener("abort", abort);
+    second.removeEventListener("abort", abort);
+  };
+  if (first.aborted || second.aborted) controller.abort();
+  else {
+    first.addEventListener("abort", abort, { once: true });
+    second.addEventListener("abort", abort, { once: true });
+  }
+  return { signal: controller.signal, release };
 }
 
 /**
@@ -94,9 +120,9 @@ function createBridge(): Bridge {
       return (await ask({ action: step.confirm })) && live();
     },
   });
-  const refused = (message = closed) => ({
+  const refused = (message = closed, step = 0) => ({
     ok: false,
-    error: { step: 0, message },
+    error: { step, message },
     steps: [],
     appeared: [],
     values: {},
@@ -112,7 +138,7 @@ function createBridge(): Bridge {
     query: (input) => {
       const request = queryInput.safeParse(input ?? {});
       if (!request.success)
-        return Promise.resolve({ error: invalid(request.error) });
+        return Promise.resolve({ error: invalid(request.error, queryTakes) });
       return inTurn(async () => {
         if (!live()) return { error: closed };
         const found = await agent.query(request.data);
@@ -122,17 +148,27 @@ function createBridge(): Bridge {
     act: (input, options) => {
       const request = actInput.safeParse(input);
       if (!request.success)
-        return Promise.resolve(refused(invalid(request.error)));
+        return Promise.resolve(
+          refused(invalid(request.error, actTakes), failedStep(request.error)),
+        );
       const caller = invocation.safeParse(options ?? {});
-      const signal =
-        caller.success && caller.data.signal
-          ? AbortSignal.any([caller.data.signal, lifetime.signal])
-          : lifetime.signal;
-      return inTurn(async () => {
+      const cancel = caller.success ? caller.data.signal : undefined;
+      const { signal, release } = cancel
+        ? either(cancel, lifetime.signal)
+        : { signal: lifetime.signal, release: () => undefined };
+      const run = inTurn(async () => {
         if (!live()) return refused();
         const result = await agent.act(request.data, { signal });
         return live() ? result : refused();
+      }).finally(release);
+      if (!cancel) return run;
+      // A call still queued behind another reports its cancellation at once.
+      const cancelled = new Promise((resolve) => {
+        const settle = () => resolve(refused("The call was cancelled."));
+        if (cancel.aborted) settle();
+        else cancel.addEventListener("abort", settle, { once: true });
       });
+      return Promise.race([run, cancelled]);
     },
   };
   return {
@@ -146,17 +182,26 @@ function createBridge(): Bridge {
   };
 }
 
-/** Registers the tools with the browser's WebMCP until `signal` aborts. */
-function registerBrowserTools(tools: Tools, signal: AbortSignal) {
+let registrations = 0;
+
+/**
+ * Registers the tools with the browser's WebMCP until `signal` aborts. A
+ * browser can find a tool by name, so a later registration in the same page,
+ * like the next account's, gets names of its own and an earlier handle can't
+ * reach it.
+ */
+function registerBrowserTools(bridge: Bridge, signal: AbortSignal) {
   const context = document.modelContext;
-  if (typeof context?.registerTool !== "function") return;
+  if (typeof context?.registerTool !== "function" || signal.aborted) return;
+  const round = (bridge.round ??= registrations++);
   for (const tool of agentTools) {
-    const execute = tools[tool.name];
+    const execute = bridge.tools[tool.name];
     if (!execute) continue;
+    const name = round ? `${tool.name}_${round}` : tool.name;
     try {
       void Promise.resolve(
         context.registerTool(
-          { ...tool, annotations: hints[tool.name] ?? {}, execute },
+          { ...tool, name, annotations: hints[tool.name] ?? {}, execute },
           { signal },
         ),
       ).catch(() => undefined);
@@ -173,22 +218,27 @@ function registerBrowserTools(tools: Tools, signal: AbortSignal) {
  */
 export function AgentBridge() {
   const [bridge, setBridge] = useState<Bridge>();
-  // Layout effects end the account's tools before the next account's screen
-  // is on the page.
-  useLayoutEffect(() => {
+  const current = useRef<Bridge>(undefined);
+  useEffect(() => {
     const next = createBridge();
+    current.current = next;
     setBridge(next);
     return next.end;
   }, []);
+  // Ends the tools as React removes the account, before the next account's
+  // screen is on the page. Unlike a layout effect, it doesn't run while a
+  // Suspense boundary only hides this screen.
+  useInsertionEffect(() => () => current.current?.end(), []);
   useEffect(() => {
     if (!bridge) return;
     // Runs after the dialog below has mounted, so a first call can ask.
     const registration = new AbortController();
-    registerBrowserTools(
-      bridge.tools,
-      AbortSignal.any([registration.signal, bridge.lifetime]),
-    );
-    return () => registration.abort();
+    const { signal, release } = either(registration.signal, bridge.lifetime);
+    registerBrowserTools(bridge, signal);
+    return () => {
+      registration.abort();
+      release();
+    };
   }, [bridge]);
   if (!bridge) return null;
   const { ask } = bridge;
