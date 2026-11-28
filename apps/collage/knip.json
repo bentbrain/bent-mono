@@ -1,7 +1,4 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "convex/**/*.ts",
-    "src/payload-generated-schema.ts"
-  ]
+  "entry": ["convex/**/*.ts", "src/payload-generated-schema.ts"]
 }

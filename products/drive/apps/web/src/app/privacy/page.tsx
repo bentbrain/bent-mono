@@ -10,21 +10,25 @@ export default function PrivacyPage() {
       <Button asChild className="-ml-2" variant="ghost">
         <Link href="/">← Bent Drive Copilot</Link>
       </Button>
-      <h1 className="mt-10 text-4xl font-semibold tracking-[-0.04em]">Privacy</h1>
+      <h1 className="mt-10 text-4xl font-semibold tracking-[-0.04em]">
+        Privacy
+      </h1>
       <Separator className="my-8" />
       <Card>
         <CardContent className="space-y-5 py-2 leading-7 text-muted-foreground">
           <p>
-            Bent Drive Copilot stores encrypted Tesla OAuth tokens so an authenticated connection
-            can read the vehicle information you authorize.
+            Bent Drive Copilot stores encrypted Tesla OAuth tokens so an
+            authenticated connection can read the vehicle information you
+            authorize.
           </p>
           <p>
-            Vehicle responses are returned to the requesting MCP client. Tesla credentials and
-            refresh tokens are never included in tool results or exposed to the AI model.
+            Vehicle responses are returned to the requesting MCP client. Tesla
+            credentials and refresh tokens are never included in tool results or
+            exposed to the AI model.
           </p>
           <p>
-            The read-only service does not sell personal data and does not request vehicle-location or
-            vehicle-command permissions.
+            The read-only service does not sell personal data and does not
+            request vehicle-location or vehicle-command permissions.
           </p>
         </CardContent>
       </Card>

@@ -53,6 +53,6 @@ export function nextjsConfig({ clerkRoutes, rootDir, tsconfigRootDir }) {
         ...nextPlugin.configs.recommended.rules,
         ...nextPlugin.configs["core-web-vitals"].rules,
       },
-    }
+    },
   );
 }

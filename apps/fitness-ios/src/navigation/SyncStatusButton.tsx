@@ -18,7 +18,11 @@ export function syncStatus(
 ): Status {
   if (sync.conflict) return { label: "Review conflict", icon: "exclamationmark.triangle.fill", tone: "danger" };
   if (!sync.online)
-    return { label: sync.pending ? `Offline · ${sync.pending} pending` : "Offline", icon: "icloud.slash", tone: "warning" };
+    return {
+      label: sync.pending ? `Offline · ${sync.pending} pending` : "Offline",
+      icon: "icloud.slash",
+      tone: "warning",
+    };
   if (sync.saving) return { label: "Saving…", icon: null, tone: "busy" };
   if (sync.error) return { label: "Needs attention", icon: "exclamationmark.circle.fill", tone: "danger" };
   if (inputPending) return { label: "Unsaved input on device", icon: "pencil.circle", tone: "busy" };
@@ -28,7 +32,12 @@ export function syncStatus(
 }
 
 const surfaces = { done: "bg-card-alt", busy: "bg-card-alt", warning: "bg-missed-soft", danger: "bg-danger-soft" };
-const tints = { done: "accent-done", busy: "accent-icon", warning: "accent-missed", danger: "accent-danger-foreground" };
+const tints = {
+  done: "accent-done",
+  busy: "accent-icon",
+  warning: "accent-missed",
+  danger: "accent-danger-foreground",
+};
 const texts = { done: "muted", busy: "muted", warning: "missed", danger: "danger" } as const;
 
 /**

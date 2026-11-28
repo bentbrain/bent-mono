@@ -14,7 +14,10 @@ import type { SyncState } from "../data/sync-engine";
 import { Session } from "./session";
 import type { OAuthClient } from "./session";
 
-const fitnessOrigin = String(Constants.expoConfig?.extra?.fitnessOrigin ?? "https://fitness.bent.build").replace(/\/$/, "");
+const fitnessOrigin = String(Constants.expoConfig?.extra?.fitnessOrigin ?? "https://fitness.bent.build").replace(
+  /\/$/,
+  "",
+);
 const settings = oauthSettings();
 const unconfigured: OAuthClient = {
   authorize: () => Promise.reject(new Error("Sign-in is not set up in this build.")),
@@ -99,22 +102,21 @@ export function AccountProvider({ owner, children }: { owner: string; children: 
     // a change still queued after signing out is never sent under another.
     const generation = session.generation();
     return new SyncEngine({
-        owner,
-        storage: sqliteStorage,
-        transport: {
-          load: () => api.loadRecords(generation),
-          // A change Fitness refuses as invalid would be refused again, so it
-          // is held for the person to discard rather than sent forever.
-          save: (request) =>
-            api.saveRecord(request, generation).catch((error: unknown) => {
-              if (error instanceof ApiError && [400, 413, 422].includes(error.status))
-                throw new RejectedChange(error.message);
-              throw error;
-            }),
-        },
-      });
-  }, [owner],
-  );
+      owner,
+      storage: sqliteStorage,
+      transport: {
+        load: () => api.loadRecords(generation),
+        // A change Fitness refuses as invalid would be refused again, so it
+        // is held for the person to discard rather than sent forever.
+        save: (request) =>
+          api.saveRecord(request, generation).catch((error: unknown) => {
+            if (error instanceof ApiError && [400, 413, 422].includes(error.status))
+              throw new RejectedChange(error.message);
+            throw error;
+          }),
+      },
+    });
+  }, [owner]);
   const state = useSyncExternalStore(engine.subscribe, engine.getState);
 
   useEffect(() => {

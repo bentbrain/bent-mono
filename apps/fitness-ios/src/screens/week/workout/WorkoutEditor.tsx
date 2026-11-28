@@ -80,7 +80,8 @@ export function WorkoutEditor({
       inputs.commit({
         keys: setKeys(held.exerciseIndex, held.setIndex),
         place: `${held.exerciseIndex}:${held.setIndex}`,
-        change: (current) => applySetChange(current, held.exerciseIndex, held.setIndex, change, { startRest: true, now: at }),
+        change: (current) =>
+          applySetChange(current, held.exerciseIndex, held.setIndex, change, { startRest: true, now: at }),
       }),
     // Starting a hold ends a rest that is still running.
     onStart: () => {
@@ -128,8 +129,11 @@ export function WorkoutEditor({
         </AppText>
       </View>
 
-
-      <SessionTimer workout={workout} error={inputs.message?.place === "timer" ? inputs.message.text : undefined} onRest={setRest} />
+      <SessionTimer
+        workout={workout}
+        error={inputs.message?.place === "timer" ? inputs.message.text : undefined}
+        onRest={setRest}
+      />
 
       <Notice tone="info">
         Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve.{" "}
@@ -158,8 +162,8 @@ export function WorkoutEditor({
           onPress={finish}
         />
         <AppText textRole="footnote" tone="muted" className="px-1">
-          Mark each set Done or Skipped to finish. Skipped sets do not count towards a weight increase. Results sync when the save status
-          says Saved.
+          Mark each set Done or Skipped to finish. Skipped sets do not count towards a weight increase. Results sync
+          when the save status says Saved.
         </AppText>
       </View>
 

@@ -10,9 +10,7 @@
 import { openedDay } from "./reminders";
 
 export type LaunchTarget<Link> = (
-  | { kind: "reminder"; day: string }
-  | { kind: "widget"; link: Link }
-  | { kind: "health" }
+  { kind: "reminder"; day: string } | { kind: "widget"; link: Link } | { kind: "health" }
 ) & {
   /** A tap that came before navigation was ready. */
   early?: boolean;

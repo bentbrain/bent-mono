@@ -407,8 +407,8 @@ export function SettingsEditor({
             </p>
             <h2 className="section-label">Your equipment</h2>
             <p>
-              Add only the sizes you have checked. A dumbbell weight in a workout
-              is for one dumbbell.
+              Add only the sizes you have checked. A dumbbell weight in a
+              workout is for one dumbbell.
             </p>
             <TextField
               label={`Dumbbell sizes · ${draft.units}, comma separated`}

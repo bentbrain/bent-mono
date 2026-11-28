@@ -9,7 +9,12 @@ import {
 import { TeslaTokenStore } from "./token-store.js";
 
 import type { TeslaBridgeConfig } from "./config.js";
-import type { ActionResult, VehicleAction, VehicleStatus, VehicleSummary } from "./domain.js";
+import type {
+  ActionResult,
+  VehicleAction,
+  VehicleStatus,
+  VehicleSummary,
+} from "./domain.js";
 
 export interface TeslaAdapter {
   listVehicles(): Promise<VehicleSummary[]>;
@@ -55,7 +60,10 @@ export class MockTeslaAdapter implements TeslaAdapter {
     return this.#status;
   }
 
-  async executeAction(vin: string, action: VehicleAction): Promise<ActionResult> {
+  async executeAction(
+    vin: string,
+    action: VehicleAction,
+  ): Promise<ActionResult> {
     this.#requireVehicle(vin);
 
     switch (action.type) {
@@ -111,7 +119,7 @@ const fleetVehiclesResponseSchema = z.object({
       vin: z.string(),
       display_name: z.string().nullable().optional(),
       state: z.string().optional(),
-    })
+    }),
   ),
 });
 
@@ -164,7 +172,9 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
 
   constructor(config: TeslaBridgeConfig) {
     if (!config.accessToken && !config.clientId) {
-      throw new Error("TESLA_CLIENT_ID or TESLA_ACCESS_TOKEN is required in live mode.");
+      throw new Error(
+        "TESLA_CLIENT_ID or TESLA_ACCESS_TOKEN is required in live mode.",
+      );
     }
     this.#accessToken = config.accessToken;
     this.#clientId = config.clientId;
@@ -176,14 +186,16 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
   }
 
   async listVehicles(): Promise<VehicleSummary[]> {
-    const body = await this.#request(this.#fleetApiBaseUrl, "/api/1/vehicles", { method: "GET" });
+    const body = await this.#request(this.#fleetApiBaseUrl, "/api/1/vehicles", {
+      method: "GET",
+    });
     const parsed = fleetVehiclesResponseSchema.parse(body);
     return parsed.response.map((vehicle) =>
       vehicleSummarySchema.parse({
         vin: vehicle.vin,
         displayName: vehicle.display_name ?? vehicle.vin,
         state: normalizeVehicleState(vehicle.state),
-      })
+      }),
     );
   }
 
@@ -191,7 +203,7 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
     const body = await this.#request(
       this.#fleetApiBaseUrl,
       `/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data`,
-      { method: "GET" }
+      { method: "GET" },
     );
     const parsed = fleetVehicleDataResponseSchema.parse(body).response;
     return vehicleStatusSchema.parse({
@@ -214,9 +226,14 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
     });
   }
 
-  async executeAction(vin: string, action: VehicleAction): Promise<ActionResult> {
+  async executeAction(
+    vin: string,
+    action: VehicleAction,
+  ): Promise<ActionResult> {
     if (!this.#commandProxyUrl) {
-      throw new Error("TESLA_COMMAND_PROXY_URL is required for signed live vehicle commands.");
+      throw new Error(
+        "TESLA_COMMAND_PROXY_URL is required for signed live vehicle commands.",
+      );
     }
     const request = commandRequest(action);
     const body = await this.#request(
@@ -225,23 +242,33 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
       {
         method: "POST",
         body: JSON.stringify(request.body),
-      }
+      },
     );
     const response = fleetCommandResponseSchema.parse(body).response;
     return actionResultSchema.parse({
       succeeded: response.result,
-      message: response.result ? `${action.type} completed.` : response.reason ?? `${action.type} failed.`,
+      message: response.result
+        ? `${action.type} completed.`
+        : (response.reason ?? `${action.type} failed.`),
       completedAt: new Date().toISOString(),
       dataSource: "fleet-api",
     });
   }
 
-  async #request(baseUrl: string, path: string, init: RequestInit): Promise<unknown> {
+  async #request(
+    baseUrl: string,
+    path: string,
+    init: RequestInit,
+  ): Promise<unknown> {
     const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
     const url = new URL(path.replace(/^\//, ""), base);
     let response = await this.#send(url, init, await this.#getAccessToken());
     if (response.status === 401 && this.#tokenStore && this.#clientId) {
-      response = await this.#send(url, init, await this.#tokenStore.refresh(this.#clientId));
+      response = await this.#send(
+        url,
+        init,
+        await this.#tokenStore.refresh(this.#clientId),
+      );
     }
     const body: unknown = await response.json();
     if (!response.ok) {
@@ -260,7 +287,11 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
     return this.#tokenStore.getAccessToken(this.#clientId);
   }
 
-  async #send(url: URL, init: RequestInit, accessToken: string): Promise<Response> {
+  async #send(
+    url: URL,
+    init: RequestInit,
+    accessToken: string,
+  ): Promise<Response> {
     return fetch(url, {
       ...init,
       headers: {
@@ -272,7 +303,9 @@ class FleetApiTeslaAdapter implements TeslaAdapter {
 }
 
 export function createTeslaAdapter(config: TeslaBridgeConfig): TeslaAdapter {
-  return config.mode === "mock" ? new MockTeslaAdapter() : new FleetApiTeslaAdapter(config);
+  return config.mode === "mock"
+    ? new MockTeslaAdapter()
+    : new FleetApiTeslaAdapter(config);
 }
 
 function commandRequest(action: VehicleAction): CommandRequest {

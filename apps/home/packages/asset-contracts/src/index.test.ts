@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  validateCharacterManifest,
-  validateFurnitureManifest,
-} from "./index";
+import { validateCharacterManifest, validateFurnitureManifest } from "./index";
 
 const sprite = {
   source: "assets/sprites/chair/north.png",
@@ -12,11 +9,27 @@ const sprite = {
 };
 
 describe("pixel asset contracts", () => {
-  test('supports photo-derived fittings in all four authored views and rejects unknown palettes',()=>{
-    const manifest={schemaVersion:1,kind:'furniture',id:'kitchen-run',displayName:'Fitted kitchen',footprint:{width:17,depth:3},heightPixels:140,palette:'apartment-fixtures-v2',views:{north:sprite,east:sprite,south:sprite,west:sprite}};
+  test("supports photo-derived fittings in all four authored views and rejects unknown palettes", () => {
+    const manifest = {
+      schemaVersion: 1,
+      kind: "furniture",
+      id: "kitchen-run",
+      displayName: "Fitted kitchen",
+      footprint: { width: 17, depth: 3 },
+      heightPixels: 140,
+      palette: "apartment-fixtures-v2",
+      views: { north: sprite, east: sprite, south: sprite, west: sprite },
+    };
     expect(validateFurnitureManifest(manifest).ok).toBe(true);
-    expect(validateFurnitureManifest({...manifest,palette:'unknown'}).ok).toBe(false);
-    expect(validateFurnitureManifest({...manifest,views:{north:sprite,east:sprite,south:sprite}}).ok).toBe(false);
+    expect(
+      validateFurnitureManifest({ ...manifest, palette: "unknown" }).ok,
+    ).toBe(false);
+    expect(
+      validateFurnitureManifest({
+        ...manifest,
+        views: { north: sprite, east: sprite, south: sprite },
+      }).ok,
+    ).toBe(false);
   });
   test("requires all four furniture directions", () => {
     const result = validateFurnitureManifest({
@@ -35,7 +48,9 @@ describe("pixel asset contracts", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.errors.join(" ")).toContain("exactly north, east, south, and west");
+    expect(result.errors.join(" ")).toContain(
+      "exactly north, east, south, and west",
+    );
   });
 
   test("accepts a complete furniture manifest", () => {

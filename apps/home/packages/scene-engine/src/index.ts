@@ -72,12 +72,8 @@ export function projectIsometric(
   projection: IsometricProjection,
 ): ScreenPoint {
   return {
-    x:
-      projection.origin.x +
-      (point.x - point.z) * (projection.tileWidth / 2),
-    y:
-      projection.origin.y +
-      (point.x + point.z) * (projection.tileHeight / 2),
+    x: projection.origin.x + (point.x - point.z) * (projection.tileWidth / 2),
+    y: projection.origin.y + (point.x + point.z) * (projection.tileHeight / 2),
   };
 }
 
@@ -86,10 +82,7 @@ export function projectWorldPoint(
   cameraQuarter: CameraQuarter,
   projection: IsometricProjection,
 ): ScreenPoint {
-  return projectIsometric(
-    rotateAroundOrigin(point, cameraQuarter),
-    projection,
-  );
+  return projectIsometric(rotateAroundOrigin(point, cameraQuarter), projection);
 }
 
 export function directionForCamera(

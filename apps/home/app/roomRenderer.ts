@@ -68,11 +68,7 @@ function projectPlanPoint(
   point: PlanPoint,
   cameraQuarter: CameraQuarter,
 ): PixelPoint {
-  return projectWorldPoint(
-    centeredPlanPoint(point),
-    cameraQuarter,
-    projection,
-  );
+  return projectWorldPoint(centeredPlanPoint(point), cameraQuarter, projection);
 }
 
 export function drawPixelLine(
@@ -172,10 +168,7 @@ function floorDiamond(
   cell: FloorCell,
   cameraQuarter: CameraQuarter,
 ): readonly PixelPoint[] {
-  const center = projectPlanPoint(
-    { x: cell.x, z: cell.z },
-    cameraQuarter,
-  );
+  const center = projectPlanPoint({ x: cell.x, z: cell.z }, cameraQuarter);
   return [
     { x: center.x, y: center.y - TILE_HEIGHT / 2 },
     { x: center.x + TILE_WIDTH / 2, y: center.y },
@@ -191,13 +184,9 @@ function floorFill(cell: FloorCell): string {
       : palette.oakMid;
   }
   if (cell.material === "balcony-tile") {
-    return (cell.x + cell.z) % 2 === 0
-      ? palette.tileLight
-      : palette.tileMid;
+    return (cell.x + cell.z) % 2 === 0 ? palette.tileLight : palette.tileMid;
   }
-  return (cell.x + cell.z) % 2 === 0
-    ? palette.wallLight
-    : palette.tileMid;
+  return (cell.x + cell.z) % 2 === 0 ? palette.wallLight : palette.tileMid;
 }
 
 function floorOutline(material: FloorMaterial): string {
@@ -214,10 +203,7 @@ function drawFloorCell(
   drawPixelPolygonOutline(context, points, floorOutline(cell.material));
 
   if (cell.material === "oak" && (cell.x + cell.z) % 2 === 0) {
-    const center = projectPlanPoint(
-      { x: cell.x, z: cell.z },
-      cameraQuarter,
-    );
+    const center = projectPlanPoint({ x: cell.x, z: cell.z }, cameraQuarter);
     drawPixelLine(
       context,
       { x: center.x - 8, y: center.y },
@@ -294,8 +280,7 @@ function drawFloorEdge(
     { x: end.x, y: end.y + FLOOR_EDGE_HEIGHT },
     { x: start.x, y: start.y + FLOOR_EDGE_HEIGHT },
   ];
-  const fill =
-    edge.material === "oak" ? palette.oakDark : palette.tileDark;
+  const fill = edge.material === "oak" ? palette.oakDark : palette.tileDark;
   fillPixelPolygon(context, points, fill);
   drawPixelLine(context, start, end, palette.outline);
   drawPixelLine(
@@ -314,10 +299,7 @@ function wallDepth(
     centeredPlanPoint(wall.start),
     cameraQuarter,
   );
-  const end = rotateAroundOrigin(
-    centeredPlanPoint(wall.end),
-    cameraQuarter,
-  );
+  const end = rotateAroundOrigin(centeredPlanPoint(wall.end), cameraQuarter);
   return start.x + start.z + end.x + end.z;
 }
 
@@ -335,10 +317,7 @@ function wallPlaneFill(
     centeredPlanPoint(wall.start),
     cameraQuarter,
   );
-  const end = rotateAroundOrigin(
-    centeredPlanPoint(wall.end),
-    cameraQuarter,
-  );
+  const end = rotateAroundOrigin(centeredPlanPoint(wall.end), cameraQuarter);
   return Math.abs(end.x - start.x) > Math.abs(end.z - start.z)
     ? palette.wallLight
     : palette.wallMid;

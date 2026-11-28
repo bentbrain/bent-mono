@@ -51,7 +51,8 @@ export function PlanScreen({ route }: StaticScreenProps<{ date: string; routineI
       </View>
 
       <Notice>
-        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve. {loadNote(routine.exercises, settings.units)}
+        Warm up for 5 minutes, then do light practice sets. Keep 2–3 reps in reserve.{" "}
+        {loadNote(routine.exercises, settings.units)}
       </Notice>
       {recorded ? (
         <Notice

@@ -24,9 +24,11 @@ export function OPTIONS(request: Request): Promise<Response> {
         return Response.json({ error: "invalid_origin" }, { status: 403 });
       }
       return withCors(new Response(null, { status: 204 }), origin);
-    })
+    }),
   );
-  return runAppResponse("route.mcp.options", program, { "http.request.method": request.method });
+  return runAppResponse("route.mcp.options", program, {
+    "http.request.method": request.method,
+  });
 }
 
 export function GET(request: Request): Promise<Response> {
@@ -47,8 +49,11 @@ function handleMcpRequest(request: Request): Promise<Response> {
     const origin = request.headers.get("origin");
     if (!isAllowedOrigin(origin, config)) {
       return Response.json(
-        { error: "invalid_origin", error_description: "This browser origin is not allowed." },
-        { status: 403, headers: { "cache-control": "no-store" } }
+        {
+          error: "invalid_origin",
+          error_description: "This browser origin is not allowed.",
+        },
+        { status: 403, headers: { "cache-control": "no-store" } },
       );
     }
     const authorization = request.headers.get("authorization");
@@ -62,7 +67,11 @@ function handleMcpRequest(request: Request): Promise<Response> {
 
     const session = yield* getAccessSession(hashToken(accessToken));
     if (session?.resource !== config.mcpResource) {
-      return unauthorized(config, origin, "The bearer token is invalid or expired.");
+      return unauthorized(
+        config,
+        origin,
+        "The bearer token is invalid or expired.",
+      );
     }
     const scopes = session.scopes.split(/\s+/).filter(Boolean);
     if (!scopes.includes("tesla.read")) {
@@ -71,20 +80,25 @@ function handleMcpRequest(request: Request): Promise<Response> {
         origin,
         "The tesla.read scope is required.",
         "insufficient_scope",
-        403
+        403,
       );
     }
 
     const response = yield* Effect.acquireUseRelease(
       Effect.gen(function* () {
         const server = createHostedMcpServer(config);
-        const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+        const transport = new WebStandardStreamableHTTPServerTransport({
+          enableJsonResponse: true,
+        });
         yield* Effect.tryPromise({
           try: () => server.connect(transport),
           catch: (error) =>
             new McpTransportError({
               operation: "connect",
-              message: error instanceof Error ? error.message : "Could not connect MCP transport.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not connect MCP transport.",
             }),
         });
         return { server, transport };
@@ -105,7 +119,10 @@ function handleMcpRequest(request: Request): Promise<Response> {
           catch: (error) =>
             new McpTransportError({
               operation: "handle",
-              message: error instanceof Error ? error.message : "MCP request handling failed.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "MCP request handling failed.",
             }),
         }),
       ({ server }) =>
@@ -114,12 +131,22 @@ function handleMcpRequest(request: Request): Promise<Response> {
           catch: (error) =>
             new McpTransportError({
               operation: "close",
-              message: error instanceof Error ? error.message : "MCP server cleanup failed.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "MCP server cleanup failed.",
             }),
-        }).pipe(Effect.catchAll((error) => Effect.logWarning("mcp.server.close_failed", error)))
+        }).pipe(
+          Effect.catchAll((error) =>
+            Effect.logWarning("mcp.server.close_failed", error),
+          ),
+        ),
     );
     yield* Effect.logInfo("mcp.request.complete").pipe(
-      Effect.annotateLogs({ clientId: session.clientId, connectionId: session.connectionId })
+      Effect.annotateLogs({
+        clientId: session.clientId,
+        connectionId: session.connectionId,
+      }),
     );
     return withCors(response, origin);
   });
@@ -135,7 +162,7 @@ function unauthorized(
   origin: string | null,
   description: string,
   error = "invalid_token",
-  status = 401
+  status = 401,
 ): Response {
   const scope = error === "insufficient_scope" ? ', scope="tesla.read"' : "";
   return withCors(
@@ -147,7 +174,7 @@ function unauthorized(
         "cache-control": "no-store",
       },
     }),
-    origin
+    origin,
   );
 }
 
@@ -160,9 +187,12 @@ function withCors(response: Response, origin: string | null): Response {
   headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
   headers.set(
     "access-control-allow-headers",
-    "authorization, content-type, mcp-protocol-version, mcp-session-id"
+    "authorization, content-type, mcp-protocol-version, mcp-session-id",
   );
-  headers.set("access-control-expose-headers", "mcp-session-id, www-authenticate");
+  headers.set(
+    "access-control-expose-headers",
+    "mcp-session-id, www-authenticate",
+  );
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

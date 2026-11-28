@@ -715,7 +715,12 @@ describe("the built app", () => {
     const withoutGroup = { ...signed };
     delete withoutGroup["com.apple.security.application-groups"];
     expect(() => checkSignedEntitlements(withoutGroup)).toThrow("exactly the App Group group.build.bent.fitness");
-    for (const groups of [["group.build.bent.fitness.dev"], ["group.build.bent.fitness", "group.other"], [], "group.build.bent.fitness"])
+    for (const groups of [
+      ["group.build.bent.fitness.dev"],
+      ["group.build.bent.fitness", "group.other"],
+      [],
+      "group.build.bent.fitness",
+    ])
       expect(() => checkSignedEntitlements({ ...signed, "com.apple.security.application-groups": groups })).toThrow(
         "exactly the App Group",
       );
@@ -733,7 +738,10 @@ describe("the built app", () => {
     expect(checkAppEntitlements(development, "development")).toEqual(Object.keys(healthKit));
     expect(() => checkAppEntitlements(development, "production")).toThrow("exactly the App Group");
     expect(() =>
-      checkAppEntitlements({ ...development, "application-identifier": "FAKETEAMID.build.bent.fitness" }, "development"),
+      checkAppEntitlements(
+        { ...development, "application-identifier": "FAKETEAMID.build.bent.fitness" },
+        "development",
+      ),
     ).toThrow("application identifier");
     expect(() => checkAppEntitlements({ ...development, "get-task-allow": "yes" }, "development")).toThrow("Boolean");
   });
@@ -764,7 +772,9 @@ describe("the built app", () => {
     const withoutIdentifier = { ...signed };
     delete withoutIdentifier["application-identifier"];
     expect(() => checkSignedExtensionEntitlements(withoutIdentifier, "TEAM123456")).toThrow("extension bundle ID");
-    expect(() => checkSignedExtensionEntitlements({ ...signed, ...healthKit }, "TEAM123456")).toThrow("must not have HealthKit");
+    expect(() => checkSignedExtensionEntitlements({ ...signed, ...healthKit }, "TEAM123456")).toThrow(
+      "must not have HealthKit",
+    );
     expect(() =>
       checkSignedExtensionEntitlements({ ...signed, "aps-environment": "production" }, "TEAM123456"),
     ).toThrow("unexpected entitlements");
@@ -781,22 +791,28 @@ describe("the built app", () => {
   });
 
   test("the widget extension's Info.plist names its bundle ID and the App Group the widget reads", () => {
-    const plist = { CFBundleIdentifier: "build.bent.fitness.workout-activity", FitnessAppGroup: "group.build.bent.fitness" };
+    const plist = {
+      CFBundleIdentifier: "build.bent.fitness.workout-activity",
+      FitnessAppGroup: "group.build.bent.fitness",
+    };
     expect(extensionBundleId("production")).toBe("build.bent.fitness.workout-activity");
     expect(extensionBundleId("development")).toBe("build.bent.fitness.dev.workout-activity");
     expect(() => checkExtensionInfoPlist(plist, "production")).not.toThrow();
     expect(() =>
       checkExtensionInfoPlist(
-        { CFBundleIdentifier: "build.bent.fitness.dev.workout-activity", FitnessAppGroup: "group.build.bent.fitness.dev" },
+        {
+          CFBundleIdentifier: "build.bent.fitness.dev.workout-activity",
+          FitnessAppGroup: "group.build.bent.fitness.dev",
+        },
         "development",
       ),
     ).not.toThrow();
     expect(() => checkExtensionInfoPlist({ ...plist, CFBundleIdentifier: "build.bent.fitness" }, "production")).toThrow(
       "widget extension bundle ID",
     );
-    expect(() => checkExtensionInfoPlist({ ...plist, FitnessAppGroup: "group.build.bent.fitness.dev" }, "production")).toThrow(
-      "FitnessAppGroup",
-    );
+    expect(() =>
+      checkExtensionInfoPlist({ ...plist, FitnessAppGroup: "group.build.bent.fitness.dev" }, "production"),
+    ).toThrow("FitnessAppGroup");
     const withoutGroup = { ...plist };
     delete withoutGroup.FitnessAppGroup;
     expect(() => checkExtensionInfoPlist(withoutGroup, "production")).toThrow("FitnessAppGroup");
@@ -810,7 +826,13 @@ describe("the built app", () => {
     // arm64: little-endian 32-bit words, the last one shorter.
     const words = [];
     for (let i = 0; i < bytes.length; i += 4)
-      words.push(bytes.slice(i, i + 4).reverse().map((b) => b.toString(16).padStart(2, "0")).join(""));
+      words.push(
+        bytes
+          .slice(i, i + 4)
+          .reverse()
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join(""),
+      );
     const arm = `000000010049247f\t${words.join(" ")} \n`;
     expect(Buffer.from(otoolSectionBytes(x86)).toString()).toBe(text);
     expect(Buffer.from(otoolSectionBytes(arm)).toString()).toBe(text);
@@ -843,7 +865,8 @@ describe("the built app", () => {
     ).toThrow("local networking");
     expect(() => checkInfoPlist({ ...plist, NSSupportsLiveActivities: false }, "production")).toThrow("Live");
     const extension = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
-    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule WorkoutWidgetModule";
+    const code =
+      "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule WorkoutWidgetModule";
     expect(() => checkAppContents({ files: ["Info.plist", extension], code })).not.toThrow();
     expect(() => checkAppContents({ files: [`/tmp/derived/bentFitness.app/${extension}`], code })).not.toThrow();
     expect(() => checkAppContents({ files: ["HealthSeed.bundle", extension], code })).toThrow("seeder");

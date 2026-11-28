@@ -19,7 +19,12 @@ export class ActionStore {
     this.#ttlMs = ttlMs;
   }
 
-  prepare(vin: string, action: VehicleAction, reason: string, now = new Date()): PendingVehicleAction {
+  prepare(
+    vin: string,
+    action: VehicleAction,
+    reason: string,
+    now = new Date(),
+  ): PendingVehicleAction {
     this.prune(now);
     const pending = {
       id: randomUUID(),
@@ -36,12 +41,16 @@ export class ActionStore {
   consume(id: string, now = new Date()): PendingVehicleAction {
     const pending = this.#pending.get(id);
     if (!pending) {
-      throw new Error("The prepared action was not found or has already been used.");
+      throw new Error(
+        "The prepared action was not found or has already been used.",
+      );
     }
 
     this.#pending.delete(id);
     if (Date.parse(pending.expiresAt) <= now.getTime()) {
-      throw new Error("The prepared action expired. Prepare it again before execution.");
+      throw new Error(
+        "The prepared action expired. Prepare it again before execution.",
+      );
     }
     return pending;
   }

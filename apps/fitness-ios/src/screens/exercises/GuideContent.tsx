@@ -26,7 +26,15 @@ const thumbRatio = 512 / 206;
  * The Exercise screen shows it in full; the guide sheet shows it compact,
  * with the illustration's middle frames in place of the full picture.
  */
-export function GuideContent({ id, prescription, compact = false }: { id: string; prescription?: Exercise; compact?: boolean }) {
+export function GuideContent({
+  id,
+  prescription,
+  compact = false,
+}: {
+  id: string;
+  prescription?: Exercise;
+  compact?: boolean;
+}) {
   const guide = guideFor(id);
   if (!guide)
     return (
@@ -37,7 +45,9 @@ export function GuideContent({ id, prescription, compact = false }: { id: string
             <AppText>{recordingNotes(prescription)}</AppText>
           </>
         ) : null}
-        <AppText>Use a familiar movement and a light practice set. Ask a qualified trainer for setup and form guidance.</AppText>
+        <AppText>
+          Use a familiar movement and a light practice set. Ask a qualified trainer for setup and form guidance.
+        </AppText>
       </Card>
     );
   return (
@@ -52,7 +62,12 @@ export function GuideContent({ id, prescription, compact = false }: { id: string
       </ListSection>
       <ListSection title="Move">
         {guide.steps.map((step, index) => (
-          <View key={step} className="flex-row gap-3 px-4 py-3" accessible accessibilityLabel={`Step ${index + 1}: ${step}`}>
+          <View
+            key={step}
+            className="flex-row gap-3 px-4 py-3"
+            accessible
+            accessibilityLabel={`Step ${index + 1}: ${step}`}
+          >
             <View className="size-7 items-center justify-center rounded-full bg-primary-soft">
               <AppText textRole="footnote" weight="bold" tone="primary" style={{ fontVariant: ["tabular-nums"] }}>
                 {index + 1}
@@ -102,7 +117,12 @@ function Illustration({ guide, compact }: { guide: Guide; compact: boolean }) {
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         >
-          <Symbol name="arrow.up.left.and.arrow.down.right" size={12} weight="semibold" tintColorClassName="accent-primary" />
+          <Symbol
+            name="arrow.up.left.and.arrow.down.right"
+            size={12}
+            weight="semibold"
+            tintColorClassName="accent-primary"
+          />
           <AppText textRole="caption" weight="semibold" tone="primary">
             {compact ? "Full illustration" : "Full screen"}
           </AppText>
@@ -111,7 +131,13 @@ function Illustration({ guide, compact }: { guide: Guide; compact: boolean }) {
       <AppText textRole="footnote" tone="muted" className="px-1">
         AI-generated reference. Compare both views with the written cues and video demonstration.
       </AppText>
-      <IllustrationViewer uri={full} alt={guide.illustrationAlt} title={nameFor(guide.id)} visible={open} onClose={() => setOpen(false)} />
+      <IllustrationViewer
+        uri={full}
+        alt={guide.illustrationAlt}
+        title={nameFor(guide.id)}
+        visible={open}
+        onClose={() => setOpen(false)}
+      />
     </View>
   );
 }
@@ -125,7 +151,10 @@ function Tutorial({ guide }: { guide: Guide }) {
     haptic("light");
     setOpening(true);
     try {
-      await openBrowserAsync(url, { controlsColor: typeof tint === "string" ? tint : undefined, dismissButtonStyle: "done" });
+      await openBrowserAsync(url, {
+        controlsColor: typeof tint === "string" ? tint : undefined,
+        dismissButtonStyle: "done",
+      });
     } catch {
       try {
         await Linking.openURL(url);
@@ -182,7 +211,12 @@ function Recording({ id }: { id: string }) {
       <ListRow icon="square.and.pencil" label={recordingNotes(measured)} />
       {plan.length ? (
         plan.map(({ routine, exercise }, index) => (
-          <ListRow key={`${routine}-${index}`} icon="calendar" label={routine} description={prescriptionText(exercise)} />
+          <ListRow
+            key={`${routine}-${index}`}
+            icon="calendar"
+            label={routine}
+            description={prescriptionText(exercise)}
+          />
         ))
       ) : (
         <ListRow
@@ -195,7 +229,12 @@ function Recording({ id }: { id: string }) {
           onPress={() => navigation.navigate("Tabs", { screen: "SettingsTab", params: { screen: "PlanSettings" } })}
         />
       )}
-      <ListRow icon="clock.arrow.circlepath" label="Last time" description={previous ?? "Not recorded yet"} testID="exercise-last-result" />
+      <ListRow
+        icon="clock.arrow.circlepath"
+        label="Last time"
+        description={previous ?? "Not recorded yet"}
+        testID="exercise-last-result"
+      />
     </ListSection>
   );
 }

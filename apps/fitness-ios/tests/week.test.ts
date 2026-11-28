@@ -40,7 +40,13 @@ function finishedWorkout(date: string, routine = routineA) {
   const workout = createWorkout(settings, routine, date, true, []);
   return { ...workout, finishedAt: `${date}T09:00:00.000Z` };
 }
-const run = (date: string, minutes = 30, distanceKm = 5): Entity => ({ kind: "run", date, minutes, distanceKm, notes: "" });
+const run = (date: string, minutes = 30, distanceKm = 5): Entity => ({
+  kind: "run",
+  date,
+  minutes,
+  distanceKm,
+  notes: "",
+});
 
 describe("days", () => {
   test("isDay accepts calendar days only", () => {
@@ -107,7 +113,9 @@ describe("workouts", () => {
   });
 
   test("rotationNote lists the routines", () => {
-    expect(rotationNote(settings)).toStartWith("Repeating strength days take turns through Strength A, Strength B in calendar order.");
+    expect(rotationNote(settings)).toStartWith(
+      "Repeating strength days take turns through Strength A, Strength B in calendar order.",
+    );
   });
 
   test("saveStatus follows the sync state", () => {
@@ -133,7 +141,10 @@ describe("workout plan page", () => {
   });
 
   test("recordedWorkout finds the finished workout for the routine and date", () => {
-    const records = [record(finishedWorkout("2026-11-23")), record(createWorkout(settings, routineB, "2026-11-25", true, []))];
+    const records = [
+      record(finishedWorkout("2026-11-23")),
+      record(createWorkout(settings, routineB, "2026-11-25", true, [])),
+    ];
     expect(recordedWorkout(records, "2026-11-23", routineA.id)).toBeDefined();
     expect(recordedWorkout(records, "2026-11-23", routineB.id)).toBeUndefined();
     expect(recordedWorkout(records, "2026-11-25", routineB.id)).toBeUndefined();
@@ -198,7 +209,12 @@ describe("recording a run", () => {
     expect(runForm(undefined, "2026-11-28", today)).toEqual({ date: today, minutes: "", distance: "", notes: "" });
     expect(runForm(undefined, "2026-11-24", today).date).toBe("2026-11-24");
     const saved = { kind: "run" as const, date: "2026-11-20", minutes: 30, distanceKm: 4.5, notes: "Park" };
-    expect(runForm(saved, "2026-11-20", today)).toEqual({ date: "2026-11-20", minutes: "30", distance: "4.5", notes: "Park" });
+    expect(runForm(saved, "2026-11-20", today)).toEqual({
+      date: "2026-11-20",
+      minutes: "30",
+      distance: "4.5",
+      notes: "Park",
+    });
     expect(runSummary(saved)).toBe("Fri 20 Nov 2026 · 30 min · 4.5 km");
   });
 

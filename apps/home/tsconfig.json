@@ -24,9 +24,7 @@
       "@apartment-hotel/asset-contracts": [
         "./packages/asset-contracts/src/index.ts"
       ],
-      "@apartment-hotel/scene-engine": [
-        "./packages/scene-engine/src/index.ts"
-      ]
+      "@apartment-hotel/scene-engine": ["./packages/scene-engine/src/index.ts"]
     }
   },
   "include": [

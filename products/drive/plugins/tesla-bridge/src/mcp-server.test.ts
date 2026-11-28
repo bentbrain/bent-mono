@@ -37,8 +37,13 @@ const executedActionResultSchema = z.object({
 });
 
 void test("MCP exposes reads and enforces prepare-before-execute", async () => {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createMcpServer(config, new MockTeslaAdapter(), new ActionStore());
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const server = createMcpServer(
+    config,
+    new MockTeslaAdapter(),
+    new ActionStore(),
+  );
   const client = new Client({ name: "tesla-bridge-test", version: "0.1.0" });
 
   await server.connect(serverTransport);
@@ -53,7 +58,7 @@ void test("MCP exposes reads and enforces prepare-before-execute", async () => {
         "tesla_get_vehicle_status",
         "tesla_prepare_action",
         "tesla_execute_action",
-      ]
+      ],
     );
 
     const preparedResponse = await client.callTool({

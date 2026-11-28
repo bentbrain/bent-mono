@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const compat = new FlatCompat({
   baseDirectory: dirname(fileURLToPath(import.meta.url)),
-  resolvePluginsRelativeTo: dirname(require.resolve("eslint-config-next/package.json")),
+  resolvePluginsRelativeTo: dirname(
+    require.resolve("eslint-config-next/package.json"),
+  ),
 });
 
 const config = [

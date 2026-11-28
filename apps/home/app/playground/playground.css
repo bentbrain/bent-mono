@@ -28,7 +28,8 @@
   text-transform: none;
 }
 
-.playground-shell input:not([type='checkbox']):not([type='range']):not([type='color']),
+.playground-shell
+  input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
 .playground-shell select {
   min-height: 38px;
   padding: 8px 10px;
@@ -93,12 +94,12 @@
 }
 
 .playground-shell summary::after {
-  content: '+';
+  content: "+";
   margin-left: auto;
 }
 
 .playground-shell details[open] > summary::after {
-  content: '−';
+  content: "−";
 }
 
 .playground-shell details[open] > summary {
@@ -174,24 +175,81 @@
   margin-left: auto;
 }
 
-.playground-shell .toolbar-primary { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-.playground-shell .toolbar-primary button,.playground-shell .edit-toolbar button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
-.playground-shell .workspace { overflow:visible; }
-.playground-shell .view-options { z-index:25; }
-.playground-shell .view-options-content label:has(input[type='checkbox']),.playground-shell .inspector-fields label:has(input[type='checkbox']) { flex-direction:row; align-items:center; }
-.playground-shell input[type='checkbox'] { width:16px; height:16px; accent-color:#0647ff; }
-.playground-shell .arrangement-presets { padding:0 18px 12px; }
-.playground-shell .arrangement-presets summary { border:0; padding:6px 0; font-size:11px; }
-.playground-shell .arrangement-presets > div { display:grid; gap:8px; padding:10px 0; }
-.playground-shell .arrangement-presets { order:5; }
-.playground-shell .placed-picker { order:4; padding:14px 18px; margin:0; font-size:12px; }
-.playground-shell .layout-actions { order:6; }
-.playground-shell .layout-actions > div:first-child,.playground-shell .add-sign { display:none; }
-.playground-shell .product-card:hover .product-copy strong { color:#fff; }
-.playground-shell .canvas-scroll { touch-action:none; background:#fff; }
-.playground-shell .canvas-scroll canvas { touch-action:none; }
-.playground-shell .inspector-fields:empty { display:none; }
-.playground-shell .inspector-advanced a { display:block; color:inherit; }
+.playground-shell .toolbar-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.playground-shell .toolbar-primary button,
+.playground-shell .edit-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.playground-shell .workspace {
+  overflow: visible;
+}
+.playground-shell .view-options {
+  z-index: 25;
+}
+.playground-shell .view-options-content label:has(input[type="checkbox"]),
+.playground-shell .inspector-fields label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+.playground-shell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #0647ff;
+}
+.playground-shell .arrangement-presets {
+  padding: 0 18px 12px;
+}
+.playground-shell .arrangement-presets summary {
+  border: 0;
+  padding: 6px 0;
+  font-size: 11px;
+}
+.playground-shell .arrangement-presets > div {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+}
+.playground-shell .arrangement-presets {
+  order: 5;
+}
+.playground-shell .placed-picker {
+  order: 4;
+  padding: 14px 18px;
+  margin: 0;
+  font-size: 12px;
+}
+.playground-shell .layout-actions {
+  order: 6;
+}
+.playground-shell .layout-actions > div:first-child,
+.playground-shell .add-sign {
+  display: none;
+}
+.playground-shell .product-card:hover .product-copy strong {
+  color: #fff;
+}
+.playground-shell .canvas-scroll {
+  touch-action: none;
+  background: #fff;
+}
+.playground-shell .canvas-scroll canvas {
+  touch-action: none;
+}
+.playground-shell .inspector-fields:empty {
+  display: none;
+}
+.playground-shell .inspector-advanced a {
+  display: block;
+  color: inherit;
+}
 
 .playground-shell .segmented {
   gap: 0;
@@ -423,13 +481,19 @@
   min-width: 0;
 }
 
-.playground-shell .inspector-fields input[type='color'] {
+.playground-shell .inspector-fields input[type="color"] {
   height: 38px;
   padding: 4px;
 }
 
-.playground-shell .inspector-fields input[type='checkbox'] { width:16px; height:16px; flex:none; }
-.playground-shell .inspector-fields label:has(input[type='checkbox']) { justify-content:flex-start; }
+.playground-shell .inspector-fields input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.playground-shell .inspector-fields label:has(input[type="checkbox"]) {
+  justify-content: flex-start;
+}
 
 .playground-shell .inspector-advanced {
   margin-top: 18px;
@@ -523,8 +587,13 @@
     padding: 10px;
   }
 
-  .playground-shell .toolbar-primary { gap:4px; }
-  .playground-shell .toolbar-primary button { padding:8px; min-width:42px; }
+  .playground-shell .toolbar-primary {
+    gap: 4px;
+  }
+  .playground-shell .toolbar-primary button {
+    padding: 8px;
+    min-width: 42px;
+  }
 
   .playground-shell .toolbar-toggles {
     width: auto;

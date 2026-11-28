@@ -9,12 +9,7 @@
   "homepage": "https://drive.bent.build",
   "repository": "https://github.com/bentbrain/tesla-bridge",
   "license": "MIT",
-  "keywords": [
-    "tesla",
-    "vehicle",
-    "copilot",
-    "mcp"
-  ],
+  "keywords": ["tesla", "vehicle", "copilot", "mcp"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Tesla Bridge",
@@ -22,11 +17,7 @@
     "longDescription": "Connect through Tesla OAuth for read-only access to battery, range, charging, locks, climate and Sentry state.",
     "developerName": "Bent Build",
     "category": "Productivity",
-    "capabilities": [
-      "Interactive",
-      "Read",
-      "OAuth"
-    ],
+    "capabilities": ["Interactive", "Read", "OAuth"],
     "websiteURL": "https://drive.bent.build",
     "privacyPolicyURL": "https://drive.bent.build/privacy",
     "termsOfServiceURL": "https://drive.bent.build/terms",

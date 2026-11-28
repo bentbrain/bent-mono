@@ -227,7 +227,8 @@ export const apps: readonly ShowcaseApp[] = [
     mobile: {
       image: driveMobile,
       alt: "Drive website on a phone with the overview.",
-      statusBar: "linear-gradient(90deg, #1e0c0d, #280c0f 20%, #320d10 50%, #270b0e 80%, #200b0d)",
+      statusBar:
+        "linear-gradient(90deg, #1e0c0d, #280c0f 20%, #320d10 50%, #270b0e 80%, #200b0d)",
     },
   },
   {

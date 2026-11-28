@@ -175,7 +175,14 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
             <AppText textRole="headline" weight="bold" accessibilityRole="header" className="flex-1">
               Reorganise week
             </AppText>
-            <IconButton icon="xmark" label="Close reorganisation" tone="secondary" size={32} onPress={close} testID="reorganise-close" />
+            <IconButton
+              icon="xmark"
+              label="Close reorganisation"
+              tone="secondary"
+              size={32}
+              onPress={close}
+              testID="reorganise-close"
+            />
           </View>
           {origin ? (
             <WeekOrder
@@ -234,7 +241,9 @@ function WeekOrder({
   const icon = useColour("--color-icon");
   return (
     <Host style={{ flex: 1 }} testID="reorganise-list">
-      <List modifiers={[listStyle("insetGrouped"), scrollContentBackground("hidden"), environment("editMode", "active")]}>
+      <List
+        modifiers={[listStyle("insetGrouped"), scrollContentBackground("hidden"), environment("editMode", "active")]}
+      >
         <Section
           title={title}
           footer={
@@ -245,7 +254,12 @@ function WeekOrder({
             </SwiftText>
           }
         >
-          <List.ForEach data={slots} keyExtractor={(slot) => slot.source} recycling={false} onMove={(sources, destination) => onMove(slots, sources, destination)}>
+          <List.ForEach
+            data={slots}
+            keyExtractor={(slot) => slot.source}
+            recycling={false}
+            onMove={(sources, destination) => onMove(slots, sources, destination)}
+          >
             {({ item }) => (
               <HStack
                 spacing={12}
@@ -254,7 +268,9 @@ function WeekOrder({
                   ...(row ? [listRowBackground(row)] : []),
                   accessibilityElement("combine"),
                   accessibilityLabel(`${formatDate(item.day)}: ${item.session}${item.locked ? ", fixed" : ""}`),
-                  accessibilityHint(item.locked ? "This day stays as it is." : "Drag to move this session to another day."),
+                  accessibilityHint(
+                    item.locked ? "This day stays as it is." : "Drag to move this session to another day.",
+                  ),
                 ]}
               >
                 <SwiftText

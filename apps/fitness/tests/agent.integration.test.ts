@@ -112,7 +112,12 @@ const toolResult = z.object({
   structuredContent: z.unknown().optional(),
 });
 
-const full: AgentAccess = { read: true, write: true, targets: true, plan: false };
+const full: AgentAccess = {
+  read: true,
+  write: true,
+  targets: true,
+  plan: false,
+};
 async function connect(owner: string, access = full) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "1.0.0" });
@@ -356,14 +361,18 @@ test.skipIf(!configured)(
         { requestId: retryId, calories: 2500 },
         anything,
       );
-      const before = (await loadRecords(ownerC)).find((r) => r.id === settingsId);
+      const before = (await loadRecords(ownerC)).find(
+        (r) => r.id === settingsId,
+      );
       const retried = await call(
         "fitness_update_food_targets",
         { requestId: retryId, calories: 2500 },
         anything,
       );
       expect(retried).toEqual(original);
-      const after = (await loadRecords(ownerC)).find((r) => r.id === settingsId);
+      const after = (await loadRecords(ownerC)).find(
+        (r) => r.id === settingsId,
+      );
       expect(after?.revision).toBe(before?.revision);
       expect(
         await failure("fitness_update_food_targets", {
@@ -668,7 +677,12 @@ test("token scopes grant read and write access separately", () => {
       "fitness:targets",
     ]),
   ).toEqual(full);
-  expect(agentAccess("oauth_token", [])).toEqual({ read: false, write: false, targets: false, plan: false });
+  expect(agentAccess("oauth_token", [])).toEqual({
+    read: false,
+    write: false,
+    targets: false,
+    plan: false,
+  });
   expect(agentAccess("api_key", [])).toEqual({ ...full, plan: true });
   expect(agentAccess("oauth_token", ["fitness:plan"])).toEqual({
     ...none,
@@ -700,10 +714,20 @@ test("assistants are told to request fitness:targets once Clerk issues it", () =
 
 test("instructions mention only the tools and results a grant includes", () => {
   const tools = /fitness_[a-z_]+/g;
-  const reader = instructions({ read: true, write: false, targets: false, plan: false });
+  const reader = instructions({
+    read: true,
+    write: false,
+    targets: false,
+    plan: false,
+  });
   expect(reader.match(tools) ?? []).toEqual([]);
   expect(reader).toContain("need write access");
-  const writer = instructions({ read: false, write: true, targets: false, plan: false });
+  const writer = instructions({
+    read: false,
+    write: true,
+    targets: false,
+    plan: false,
+  });
   expect(writer.match(tools)).toEqual([
     "fitness_add_meals",
     "fitness_add_saved_meals",
@@ -711,7 +735,12 @@ test("instructions mention only the tools and results a grant includes", () => {
   expect(instructions({ ...full, targets: false, plan: false })).not.toContain(
     "fitness_update_food_targets",
   );
-  const targetsOnly = instructions({ read: false, write: false, targets: true, plan: false });
+  const targetsOnly = instructions({
+    read: false,
+    write: false,
+    targets: true,
+    plan: false,
+  });
   expect(targetsOnly.match(tools)).toEqual(["fitness_update_food_targets"]);
   expect(targetsOnly).toContain("requestId");
   expect(writer).not.toContain("totals");
@@ -725,7 +754,12 @@ test("instructions mention only the tools and results a grant includes", () => {
 test.skipIf(!configured)(
   "a connection lists only the tools its grant allows",
   async () => {
-    const reader = await connect(ownerB, { read: true, write: false, targets: false, plan: false });
+    const reader = await connect(ownerB, {
+      read: true,
+      write: false,
+      targets: false,
+      plan: false,
+    });
     expect(await reader.tools()).toEqual([
       "fitness_get_day",
       "fitness_get_history",
@@ -740,7 +774,12 @@ test.skipIf(!configured)(
     expect(reader.instructions()).toBe(
       instructions({ read: true, write: false, targets: false, plan: false }),
     );
-    const writer = await connect(ownerB, { read: false, write: true, targets: false, plan: false });
+    const writer = await connect(ownerB, {
+      read: false,
+      write: true,
+      targets: false,
+      plan: false,
+    });
     expect(writer.instructions()).toBe(
       instructions({ read: false, write: true, targets: false, plan: false }),
     );
@@ -755,7 +794,11 @@ test.skipIf(!configured)(
     ]);
     // A connection granted fitness:read and fitness:write before food
     // targets existed can't change them.
-    const legacy = await connect(ownerB, { ...full, targets: false, plan: false });
+    const legacy = await connect(ownerB, {
+      ...full,
+      targets: false,
+      plan: false,
+    });
     expect(await legacy.tools()).not.toContain("fitness_update_food_targets");
     expect(
       await legacy.failure("fitness_update_food_targets", {
@@ -818,7 +861,12 @@ test.skipIf(!configured)(
       { requestId: key(), date, weight: 70, unit: "kg" },
       logged,
     );
-    const writer = await connect(ownerB, { read: false, write: true, targets: false, plan: false });
+    const writer = await connect(ownerB, {
+      read: false,
+      write: true,
+      targets: false,
+      plan: false,
+    });
     const request = {
       requestId: key(),
       date,
@@ -988,7 +1036,12 @@ test.skipIf(!configured)(
       expect(day.food.meals.map((m) => m.name)).toEqual(["Protein shake"]);
 
       // A write-only connection cannot tell which meals are already saved.
-      const writer = await connect(owner, { read: false, write: true, targets: false, plan: false });
+      const writer = await connect(owner, {
+        read: false,
+        write: true,
+        targets: false,
+        plan: false,
+      });
       const receipt = await writer.call(
         "fitness_add_saved_meals",
         {

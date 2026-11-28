@@ -46,7 +46,10 @@ type WorkoutRemindersNative = {
    * Brings the pending reminders for the account `owner` in line with these.
    * Resolves "denied" when notifications are off for the app; rejects when iOS refused one.
    */
-  schedule(owner: string, reminders: { day: string; at: number; title: string; body: string }[]): Promise<"scheduled" | "denied">;
+  schedule(
+    owner: string,
+    reminders: { day: string; at: number; title: string; body: string }[],
+  ): Promise<"scheduled" | "denied">;
   /** Removes pending and delivered reminders, and forgets a tap not yet handled. */
   cancel(): Promise<void>;
   /** The reminder tapped before JavaScript listened, once: its day and account. */

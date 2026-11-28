@@ -6,13 +6,20 @@ import type { Exercise, RecordEntry, Routine, Settings } from "@bent/fitness-con
  * first, in routine order, then the rest of the included exercises.
  */
 export function libraryOrder(routines: Routine[]): Exercise[] {
-  const ids = [...new Set([...routines.flatMap((routine) => routine.exercises.map((item) => item.id)), ...exercises.map((item) => item.id)])];
+  const ids = [
+    ...new Set([
+      ...routines.flatMap((routine) => routine.exercises.map((item) => item.id)),
+      ...exercises.map((item) => item.id),
+    ]),
+  ];
   return ids.flatMap((id) => exercises.filter((item) => item.id === id));
 }
 
 /** The names of the routines that include an exercise. */
 export function routinesWith(routines: Routine[], id: string) {
-  return routines.filter((routine) => routine.exercises.some((exercise) => exercise.id === id)).map((routine) => routine.name);
+  return routines
+    .filter((routine) => routine.exercises.some((exercise) => exercise.id === id))
+    .map((routine) => routine.name);
 }
 
 /** "In Strength A, Strength B", or a note that the exercise is in no routine. */

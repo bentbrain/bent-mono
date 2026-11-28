@@ -7,9 +7,7 @@
     "apps/web": {},
     "packages/*": {},
     "plugins/tesla-bridge": {
-      "entry": [
-        "src/{http,stdio,setup}.ts"
-      ]
+      "entry": ["src/{http,stdio,setup}.ts"]
     },
     "tooling/*": {}
   }

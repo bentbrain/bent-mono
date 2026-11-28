@@ -126,7 +126,9 @@ export function mealSummary(meal: Pick<Meal, "calories" | "protein" | Nutrient>,
 /** The day's meals, in the order they were recorded. */
 export function mealsOn(records: RecordEntry[], date: string) {
   return records.flatMap((record) =>
-    record.data.kind === "meal" && record.data.date === date ? [{ id: record.id, revision: record.revision, data: record.data }] : [],
+    record.data.kind === "meal" && record.data.date === date
+      ? [{ id: record.id, revision: record.revision, data: record.data }]
+      : [],
   );
 }
 
@@ -139,11 +141,22 @@ export function regulars(records: RecordEntry[]) {
 
 /** A saved meal recorded on `date`. */
 export function mealFromRegular(regular: Regular, date: string): Meal {
-  return { kind: "meal", date, name: regular.name, calories: regular.calories, protein: regular.protein, ...mealNutrientValues(regular) };
+  return {
+    kind: "meal",
+    date,
+    name: regular.name,
+    calories: regular.calories,
+    protein: regular.protein,
+    ...mealNutrientValues(regular),
+  };
 }
 
 /** The day's totals against the calorie, protein and tracked nutrient targets. */
-export function daySummary(records: RecordEntry[], date: string, settings: Pick<Settings, "calories" | "protein" | "nutrients">) {
+export function daySummary(
+  records: RecordEntry[],
+  date: string,
+  settings: Pick<Settings, "calories" | "protein" | "nutrients">,
+) {
   const total = totals(records, date);
   const eaten = nutrientTotals(records, date);
   const left = {
@@ -182,7 +195,6 @@ export function daySummary(records: RecordEntry[], date: string, settings: Pick<
     }),
   };
 }
-
 
 /** Over a most to stay under, or a least reached. */
 function nutrientTone(aim: "most" | "least", grams: number, target: number | null): "default" | "done" | "missed" {

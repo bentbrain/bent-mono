@@ -89,7 +89,9 @@ function EquipmentEditor() {
               label="Equipment"
               value={item.name}
               maxLength={160}
-              onChangeText={(name) => update({ equipment: draft.equipment.map((v, j) => (j === i ? { ...v, name } : v)) })}
+              onChangeText={(name) =>
+                update({ equipment: draft.equipment.map((v, j) => (j === i ? { ...v, name } : v)) })
+              }
               inputRef={fields.register(`equipment-${i}`)}
               testID={`equipment-name-${i}`}
             />
@@ -98,7 +100,9 @@ function EquipmentEditor() {
               value={item.notes}
               maxLength={500}
               multiline
-              onChangeText={(notes) => update({ equipment: draft.equipment.map((v, j) => (j === i ? { ...v, notes } : v)) })}
+              onChangeText={(notes) =>
+                update({ equipment: draft.equipment.map((v, j) => (j === i ? { ...v, notes } : v)) })
+              }
               testID={`equipment-notes-${i}`}
             />
             <Button
@@ -132,7 +136,13 @@ function EquipmentEditor() {
         />
       </View>
 
-      <SaveBar onSave={save} status={editor.status} error={editor.error} syncError={editor.sync.error} onGoTo={fields.focus} />
+      <SaveBar
+        onSave={save}
+        status={editor.status}
+        error={editor.error}
+        syncError={editor.sync.error}
+        onGoTo={fields.focus}
+      />
 
       <PhotoLibrary />
     </Screen>

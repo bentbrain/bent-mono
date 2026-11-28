@@ -40,7 +40,10 @@ export function ListSection({
           {trailing}
         </View>
       ) : null}
-      <View className="overflow-hidden bg-grouped-card" style={{ borderRadius: shape.group, borderCurve: "continuous" }}>
+      <View
+        className="overflow-hidden bg-grouped-card"
+        style={{ borderRadius: shape.group, borderCurve: "continuous" }}
+      >
         {rows.map((row, index) => (
           <Fragment key={index}>
             {index > 0 ? <View className="ml-4 h-px bg-separator" /> : null}
@@ -94,7 +97,13 @@ export function ListRow({
   accessibilityHint,
 }: ListRowProps) {
   const content = (
-    <View className={cn("min-h-12 flex-row items-center gap-3 px-4 py-3", description && "min-h-16", disabled && "opacity-45")}>
+    <View
+      className={cn(
+        "min-h-12 flex-row items-center gap-3 px-4 py-3",
+        description && "min-h-16",
+        disabled && "opacity-45",
+      )}
+    >
       {icon ? (
         iconTile ? (
           <View className={cn("size-8 items-center justify-center rounded-[9px]", iconTile)}>
@@ -105,7 +114,9 @@ export function ListRow({
             <Symbol
               name={icon}
               size={20}
-              tintColorClassName={tone === "danger" ? "accent-danger-foreground" : tone === "primary" ? "accent-primary" : "accent-icon"}
+              tintColorClassName={
+                tone === "danger" ? "accent-danger-foreground" : tone === "primary" ? "accent-primary" : "accent-icon"
+              }
             />
           </View>
         )
@@ -127,7 +138,9 @@ export function ListRow({
       ) : null}
       {trailing}
       {selected ? <Symbol name="checkmark" size={16} weight="semibold" tintColorClassName="accent-primary" /> : null}
-      {navigates ? <Symbol name="chevron.right" size={13} weight="semibold" tintColorClassName="accent-chevron" /> : null}
+      {navigates ? (
+        <Symbol name="chevron.right" size={13} weight="semibold" tintColorClassName="accent-chevron" />
+      ) : null}
     </View>
   );
   if (!onPress) return <View testID={testID}>{content}</View>;

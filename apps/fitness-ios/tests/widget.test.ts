@@ -27,7 +27,12 @@ function workout(date: string, finished: boolean) {
   const started = createWorkout(settings, routineA, date, true, []);
   return finished ? { ...started, finishedAt: `${date}T09:00:00.000Z` } : started;
 }
-const meal = (date: string, calories: number, protein: number, extra: Partial<Record<"carbs" | "fat" | "fibre", number>> = {}): Entity => ({
+const meal = (
+  date: string,
+  calories: number,
+  protein: number,
+  extra: Partial<Record<"carbs" | "fat" | "fibre", number>> = {},
+): Entity => ({
   kind: "meal",
   date,
   name: "Synthetic meal",
@@ -94,7 +99,13 @@ describe("the widget snapshot", () => {
       state: "planned",
       status: "Planned",
     });
-    expect(easyRun?.plan).toEqual({ kind: "run", title: "Easy run", detail: null, state: "planned", status: "Planned" });
+    expect(easyRun?.plan).toEqual({
+      kind: "run",
+      title: "Easy run",
+      detail: null,
+      state: "planned",
+      status: "Planned",
+    });
     expect(rest?.plan).toEqual({
       kind: "rest",
       title: "Rest day",
@@ -107,8 +118,15 @@ describe("the widget snapshot", () => {
   test("shows a finished session as done and an unfinished one as in progress", () => {
     const done = first(widgetSnapshot(settings, [record(workout(monday, true))], at("2026-11-23T12:00:00Z"), scheme));
     expect(done.plan).toMatchObject({ title: "Strength A", state: "done", status: "Done" });
-    const started = first(widgetSnapshot(settings, [record(workout(monday, false))], at("2026-11-23T12:00:00Z"), scheme));
-    expect(started.plan).toMatchObject({ kind: "strength", title: "Strength A", state: "inProgress", status: "In progress" });
+    const started = first(
+      widgetSnapshot(settings, [record(workout(monday, false))], at("2026-11-23T12:00:00Z"), scheme),
+    );
+    expect(started.plan).toMatchObject({
+      kind: "strength",
+      title: "Strength A",
+      state: "inProgress",
+      status: "In progress",
+    });
     expect(started.plan.detail).toMatch(/^0\/\d+ sets handled$/);
     // A run on a strength day is recorded activity, not the planned session.
     const other = first(widgetSnapshot(settings, [record(run(monday))], at("2026-11-23T12:00:00Z"), scheme));

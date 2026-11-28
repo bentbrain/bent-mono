@@ -25,7 +25,12 @@ export function DateBar({ step = false }: { step?: boolean }) {
       testID="date-bar"
     >
       {step ? (
-        <IconButton icon="chevron.left" label={`Previous day, ${formatDate(previous)}`} onPress={() => setDate(previous)} testID="date-previous" />
+        <IconButton
+          icon="chevron.left"
+          label={`Previous day, ${formatDate(previous)}`}
+          onPress={() => setDate(previous)}
+          testID="date-previous"
+        />
       ) : null}
       <View className="flex-1 px-2">
         <View
@@ -38,7 +43,13 @@ export function DateBar({ step = false }: { step?: boolean }) {
           </AppText>
         </View>
         {isToday ? (
-          <AppText textRole="footnote" tone="muted" numberOfLines={1} accessibilityElementsHidden importantForAccessibility="no">
+          <AppText
+            textRole="footnote"
+            tone="muted"
+            numberOfLines={1}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          >
             {formatShortDate(date)}
           </AppText>
         ) : (
@@ -59,8 +70,21 @@ export function DateBar({ step = false }: { step?: boolean }) {
           </Pressable>
         )}
       </View>
-      <DateField label="Choose date" showLabel={false} value={date} onChange={(value) => setDate(value || today)} testID="date-pick" />
-      {step ? <IconButton icon="chevron.right" label={`Next day, ${formatDate(next)}`} onPress={() => setDate(next)} testID="date-next" /> : null}
+      <DateField
+        label="Choose date"
+        showLabel={false}
+        value={date}
+        onChange={(value) => setDate(value || today)}
+        testID="date-pick"
+      />
+      {step ? (
+        <IconButton
+          icon="chevron.right"
+          label={`Next day, ${formatDate(next)}`}
+          onPress={() => setDate(next)}
+          testID="date-next"
+        />
+      ) : null}
     </View>
   );
 }

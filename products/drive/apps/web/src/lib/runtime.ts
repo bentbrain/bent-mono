@@ -21,9 +21,9 @@ const DatabaseFromConfig = Layer.unwrapEffect(
           "db.system.name": "postgresql",
           "service.name": "bent-drive-copilot",
         },
-      })
-    )
-  )
+      }),
+    ),
+  ),
 );
 
 const DatabaseLive = DatabaseFromConfig.pipe(Layer.provide(AppConfigLive));
@@ -33,45 +33,54 @@ const TelemetryLive = OtelTracer.layerGlobal.pipe(
       serviceName: "bent-drive-copilot",
       serviceVersion: "0.3.0",
       attributes: { "deployment.platform": "vercel" },
-    })
-  )
+    }),
+  ),
 );
 
-const AppLayer = Layer.mergeAll(AppConfigLive, DatabaseLive, TelemetryLive, Logger.json);
+const AppLayer = Layer.mergeAll(
+  AppConfigLive,
+  DatabaseLive,
+  TelemetryLive,
+  Logger.json,
+);
 
-export type AppServices = AppConfigService | PgClient.PgClient | SqlClient.SqlClient;
+export type AppServices =
+  AppConfigService | PgClient.PgClient | SqlClient.SqlClient;
 
 export const AppRuntime = ManagedRuntime.make(AppLayer);
 
 export function runAppResponse<E>(
   spanName: string,
   effect: Effect.Effect<Response, E, AppServices>,
-  annotations: Record<string, string | number | boolean> = {}
+  annotations: Record<string, string | number | boolean> = {},
 ): Promise<Response> {
   const observed = effect.pipe(
     Effect.annotateLogs(annotations),
     Effect.annotateSpans(annotations),
     Effect.tapErrorCause((cause) =>
       Effect.logError("request.failed").pipe(
-        Effect.annotateLogs({ spanName, cause: Cause.pretty(cause) })
-      )
+        Effect.annotateLogs({ spanName, cause: Cause.pretty(cause) }),
+      ),
     ),
     Effect.catchAllCause(() =>
       Effect.succeed(
         Response.json(
           {
             error: "server_error",
-            error_description: "Bent Drive Copilot could not complete the request.",
+            error_description:
+              "Bent Drive Copilot could not complete the request.",
           },
-          { status: 500, headers: { "cache-control": "no-store" } }
-        )
-      )
+          { status: 500, headers: { "cache-control": "no-store" } },
+        ),
+      ),
     ),
-    Effect.withSpan(spanName, { attributes: annotations })
+    Effect.withSpan(spanName, { attributes: annotations }),
   );
   return AppRuntime.runPromise(observed);
 }
 
-export function runApp<A, E>(effect: Effect.Effect<A, E, AppServices>): Promise<A> {
+export function runApp<A, E>(
+  effect: Effect.Effect<A, E, AppServices>,
+): Promise<A> {
   return AppRuntime.runPromise(effect);
 }

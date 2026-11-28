@@ -56,7 +56,13 @@ export function ExerciseThumb({ id, width = 88, className }: { id: string; width
       importantForAccessibility="no-hide-descendants"
     >
       {guideFor(id) ? (
-        <Image source={{ uri: guideThumb(id) }} style={{ width, height }} contentFit="cover" cachePolicy="memory-disk" transition={150} />
+        <Image
+          source={{ uri: guideThumb(id) }}
+          style={{ width, height }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={150}
+        />
       ) : (
         <Symbol name="dumbbell" size={Math.round(height * 0.5)} tintColorClassName="accent-chevron" />
       )}

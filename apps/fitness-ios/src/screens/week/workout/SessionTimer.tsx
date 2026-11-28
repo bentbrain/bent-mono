@@ -10,7 +10,14 @@ import { Symbol } from "../../../ui/Symbol";
 import { AppText } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { cn, shape } from "../../../ui/typography";
-import { progressText, restAnnouncement, restChoices, restDoneShowing, sessionProgress, suggestedRest } from "./session";
+import {
+  progressText,
+  restAnnouncement,
+  restChoices,
+  restDoneShowing,
+  sessionProgress,
+  suggestedRest,
+} from "./session";
 
 /** The current time, updated every second and as soon as the app returns. */
 function useNow() {
@@ -95,7 +102,12 @@ export function SessionTimer({
               Rest
             </AppText>
             {rest > 0 ? (
-              <AppText testID="rest-remaining" weight="heavy" tone="primary" style={{ fontSize: 48, lineHeight: 54, fontVariant: ["tabular-nums"] }}>
+              <AppText
+                testID="rest-remaining"
+                weight="heavy"
+                tone="primary"
+                style={{ fontSize: 48, lineHeight: 54, fontVariant: ["tabular-nums"] }}
+              >
                 {formatDuration(rest)}
               </AppText>
             ) : (
@@ -119,8 +131,15 @@ export function SessionTimer({
           </View>
         </View>
         <View className="gap-1.5">
-          <View className="h-2 overflow-hidden rounded-full bg-separator" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-            <View className="h-2 rounded-full bg-primary" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
+          <View
+            className="h-2 overflow-hidden rounded-full bg-separator"
+            importantForAccessibility="no-hide-descendants"
+            accessibilityElementsHidden
+          >
+            <View
+              className="h-2 rounded-full bg-primary"
+              style={{ width: `${Math.round(progress.fraction * 100)}%` }}
+            />
           </View>
           <AppText textRole="footnote" weight="semibold" tone="secondary" testID="workout-set-count">
             {progressText(progress)}
@@ -132,12 +151,22 @@ export function SessionTimer({
           </AppText>
         ) : null}
         {rest > 0 ? (
-          <Button label="Skip rest" tone="secondary" icon="forward.fill" fullWidth testID="skip-rest" onPress={() => setRest(null)} />
+          <Button
+            label="Skip rest"
+            tone="secondary"
+            icon="forward.fill"
+            fullWidth
+            testID="skip-rest"
+            onPress={() => setRest(null)}
+          />
         ) : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}
       </View>
 
-      <View className="overflow-hidden bg-grouped-card" style={{ borderRadius: shape.group, borderCurve: "continuous" }}>
+      <View
+        className="overflow-hidden bg-grouped-card"
+        style={{ borderRadius: shape.group, borderCurve: "continuous" }}
+      >
         <Pressable
           testID="rest-controls"
           accessibilityRole="button"
@@ -151,7 +180,12 @@ export function SessionTimer({
         >
           <Symbol name="timer" size={20} tintColorClassName="accent-icon" />
           <AppText className="flex-1">Rest controls</AppText>
-          <Symbol name={controlsOpen ? "chevron.up" : "chevron.down"} size={13} weight="semibold" tintColorClassName="accent-chevron" />
+          <Symbol
+            name={controlsOpen ? "chevron.up" : "chevron.down"}
+            size={13}
+            weight="semibold"
+            tintColorClassName="accent-chevron"
+          />
         </Pressable>
         {controlsOpen ? (
           <View className="gap-3 px-4 pb-4">

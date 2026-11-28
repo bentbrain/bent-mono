@@ -128,7 +128,10 @@ export function startHold(
  */
 export function holdResult(hold: Hold, now: number): Partial<SetEntry> | undefined {
   const phase = holdPhase(hold, now);
-  if (phase.kind === "done") return hold.right === null ? { value: hold.seconds, done: true, skipped: false } : { value: hold.seconds, right: hold.right, done: true, skipped: false };
+  if (phase.kind === "done")
+    return hold.right === null
+      ? { value: hold.seconds, done: true, skipped: false }
+      : { value: hold.seconds, right: hold.right, done: true, skipped: false };
   const held = segments(hold).filter((item) => item.kind === "hold" && item.start <= now);
   if (!held.length) return undefined;
   const change: Partial<SetEntry> = {};

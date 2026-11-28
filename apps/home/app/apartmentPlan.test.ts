@@ -39,11 +39,13 @@ describe("apartment floorplan", () => {
 
   test("compiles walls into atomic spans and preserves explicit doors", () => {
     const segments = compileWallRuns();
-    expect(segments.every((segment) => {
-      const width = Math.abs(segment.end.x - segment.start.x);
-      const depth = Math.abs(segment.end.z - segment.start.z);
-      return (width === 0 || depth === 0) && width + depth <= 1;
-    })).toBe(true);
+    expect(
+      segments.every((segment) => {
+        const width = Math.abs(segment.end.x - segment.start.x);
+        const depth = Math.abs(segment.end.z - segment.start.z);
+        return (width === 0 || depth === 0) && width + depth <= 1;
+      }),
+    ).toBe(true);
     expect(
       segments.some(
         (segment) =>
@@ -54,9 +56,7 @@ describe("apartment floorplan", () => {
     ).toBe(true);
     expect(
       segments.some(
-        (segment) =>
-          segment.id === "entry-south" &&
-          segment.start.x >= 9.5,
+        (segment) => segment.id === "entry-south" && segment.start.x >= 9.5,
       ),
     ).toBe(true);
   });

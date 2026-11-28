@@ -101,7 +101,8 @@ export function replayBuilds(scope, project) {
   if (scope === "all" || scope === "modules") app.push("FitnessHealth", "FitnessCharts", "WorkoutActivity");
   if (scope === "all" || scope === "app") app.push("WorkoutActivityExtension", project());
   const builds = app.length ? [{ log: "app-build.log", targets: app }] : [];
-  if (scope === "all" || scope === "seeder") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+  if (scope === "all" || scope === "seeder")
+    builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
   return builds;
 }
 
@@ -234,7 +235,9 @@ const commands = {
     const entitlementsOf = (file) =>
       JSON.parse(
         output("plutil", ["-convert", "json", "-o", "-", "-"], {
-          input: Buffer.from(otoolSectionBytes(output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", file]))),
+          input: Buffer.from(
+            otoolSectionBytes(output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", file])),
+          ),
         }),
       );
     const health = checkAppEntitlements(entitlementsOf(binary), variant);
@@ -244,7 +247,15 @@ const commands = {
     const extension = join(appPath(), extensionBinary);
     checkExtensionEntitlements(entitlementsOf(extension), variant);
     checkExtensionInfoPlist(
-      JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "PlugIns/WorkoutActivityExtension.appex/Info.plist")])),
+      JSON.parse(
+        output("plutil", [
+          "-convert",
+          "json",
+          "-o",
+          "-",
+          join(appPath(), "PlugIns/WorkoutActivityExtension.appex/Info.plist"),
+        ]),
+      ),
       variant,
     );
     // The widget types are named in the binary's Swift metadata, not its exported symbols.

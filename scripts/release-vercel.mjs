@@ -4,87 +4,222 @@ import { open, readFile, realpath, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { githubApi, requireReleaseChecks, validateReleaseEvent } from "./require-release-checks.mjs";
+import {
+  githubApi,
+  requireReleaseChecks,
+  validateReleaseEvent,
+} from "./require-release-checks.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const fail = message => { throw new Error(message); };
-const identifiers = { team: /^team_[A-Za-z0-9-]+$/, prj: /^prj_[A-Za-z0-9-]+$/, dpl: /^dpl_[A-Za-z0-9-]+$/, chk: /^chk_[A-Za-z0-9-]+$/ };
-const id = (value, prefix) => typeof value === "string" && identifiers[prefix].test(value);
-const validProductionAnchor = config =>
-  (config.firstRelease === undefined || typeof config.firstRelease === "boolean") &&
-  (config.firstRelease === true ? config.expectedProductionId === null : id(config.expectedProductionId, "dpl"));
+const fail = (message) => {
+  throw new Error(message);
+};
+const identifiers = {
+  team: /^team_[A-Za-z0-9-]+$/,
+  prj: /^prj_[A-Za-z0-9-]+$/,
+  dpl: /^dpl_[A-Za-z0-9-]+$/,
+  chk: /^chk_[A-Za-z0-9-]+$/,
+};
+const id = (value, prefix) =>
+  typeof value === "string" && identifiers[prefix].test(value);
+const validProductionAnchor = (config) =>
+  (config.firstRelease === undefined ||
+    typeof config.firstRelease === "boolean") &&
+  (config.firstRelease === true
+    ? config.expectedProductionId === null
+    : id(config.expectedProductionId, "dpl"));
 function productionId(project) {
   const target = project.targets?.production;
   if (target === undefined || target === null) return null;
   if (!id(target.id, "dpl")) fail("Malformed current production target.");
   return target.id;
 }
-const canonical = value => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
-  ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+const canonical = (value) =>
+  JSON.stringify(value, (_, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).sort(([a], [b]) => a.localeCompare(b)),
+        )
+      : item,
+  );
 
 export function configurationHash(project, checks) {
-  const fields = ["id", "accountId", "name", "rootDirectory", "nodeVersion", "framework", "sourceFilesOutsideRootDirectory",
-    "installCommand", "buildCommand", "outputDirectory", "link", "env", "ssoProtection", "passwordProtection", "trustedIps", "trustedSources"];
-  return createHash("sha256").update(canonical({ project: Object.fromEntries(fields.map(key => [key, project[key] ?? null])), checks })).digest("hex");
+  const fields = [
+    "id",
+    "accountId",
+    "name",
+    "rootDirectory",
+    "nodeVersion",
+    "framework",
+    "sourceFilesOutsideRootDirectory",
+    "installCommand",
+    "buildCommand",
+    "outputDirectory",
+    "link",
+    "env",
+    "ssoProtection",
+    "passwordProtection",
+    "trustedIps",
+    "trustedSources",
+  ];
+  return createHash("sha256")
+    .update(
+      canonical({
+        project: Object.fromEntries(
+          fields.map((key) => [key, project[key] ?? null]),
+        ),
+        checks,
+      }),
+    )
+    .digest("hex");
 }
 
-export function validateTarget({ app, config, project, deployment, deploymentId, sha, inspection = false }) {
-  if (!/^[a-f0-9]{40}$/.test(sha) || !id(config.teamId, "team") || !id(config.projectId, "prj") ||
-      !validProductionAnchor(config) || !id(config.requiredCheckId, "chk")) fail("Invalid protected release configuration.");
-  if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
-      project.rootDirectory !== app.directory || project.nodeVersion !== "24.x" || project.sourceFilesOutsideRootDirectory !== true ||
-      project.link?.type !== "github" || project.link.org !== "bentbrain" || project.link.repo !== "bent-mono" ||
-      project.link.productionBranch !== "main") fail("Vercel project does not match the monorepo application.");
-  if (deployment.id !== deploymentId || deployment.project?.id !== project.id || deployment.team?.id !== config.teamId || deployment.name !== project.name ||
-      deployment.target !== "production" || deployment.readyState !== "READY" || deployment.nodeVersion !== "24.x" ||
-      deployment.gitSource?.type !== "github" || deployment.gitSource.sha !== sha || deployment.gitSource.ref !== "main" ||
-      deployment.gitSource.repoId !== project.link.repoId || deployment.meta?.githubCommitOrg !== "bentbrain" ||
-      deployment.meta.githubCommitRepo !== "bent-mono" || deployment.meta.githubCommitSha !== sha) fail("Deployment is not the exact qualified production source.");
-  if (productionId(project) !== config.expectedProductionId &&
-      !(inspection && productionId(project) === deployment.id)) fail("Current production changed.");
+export function validateTarget({
+  app,
+  config,
+  project,
+  deployment,
+  deploymentId,
+  sha,
+  inspection = false,
+}) {
+  if (
+    !/^[a-f0-9]{40}$/.test(sha) ||
+    !id(config.teamId, "team") ||
+    !id(config.projectId, "prj") ||
+    !validProductionAnchor(config) ||
+    !id(config.requiredCheckId, "chk")
+  )
+    fail("Invalid protected release configuration.");
+  if (
+    project.id !== config.projectId ||
+    project.accountId !== config.teamId ||
+    project.name !== app.project ||
+    project.rootDirectory !== app.directory ||
+    project.nodeVersion !== "24.x" ||
+    project.sourceFilesOutsideRootDirectory !== true ||
+    project.link?.type !== "github" ||
+    project.link.org !== "bentbrain" ||
+    project.link.repo !== "bent-mono" ||
+    project.link.productionBranch !== "main"
+  )
+    fail("Vercel project does not match the monorepo application.");
+  if (
+    deployment.id !== deploymentId ||
+    deployment.project?.id !== project.id ||
+    deployment.team?.id !== config.teamId ||
+    deployment.name !== project.name ||
+    deployment.target !== "production" ||
+    deployment.readyState !== "READY" ||
+    deployment.nodeVersion !== "24.x" ||
+    deployment.gitSource?.type !== "github" ||
+    deployment.gitSource.sha !== sha ||
+    deployment.gitSource.ref !== "main" ||
+    deployment.gitSource.repoId !== project.link.repoId ||
+    deployment.meta?.githubCommitOrg !== "bentbrain" ||
+    deployment.meta.githubCommitRepo !== "bent-mono" ||
+    deployment.meta.githubCommitSha !== sha
+  )
+    fail("Deployment is not the exact qualified production source.");
+  if (
+    productionId(project) !== config.expectedProductionId &&
+    !(inspection && productionId(project) === deployment.id)
+  )
+    fail("Current production changed.");
 }
 
-export function validateRuntime(receipt, { app, deployment, sha, fingerprint, now = Date.now() }) {
-  if (!receipt || typeof receipt !== "object") fail("A protected runtime qualification receipt is required.");
+export function validateRuntime(
+  receipt,
+  { app, deployment, sha, fingerprint, now = Date.now() },
+) {
+  if (!receipt || typeof receipt !== "object")
+    fail("A protected runtime qualification receipt is required.");
   const at = Date.parse(receipt.at);
-  if (!Number.isFinite(at) || at > now || now - at > 24 * 60 * 60 * 1000 || receipt.app !== app.name ||
-      receipt.deploymentId !== deployment.id || receipt.sourceRevision !== sha || receipt.configurationSha256 !== fingerprint ||
-      receipt.runtimeQualified !== true) fail("Runtime qualification is missing, stale or bound to different inputs.");
-  const required = app.name === "stay"
-    ? ["hostPrivateGuide", "hostPhotos", "hostDraftEditorLoads", "guestGuidePhotos", "guestEditorDenied"] : ["applicationSmoke"];
-  if (required.some(name => receipt.checks?.[name] !== true)) fail("Application runtime checks have not passed.");
+  if (
+    !Number.isFinite(at) ||
+    at > now ||
+    now - at > 24 * 60 * 60 * 1000 ||
+    receipt.app !== app.name ||
+    receipt.deploymentId !== deployment.id ||
+    receipt.sourceRevision !== sha ||
+    receipt.configurationSha256 !== fingerprint ||
+    receipt.runtimeQualified !== true
+  )
+    fail(
+      "Runtime qualification is missing, stale or bound to different inputs.",
+    );
+  const required =
+    app.name === "stay"
+      ? [
+          "hostPrivateGuide",
+          "hostPhotos",
+          "hostDraftEditorLoads",
+          "guestGuidePhotos",
+          "guestEditorDenied",
+        ]
+      : ["applicationSmoke"];
+  if (required.some((name) => receipt.checks?.[name] !== true))
+    fail("Application runtime checks have not passed.");
 }
 
 function requiredPolicy(config, definitions) {
   if (!Array.isArray(definitions)) fail("Malformed Vercel check inventory.");
-  const selected = definitions.filter(check => check.id === config.requiredCheckId);
-  if (selected.length !== 1 || selected[0].name !== "Release qualification" || selected[0].source?.kind !== "git-provider" ||
-      selected[0].source.provider !== "github" || selected[0].source.externalCheckName !== "Release qualification" ||
-      selected[0].blocks !== "deployment-alias" || canonical(selected[0].targets) !== '["production"]' ||
-      selected[0].projectId !== config.projectId || selected[0].ownerId !== config.teamId) fail("Required Vercel check policy changed.");
+  const selected = definitions.filter(
+    (check) => check.id === config.requiredCheckId,
+  );
+  if (
+    selected.length !== 1 ||
+    selected[0].name !== "Release qualification" ||
+    selected[0].source?.kind !== "git-provider" ||
+    selected[0].source.provider !== "github" ||
+    selected[0].source.externalCheckName !== "Release qualification" ||
+    selected[0].blocks !== "deployment-alias" ||
+    canonical(selected[0].targets) !== '["production"]' ||
+    selected[0].projectId !== config.projectId ||
+    selected[0].ownerId !== config.teamId
+  )
+    fail("Required Vercel check policy changed.");
 }
 
 export function validateNativeChecks(config, definitions, runs, deployment) {
   requiredPolicy(config, definitions);
   if (!Array.isArray(runs)) fail("Malformed Vercel check inventory.");
-  if (runs.some(run => !definitions.some(definition => definition.id === run.checkId))) fail("An unknown native check run requires investigation.");
-  for (const definition of definitions.filter(check => check.blocks !== "none" && check.targets?.some(target => ["production", "all"].includes(target)))) {
-    const matches = runs.filter(run => run.checkId === definition.id);
+  if (
+    runs.some(
+      (run) => !definitions.some((definition) => definition.id === run.checkId),
+    )
+  )
+    fail("An unknown native check run requires investigation.");
+  for (const definition of definitions.filter(
+    (check) =>
+      check.blocks !== "none" &&
+      check.targets?.some((target) => ["production", "all"].includes(target)),
+  )) {
+    const matches = runs.filter((run) => run.checkId === definition.id);
     // Manual staged releases validate the authoritative GitHub result directly.
     // Auto-assignment is disabled during staging, so its GitHub mirror may not exist.
     // An existing unsuccessful mirror, or any other missing blocking check, still stops release.
-    if (definition.id === config.requiredCheckId && matches.length === 0) continue;
-    if (matches.length !== 1 || matches[0].deploymentId !== deployment.id || matches[0].projectId !== config.projectId ||
-        matches[0].ownerId !== config.teamId || matches[0].status !== "completed" || matches[0].conclusion !== "succeeded") {
+    if (definition.id === config.requiredCheckId && matches.length === 0)
+      continue;
+    if (
+      matches.length !== 1 ||
+      matches[0].deploymentId !== deployment.id ||
+      matches[0].projectId !== config.projectId ||
+      matches[0].ownerId !== config.teamId ||
+      matches[0].status !== "completed" ||
+      matches[0].conclusion !== "succeeded"
+    ) {
       fail("A native blocking check is missing, ambiguous or unsuccessful.");
     }
   }
 }
 
 function inventoryHead(result) {
-  if (!Array.isArray(result.deployments)) fail("Malformed production deployment inventory.");
+  if (!Array.isArray(result.deployments))
+    fail("Malformed production deployment inventory.");
   const next = result.pagination?.next ?? null;
-  if (next !== null && (!Number.isSafeInteger(next) || next <= 0)) fail("Ambiguous production deployment pagination.");
+  if (next !== null && (!Number.isSafeInteger(next) || next <= 0))
+    fail("Ambiguous production deployment pagination.");
   return canonical({ deployments: result.deployments, next });
 }
 
@@ -93,13 +228,20 @@ async function deploymentInventory(vercel, projectId) {
   let head;
   let until;
   for (let page = 0; page < 100; page++) {
-    const result = await vercel(`/v6/deployments?projectId=${projectId}&target=production&limit=100${until ? `&until=${until}` : ""}`);
-    if (!Array.isArray(result.deployments)) fail("Malformed production deployment inventory.");
+    const result = await vercel(
+      `/v6/deployments?projectId=${projectId}&target=production&limit=100${until ? `&until=${until}` : ""}`,
+    );
+    if (!Array.isArray(result.deployments))
+      fail("Malformed production deployment inventory.");
     if (page === 0) head = inventoryHead(result);
     deployments.push(...result.deployments);
     if (!result.pagination?.next) return { deployments, head };
-    if (!Number.isSafeInteger(result.pagination.next) || result.pagination.next <= 0 ||
-        (until && result.pagination.next >= until)) fail("Ambiguous production deployment pagination.");
+    if (
+      !Number.isSafeInteger(result.pagination.next) ||
+      result.pagination.next <= 0 ||
+      (until && result.pagination.next >= until)
+    )
+      fail("Ambiguous production deployment pagination.");
     until = result.pagination.next;
   }
   fail("Production inventory exceeds the safe pagination limit.");
@@ -109,35 +251,71 @@ export async function protectedJson(path) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.uid !== process.getuid() || (stat.mode & 0o077) !== 0) fail("Release inputs must be private files owned by the operator.");
+    if (
+      !stat.isFile() ||
+      stat.uid !== process.getuid() ||
+      (stat.mode & 0o077) !== 0
+    )
+      fail("Release inputs must be private files owned by the operator.");
     return JSON.parse(await handle.readFile("utf8"));
-  } finally { await handle.close(); }
+  } finally {
+    await handle.close();
+  }
 }
 
 async function releaseJournal(path) {
   const parent = await realpath(dirname(path));
   const metadata = await stat(parent);
-  if (metadata.uid !== process.getuid() || (metadata.mode & 0o077) !== 0 ||
-      parent === resolve(root) || parent.startsWith(`${resolve(root)}${sep}`)) {
-    fail("Release journals require a private operator directory outside the source checkout.");
+  if (
+    metadata.uid !== process.getuid() ||
+    (metadata.mode & 0o077) !== 0 ||
+    parent === resolve(root) ||
+    parent.startsWith(`${resolve(root)}${sep}`)
+  ) {
+    fail(
+      "Release journals require a private operator directory outside the source checkout.",
+    );
   }
   return open(path, "wx", 0o600);
 }
 
-export async function releaseVercel({ action, app, config, deploymentId, receipt, journalPath, sha }, { vercel, qualify, checkout }) {
-  if (!["inspect", "stage", "promote"].includes(action) || app.platform !== "vercel" || !id(config.projectId, "prj") ||
-      !id(config.teamId, "team") || !validProductionAnchor(config) || !id(config.requiredCheckId, "chk") ||
-      (action !== "stage" && !id(deploymentId, "dpl")) ||
-      (action !== "inspect" && (typeof journalPath !== "string" || !isAbsolute(journalPath)))) fail("Unsupported release target, journal or action.");
+export async function releaseVercel(
+  { action, app, config, deploymentId, receipt, journalPath, sha },
+  { vercel, qualify, checkout },
+) {
+  if (
+    !["inspect", "stage", "promote"].includes(action) ||
+    app.platform !== "vercel" ||
+    !id(config.projectId, "prj") ||
+    !id(config.teamId, "team") ||
+    !validProductionAnchor(config) ||
+    !id(config.requiredCheckId, "chk") ||
+    (action !== "stage" && !id(deploymentId, "dpl")) ||
+    (action !== "inspect" &&
+      (typeof journalPath !== "string" || !isAbsolute(journalPath)))
+  )
+    fail("Unsupported release target, journal or action.");
   await checkout(sha);
   const quality = await qualify(sha);
   const project = await vercel(`/v9/projects/${config.projectId}`);
   if (action === "stage") {
-    if (project.id !== config.projectId || project.accountId !== config.teamId || project.name !== app.project ||
-        project.rootDirectory !== app.directory || project.autoAssignCustomDomains !== false ||
-        project.nodeVersion !== "24.x" || project.sourceFilesOutsideRootDirectory !== true || project.link?.type !== "github" ||
-        productionId(project) !== config.expectedProductionId || project.link?.org !== "bentbrain" ||
-        project.link.repo !== "bent-mono" || project.link.productionBranch !== "main") fail("Stage requires the frozen monorepo project with automatic assignment disabled.");
+    if (
+      project.id !== config.projectId ||
+      project.accountId !== config.teamId ||
+      project.name !== app.project ||
+      project.rootDirectory !== app.directory ||
+      project.autoAssignCustomDomains !== false ||
+      project.nodeVersion !== "24.x" ||
+      project.sourceFilesOutsideRootDirectory !== true ||
+      project.link?.type !== "github" ||
+      productionId(project) !== config.expectedProductionId ||
+      project.link?.org !== "bentbrain" ||
+      project.link.repo !== "bent-mono" ||
+      project.link.productionBranch !== "main"
+    )
+      fail(
+        "Stage requires the frozen monorepo project with automatic assignment disabled.",
+      );
   }
   const definitions = await vercel(`/v2/projects/${config.projectId}/checks`);
   requiredPolicy(config, definitions.checks);
@@ -145,109 +323,265 @@ export async function releaseVercel({ action, app, config, deploymentId, receipt
   let deployment;
   let nativeMirrorPresent;
   if (action !== "stage") {
-    deployment = await vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`);
-    validateTarget({ app, config, project, deployment, deploymentId, sha, inspection: action === "inspect" });
+    deployment = await vercel(
+      `/v13/deployments/${deploymentId}?withGitRepoInfo=true`,
+    );
+    validateTarget({
+      app,
+      config,
+      project,
+      deployment,
+      deploymentId,
+      sha,
+      inspection: action === "inspect",
+    });
     const runs = await vercel(`/v2/deployments/${deploymentId}/check-runs`);
     validateNativeChecks(config, definitions.checks, runs.runs, deployment);
-    nativeMirrorPresent = runs.runs.some(run => run.checkId === config.requiredCheckId);
-    if (action === "promote") validateRuntime(receipt, { app, deployment, sha, fingerprint });
+    nativeMirrorPresent = runs.runs.some(
+      (run) => run.checkId === config.requiredCheckId,
+    );
+    if (action === "promote")
+      validateRuntime(receipt, { app, deployment, sha, fingerprint });
   }
-  const report = { app: app.name, sha, deploymentId, configurationSha256: fingerprint, quality, nativeMirrorPresent,
-    isCurrentProduction: project.targets?.production?.id === deploymentId };
+  const report = {
+    app: app.name,
+    sha,
+    deploymentId,
+    configurationSha256: fingerprint,
+    quality,
+    nativeMirrorPresent,
+    isCurrentProduction: project.targets?.production?.id === deploymentId,
+  };
   if (action === "inspect") return report;
   // Read potentially long history before final source admission. Its newest
   // page is checked again below, so a build created while paging is not missed.
   const inventory = await deploymentInventory(vercel, config.projectId);
   await checkout(sha);
   const finalQuality = await qualify(sha);
-  if (canonical(finalQuality) !== canonical(quality)) fail("Quality qualification changed during admission.");
+  if (canonical(finalQuality) !== canonical(quality))
+    fail("Quality qualification changed during admission.");
   // GitHub admission performs several asynchronous reads. Refresh provider
   // admission afterwards, so changes during qualification cannot use an old
   // settings, check-policy or deployment snapshot to authorize mutation.
-  const [finalProject, finalDefinitions, finalDeployment, finalRuns, finalInventoryHead] = await Promise.all([
+  const [
+    finalProject,
+    finalDefinitions,
+    finalDeployment,
+    finalRuns,
+    finalInventoryHead,
+  ] = await Promise.all([
     vercel(`/v9/projects/${config.projectId}`),
     vercel(`/v2/projects/${config.projectId}/checks`),
-    action === "promote" ? vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`) : null,
-    action === "promote" ? vercel(`/v2/deployments/${deploymentId}/check-runs`) : null,
-    vercel(`/v6/deployments?projectId=${config.projectId}&target=production&limit=100`),
+    action === "promote"
+      ? vercel(`/v13/deployments/${deploymentId}?withGitRepoInfo=true`)
+      : null,
+    action === "promote"
+      ? vercel(`/v2/deployments/${deploymentId}/check-runs`)
+      : null,
+    vercel(
+      `/v6/deployments?projectId=${config.projectId}&target=production&limit=100`,
+    ),
   ]);
   requiredPolicy(config, finalDefinitions.checks);
-  if (inventoryHead(finalInventoryHead) !== inventory.head) fail("Production deployment inventory changed during admission.");
+  if (inventoryHead(finalInventoryHead) !== inventory.head)
+    fail("Production deployment inventory changed during admission.");
   if (config.firstRelease === true) {
-    const onlyCandidate = inventory.deployments.length === 1 && (() => {
-      const item = inventory.deployments[0];
-      return (item.uid ?? item.id) === deploymentId && (!item.uid || !item.id || item.uid === item.id);
-    })();
-    if (action === "stage" ? inventory.deployments.length !== 0 : !onlyCandidate) {
-      fail("First release requires empty production history before staging and only its candidate before promotion.");
+    const onlyCandidate =
+      inventory.deployments.length === 1 &&
+      (() => {
+        const item = inventory.deployments[0];
+        return (
+          (item.uid ?? item.id) === deploymentId &&
+          (!item.uid || !item.id || item.uid === item.id)
+        );
+      })();
+    if (
+      action === "stage" ? inventory.deployments.length !== 0 : !onlyCandidate
+    ) {
+      fail(
+        "First release requires empty production history before staging and only its candidate before promotion.",
+      );
     }
   }
-  if (inventory.deployments.some(item =>
-    ["INITIALIZING", "QUEUED", "BUILDING"].includes(item.state) ||
-    (action === "promote" && item.created > deployment.createdAt))) fail("Production has concurrent or newer deployment work, or an incomplete inventory.");
-  if (configurationHash(finalProject, finalDefinitions.checks) !== fingerprint ||
-      productionId(finalProject) !== config.expectedProductionId ||
-      finalProject.autoAssignCustomDomains !== false ||
-      (finalProject.lastAliasRequest && finalProject.lastAliasRequest.jobStatus !== "success")) fail("Release settings or production changed during admission.");
+  if (
+    inventory.deployments.some(
+      (item) =>
+        ["INITIALIZING", "QUEUED", "BUILDING"].includes(item.state) ||
+        (action === "promote" && item.created > deployment.createdAt),
+    )
+  )
+    fail(
+      "Production has concurrent or newer deployment work, or an incomplete inventory.",
+    );
+  if (
+    configurationHash(finalProject, finalDefinitions.checks) !== fingerprint ||
+    productionId(finalProject) !== config.expectedProductionId ||
+    finalProject.autoAssignCustomDomains !== false ||
+    (finalProject.lastAliasRequest &&
+      finalProject.lastAliasRequest.jobStatus !== "success")
+  )
+    fail("Release settings or production changed during admission.");
   if (action === "promote") {
     deployment = finalDeployment;
-    validateTarget({ app, config, project: finalProject, deployment, deploymentId, sha });
-    validateNativeChecks(config, finalDefinitions.checks, finalRuns.runs, deployment);
+    validateTarget({
+      app,
+      config,
+      project: finalProject,
+      deployment,
+      deploymentId,
+      sha,
+    });
+    validateNativeChecks(
+      config,
+      finalDefinitions.checks,
+      finalRuns.runs,
+      deployment,
+    );
     validateRuntime(receipt, { app, deployment, sha, fingerprint });
   }
   await checkout(sha);
   const handle = await releaseJournal(journalPath);
   try {
-    await handle.writeFile(JSON.stringify({ ...report, action, at: new Date().toISOString(), status: "intent-recorded-no-retry" }) + "\n");
+    await handle.writeFile(
+      JSON.stringify({
+        ...report,
+        action,
+        at: new Date().toISOString(),
+        status: "intent-recorded-no-retry",
+      }) + "\n",
+    );
     await handle.sync();
     // Exactly one mutation. A timeout/HTTP error leaves the journal intact and
     // requires inspection, never an automatic retry or a force/alias fallback.
-    const result = action === "stage"
-      ? await vercel("/v13/deployments", "POST", { name: app.project, project: config.projectId, target: "production",
-        gitSource: { type: "github", repoId: finalProject.link.repoId, ref: "main", sha } })
-      : await vercel(`/v10/projects/${config.projectId}/promote/${deploymentId}`, "POST", {});
-    await handle.writeFile(JSON.stringify({ status: "accepted-readback-required", result }) + "\n");
+    const result =
+      action === "stage"
+        ? await vercel("/v13/deployments", "POST", {
+            name: app.project,
+            project: config.projectId,
+            target: "production",
+            gitSource: {
+              type: "github",
+              repoId: finalProject.link.repoId,
+              ref: "main",
+              sha,
+            },
+          })
+        : await vercel(
+            `/v10/projects/${config.projectId}/promote/${deploymentId}`,
+            "POST",
+            {},
+          );
+    await handle.writeFile(
+      JSON.stringify({ status: "accepted-readback-required", result }) + "\n",
+    );
     await handle.sync();
     return { ...report, status: "accepted-readback-required" };
-  } finally { await handle.close(); }
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function vercelApi(path, method = "GET", body) {
   const token = process.env.VERCEL_TOKEN;
   const team = process.env.VERCEL_ORG_ID;
-  if (!token || !id(team, "team") || !path.startsWith("/v")) fail("Scoped Vercel credentials are required.");
-  const response = await fetch(`https://api.vercel.com${path}${path.includes("?") ? "&" : "?"}teamId=${team}`, {
-    method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    ...(body ? { body: JSON.stringify(body) } : {}), redirect: "error", signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) fail(`Vercel request failed with HTTP ${response.status}; inspect any recorded release intent before retrying.`);
+  if (!token || !id(team, "team") || !path.startsWith("/v"))
+    fail("Scoped Vercel credentials are required.");
+  const response = await fetch(
+    `https://api.vercel.com${path}${path.includes("?") ? "&" : "?"}teamId=${team}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  if (!response.ok)
+    fail(
+      `Vercel request failed with HTTP ${response.status}; inspect any recorded release intent before retrying.`,
+    );
   if (response.status === 204) return {};
   const text = await response.text();
   return text.trim() ? JSON.parse(text) : {};
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const [action, ...args] = process.argv.slice(2);
   const options = {};
   for (let index = 0; index < args.length; index += 2) {
     const name = args[index];
-    if (!["--app", "--config", "--deployment", "--qualification", "--journal"].includes(name) ||
-        !args[index + 1] || options[name]) fail("Usage: bun run release:vercel inspect|stage|promote --app <name> --config <private-file> [--deployment <id> --qualification <private-file> --journal <new-private-file>]");
+    if (
+      ![
+        "--app",
+        "--config",
+        "--deployment",
+        "--qualification",
+        "--journal",
+      ].includes(name) ||
+      !args[index + 1] ||
+      options[name]
+    )
+      fail(
+        "Usage: bun run release:vercel inspect|stage|promote --app <name> --config <private-file> [--deployment <id> --qualification <private-file> --journal <new-private-file>]",
+      );
     options[name] = args[index + 1];
   }
-  const applications = JSON.parse(await readFile(new URL("../deployments.json", import.meta.url), "utf8")).applications;
-  const app = applications.find(item => item.name === options["--app"] && item.platform === "vercel");
-  if (!app) fail("Select a plain Vercel application from deployments.json; paired application releases retain their guarded routes.");
+  const applications = JSON.parse(
+    await readFile(new URL("../deployments.json", import.meta.url), "utf8"),
+  ).applications;
+  const app = applications.find(
+    (item) => item.name === options["--app"] && item.platform === "vercel",
+  );
+  if (!app)
+    fail(
+      "Select a plain Vercel application from deployments.json; paired application releases retain their guarded routes.",
+    );
   const config = await protectedJson(options["--config"]);
-  if (config.teamId !== process.env.VERCEL_ORG_ID) fail("Vercel credential scope and protected configuration disagree.");
-  const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  if (config.teamId !== process.env.VERCEL_ORG_ID)
+    fail("Vercel credential scope and protected configuration disagree.");
+  const git = (args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   const sha = git(["rev-parse", "HEAD"]);
-  validateReleaseEvent(process.env, process.env.GITHUB_ACTIONS === "true"
-    ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8")) : {}, sha);
-  const checkout = async expected => {
-    if (git(["rev-parse", "HEAD"]) !== expected || git(["status", "--porcelain", "--untracked-files=normal"])) fail("Release requires a clean exact-source checkout.");
+  validateReleaseEvent(
+    process.env,
+    process.env.GITHUB_ACTIONS === "true"
+      ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"))
+      : {},
+    sha,
+  );
+  const checkout = async (expected) => {
+    if (
+      git(["rev-parse", "HEAD"]) !== expected ||
+      git(["status", "--porcelain", "--untracked-files=normal"])
+    )
+      fail("Release requires a clean exact-source checkout.");
   };
-  console.log(JSON.stringify(await releaseVercel({ action, app, config, sha, deploymentId: options["--deployment"],
-    receipt: options["--qualification"] ? await protectedJson(options["--qualification"]) : undefined,
-    journalPath: options["--journal"] }, { vercel: vercelApi, qualify: sha => requireReleaseChecks(sha, githubApi), checkout })));
+  console.log(
+    JSON.stringify(
+      await releaseVercel(
+        {
+          action,
+          app,
+          config,
+          sha,
+          deploymentId: options["--deployment"],
+          receipt: options["--qualification"]
+            ? await protectedJson(options["--qualification"])
+            : undefined,
+          journalPath: options["--journal"],
+        },
+        {
+          vercel: vercelApi,
+          qualify: (sha) => requireReleaseChecks(sha, githubApi),
+          checkout,
+        },
+      ),
+    ),
+  );
 }

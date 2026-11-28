@@ -99,9 +99,15 @@ describe("chart popover selection", () => {
 
 describe("chart popover fit", () => {
   test("a card that is taller or wider than its chart shows below it", () => {
-    expect(cardFits({ width: 150, height: 54 }, { width: 300, height: 54 })).toBe(true);
-    expect(cardFits({ width: 150, height: 74 }, { width: 300, height: 54 })).toBe(false);
-    expect(cardFits({ width: 320, height: 40 }, { width: 300, height: 54 })).toBe(false);
+    expect(
+      cardFits({ width: 150, height: 54 }, { width: 300, height: 54 }),
+    ).toBe(true);
+    expect(
+      cardFits({ width: 150, height: 74 }, { width: 300, height: 54 }),
+    ).toBe(false);
+    expect(
+      cardFits({ width: 320, height: 40 }, { width: 300, height: 54 }),
+    ).toBe(false);
   });
 });
 

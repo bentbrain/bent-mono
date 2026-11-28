@@ -43,12 +43,27 @@ const meal = {
 describe("nutrients", () => {
   test("meals and saved meals record nutrients only when given", () => {
     expect(mealSchema.parse(meal)).toEqual(meal);
-    expect(mealSchema.parse({ ...meal, carbs: 60, fat: 8, fibre: 0 })).toEqual(
-      { ...meal, carbs: 60, fat: 8, fibre: 0 },
-    );
+    expect(mealSchema.parse({ ...meal, carbs: 60, fat: 8, fibre: 0 })).toEqual({
+      ...meal,
+      carbs: 60,
+      fat: 8,
+      fibre: 0,
+    });
     expect(
-      regularSchema.parse({ kind: "regular", name: "Oats", calories: 400, protein: 20, fibre: 7 }),
-    ).toEqual({ kind: "regular", name: "Oats", calories: 400, protein: 20, fibre: 7 });
+      regularSchema.parse({
+        kind: "regular",
+        name: "Oats",
+        calories: 400,
+        protein: 20,
+        fibre: 7,
+      }),
+    ).toEqual({
+      kind: "regular",
+      name: "Oats",
+      calories: 400,
+      protein: 20,
+      fibre: 7,
+    });
     expect(mealSchema.safeParse({ ...meal, carbs: -1 }).success).toBe(false);
     expect(mealSchema.safeParse({ ...meal, fat: 501 }).success).toBe(false);
     expect(mealSchema.safeParse({ ...meal, fibre: 201 }).success).toBe(false);
@@ -59,18 +74,32 @@ describe("nutrients", () => {
     const settings = defaultSettings("2026-11-30", "Australia/Brisbane");
     expect(settings.nutrients).toBeUndefined();
     expect(trackedNutrients(settings)).toEqual([]);
-    const tracked = withNutrient(withNutrient(settings, "fibre", 30), "carbs", null);
-    expect(tracked.nutrients).toEqual({ fibre: { target: 30 }, carbs: { target: null } });
+    const tracked = withNutrient(
+      withNutrient(settings, "fibre", 30),
+      "carbs",
+      null,
+    );
+    expect(tracked.nutrients).toEqual({
+      fibre: { target: 30 },
+      carbs: { target: null },
+    });
     expect(trackedNutrients(tracked)).toEqual(["carbs", "fibre"]);
     expect(settingsSchema.parse(tracked)).toEqual(tracked);
-    const none = withNutrient(withNutrient(tracked, "fibre", false), "carbs", false);
+    const none = withNutrient(
+      withNutrient(tracked, "fibre", false),
+      "carbs",
+      false,
+    );
     expect("nutrients" in none).toBe(false);
     expect(settingsSchema.parse(none)).toEqual(settings);
     expect(
       settingsSchema.safeParse(withNutrient(settings, "fat", 5)).success,
     ).toBe(false);
     expect(
-      settingsSchema.safeParse({ ...settings, nutrients: { sugar: { target: 30 } } }).success,
+      settingsSchema.safeParse({
+        ...settings,
+        nutrients: { sugar: { target: 30 } },
+      }).success,
     ).toBe(false);
   });
 
@@ -80,9 +109,18 @@ describe("nutrients", () => {
       record({ ...meal, name: "Chicken", carbs: 0 }),
       record({ ...meal, name: "Apple" }),
       record({ ...meal, date: "2026-12-01", fat: 90 }),
-      record({ kind: "regular", name: "Oats", calories: 400, protein: 20, fat: 30 }),
+      record({
+        kind: "regular",
+        name: "Oats",
+        calories: 400,
+        protein: 20,
+        fat: 30,
+      }),
     ];
-    expect(totals(records, "2026-11-30")).toEqual({ calories: 1200, protein: 60 });
+    expect(totals(records, "2026-11-30")).toEqual({
+      calories: 1200,
+      protein: 60,
+    });
     const day = nutrientTotals(records, "2026-11-30");
     expect(day).toEqual({
       meals: 3,
@@ -91,13 +129,18 @@ describe("nutrients", () => {
       fibre: { grams: 0, recorded: 0 },
     });
     expect(nutrientCoverage(day.carbs, day.meals)).toBe("from 2 of 3 meals");
-    expect(nutrientCoverage({ grams: 0, recorded: 0 }, 1)).toBe("from 0 of 1 meal");
+    expect(nutrientCoverage({ grams: 0, recorded: 0 }, 1)).toBe(
+      "from 0 of 1 meal",
+    );
     expect(nutrientCoverage({ grams: 5, recorded: 2 }, 2)).toBe("");
     expect(nutrientTotals(records, "2026-12-02").meals).toBe(0);
   });
 
   test("compares and copies the values a meal records", () => {
-    expect(mealNutrientValues({ ...meal, carbs: 10, fibre: 0 })).toEqual({ carbs: 10, fibre: 0 });
+    expect(mealNutrientValues({ ...meal, carbs: 10, fibre: 0 })).toEqual({
+      carbs: 10,
+      fibre: 0,
+    });
     expect(sameNutrients({ carbs: 10 }, { carbs: 10 })).toBe(true);
     expect(sameNutrients({ carbs: 10 }, { carbs: 10, fat: 0 })).toBe(false);
   });
@@ -107,7 +150,9 @@ describe("nutrients", () => {
     expect(isNutrient("sugar")).toBe(false);
     expect(nutrientList(["carbs"])).toBe("carbs");
     expect(nutrientList(["carbs", "fibre"])).toBe("carbs and fibre");
-    expect(nutrientList(["carbs", "fat", "fibre"])).toBe("carbs, fat and fibre");
+    expect(nutrientList(["carbs", "fat", "fibre"])).toBe(
+      "carbs, fat and fibre",
+    );
     expect(nutrientNote("carbs", 210.4, 250)).toBe("40g left");
     expect(nutrientNote("fat", 82, 70)).toBe("12g over");
     expect(nutrientNote("fibre", 22, 30)).toBe("8g to go");
@@ -121,7 +166,9 @@ describe("nutrients", () => {
     expect(formNutrients([], [])).toEqual([]);
     // Several meals can sum to a hair under the target.
     const fibre = nutrientTotals(
-      [10.1, 10.2, 9.7].map((grams) => record({ ...meal, date: "2026-12-05", fibre: grams })),
+      [10.1, 10.2, 9.7].map((grams) =>
+        record({ ...meal, date: "2026-12-05", fibre: grams }),
+      ),
       "2026-12-05",
     ).fibre.grams;
     expect(fibre).toBeCloseTo(30);
@@ -132,12 +179,19 @@ describe("nutrients", () => {
     expect(targetStatus(29.5, 30)).toBe("under");
     expect(targetStatus(30.5, 30)).toBe("over");
     expect(nutrientNote("fibre", fibre, 30)).toBe("Fibre target reached");
-    expect(nutrientNote("fibre", 29.999999999999996, 30)).toBe("Fibre target reached");
-    expect(nutrientNote("fat", 70.00000000000001, 70)).toBe("On target");
-    expect(foodSummary({ calories: 450.4, protein: 30, carbs: 40.2, fibre: 3 }, ["carbs", "fat"])).toBe(
-      "450 kcal · 30g protein · 40g carbs",
+    expect(nutrientNote("fibre", 29.999999999999996, 30)).toBe(
+      "Fibre target reached",
     );
-    expect(foodSummary({ calories: 450, protein: 30, carbs: 40 }, [])).toBe("450 kcal · 30g protein");
+    expect(nutrientNote("fat", 70.00000000000001, 70)).toBe("On target");
+    expect(
+      foodSummary({ calories: 450.4, protein: 30, carbs: 40.2, fibre: 3 }, [
+        "carbs",
+        "fat",
+      ]),
+    ).toBe("450 kcal · 30g protein · 40g carbs");
+    expect(foodSummary({ calories: 450, protein: 30, carbs: 40 }, [])).toBe(
+      "450 kcal · 30g protein",
+    );
     expect(mealEntryError([])).toBe("Enter a meal name, calories and protein.");
     expect(mealEntryError(["fibre"])).toBe(
       "Enter a meal name, calories and protein. Fibre is optional: enter grams or leave it empty.",

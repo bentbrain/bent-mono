@@ -6,7 +6,16 @@ import { Button } from "../../../ui/Button";
 import { AppText } from "../../../ui/Text";
 import { haptic } from "../../../ui/haptics";
 import { cn, shape } from "../../../ui/typography";
-import { holdFinishedAt, holdPhase, holdResult, holdSetOpen, phaseAnnouncement, phaseKey, phaseTitle, startHold } from "./hold";
+import {
+  holdFinishedAt,
+  holdPhase,
+  holdResult,
+  holdSetOpen,
+  phaseAnnouncement,
+  phaseKey,
+  phaseTitle,
+  startHold,
+} from "./hold";
 import type { Hold, HoldPhase } from "./hold";
 import type { SetEntry } from "./session";
 

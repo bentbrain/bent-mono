@@ -54,9 +54,17 @@ export function applyText(workout: Workout, key: string, text: string, units: Un
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
   // A weight typed for an exercise that records none, such as a band exercise, has no field to apply to.
-  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)) return null;
+  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed))
+    return null;
   const prescription = exercise.prescription;
-  const label = field === "loadKg" ? "weight" : field === "rir" ? "reps left" : prescription.mode === "seconds" ? "seconds" : "reps";
+  const label =
+    field === "loadKg"
+      ? "weight"
+      : field === "rir"
+        ? "reps left"
+        : prescription.mode === "seconds"
+          ? "seconds"
+          : "reps";
   const trimmed = text.trim().replace(",", ".");
   const number = Number(trimmed);
   if (!trimmed || !Number.isFinite(number) || number < 0) return `Enter ${label} as a number of 0 or more.`;
@@ -122,7 +130,9 @@ export function changeSet(workout: Workout, exercise: number, set: number, chang
   return {
     ...workout,
     exercises: workout.exercises.map((item, i) =>
-      i !== exercise ? item : { ...item, sets: item.sets.map((value, j) => (j === set ? { ...value, ...change } : value)) },
+      i !== exercise
+        ? item
+        : { ...item, sets: item.sets.map((value, j) => (j === set ? { ...value, ...change } : value)) },
     ),
   };
 }

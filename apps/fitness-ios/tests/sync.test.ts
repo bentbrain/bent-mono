@@ -16,9 +16,16 @@ function memoryStorage() {
     writeSnapshot: (o, records) => void snapshots.set(o, records),
     readPending: (o) => [...(pending.get(o) ?? [])],
     addPending: (o, item) => void pending.set(o, [...(pending.get(o) ?? []), item]),
-    removePending: (o, id) => void pending.set(o, (pending.get(o) ?? []).filter((p) => p.request.operationId !== id)),
+    removePending: (o, id) =>
+      void pending.set(
+        o,
+        (pending.get(o) ?? []).filter((p) => p.request.operationId !== id),
+      ),
     acknowledge: (o, id, records) => {
-      pending.set(o, (pending.get(o) ?? []).filter((p) => p.request.operationId !== id));
+      pending.set(
+        o,
+        (pending.get(o) ?? []).filter((p) => p.request.operationId !== id),
+      );
       snapshots.set(o, records);
     },
   };
@@ -44,7 +51,12 @@ function fakeFitness(initial: RecordEntry[] = []) {
         records.delete(request.id);
         return { status: "saved", record: null };
       }
-      const record = { id: request.id, revision: request.revision + 1, data: request.data, updatedAt: new Date(0).toISOString() };
+      const record = {
+        id: request.id,
+        revision: request.revision + 1,
+        data: request.data,
+        updatedAt: new Date(0).toISOString(),
+      };
       records.set(request.id, record);
       return { status: "saved", record };
     },
@@ -52,7 +64,12 @@ function fakeFitness(initial: RecordEntry[] = []) {
   return { transport, records, state };
 }
 
-const settingsRecord: RecordEntry = { id: settingsId, revision: 1, data: settings, updatedAt: new Date(0).toISOString() };
+const settingsRecord: RecordEntry = {
+  id: settingsId,
+  revision: 1,
+  data: settings,
+  updatedAt: new Date(0).toISOString(),
+};
 
 describe("sync engine", () => {
   test("loads the account, keeps a snapshot and saves queued changes in order", async () => {
@@ -152,7 +169,10 @@ describe("sync engine", () => {
       storage: memoryStorage().storage,
     });
     await engine.start();
-    expect(engine.getState()).toMatchObject({ ready: false, error: "Your account changed. Sign in again to continue." });
+    expect(engine.getState()).toMatchObject({
+      ready: false,
+      error: "Your account changed. Sign in again to continue.",
+    });
   });
 
   test("latest reflects queued changes and removals", async () => {
@@ -160,10 +180,15 @@ describe("sync engine", () => {
     fitness.state.offline = true;
     const device = memoryStorage();
     device.storage.writeSnapshot(owner, [settingsRecord]);
-    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage, uuid: (() => {
-      let n = 0;
-      return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
-    })() });
+    const engine = new SyncEngine({
+      owner,
+      transport: fitness.transport,
+      storage: device.storage,
+      uuid: (() => {
+        let n = 0;
+        return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+      })(),
+    });
     await engine.start();
     const id = "11111111-1111-4111-8111-111111111111";
     engine.put(meal("A"), id);
@@ -225,7 +250,11 @@ describe("sync engine", () => {
     expect(fitness.state.saves.filter((m) => m.data?.kind === "meal")).toHaveLength(0);
     await engine.discardRejected();
     expect(engine.getState()).toMatchObject({ rejected: null, pending: 0, error: "" });
-    expect([...fitness.records.values()].filter((r) => r.data.kind === "meal").map((r) => r.data.kind === "meal" && r.data.name)).toEqual(["Next"]);
+    expect(
+      [...fitness.records.values()]
+        .filter((r) => r.data.kind === "meal")
+        .map((r) => r.data.kind === "meal" && r.data.name),
+    ).toEqual(["Next"]);
   });
 
   test("a stopped engine ignores late replies and refuses changes", async () => {
@@ -253,7 +282,11 @@ describe("sync engine", () => {
   });
 
   test("the export includes typed values kept on the iPhone", async () => {
-    const engine = new SyncEngine({ owner, transport: fakeFitness([settingsRecord]).transport, storage: memoryStorage().storage });
+    const engine = new SyncEngine({
+      owner,
+      transport: fakeFitness([settingsRecord]).transport,
+      storage: memoryStorage().storage,
+    });
     await engine.start();
     const exported = JSON.parse(engine.draftExport({ "workout:1:0:0:value": "12" }));
     expect(exported).toMatchObject({ format: "fitness-pending-v1", typed: { "workout:1:0:0:value": "12" } });
@@ -314,7 +347,9 @@ describe("sync engine", () => {
       updatedAt: new Date(0).toISOString(),
     });
     expect(await engine.refresh()).toBe(true);
-    expect(engine.getState().records.some((r) => r.data.kind === "meal" && r.data.name === "From another device")).toBe(true);
+    expect(engine.getState().records.some((r) => r.data.kind === "meal" && r.data.name === "From another device")).toBe(
+      true,
+    );
   });
 
   test("a save reply that crossed a load can't bring back a record removed elsewhere", async () => {

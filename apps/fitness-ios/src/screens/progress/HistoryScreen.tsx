@@ -47,9 +47,7 @@ function RunCard({ run }: { run: RunEntry }) {
           Easy run
         </AppText>
       </View>
-      <AppText tone="secondary">
-        {runText(run.data)}
-      </AppText>
+      <AppText tone="secondary">{runText(run.data)}</AppText>
       {run.data.notes ? <AppText textRole="footnote">{run.data.notes}</AppText> : null}
       <View className="flex-row flex-wrap gap-2">
         <Button
@@ -58,7 +56,9 @@ function RunCard({ run }: { run: RunEntry }) {
           size="compact"
           icon="pencil"
           accessibilityLabel={`Edit ${label}`}
-          onPress={() => navigation.navigate("WeekTab", { screen: "Run", params: { date: run.data.date, runId: run.id } })}
+          onPress={() =>
+            navigation.navigate("WeekTab", { screen: "Run", params: { date: run.data.date, runId: run.id } })
+          }
         />
         <Button
           label="Remove run"
@@ -119,7 +119,12 @@ function WorkoutCard({
           {data.name}
         </AppText>
         {correction ? <Badge label="Corrected" tone="primary" /> : null}
-        <Symbol name={open ? "chevron.up" : "chevron.down"} size={13} weight="semibold" tintColorClassName="accent-chevron" />
+        <Symbol
+          name={open ? "chevron.up" : "chevron.down"}
+          size={13}
+          weight="semibold"
+          tintColorClassName="accent-chevron"
+        />
       </Pressable>
       {open ? (
         <>
@@ -238,7 +243,11 @@ export function HistoryScreen() {
         </Notice>
       ) : null}
       {!groups.length ? (
-        <EmptyState icon="list.bullet.rectangle" title="No sessions yet" body="Your completed workouts and runs will appear here." />
+        <EmptyState
+          icon="list.bullet.rectangle"
+          title="No sessions yet"
+          body="Your completed workouts and runs will appear here."
+        />
       ) : null}
       {groups.map((group) => (
         <View
@@ -250,7 +259,13 @@ export function HistoryScreen() {
             scroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - headerHeight - 8), animated: true });
           }}
         >
-          <AppText textRole="footnote" weight="medium" tone="muted" accessibilityRole="header" className="px-4 uppercase">
+          <AppText
+            textRole="footnote"
+            weight="medium"
+            tone="muted"
+            accessibilityRole="header"
+            className="px-4 uppercase"
+          >
             {formatDate(group.date)}
           </AppText>
           {group.sessions.map((session) =>
@@ -265,7 +280,10 @@ export function HistoryScreen() {
                 units={settings.units}
                 open={toggled[session.id] ?? session.data.date === date}
                 onToggle={() =>
-                  setToggled((value) => ({ ...value, [session.id]: !(value[session.id] ?? session.data.date === date) }))
+                  setToggled((value) => ({
+                    ...value,
+                    [session.id]: !(value[session.id] ?? session.data.date === date),
+                  }))
                 }
                 onRemove={remove}
                 onRestore={restore}

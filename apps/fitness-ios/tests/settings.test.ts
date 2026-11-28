@@ -51,7 +51,9 @@ describe("dumbbells", () => {
     );
     expect(parseDumbbells("0", "kg").error).toBeDefined();
     expect(parseDumbbells("500", "lb").error).toContain("up to 440 lb");
-    expect(parseDumbbells(Array.from({ length: 61 }, (_, i) => i + 1).join(","), "kg").error).toBe("Enter up to 60 dumbbell sizes.");
+    expect(parseDumbbells(Array.from({ length: 61 }, (_, i) => i + 1).join(","), "kg").error).toBe(
+      "Enter up to 60 dumbbell sizes.",
+    );
   });
 });
 
@@ -75,17 +77,25 @@ describe("validation messages", () => {
     const [first] = draft.routines;
     if (!first) throw new Error("The default plan has routines.");
     const named = { ...draft, routines: [{ ...first, name: "" }] };
-    expect(checkSettings(named).error).toEqual({ id: "routine-0", text: "Routine 1: enter a routine name of up to 160 characters." });
+    expect(checkSettings(named).error).toEqual({
+      id: "routine-0",
+      text: "Routine 1: enter a routine name of up to 160 characters.",
+    });
     const exercise = first.exercises[0];
     if (!exercise) throw new Error("The default routine has exercises.");
     const sets = { ...draft, routines: [{ ...first, exercises: [{ ...exercise, sets: 9 }] }] };
-    expect(checkSettings(sets).error).toEqual({ id: "sets-0-0", text: `${first.name}, ${exercise.name}: enter 1 to 8 sets.` });
+    expect(checkSettings(sets).error).toEqual({
+      id: "sets-0-0",
+      text: `${first.name}, ${exercise.name}: enter 1 to 8 sets.`,
+    });
     const range = { ...draft, routines: [{ ...first, exercises: [{ ...exercise, min: 12, max: 8 }] }] };
     expect(checkSettings(range).error).toEqual({
       id: "min-0-0",
       text: `${first.name}, ${exercise.name}: use a minimum above 0 that is no larger than the maximum.`,
     });
-    expect(checkSettings({ ...draft, routines: [{ ...first, exercises: [] }] }).error?.text).toBe(`${first.name}: keep 1 to 15 exercises.`);
+    expect(checkSettings({ ...draft, routines: [{ ...first, exercises: [] }] }).error?.text).toBe(
+      `${first.name}: keep 1 to 15 exercises.`,
+    );
     expect(checkSettings({ ...draft, routines: [] }).error?.text).toBe("Keep 1 to 8 routines.");
   });
 
@@ -126,7 +136,9 @@ describe("editor state", () => {
     expect(saveStatus(unsavedNotice, idle)).toBe("Unsaved settings");
     expect(saveStatus(queuedNotice, idle)).toBe("Settings saved.");
     expect(saveStatus(queuedNotice, { ...idle, pending: 1 })).toBe("Settings pending sync.");
-    expect(saveStatus(queuedNotice, { ...idle, error: "Offline" })).toBe("Settings need attention. See the save error below.");
+    expect(saveStatus(queuedNotice, { ...idle, error: "Offline" })).toBe(
+      "Settings need attention. See the save error below.",
+    );
   });
 });
 
@@ -145,9 +157,22 @@ describe("routines", () => {
     expect(addExercise(routine, "squat")).toBe(routine);
     expect(addExercise(routine, "unknown")).toBe(routine);
     const added = addExercise(routine, "curl");
-    expect(added.exercises.at(-1)).toEqual({ id: "curl", name: "Hammer curl", sets: 2, min: 10, max: 15, side: false, rest: 75, mode: "reps" });
+    expect(added.exercises.at(-1)).toEqual({
+      id: "curl",
+      name: "Hammer curl",
+      sets: 2,
+      min: 10,
+      max: 15,
+      side: false,
+      rest: 75,
+      mode: "reps",
+    });
     const choices = exerciseChoices(added);
-    expect(choices.find((c) => c.id === "curl")).toEqual({ id: "curl", label: "Hammer curl · already in this routine", included: true });
+    expect(choices.find((c) => c.id === "curl")).toEqual({
+      id: "curl",
+      label: "Hammer curl · already in this routine",
+      included: true,
+    });
     expect(choices.find((c) => c.id === "bench")?.included).toBe(false);
   });
 
@@ -220,7 +245,9 @@ describe("account copy", () => {
     expect(signOutMessage(0)).toBe(
       "Your saved data stays in your Fitness account. Apple Health sync stays connected until you disconnect it under Apple Health.",
     );
-    expect(signOutMessage(1)).toContain("1 change on this iPhone has not synced and will be deleted. Export pending changes first to keep it.");
+    expect(signOutMessage(1)).toContain(
+      "1 change on this iPhone has not synced and will be deleted. Export pending changes first to keep it.",
+    );
     expect(signOutMessage(3)).toContain("3 changes on this iPhone have not synced");
   });
 

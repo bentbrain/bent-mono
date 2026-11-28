@@ -87,7 +87,14 @@ export function Button({
         <ActivityIndicator color={typeof spinner === "string" ? spinner : undefined} />
       ) : (
         <View className="flex-row items-center gap-2">
-          {icon ? <Symbol name={icon} size={size === "compact" ? 15 : 17} weight="semibold" tintColorClassName={icons[tone]} /> : null}
+          {icon ? (
+            <Symbol
+              name={icon}
+              size={size === "compact" ? 15 : 17}
+              weight="semibold"
+              tintColorClassName={icons[tone]}
+            />
+          ) : null}
           <AppText textRole={size === "compact" ? "footnote" : "body"} weight="semibold" tone={labels[tone]}>
             {label}
           </AppText>
@@ -128,7 +135,11 @@ export function IconButton({
         onPress();
       }}
       style={{ width: size, height: size }}
-      className={cn("items-center justify-center rounded-full active:opacity-70", surfaces[tone], disabled && "opacity-40")}
+      className={cn(
+        "items-center justify-center rounded-full active:opacity-70",
+        surfaces[tone],
+        disabled && "opacity-40",
+      )}
     >
       <Symbol name={icon} size={Math.round(size * 0.45)} weight="semibold" tintColorClassName={icons[tone]} />
     </Pressable>

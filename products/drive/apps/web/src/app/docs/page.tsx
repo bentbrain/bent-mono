@@ -14,7 +14,9 @@ export default function DocsPage() {
       <Badge className="mt-10 block w-fit" variant="outline">
         Read-only pilot
       </Badge>
-      <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">Connection guide</h1>
+      <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">
+        Connection guide
+      </h1>
       <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
         Connect ChatGPT to read your Tesla vehicle status. You need an invited
         GitHub account and a Tesla account. Adding a custom MCP server in
@@ -45,10 +47,11 @@ export default function DocsPage() {
           </CardHeader>
           <CardContent className="leading-7 text-muted-foreground">
             <p>
-              Sign in with an invited GitHub account, then authorize read-only vehicle
-              access on Tesla&apos;s site. The service uses OAuth 2.1 authorization-code
-              flow with PKCE and dynamic client registration. Bent Drive Copilot issues
-              separate, short-lived tokens to the MCP client.
+              Sign in with an invited GitHub account, then authorize read-only
+              vehicle access on Tesla&apos;s site. The service uses OAuth 2.1
+              authorization-code flow with PKCE and dynamic client registration.
+              Bent Drive Copilot issues separate, short-lived tokens to the MCP
+              client.
             </p>
           </CardContent>
         </Card>
@@ -62,12 +65,14 @@ export default function DocsPage() {
           <CardContent className="text-muted-foreground">
             <ul className="list-disc space-y-2 pl-5 leading-7">
               <li>
-                <code className="text-foreground">tesla_list_vehicles</code> lists vehicles connected
-                by the current user.
+                <code className="text-foreground">tesla_list_vehicles</code>{" "}
+                lists vehicles connected by the current user.
               </li>
               <li>
-                <code className="text-foreground">tesla_get_vehicle_status</code> reads battery,
-                range, charging, locks, climate and Sentry state.
+                <code className="text-foreground">
+                  tesla_get_vehicle_status
+                </code>{" "}
+                reads battery, range, charging, locks, climate and Sentry state.
               </li>
             </ul>
           </CardContent>
@@ -81,8 +86,9 @@ export default function DocsPage() {
           </CardHeader>
           <CardContent className="leading-7 text-muted-foreground">
             <p>
-              The service requests only Tesla&apos;s vehicle-information scope. It does not request
-              command scopes and cannot unlock, start, move or otherwise control a vehicle.
+              The service requests only Tesla&apos;s vehicle-information scope.
+              It does not request command scopes and cannot unlock, start, move
+              or otherwise control a vehicle.
             </p>
           </CardContent>
         </Card>

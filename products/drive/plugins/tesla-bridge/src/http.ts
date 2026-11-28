@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 const runtime = createRuntime();
 if (runtime.config.mode === "live") {
   throw new Error(
-    "Live HTTP mode is intentionally disabled until OAuth 2.1 resource-server authentication is implemented. Use stdio for developer-only live testing."
+    "Live HTTP mode is intentionally disabled until OAuth 2.1 resource-server authentication is implemented. Use stdio for developer-only live testing.",
   );
 }
 
@@ -22,18 +22,27 @@ const httpServer = createServer((request, response) => {
 
 async function handleHttpRequest(
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
 ): Promise<void> {
   if (!request.url) {
     response.writeHead(400).end("Missing URL");
     return;
   }
 
-  const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+  const url = new URL(
+    request.url,
+    `http://${request.headers.host ?? "localhost"}`,
+  );
 
   if (request.method === "GET" && url.pathname === "/") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ name: "tesla-bridge", mode: runtime.config.mode, status: "ok" }));
+    response.end(
+      JSON.stringify({
+        name: "tesla-bridge",
+        mode: runtime.config.mode,
+        status: "ok",
+      }),
+    );
     return;
   }
 
@@ -48,10 +57,18 @@ async function handleHttpRequest(
     return;
   }
 
-  if (url.pathname === "/mcp" && request.method && allowedMethods.has(request.method)) {
+  if (
+    url.pathname === "/mcp" &&
+    request.method &&
+    allowedMethods.has(request.method)
+  ) {
     response.setHeader("access-control-allow-origin", "*");
     response.setHeader("access-control-expose-headers", "mcp-session-id");
-    const server = createMcpServer(runtime.config, runtime.adapter, runtime.actionStore);
+    const server = createMcpServer(
+      runtime.config,
+      runtime.adapter,
+      runtime.actionStore,
+    );
     const transport = new StreamableHTTPServerTransport({
       enableJsonResponse: true,
     });
@@ -77,5 +94,7 @@ async function handleHttpRequest(
 }
 
 httpServer.listen(runtime.config.port, "127.0.0.1", () => {
-  console.log(`Tesla Bridge MCP listening on http://127.0.0.1:${runtime.config.port}/mcp`);
+  console.log(
+    `Tesla Bridge MCP listening on http://127.0.0.1:${runtime.config.port}/mcp`,
+  );
 });

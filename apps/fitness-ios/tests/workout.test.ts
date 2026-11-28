@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createWorkout, defaultSettings, lastExercise, progression, workoutSchema } from "@bent/fitness-contracts/domain";
+import {
+  createWorkout,
+  defaultSettings,
+  lastExercise,
+  progression,
+  workoutSchema,
+} from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Workout } from "@bent/fitness-contracts/domain";
 import { elapsedSeconds, formatDuration, remainingRest } from "@bent/fitness-contracts/timing";
 import {
@@ -89,7 +95,12 @@ function handleEverySet(workout: Workout): Workout {
       sets: exercise.sets.map((set, i) =>
         i === 0
           ? { ...set, done: false, skipped: true }
-          : { ...set, done: true, value: exercise.prescription.max, right: exercise.prescription.side ? exercise.prescription.max : null },
+          : {
+              ...set,
+              done: true,
+              value: exercise.prescription.max,
+              right: exercise.prescription.side ? exercise.prescription.max : null,
+            },
       ),
     })),
   };
@@ -157,7 +168,11 @@ describe("typed workout values", () => {
   test("set rows show the inputs each exercise records", () => {
     const base = workout.exercises[0]?.prescription;
     if (!base) throw new Error("Missing exercise");
-    expect(setInputs({ ...base, mode: "reps", side: false }, "lb").map((i) => i.heading)).toEqual(["lb / dumbbell", "Reps", "Reps left"]);
+    expect(setInputs({ ...base, mode: "reps", side: false }, "lb").map((i) => i.heading)).toEqual([
+      "lb / dumbbell",
+      "Reps",
+      "Reps left",
+    ]);
     expect(setInputs({ ...base, mode: "reps", side: true }, "kg").map((i) => i.heading)).toEqual([
       "kg / dumbbell",
       "Left reps",
@@ -182,14 +197,28 @@ describe("typed workout values", () => {
   test("a weight typed for a band exercise is dropped", () => {
     const base = workout.exercises[0]?.prescription;
     if (!base) throw new Error("Missing exercise");
-    const banded = { ...workout, exercises: workout.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } } : e)) };
+    const banded = {
+      ...workout,
+      exercises: workout.exercises.map((e, i) =>
+        i === 0
+          ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } }
+          : e,
+      ),
+    };
     expect(applyText(banded, "0:0:loadKg", "4", "kg")).toBeNull();
     expect(applyText(banded, "0:0:value", "12", "kg")).not.toBeNull();
   });
   test("a hidden band weight is neither held back nor waiting for confirmation", () => {
     const base = workout.exercises[0]?.prescription;
     if (!base) throw new Error("Missing exercise");
-    const banded = { ...workout, exercises: workout.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } } : e)) };
+    const banded = {
+      ...workout,
+      exercises: workout.exercises.map((e, i) =>
+        i === 0
+          ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } }
+          : e,
+      ),
+    };
     const entry = { text: "4", base: null, units: null };
     expect(holdInBackground(banded, "0:0:loadKg", entry)).toBe(false);
     expect(unconfirmedKeys({ "0:0:loadKg": entry, "1:0:loadKg": entry }, banded)).toEqual(["1:0:loadKg"]);
@@ -213,7 +242,9 @@ describe("saving typed values", () => {
     expect(plan.workout.exercises[0]?.sets[1]?.value).toBe(workout.exercises[0]?.sets[1]?.value);
   });
   test("invalid text blocks the save and reports the field", () => {
-    const plan = planCommit(fresh(), { "0:0:value": { text: "9.5", base: "0", units: "kg" } }, "kg", { keys: setKeys(0, 0) });
+    const plan = planCommit(fresh(), { "0:0:value": { text: "9.5", base: "0", units: "kg" } }, "kg", {
+      keys: setKeys(0, 0),
+    });
     expect(plan).toMatchObject({ status: "invalid", failed: { "0:0:value": "Enter reps as a whole number." } });
   });
   test("Skip drops invalid text in the set and saves the skip", () => {
@@ -253,9 +284,19 @@ describe("saving typed values", () => {
   test("a save that breaks a workout rule is rejected with its message", () => {
     const workout = fresh();
     const plan = planCommit(workout, {}, "kg", {
-      change: (w) => applySetChange({ ...w, exercises: w.exercises.map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s, value: 0 })) })) }, 0, 0, { done: true }, { startRest: true, now: 0 }),
+      change: (w) =>
+        applySetChange(
+          { ...w, exercises: w.exercises.map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s, value: 0 })) })) },
+          0,
+          0,
+          { done: true },
+          { startRest: true, now: 0 },
+        ),
     });
-    expect(plan).toMatchObject({ status: "rejected", message: "Enter a result for each completed set and both sides." });
+    expect(plan).toMatchObject({
+      status: "rejected",
+      message: "Enter a result for each completed set and both sides.",
+    });
   });
   test("an unchanged workout is not saved again", () => {
     const workout = fresh();
@@ -343,14 +384,18 @@ describe("skipped sets", () => {
     const workout = completedWorkout("2026-01-05", 10);
     const squat = workout.exercises.find((e) => e.prescription.id === "squat");
     if (!squat) throw new Error("Missing exercise");
-    const skipped = { ...squat, sets: squat.sets.map((set, i) => (i === 0 ? { ...set, done: false, skipped: true, loadKg: 4 } : set)) };
+    const skipped = {
+      ...squat,
+      sets: squat.sets.map((set, i) => (i === 0 ? { ...set, done: false, skipped: true, loadKg: 4 } : set)),
+    };
     expect(progression(squat.prescription, skipped, { dumbbellsKg: [10, 12] }).loadKg).toBe(10);
   });
   test("last time ignores exercises that were skipped entirely", () => {
     const earlier = completedWorkout("2026-01-05", 8);
     const later = completedWorkout("2026-01-07", 10);
     for (const exercise of later.exercises)
-      if (exercise.prescription.id === "squat") exercise.sets = exercise.sets.map((set) => ({ ...set, done: false, skipped: true }));
+      if (exercise.prescription.id === "squat")
+        exercise.sets = exercise.sets.map((set) => ({ ...set, done: false, skipped: true }));
     expect(lastExercise([entry(earlier), entry(later)], "squat")?.sets[0]?.loadKg).toBe(8);
   });
   test("progress counts done and skipped sets and finds the next set", () => {

@@ -30,7 +30,11 @@ export default function App() {
 
 function Loading({ label }: { label: string }) {
   return (
-    <View className="flex-1 items-center justify-center gap-3 bg-screen" accessibilityLabel={label} testID="screen-loading">
+    <View
+      className="flex-1 items-center justify-center gap-3 bg-screen"
+      accessibilityLabel={label}
+      testID="screen-loading"
+    >
       <ActivityIndicator />
     </View>
   );

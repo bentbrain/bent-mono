@@ -92,9 +92,13 @@ export function reminderText(
   if (training.some(({ data }) => data.kind === "workout" && data.date === day)) return null;
   const { title, detail } = sessionText(info);
   if (info.plan.type === "strength") return { title: `Today: ${title}`, body: detail ?? "Strength session" };
-  if (info.plan.type === "run") return { title: "Today: Easy run", body: "Keep it comfortable enough to talk in sentences." };
+  if (info.plan.type === "run")
+    return { title: "Today: Easy run", body: "Keep it comfortable enough to talk in sentences." };
   if (!restDays) return null;
-  return { title: "Today: Rest day", body: nextSessionText(settings, records, day) ?? "Nothing planned in the next two weeks." };
+  return {
+    title: "Today: Rest day",
+    body: nextSessionText(settings, records, day) ?? "Nothing planned in the next two weeks.",
+  };
 }
 
 /**
@@ -228,7 +232,9 @@ export class ReminderRetry {
 
 /** "7:00 am" in `timezone`, the moment a reminder fires. */
 export function fireTimeText(at: number, timezone: string, locale?: string) {
-  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(new Date(at));
+  return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(
+    new Date(at),
+  );
 }
 
 /** The day a tapped reminder opens: only a calendar day scheduled for the account signed in. */

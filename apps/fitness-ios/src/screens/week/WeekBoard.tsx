@@ -19,7 +19,8 @@ const surfaces: Record<DayState, string> = {
 
 /** The round marker under each day: a tick, a dash, a ring or a dot. */
 function StateMark({ state, size = 18 }: { state: DayState; size?: number }) {
-  if (state === "rest") return <View className="size-1.5 rounded-full bg-border-strong" style={{ marginVertical: (size - 6) / 2 }} />;
+  if (state === "rest")
+    return <View className="size-1.5 rounded-full bg-border-strong" style={{ marginVertical: (size - 6) / 2 }} />;
   return (
     <View
       className={cn(
@@ -56,7 +57,13 @@ export function WeekBoard({ monday }: { monday: string }) {
         <AppText textRole="footnote" weight="semibold" tone="secondary" accessibilityRole="header">
           {formatShortDate(monday)} – {formatShortDate(addDays(monday, 6))}
         </AppText>
-        <IconButton icon="chevron.right" label="Next week" size={34} onPress={() => setDate(addDays(date, 7))} testID="week-next" />
+        <IconButton
+          icon="chevron.right"
+          label="Next week"
+          size={34}
+          onPress={() => setDate(addDays(date, 7))}
+          testID="week-next"
+        />
       </View>
       <View className="flex-row gap-1">
         {weekDays(monday).map((day) => {
@@ -88,7 +95,12 @@ export function WeekBoard({ monday }: { monday: string }) {
                 {weekday}
               </AppText>
               <View className={cn("size-7 items-center justify-center rounded-full", isToday && "bg-primary")}>
-                <AppText textRole="body" weight="bold" tone={isToday ? "inverse" : "default"} style={{ fontVariant: ["tabular-nums"] }}>
+                <AppText
+                  textRole="body"
+                  weight="bold"
+                  tone={isToday ? "inverse" : "default"}
+                  style={{ fontVariant: ["tabular-nums"] }}
+                >
                   {Number(day.slice(8))}
                 </AppText>
               </View>
@@ -116,7 +128,11 @@ export function WeekBoard({ monday }: { monday: string }) {
           );
         })}
       </View>
-      <View className="flex-row flex-wrap gap-x-3.5 gap-y-1.5" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View
+        className="flex-row flex-wrap gap-x-3.5 gap-y-1.5"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         {(
           [
             ["done", "Done"],

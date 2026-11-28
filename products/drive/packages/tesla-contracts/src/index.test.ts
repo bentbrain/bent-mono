@@ -31,6 +31,6 @@ void test("the shared vehicle contract validates VIN and status boundaries", () 
       sentryMode: true,
       observedAt: "2026-07-10T00:00:00.000Z",
     }).success,
-    false
+    false,
   );
 });
