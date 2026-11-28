@@ -15,6 +15,7 @@ import { KeyboardDoneBar } from "./ui/KeyboardDoneBar";
 import { Notice } from "./ui/Layout";
 import { AppText } from "./ui/Text";
 import { endAllWorkoutActivities } from "./screens/week/workout/useWorkoutActivity";
+import { reminders } from "./data/reminders";
 
 export default function App() {
   return (
@@ -40,10 +41,13 @@ function Root() {
     void session.restore();
   }, []);
   // When the session ends, by signing out or because Fitness ended the
-  // sign-in, the workout leaves the Lock Screen and its timer alert goes.
+  // sign-in, the workout leaves the Lock Screen, its timer alert goes and
+  // no workout reminders stay scheduled. The reminder settings stay.
   const closed = state.status === "signedOut" || state.status === "signingOut";
   useEffect(() => {
-    if (closed) endAllWorkoutActivities();
+    if (!closed) return;
+    endAllWorkoutActivities();
+    void reminders.cancel();
   }, [closed]);
   switch (state.status) {
     case "loading":

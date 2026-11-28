@@ -9,8 +9,9 @@ import type { Pending, SyncStorage } from "./sync-engine";
 /**
  * The app's SQLite database. It keeps each account's last loaded records,
  * its queued changes and small per-device drafts, such as typed workout
- * values. Its directory is excluded from iCloud and computer backups.
- * Signing out deletes the account's rows.
+ * values, and this iPhone's own settings, such as workout reminders. Its
+ * directory is excluded from iCloud and computer backups. Signing out
+ * deletes the account's rows and keeps the iPhone's settings.
  */
 let db: SQLiteDatabase | undefined;
 function database() {
@@ -33,6 +34,7 @@ function database() {
     );
     CREATE INDEX IF NOT EXISTS pending_owner ON pending (owner, at);
     CREATE TABLE IF NOT EXISTS drafts (owner TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (owner, key));
+    CREATE TABLE IF NOT EXISTS device (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `);
   return db;
 }
@@ -105,6 +107,20 @@ export const drafts = {
       const parsed = draftRow.parse(row);
       return [parsed.key, parsed.value];
     }));
+  },
+};
+
+/** Settings for this iPhone, whichever account is signed in. */
+export const deviceValues = {
+  get(key: string): string | null {
+    return database().getFirstSync<{ value: string }>("SELECT value FROM device WHERE key = ?", key)?.value ?? null;
+  },
+  set(key: string, value: string) {
+    database().runSync(
+      "INSERT INTO device (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      key,
+      value,
+    );
   },
 };
 

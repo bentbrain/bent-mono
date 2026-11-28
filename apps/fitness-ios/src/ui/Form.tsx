@@ -180,3 +180,29 @@ export function DateField({
     </View>
   );
 }
+
+/** A compact native time picker for a time of day, in minutes from midnight. */
+export function TimeField({
+  label,
+  minutes,
+  onChange,
+  testID,
+}: {
+  label: string;
+  minutes: number;
+  onChange: (minutes: number) => void;
+  testID?: string;
+}) {
+  const selection = new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60);
+  return (
+    <Host matchContents testID={testID}>
+      <DatePicker
+        title={label}
+        selection={selection}
+        displayedComponents={["hourAndMinute"]}
+        onDateChange={(date: Date) => onChange(date.getHours() * 60 + date.getMinutes())}
+        modifiers={[datePickerStyle("compact"), labelsHidden()]}
+      />
+    </Host>
+  );
+}

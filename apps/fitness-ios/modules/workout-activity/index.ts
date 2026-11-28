@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from "expo";
+import type { EventSubscription } from "expo";
 
 /** The Live Activity content, as `activityContent` builds it. Times are milliseconds since 1970. */
 type WorkoutActivityContent = {
@@ -35,5 +36,26 @@ type WorkoutActivityNative = {
   cancelAlert(): void;
 };
 
+/** The daily workout reminders. Times are milliseconds since 1970. */
+type WorkoutRemindersNative = {
+  /** Whether notifications are allowed for the app. */
+  permission(): Promise<"granted" | "denied" | "undetermined">;
+  /** Asks iOS for notification permission if it hasn't asked, and resolves whether reminders can show. */
+  requestPermission(): Promise<boolean>;
+  /**
+   * Brings the pending reminders for the account `owner` in line with these.
+   * Resolves "denied" when notifications are off for the app; rejects when iOS refused one.
+   */
+  schedule(owner: string, reminders: { day: string; at: number; title: string; body: string }[]): Promise<"scheduled" | "denied">;
+  /** Removes pending and delivered reminders, and forgets a tap not yet handled. */
+  cancel(): Promise<void>;
+  /** The reminder tapped before JavaScript listened, once: its day and account. */
+  takeOpened(): { day: string; owner: string } | null;
+  addListener(event: "onReminderOpened", listener: (event: { day: string; owner: string }) => void): EventSubscription;
+};
+
 /** The native module, or null where it isn't linked, such as in unit tests. */
 export const WorkoutActivity = requireOptionalNativeModule<WorkoutActivityNative>("WorkoutActivity");
+
+/** The reminders module, or null where it isn't linked. */
+export const WorkoutReminders = requireOptionalNativeModule<WorkoutRemindersNative>("WorkoutReminders");

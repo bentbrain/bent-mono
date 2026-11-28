@@ -706,7 +706,7 @@ describe("the built app", () => {
     ).toThrow("local networking");
     expect(() => checkInfoPlist({ ...plist, NSSupportsLiveActivities: false }, "production")).toThrow("Live");
     const extension = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
-    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule";
+    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule";
     expect(() => checkAppContents({ files: ["Info.plist", extension], code })).not.toThrow();
     expect(() => checkAppContents({ files: [`/tmp/derived/bentFitness.app/${extension}`], code })).not.toThrow();
     expect(() => checkAppContents({ files: ["HealthSeed.bundle", extension], code })).toThrow("seeder");
@@ -720,6 +720,9 @@ describe("the built app", () => {
     expect(() => checkAppContents({ files: [extension], code: "FitnessHealthModule FitnessChartsModule" })).toThrow(
       "workout-activity module is not linked",
     );
+    expect(() =>
+      checkAppContents({ files: [extension], code: "FitnessHealthModule FitnessChartsModule WorkoutActivityModule" }),
+    ).toThrow("workout reminders module is not linked");
     expect(() => checkAppContents({ files: ["Info.plist"], code })).toThrow("Live Activity extension");
   });
 });

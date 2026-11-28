@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, createNavigationContainerRef, createStaticNavi
 import type { StaticParamList } from "@react-navigation/native";
 import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/unstable";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useColorScheme } from "react-native";
 import { FitnessHealth } from "../../modules/fitness-health";
 import { useAccount } from "../account/AccountProvider";
@@ -14,6 +14,7 @@ import { progressScreens } from "../screens/progress";
 import { settingsScreens } from "../screens/settings";
 import { weekScreens } from "../screens/week";
 import { rootScreens } from "../screens/root";
+import { takeOpenedReminder, useReminderSchedule, useReminderTaps } from "./reminders";
 
 /*
  * The route table. Each tab has its own native stack, so pushed screens
@@ -106,17 +107,43 @@ function useConflictReview() {
 /**
  * A Health connection waiting for consent or for the Health step opens at
  * that step, so a relaunch returns to the step it left. The native status
- * keeps the wait, and nothing syncs until the step is done.
+ * keeps the wait, and nothing syncs until the step is done. A reminder
+ * tapped to open the app takes precedence, so its day stays open.
  */
-function resumeHealthStep() {
+function resumeHealthStep(reminderOpened: () => boolean) {
   FitnessHealth.getStatus().then(
     (status) => {
       const step = screenFor(status);
-      if ((step === "consent" || step === "health") && navigationRef.isReady())
+      if ((step === "consent" || step === "health") && navigationRef.isReady() && !reminderOpened())
         navigationRef.navigate("Tabs", { screen: "SettingsTab", params: { screen: "HealthSync", initial: false } });
     },
     () => undefined,
   );
+}
+
+/**
+ * Opens the Week tab at a tapped reminder's day, for a tap while the app
+ * runs and for the tap that opened it, once navigation is ready.
+ */
+function useOpenReminder() {
+  const { owner, setDate } = useAccount();
+  const opened = useRef(false);
+  const open = useCallback(
+    (day: string) => {
+      opened.current = true;
+      setDate(day);
+      if (navigationRef.isReady()) navigationRef.navigate("Tabs", { screen: "WeekTab", params: { screen: "Week" } });
+    },
+    [setDate],
+  );
+  useReminderTaps(owner, open);
+  return {
+    ready: () => {
+      const day = takeOpenedReminder(owner);
+      if (day) open(day);
+      resumeHealthStep(() => opened.current);
+    },
+  };
 }
 
 function useColor(name: string, fallback: string) {
@@ -127,6 +154,8 @@ function useColor(name: string, fallback: string) {
 /** The signed-in app's navigation, themed from the app's colour tokens. */
 export function Navigation() {
   useConflictReview();
+  useReminderSchedule();
+  const { ready } = useOpenReminder();
   const dark = useColorScheme() === "dark";
   const base = dark ? DarkTheme : DefaultTheme;
   const theme = {
@@ -140,5 +169,5 @@ export function Navigation() {
       border: useColor("--color-border", base.colors.border),
     },
   };
-  return <StaticNavigation ref={navigationRef} theme={theme} onReady={resumeHealthStep} />;
+  return <StaticNavigation ref={navigationRef} theme={theme} onReady={ready} />;
 }
