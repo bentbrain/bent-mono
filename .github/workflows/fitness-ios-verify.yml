@@ -64,11 +64,11 @@ jobs:
     timeout-minutes: 27
     env:
       # The raw-flow gate requires both complete suites.
-      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
-      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"
+      CODEQL_ACTION_OVERLAY_ANALYSIS: "false"
       APP_VARIANT: production
       # The analysis covers Swift, so the JavaScript bundle is not built.
-      SKIP_BUNDLING: '1'
+      SKIP_BUNDLING: "1"
     permissions:
       contents: read
       # The CodeQL Action reads its API endpoints with this; it uploads nothing.
@@ -168,11 +168,11 @@ jobs:
     timeout-minutes: 27
     env:
       # The raw-flow gate requires both complete suites.
-      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
-      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"
+      CODEQL_ACTION_OVERLAY_ANALYSIS: "false"
       APP_VARIANT: production
       # The analysis covers Swift, so the JavaScript bundle is not built.
-      SKIP_BUNDLING: '1'
+      SKIP_BUNDLING: "1"
     permissions:
       contents: read
       # The CodeQL Action reads its API endpoints with this; it uploads nothing.
@@ -272,8 +272,8 @@ jobs:
     timeout-minutes: 27
     env:
       # The raw-flow gate requires both complete suites.
-      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
-      CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"
+      CODEQL_ACTION_OVERLAY_ANALYSIS: "false"
     permissions:
       contents: read
       # The CodeQL Action reads its API endpoints with this; it uploads nothing.
@@ -531,7 +531,7 @@ jobs:
       - name: Run the Simulator flow against the local harness
         env:
           FLOW: ${{ matrix.flow }}
-          FITNESS_FLOW_BUDGET_SECONDS: '1200'
+          FITNESS_FLOW_BUDGET_SECONDS: "1200"
         run: node scripts/flows.mjs --prebuilt "$FLOW"
       - name: Retain the Simulator flow results
         if: failure()
@@ -551,7 +551,13 @@ jobs:
     # Requires each job above. Releases don't wait for this workflow; it reports the result after merge and nightly.
     name: Fitness iOS verification
     if: always()
-    needs: [codeql-swift-app, codeql-swift-modules, codeql-swift-tools, production-build, simulator-build, simulator-flow]
+    needs:
+      - codeql-swift-app
+      - codeql-swift-modules
+      - codeql-swift-tools
+      - production-build
+      - simulator-build
+      - simulator-flow
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

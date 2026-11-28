@@ -29,7 +29,11 @@ bun run dev --filter=japan-blog
 bun run dev --filter=@bent/stay
 bun run check:source
 bun run test:workspace
+bun run format
+bun run format:check
 ```
+
+Prettier formats the whole repository from the root. `bun run format` rewrites files and `bun run format:check` reports unformatted ones; the `lint` check in CI runs it on every pull request. The root `.prettierrc.json` uses Prettier's defaults, and apps with their own Prettier config keep it. The commands format the files Git manages: tracked files and new files Git doesn't ignore. Local files such as credentials and tool output stay untouched. `.prettierignore` adds generated output, lockfiles and files whose exact bytes tools check. Each file uses the nearest tracked Prettier config.
 
 Run app commands from their directories or use Bun workspace filters. Each app's example environment file describes its configuration. Store credentials and production content in the app's protected environment and storage.
 

@@ -24,6 +24,8 @@
     "test": "turbo run test",
     "check": "bun run check:source && turbo run lint typecheck check-types test build",
     "check:source": "node scripts/check-public-source.mjs",
+    "format": "node scripts/format.mjs",
+    "format:check": "node scripts/format.mjs --check",
     "test:workspace": "node --test scripts/*.test.mjs",
     "knip": "turbo run knip",
     "check:ci": "node scripts/ci-check.mjs",
@@ -32,10 +34,11 @@
   "devDependencies": {
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "turbo": "2.11.8",
-    "typescript": "^6.0.3",
+    "prettier": "3.9.10",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "turbo": "2.11.8",
+    "typescript": "^6.0.3"
   },
   "trustedDependencies": [
     "bufferutil",

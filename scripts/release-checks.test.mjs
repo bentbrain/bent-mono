@@ -20,7 +20,13 @@ const names = ["lint", "typecheck", "test", "knip", "build", "test:integration",
   "secret-scan", "dependencies", "CodeQL", "fitness-ios", "fitness-ios-native", "Release qualification"];
 const qualitySource = () => readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
 const qualityJob = (source, name) => source.split(`\n  ${name}:\n`)[1]?.split(/^  [a-z][a-z0-9-]*:$/m)[0];
-const jobDependencies = job => job.match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(",").map(value => value.trim());
+// Reads a job's `needs` as a flow list, a block list or a single job.
+const jobDependencies = job => {
+  const match = job.match(/^    needs:(?: \[([^\]]+)\]$| (\S+)$|\n((?:      - \S+\n)+))/m);
+  if (!match) return undefined;
+  if (match[3]) return [...match[3].matchAll(/^      - (\S+)$/gm)].map(item => item[1]);
+  return (match[1] ?? match[2]).split(",").map(value => value.trim());
+};
 
 test("the production aggregate depends on every Quality job and runs after failures", async () => {
   const source = await qualitySource();
@@ -107,8 +113,8 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     const codeql = job(name);
     assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 27\n`));
     assert.match(codeql, /^    permissions:\n      contents: read\n(      #.*\n)?      security-events: read\n    steps:\n/m);
-    assert.ok(codeql.includes("CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'"));
-    assert.ok(codeql.includes("CODEQL_ACTION_OVERLAY_ANALYSIS: 'false'"));
+    assert.ok(codeql.includes('CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"'));
+    assert.ok(codeql.includes('CODEQL_ACTION_OVERLAY_ANALYSIS: "false"'));
     assert.ok(codeql.includes("languages: swift\n          build-mode: manual\n          queries: security-extended,security-and-quality\n"));
     assert.ok(codeql.includes("--install-rosetta"));
     assert.ok(codeql.includes(`category: fitness-codeql-swift-${scope}\n          output: \${{ runner.temp }}/codeql-swift-results\n          upload: never\n          upload-database: false\n`));
@@ -132,7 +138,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   }
   // The app and modules jobs each build the production app, then replay their own targets.
   for (const name of ["codeql-swift-app", "codeql-swift-modules"]) {
-    assert.ok(job(name).includes("SKIP_BUNDLING: '1'"), name);
+    assert.ok(job(name).includes('SKIP_BUNDLING: "1"'), name);
     assert.ok(job(name).includes("run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n"), name);
   }
   assert.ok(job("codeql-swift-app").includes('--scope app "$RUNNER_TEMP/codeql_databases/swift" "$NATIVE_BUILD_DIR/app"\n'));
@@ -170,7 +176,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
   }
   // The flow has a time budget inside the 25-minute limit, so the limit never cuts an attempt or its cleanup short.
-  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: '1200'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
+  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: \"1200\"\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
   // No flow shard builds the app or runs the module's checks; each runs the flow build's app and seeder.
   assert.ok(!/native\.mjs (prebuild|build|seeder|lint|core-test)\n|roundtrip\.mjs/.test(flows));
   assert.ok(flows.includes("          name: fitness-ios-sim-build\n"));
@@ -214,14 +220,14 @@ test("every Quality job stops within 20 minutes and the longest job chain stays 
     assert.ok(Number.isInteger(minutes) && minutes > 0 && minutes <= 20, `${name} needs a job timeout of at most 20 minutes`);
   }
   assert.equal(limits["browser-suite"].minutes, 15);
-  const needs = body => body.match(/^    needs: (?:\[([^\]]+)\]|(\S+))$/m)?.slice(1).find(Boolean)?.split(",").map(value => value.trim()) ?? [];
+  const needs = body => jobDependencies(body) ?? [];
   const longest = name => limits[name].minutes + Math.max(0, ...needs(limits[name].body).map(longest));
   assert.ok(longest("release-qualification") < 30, `The longest Quality chain takes ${longest("release-qualification")} minutes`);
 });
 test("Fitness iOS Verification fits five macOS runners and keeps every job short", async () => {
   const source = await verifySource();
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  const needs = body => body.match(/^    needs: (?:\[([^\]]+)\]|(\S+))$/m)?.slice(1).find(Boolean)?.split(",").map(value => value.trim()) ?? [];
+  const needs = body => jobDependencies(body) ?? [];
   const jobs = Object.fromEntries(declared.map(name => {
     const body = qualityJob(source, name);
     const shards = [...(body.split("\n        include:\n")[1] ?? "").matchAll(/^          - label: (\S+)\n/gm)].length;

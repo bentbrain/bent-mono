@@ -15,15 +15,24 @@ const allowed = [
 if (!allowed.includes(task)) throw new Error("Select a known workspace check.");
 
 const selectedBrowser = task === "browser" && app ? `apps/${app}` : null;
-if (selectedBrowser && !browserMatrix({ packages: [{ path: selectedBrowser }] })
-  .some((entry) => String(entry.part) === part && String(entry.total) === total)) {
+if (
+  selectedBrowser &&
+  !browserMatrix({ packages: [{ path: selectedBrowser }] }).some(
+    (entry) => String(entry.part) === part && String(entry.total) === total,
+  )
+) {
   throw new Error("Select a planned browser suite and shard.");
 }
-const scope = selectedBrowser ? null : workspaceScope(process.env, undefined, { browser: task === "browser" });
-const affected = (directory) => scope ? includesPath(scope, directory) : directory === selectedBrowser;
-console.log(scope
-  ? `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`
-  : `CI: ${selectedBrowser} (${part}/${total})`);
+const scope = selectedBrowser
+  ? null
+  : workspaceScope(process.env, undefined, { browser: task === "browser" });
+const affected = (directory) =>
+  scope ? includesPath(scope, directory) : directory === selectedBrowser;
+console.log(
+  scope
+    ? `CI: ${scope.reason}: ${scope.packages.map((item) => item.name).join(", ") || "no affected workspaces"}`
+    : `CI: ${selectedBrowser} (${part}/${total})`,
+);
 
 // Disposable CI fixtures only. This runner never reads a production environment.
 const env = {
@@ -43,7 +52,8 @@ const env = {
       regions: ["sea1"],
     }),
   ).toString("base64"),
-  FITNESS_TEST_DATABASE_URL: process.env.PAYLOAD_MIGRATION_TEST_DATABASE_URI ?? "",
+  FITNESS_TEST_DATABASE_URL:
+    process.env.PAYLOAD_MIGRATION_TEST_DATABASE_URI ?? "",
   PUBLIC_HOME_LATITUDE: "0",
   PUBLIC_HOME_LONGITUDE: "0",
   PUBLIC_HOME_BALCONY_BEARING: "90",
@@ -66,27 +76,33 @@ function application(directory, script, overrides, args = []) {
 }
 
 if (task === "browser") {
-  const shard = selectedBrowser && total !== "1" ? [`--shard=${part}/${total}`] : [];
-  application("apps/fitness", "test:browser", { VITE_CLERK_PUBLISHABLE_KEY: "", CLERK_SECRET_KEY: "", DATABASE_URL: "", FITNESS_ALLOWED_EMAILS: "" });
+  const shard =
+    selectedBrowser && total !== "1" ? [`--shard=${part}/${total}`] : [];
+  application("apps/fitness", "test:browser", {
+    VITE_CLERK_PUBLISHABLE_KEY: "",
+    CLERK_SECRET_KEY: "",
+    DATABASE_URL: "",
+    FITNESS_ALLOWED_EMAILS: "",
+  });
   application("apps/trackmap", "build");
   application("apps/trackmap", "test:browser");
-  if (!selectedBrowser || part === "1") application("apps/jp", "test:e2e:coverage");
+  if (!selectedBrowser || part === "1")
+    application("apps/jp", "test:e2e:coverage");
   application("apps/jp", "test:e2e", undefined, shard);
   application("apps/toolbar", "build");
   application("apps/toolbar", "test:e2e", undefined, shard);
   application("apps/home", "build");
   application("apps/home", "test:worker");
 } else {
-  if (task === "lint") {
-    application("apps/toolbar", "format:check");
-    application("apps/stay", "format:check");
-  }
+  // One repository-wide Prettier check covers every workspace.
+  if (task === "lint") run("bun", ["run", "format:check"]);
   if (task === "test")
     run("node", [
       "--test",
       "scripts/public-source.test.mjs",
       "scripts/workspace.test.mjs",
       "scripts/ci-scope.test.mjs",
+      "scripts/format.test.mjs",
     ]);
   const packages = scope.packages;
   if (packages.length)
