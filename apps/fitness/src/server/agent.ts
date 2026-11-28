@@ -244,6 +244,7 @@ export async function getHistory(
       date,
       plan: plan(a, date)?.type ?? null,
       ...eaten.totals,
+      recordedIn: eaten.recordedIn,
       meals: eaten.meals.length,
       weight: weightOn(a, date)?.display ?? null,
       workouts: workouts.map((w) => `${w.name} (${w.status})`),
@@ -712,18 +713,17 @@ export function updateFoodTargets(
       );
     }
     const data = parsed(settingsSchema, next);
-    const saved = sameData(data, a.settings)
-      ? record
-      : await change.save(changed(record, record.revision, data));
+    if (!sameData(data, a.settings))
+      await change.save(changed(record, record.revision, data));
     const after = account(await change.records());
     return {
       full: {
         targets: summary(after).targets,
         trackedNutrients: summary(after).trackedNutrients,
       },
-      receipt: {
-        updated: saved ? { id: saved.id, revision: saved.revision } : null,
-      },
+      // The same for every request, so a connection that can't read learns
+      // nothing about the targets it replaced.
+      receipt: { saved: true },
     };
   });
 }

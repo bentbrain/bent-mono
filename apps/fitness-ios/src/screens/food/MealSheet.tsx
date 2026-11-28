@@ -62,8 +62,12 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
     return editing && current?.data?.kind === "meal" ? { id: editing.id, revision: current.revision, data: current.data } : undefined;
   }
 
-  function save(target: Opened<Meal> | undefined) {
-    const result = parseMeal(input, target?.data.date ?? date, tracked, target?.data);
+  /**
+   * Saves over `target`, or as new food without one. `source` is the version
+   * the sheet opened, whose values for untracked nutrients stay.
+   */
+  function save(target: Opened<Meal> | undefined, source = target) {
+    const result = parseMeal(input, target?.data.date ?? date, tracked, source?.data);
     if ("error" in result) {
       setError(result.error);
       haptic("error");
@@ -166,7 +170,7 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
                 <Button label="Load saved version" tone="secondary" onPress={() => open(savedVersion())} fullWidth testID="meal-use-saved" />
               </View>
             ) : (
-              <Button label="Save my changes as new food" onPress={() => save(undefined)} fullWidth testID="meal-save-new" />
+              <Button label="Save my changes as new food" onPress={() => save(undefined, editing)} fullWidth testID="meal-save-new" />
             )
           }
         >

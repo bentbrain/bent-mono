@@ -211,7 +211,11 @@ export async function handleRecordsLoad(request: Request) {
   const auth = await authenticateApp(request, ["read"]);
   if (!auth.ok) return auth.response;
   return guarded(async () =>
-    json({ owner: auth.owner, records: await loadRecords(auth.owner) }),
+    json({
+      owner: auth.owner,
+      records: await loadRecords(auth.owner),
+      contract: minimumAppContract(),
+    }),
   );
 }
 

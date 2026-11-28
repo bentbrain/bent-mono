@@ -95,5 +95,11 @@ export const PhotoList = z.object({ photos: z.array(PhotoSummary) });
 export const AppRecords = z.object({
   owner: z.string(),
   records: z.array(recordSchema),
+  /**
+   * The newest records contract Fitness stores, so a build offers only
+   * fields Fitness can save. Fitness releases before contract 2 leave it
+   * out, which means 1.
+   */
+  contract: z.number().int().positive().optional(),
 });
 export type AppRecords = z.infer<typeof AppRecords>;

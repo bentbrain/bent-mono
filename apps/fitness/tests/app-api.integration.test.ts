@@ -159,6 +159,8 @@ describe.skipIf(!configured)("app API", () => {
     const loaded = AppRecords.parse(await response.json());
     expect(loaded.owner).toBe(owner);
     expect(loaded.records.map((r) => r.id)).toEqual([settingsId]);
+    // The app offers nutrient fields once Fitness says it stores contract 2.
+    expect(loaded.contract).toBe(2);
   });
 
   test("saves a mutation once, and reports a conflict with the current record", async () => {

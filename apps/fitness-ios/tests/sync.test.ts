@@ -72,6 +72,19 @@ describe("sync engine", () => {
     expect(device.pending.get(owner)).toEqual([]);
   });
 
+  test("reads the newest records contract Fitness stores, or 1 when it doesn't say", async () => {
+    const fitness = fakeFitness([settingsRecord]);
+    const device = memoryStorage();
+    const engine = new SyncEngine({ owner, transport: fitness.transport, storage: device.storage });
+    expect(engine.getState().storedContract).toBe(1);
+    await engine.start();
+    expect(engine.getState().storedContract).toBe(1);
+    const load = fitness.transport.load;
+    fitness.transport.load = async () => ({ ...(await load()), contract: 2 });
+    await engine.refresh();
+    expect(engine.getState().storedContract).toBe(2);
+  });
+
   test("opens offline from the snapshot and sends queued changes when Fitness answers", async () => {
     const fitness = fakeFitness([settingsRecord]);
     const device = memoryStorage();

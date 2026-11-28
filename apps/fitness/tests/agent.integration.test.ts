@@ -335,15 +335,36 @@ test.skipIf(!configured)(
         { requestId: key(), nutrients: { fat: { track: true, target: 70 } } },
         anything,
       );
-      expect(receipt).toEqual({
-        updated: { id: settingsId, revision: expect.any(Number) },
-      });
+      expect(receipt).toEqual({ saved: true });
+      // The receipt is the same whether or not the targets changed.
       const unchanged = await writer.call(
         "fitness_update_food_targets",
         { requestId: key(), nutrients: { fat: { track: true, target: 70 } } },
         anything,
       );
       expect(unchanged).toEqual(receipt);
+      // A retry with the same request ID returns the first result without saving again.
+      const retryId = key();
+      const original = await call(
+        "fitness_update_food_targets",
+        { requestId: retryId, calories: 2500 },
+        anything,
+      );
+      const before = (await loadRecords(ownerC)).find((r) => r.id === settingsId);
+      const retried = await call(
+        "fitness_update_food_targets",
+        { requestId: retryId, calories: 2500 },
+        anything,
+      );
+      expect(retried).toEqual(original);
+      const after = (await loadRecords(ownerC)).find((r) => r.id === settingsId);
+      expect(after?.revision).toBe(before?.revision);
+      expect(
+        await failure("fitness_update_food_targets", {
+          requestId: retryId,
+          calories: 2600,
+        }),
+      ).toContain("already used");
     }
   },
 );

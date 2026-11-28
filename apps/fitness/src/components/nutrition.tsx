@@ -84,10 +84,18 @@ export function Nutrition({
       ? { id: target.id, revision: current.revision, data: current.data }
       : undefined;
   }
-  function save(element: HTMLFormElement, target: Opened<Meal> | undefined) {
+  /**
+   * Saves the form over `target`, or as new food without one. `source` is
+   * the version the form opened, whose values for untracked nutrients stay.
+   */
+  function save(
+    element: HTMLFormElement,
+    target: Opened<Meal> | undefined,
+    source = target,
+  ) {
     const data = new FormData(element);
     // Values for nutrients the account doesn't track stay on the meal.
-    const values = mealNutrientValues(target?.data ?? {});
+    const values = mealNutrientValues(source?.data ?? {});
     for (const nutrient of tracked) {
       const text = String(data.get(nutrient) ?? "").trim();
       if (text === "") delete values[nutrient];
@@ -214,7 +222,11 @@ export function Nutrition({
                     : `of ${target}g ${label.toLowerCase()}`}
                 </span>
                 {target !== null && (
-                  <progress value={Math.min(grams, target)} max={target} />
+                  <progress
+                    aria-label={`${label} toward the daily target`}
+                    value={Math.min(grams, target)}
+                    max={target}
+                  />
                 )}
                 {target !== null && (
                   <small>{nutrientNote(nutrient, grams, target)}</small>
@@ -339,7 +351,8 @@ export function Nutrition({
             }}
             onUseCurrent={() => open(savedVersion())}
             onSaveAsNew={() => {
-              if (form.current) save(form.current, undefined);
+              if (form.current)
+                save(form.current, undefined, opened.current);
             }}
           />
         )}

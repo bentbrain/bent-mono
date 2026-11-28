@@ -23,6 +23,9 @@ function ProfileEditor() {
   const fields = useFieldFocus();
   useDiscardGuard(editor.dirty);
   const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Fitness stores nutrients from records contract 2. Before it says so,
+  // a save with them would be refused and hold the sync queue.
+  const canTrack = editor.sync.storedContract >= 2 || Boolean(editor.saved.nutrients);
   const choices = [...new Set([deviceZone, ...timezones])];
 
   return (
@@ -131,11 +134,19 @@ function ProfileEditor() {
 
       <View className="gap-3">
         <SectionTitle>Nutrients</SectionTitle>
-        <ListSection footer="Track carbs, fat or fibre alongside calories and protein. Targets are optional." testID="profile-nutrients">
+        <ListSection
+          footer={
+            canTrack
+              ? "Track carbs, fat or fibre alongside calories and protein. Targets are optional."
+              : "Connect to Fitness to choose the nutrients to track."
+          }
+          testID="profile-nutrients"
+        >
           {nutrients.map((nutrient) => (
             <ListToggleRow
               key={nutrient}
               label={`Track ${nutrientInfo[nutrient].label.toLowerCase()}`}
+              disabled={!canTrack}
               value={Boolean(draft.nutrients?.[nutrient])}
               onValueChange={(on) => editor.track(nutrient, on ? (draft.nutrients?.[nutrient]?.target ?? null) : false)}
               testID={`profile-track-${nutrient}`}
