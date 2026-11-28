@@ -200,6 +200,53 @@ export class ReminderScheduler {
   }
 }
 
+type Timers = {
+  set: (run: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clear: (timer: ReturnType<typeof setTimeout>) => void;
+};
+
+/**
+ * Schedules reminders for one signed-in session and, when iOS refuses one,
+ * schedules again `retryMs` later. Once stopped, as when the session ends,
+ * it schedules nothing more, even for a schedule that fails afterwards, so
+ * a retry never brings back an earlier account's reminders.
+ */
+export class ReminderRetry {
+  private stopped = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly scheduler: Pick<ReminderScheduler, "schedule">,
+    private readonly plan: () => { owner: string; reminders: Reminder[] } | null,
+    private readonly retryMs = 60_000,
+    private readonly timers: Timers = { set: setTimeout, clear: clearTimeout },
+  ) {}
+
+  run(force: boolean) {
+    if (this.stopped) return;
+    this.clearTimer();
+    const next = this.plan();
+    if (!next) return;
+    void this.scheduler.schedule(next.owner, next.reminders, force).then((result) => {
+      if (result !== "failed" || this.stopped || this.timer) return;
+      this.timer = this.timers.set(() => {
+        this.timer = null;
+        this.run(true);
+      }, this.retryMs);
+    });
+  }
+
+  stop() {
+    this.stopped = true;
+    this.clearTimer();
+  }
+
+  private clearTimer() {
+    if (this.timer) this.timers.clear(this.timer);
+    this.timer = null;
+  }
+}
+
 /** "7:00 am" in `timezone`, the moment a reminder fires. */
 export function fireTimeText(at: number, timezone: string, locale?: string) {
   return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: timezone }).format(new Date(at));

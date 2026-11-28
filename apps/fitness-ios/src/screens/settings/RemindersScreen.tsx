@@ -27,8 +27,10 @@ function usePermission() {
 }
 
 /** The time now, moved on when `until` passes and when the app comes forward. */
-function useNow(until: number | undefined) {
+function useNow(until: number | undefined, today: string) {
   const [now, setNow] = useState(() => Date.now());
+  // A new account day can bring a session into the 14-day window.
+  useEffect(() => setNow(Date.now()), [today]);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setNow(Date.now());
@@ -51,7 +53,7 @@ export function RemindersScreen() {
   const [asked, setAsked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [until, setUntil] = useState<number | undefined>(undefined);
-  const now = useNow(until);
+  const now = useNow(until, today);
   const next = reminderPlan(settings, sync.records, preferences, now)[0];
   useEffect(() => setUntil(next?.at), [next?.at]);
   // The switch shows the setting kept on this iPhone, so it can always be turned off.

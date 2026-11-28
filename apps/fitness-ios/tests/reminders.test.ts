@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createWorkout, defaultSettings, reorganiseDays, sessionMinutes } from "@bent/fitness-contracts/domain";
 import type { Entity, RecordEntry, Settings } from "@bent/fitness-contracts/domain";
 import {
+  ReminderRetry,
   ReminderScheduler,
   clockText,
   defaultReminderSettings,
@@ -341,5 +342,74 @@ describe("ReminderScheduler", () => {
     const scheduler = new ReminderScheduler(null);
     expect(await scheduler.schedule(owner, [reminder("2026-11-23")])).toBe("unchanged");
     await scheduler.cancel();
+  });
+});
+
+describe("ReminderRetry", () => {
+  const reminder: Reminder = { day: "2026-12-01", at: 1, title: "Today: Strength A", body: "6 exercises" };
+  function harness(results: ("scheduled" | "failed")[]) {
+    const calls: { owner: string; force: boolean }[] = [];
+    const resolvers: (() => void)[] = [];
+    const scheduler = {
+      schedule(owner: string, _reminders: Reminder[], force = false) {
+        calls.push({ owner, force });
+        const result = results.shift() ?? "scheduled";
+        return new Promise<"scheduled" | "failed">((resolve) => resolvers.push(() => resolve(result)));
+      },
+    };
+    const timers: (() => void)[] = [];
+    let cleared = 0;
+    let account = "user_a";
+    const retry = new ReminderRetry(scheduler, () => ({ owner: account, reminders: [reminder] }), 60_000, {
+      set: (run) => {
+        timers.push(run);
+        return setTimeout(() => undefined, 0);
+      },
+      clear: () => {
+        cleared += 1;
+      },
+    });
+    const settle = async () => {
+      for (const resolve of resolvers.splice(0)) resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    return { retry, calls, timers, settle, cleared: () => cleared, switchTo: (owner: string) => (account = owner) };
+  }
+
+  test("schedules again a minute after iOS refuses a reminder", async () => {
+    const { retry, calls, timers, settle } = harness(["failed", "scheduled"]);
+    retry.run(false);
+    await settle();
+    expect(timers).toHaveLength(1);
+    timers[0]?.();
+    await settle();
+    expect(calls).toEqual([
+      { owner: "user_a", force: false },
+      { owner: "user_a", force: true },
+    ]);
+  });
+
+  test("a refusal that arrives after the session ends schedules nothing", async () => {
+    const { retry, calls, timers, settle, switchTo } = harness(["failed"]);
+    retry.run(false);
+    // Signing out stops the session while iOS is still answering.
+    retry.stop();
+    switchTo("user_b");
+    await settle();
+    expect(timers).toHaveLength(0);
+    retry.run(true);
+    expect(calls).toEqual([{ owner: "user_a", force: false }]);
+  });
+
+  test("stopping cancels a waiting retry, and a retry that fires anyway does nothing", async () => {
+    const { retry, calls, timers, settle, cleared } = harness(["failed"]);
+    retry.run(false);
+    await settle();
+    expect(timers).toHaveLength(1);
+    retry.stop();
+    expect(cleared()).toBe(1);
+    timers[0]?.();
+    await settle();
+    expect(calls).toHaveLength(1);
   });
 });
