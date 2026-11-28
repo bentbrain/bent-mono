@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { createAgent, registerTools } from "@ui-sdk/react/agent";
+import { z } from "zod";
+import { agentTools, createAgent } from "@ui-sdk/react/agent";
 import {
   AlertDialog,
   AlertDialogBackdrop,
@@ -11,40 +12,125 @@ import {
 } from "@ui-sdk/react/alert-dialog";
 
 type Request = { action: string };
+type Tools = Record<string, (input: unknown) => Promise<unknown>>;
 type Bridge = {
-  agent: ReturnType<typeof createAgent>;
+  tools: Tools;
   ask: ReturnType<typeof createConfirm<Request>>;
   end: () => void;
 };
+type ModelContext = {
+  registerTool?: (
+    tool: (typeof agentTools)[number] & {
+      annotations: Record<string, boolean>;
+      execute: (input: unknown) => Promise<unknown>;
+    },
+    options: { signal: AbortSignal },
+  ) => unknown;
+};
+declare global {
+  interface Document {
+    /** WebMCP, in browsers that provide it. */
+    modelContext?: ModelContext;
+  }
+}
+
+const closed =
+  "This Fitness account is no longer open. Ask the person to open it again.";
+const actInput = z.object({
+  steps: z.array(
+    z.object({
+      ref: z.string(),
+      action: z.string(),
+      args: z.array(z.unknown()).optional(),
+    }),
+  ),
+});
+const queryInput = z.object({
+  text: z.string().optional(),
+  within: z.string().optional(),
+  kind: z.string().optional(),
+  closed: z.boolean().optional(),
+  from: z.number().optional(),
+});
+const hints: Record<string, Record<string, boolean>> = {
+  snapshot: { readOnlyHint: true, untrustedContentHint: true },
+  query: { untrustedContentHint: true },
+  act: { consequentialHint: true, untrustedContentHint: true },
+};
 
 /**
- * A bridge for one signed-in account. Once it ends, every step it still has,
- * including ones queued behind a question, is refused. A step on a control
- * marked `data-agent-confirm` waits for the person to allow it.
+ * The agent tools for one signed-in account. Once it ends, they read nothing,
+ * return nothing from the page and refuse every step they still have,
+ * including ones waiting on a question. A step on a control marked
+ * `data-agent-confirm` waits for the person to allow it.
  */
 function createBridge(): Bridge {
   const ask = createConfirm<Request>();
-  let live = true;
+  const lifetime = new AbortController();
+  const live = () => !lifetime.signal.aborted;
   const agent = createAgent({
     allow: async (step, { signal }) => {
-      if (!live) return false;
+      if (!live()) return false;
       if (!step.confirm) return true;
       // A native modal dialog makes the question underneath it unanswerable.
       if (document.querySelector("dialog:modal")) return false;
       signal.addEventListener("abort", () => ask.controller.close(), {
         once: true,
       });
-      return (await ask({ action: step.confirm })) && live;
+      return (await ask({ action: step.confirm })) && live();
     },
   });
+  const refused = {
+    ok: false,
+    error: { step: 0, message: closed },
+    steps: [],
+    appeared: [],
+    values: {},
+  };
+  const tools: Tools = {
+    snapshot: async () => (live() ? agent.snapshot() : []),
+    query: async (input) => {
+      const request = queryInput.safeParse(input ?? {});
+      if (!request.success) return { error: "Send query input as JSON." };
+      if (!live()) return { error: closed };
+      const found = await agent.query(request.data);
+      return live() ? found : { error: closed };
+    },
+    act: async (input) => {
+      const request = actInput.safeParse(input);
+      if (!request.success)
+        return { ...refused, error: { step: 0, message: "Send steps." } };
+      if (!live()) return refused;
+      const result = await agent.act(request.data, {
+        signal: lifetime.signal,
+      });
+      return live() ? result : refused;
+    },
+  };
   return {
-    agent,
+    tools,
     ask,
     end: () => {
-      live = false;
+      lifetime.abort();
       ask.controller.close();
     },
   };
+}
+
+/** Registers the tools with the browser's WebMCP until `signal` aborts. */
+function registerBrowserTools(tools: Tools, signal: AbortSignal) {
+  const context = document.modelContext;
+  if (typeof context?.registerTool !== "function") return;
+  for (const tool of agentTools) {
+    const execute = tools[tool.name];
+    if (!execute) continue;
+    void Promise.resolve(
+      context.registerTool(
+        { ...tool, annotations: hints[tool.name] ?? {}, execute },
+        { signal },
+      ),
+    ).catch(() => undefined);
+  }
 }
 
 /**
@@ -61,9 +147,10 @@ export function AgentBridge() {
   }, []);
   useEffect(() => {
     if (!bridge) return;
-    // Runs after the dialog below has mounted, so a first call can ask. The
-    // bridge's own allow already asks the person, so this one doesn't ask twice.
-    return registerTools(bridge.agent, { allow: () => true });
+    // Runs after the dialog below has mounted, so a first call can ask.
+    const registration = new AbortController();
+    registerBrowserTools(bridge.tools, registration.signal);
+    return () => registration.abort();
   }, [bridge]);
   if (!bridge) return null;
   const { ask } = bridge;

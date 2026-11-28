@@ -25,6 +25,7 @@ type Tool = { execute: (input: object) => Promise<unknown> | unknown };
 declare global {
   interface Window {
     webmcpTools?: Map<string, Tool>;
+    staleTools?: Map<string, Tool>;
   }
 }
 
@@ -198,25 +199,34 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   const ask = page.getByRole("alertdialog", {
     name: "Allow your assistant to do this?",
   });
-  const waiting = act(page, [
-    { ref: "Export account data and photos", action: "press" },
-  ]);
+  const waiting = tool(page, "act", {
+    steps: [{ ref: "Export account data and photos", action: "press" }],
+  });
   await expect(ask).toBeVisible();
+  const queued = tool(page, "query", { text: "Sign in" });
   await page.evaluate(() => {
-    Object.assign(window, { staleAct: window.webmcpTools?.get("act") });
+    window.staleTools = new Map(window.webmcpTools);
   });
   await clerk.signOut({ page });
-  expect((await waiting).ok).toBe(false);
+  expect(await waiting).toMatchObject({
+    ok: false,
+    appeared: [],
+    values: {},
+  });
+  expect(await queued).toHaveProperty("error");
   await expect(ask).toBeHidden();
-  const signIn = page.getByRole("button", { name: "Sign in" });
-  await expect(signIn).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   expect(await page.evaluate(() => window.webmcpTools?.size)).toBe(0);
+
+  const stale = (name: string, input: object) =>
+    page.evaluate(
+      ([key, value]) => window.staleTools?.get(key)?.execute(value),
+      [name, input] as const,
+    );
+  expect(await stale("snapshot", {})).toEqual([]);
+  expect(await stale("query", { text: "Sign in" })).toHaveProperty("error");
   const late = actSchema.parse(
-    await page.evaluate(() =>
-      (window as Window & { staleAct?: Tool }).staleAct?.execute({
-        steps: [{ ref: "Sign in", action: "press" }],
-      }),
-    ),
+    await stale("act", { steps: [{ ref: "Sign in", action: "press" }] }),
   );
   expect(late.ok, "a call made through the earlier registration").toBe(false);
   await expect(page.getByRole("dialog")).toHaveCount(0);
