@@ -77,10 +77,12 @@ export type StrengthSeries = {
   points: StrengthPoint[];
 };
 
-function bestSet(exercise: Workout["exercises"][number]) {
+/** The best completed set. Bands record no weight, so they rank by reps. */
+function bestSet(exercise: Workout["exercises"][number], band: boolean) {
   let best: { loadKg: number; value: number } | undefined;
-  for (const set of exercise.sets) {
-    if (!set.done) continue;
+  for (const done of exercise.sets) {
+    if (!done.done) continue;
+    const set = band ? { ...done, loadKg: 0 } : done;
     const value = exercise.prescription.side
       ? Math.min(set.value, set.right ?? 0)
       : set.value;
@@ -114,14 +116,15 @@ export function strengthSeries(records: RecordEntry[]): StrengthSeries[] {
   const series = new Map<string, StrengthSeries>();
   for (const workout of workouts)
     for (const exercise of workout.exercises) {
-      const best = bestSet(exercise);
-      if (!best) continue;
       const p = exercise.prescription;
       const load = loadTypeOf(p);
-      // Prescriptions that name a load type chart apart from ones recorded
-      // another way. Others keep the key they always had.
+      const best = bestSet(exercise, load === "band");
+      if (!best) continue;
+      // A load type other than the one the exercise would have without one
+      // charts apart. Others keep the key they always had.
+      const implicit = loadTypeOf({ id: p.id, mode: p.mode });
       const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}${
-        p.load === undefined ? "" : `:${load}`
+        load === implicit ? "" : `:${load}`
       }`;
       const entry = series.get(key) ?? {
         key,

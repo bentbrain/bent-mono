@@ -468,11 +468,16 @@ export function ExerciseList({
                 {loadWording(p, settings.units).weighed && (
                   <label>
                     <span>{loadWording(p, settings.units).heading}</span>
-                    {numberInput(si, "loadKg", `${name} weight`, {
-                      inputMode: "decimal",
-                      max: Math.floor(displayLoad(1000, settings.units)),
-                      step: "any",
-                    })}
+                    {numberInput(
+                      si,
+                      "loadKg",
+                      `${name} weight, ${loadWording(p, settings.units).unit}`,
+                      {
+                        inputMode: "decimal",
+                        max: Math.floor(displayLoad(1000, settings.units)),
+                        step: "any",
+                      },
+                    )}
                   </label>
                 )}
                 <label>

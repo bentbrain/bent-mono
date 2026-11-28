@@ -761,6 +761,8 @@ export function progression(
     previous.sets.find((set) => set.done)?.loadKg ??
     previous.sets[0]?.loadKg ??
     0;
+  // Bands record no weight, so any stored weight says nothing about them.
+  const band = type === "band";
   const eligible =
     previous.prescription.mode === p.mode &&
     previous.prescription.side === p.side &&
@@ -772,7 +774,7 @@ export function progression(
         s.rir >= 2 &&
         s.value >= p.max &&
         (!p.side || (s.right ?? 0) >= p.max) &&
-        s.loadKg === load,
+        (band || s.loadKg === load),
     );
   // Timed sets record no weight: the logger has no weight field for them.
   if (p.mode === "seconds")
@@ -784,10 +786,15 @@ export function progression(
         : "Build controlled hold time within the range.",
       loadKg: 0,
     };
-  const repeat = {
-    text: "Repeat the load and build controlled reps within the range.",
-    loadKg: load,
-  };
+  const repeat = band
+    ? {
+        text: "Repeat this band and build controlled reps within the range.",
+        loadKg: 0,
+      }
+    : {
+        text: "Repeat the load and build controlled reps within the range.",
+        loadKg: load,
+      };
   if (!eligible) return repeat;
   const restart = `Return to ${p.min} reps; keep this load if the jump affects form.`;
   if (type === "dumbbell" || type === "kettlebell") {

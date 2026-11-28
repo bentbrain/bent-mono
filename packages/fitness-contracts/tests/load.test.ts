@@ -4,6 +4,7 @@ import {
   defaultSettings,
   loadNote,
   loadWording,
+  progression,
   setResult,
 } from "../src/domain";
 import type { Exercise, RecordEntry, Workout } from "../src/domain";
@@ -110,4 +111,83 @@ test("strength series carry their load type and keep untyped keys", () => {
   expect(
     series.find((s) => s.key === "custom-barbell:reps:single:barbell")?.load,
   ).toBe("barbell");
+});
+
+const done = (value: number, loadKg = 0) => ({
+  loadKg,
+  value,
+  right: null,
+  done: true,
+  skipped: false,
+  rir: 2,
+  controlled: true,
+});
+const previous = (exercise: Exercise, sets: ReturnType<typeof done>[]) => ({
+  prescription: exercise,
+  sets,
+});
+
+test("band progression ignores stored weight and starts sets at zero", () => {
+  const band = custom("band");
+  const top = progression(
+    band,
+    previous(band, [done(12, 2), done(12, 0), done(12, 0)]),
+    {
+      dumbbellsKg: [],
+    },
+  );
+  expect(top).toEqual({
+    text: "Top of range reached. Use a stronger band and return to 8 reps.",
+    loadKg: 0,
+  });
+  expect(
+    progression(band, previous(band, [done(10, 4), done(9, 4), done(9, 4)]), {
+      dumbbellsKg: [],
+    }),
+  ).toEqual({
+    text: "Repeat this band and build controlled reps within the range.",
+    loadKg: 0,
+  });
+});
+
+test("band charts rank by reps, and naming the implicit load type keeps the chart", () => {
+  const settings = defaultSettings("2026-11-02", "UTC");
+  const routine = settings.routines[0];
+  if (!routine) throw new Error("Expected a routine.");
+  const session = (
+    exercise: Exercise,
+    sets: ReturnType<typeof done>[],
+    hour: number,
+  ) => {
+    const workout = createWorkout(
+      settings,
+      { ...routine, exercises: [exercise] },
+      "2026-11-02",
+      false,
+      [],
+    );
+    workout.finishedAt = `2026-11-02T0${hour}:00:00.000Z`;
+    workout.exercises[0]!.sets = sets;
+    return {
+      id: crypto.randomUUID(),
+      revision: 1,
+      updatedAt: workout.finishedAt,
+      data: workout,
+    } satisfies RecordEntry;
+  };
+  const band = custom("band");
+  const [bandSeries] = strengthSeries([
+    session(band, [done(12, 0), done(8, 4)], 1),
+  ]);
+  expect(bandSeries?.points).toEqual([
+    { date: "2026-11-02", loadKg: 0, value: 12 },
+  ]);
+  const press = { ...custom(undefined), id: "custom-press" };
+  const series = strengthSeries([
+    session(press, [done(10, 10)], 1),
+    session({ ...press, load: "dumbbell" }, [done(10, 12)], 2),
+  ]);
+  expect(series.map((s) => [s.key, s.points.length])).toEqual([
+    ["custom-press:reps:single", 2],
+  ]);
 });

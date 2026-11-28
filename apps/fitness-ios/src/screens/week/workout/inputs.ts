@@ -82,7 +82,8 @@ export function applyText(workout: Workout, key: string, text: string, units: Un
   const field = match?.[3];
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
-  if (!match || !exercise || !set) return null;
+  // A weight typed for an exercise that records none, such as a band exercise, has no field to apply to.
+  if (!match || !exercise || !set || (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)) return null;
   const prescription = exercise.prescription;
   const label = field === "loadKg" ? "weight" : field === "rir" ? "reps left" : prescription.mode === "seconds" ? "seconds" : "reps";
   const trimmed = text.trim();

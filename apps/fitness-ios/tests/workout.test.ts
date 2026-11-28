@@ -179,6 +179,13 @@ describe("typed workout values", () => {
     expect(setInputs({ ...custom, load: "band" }, "kg").map((i) => i.field)).toEqual(["value", "rir"]);
     expect(setInputs(custom, "lb")[0]?.hint).toBe("In lb per dumbbell");
   });
+  test("a weight typed for a band exercise is dropped", () => {
+    const base = workout.exercises[0]?.prescription;
+    if (!base) throw new Error("Missing exercise");
+    const banded = { ...workout, exercises: workout.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } } : e)) };
+    expect(applyText(banded, "0:0:loadKg", "4", "kg")).toBeNull();
+    expect(applyText(banded, "0:0:value", "12", "kg")).not.toBeNull();
+  });
 });
 
 describe("saving typed values", () => {

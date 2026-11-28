@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import {
   displayLoad,
+  loadWording,
   toKg,
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
@@ -101,7 +102,15 @@ export function applyText(
   const field = match?.[3];
   const exercise = workout.exercises[exerciseIndex];
   const set = exercise?.sets[setIndex];
-  if (!match || !exercise || !set) return null;
+  // A weight typed for an exercise that records none, such as a band
+  // exercise, has no field to apply to.
+  if (
+    !match ||
+    !exercise ||
+    !set ||
+    (field === "loadKg" && !loadWording(exercise.prescription, units).weighed)
+  )
+    return null;
   const prescription = exercise.prescription;
   const label =
     field === "loadKg"
