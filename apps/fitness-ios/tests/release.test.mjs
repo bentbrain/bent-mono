@@ -1966,19 +1966,20 @@ describe("the CodeQL Swift scopes", () => {
     "",
   ];
 
-  test("split the tracked Swift into the app and the tools, with the module's core in both", () => {
-    // The app scope is the health module's Core, Platform and Module, the
-    // Live Activity extension and the charts module.
-    expect(swiftFilesFor("app", tracked)).toEqual([...tracked.slice(1, 5), tracked[8]]);
-    // The tools scope is the seeder with its UI tests and the module's Core and Tests.
+  test("split the tracked Swift into the app, the modules and the tools, with the health module's core in two", () => {
+    // The app scope is the workout-activity module with its Live Activity extension.
+    expect(swiftFilesFor("app", tracked)).toEqual([tracked[4]]);
+    // The modules scope is the health module's Core, Platform and Module, and the charts module.
+    expect(swiftFilesFor("modules", tracked)).toEqual([...tracked.slice(1, 4), tracked[8]]);
+    // The tools scope is the seeder with its UI tests and the health module's Core and Tests.
     expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(5, 8)]);
     expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 9));
-    // Together the two CodeQL jobs' scopes cover every tracked Swift source.
-    const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
+    // Together the three CodeQL jobs' scopes cover every tracked Swift source.
+    const covered = new Set(["app", "modules", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
     expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
   });
 
-  test("fail closed for a tracked Swift file outside both scopes", () => {
+  test("fail closed for a tracked Swift file outside every scope", () => {
     for (const outside of [
       "apps/fitness-ios/modules/fitness-health/ios/Extra/New.swift",
       "apps/fitness-ios/modules/workout-activity/ios/Tests/New.swift",
@@ -1986,9 +1987,10 @@ describe("the CodeQL Swift scopes", () => {
       "apps/other/Tool.swift",
       "Root.swift",
     ])
-      for (const scope of ["all", "app", "tools"])
+      for (const scope of ["all", "app", "modules", "tools"])
         expect(() => swiftFilesFor(scope, [...tracked, outside])).toThrow(outside);
     expect(() => swiftFilesFor("app", tracked.slice(5, 8))).toThrow("No tracked Swift files");
+    expect(() => swiftFilesFor("modules", tracked.slice(4, 5))).toThrow("No tracked Swift files");
     expect(() => swiftFilesFor("tools", tracked.slice(2, 5))).toThrow("No tracked Swift files");
   });
 
@@ -1998,8 +2000,8 @@ describe("the CodeQL Swift scopes", () => {
       encoding: "utf8",
     }).stdout.split("\0");
     expect(swiftFilesFor("all", listed).length).toBeGreaterThan(20);
-    for (const scope of ["app", "tools"]) expect(swiftFilesFor(scope, listed).length).toBeGreaterThan(0);
-    const covered = new Set(["app", "tools"].flatMap((scope) => swiftFilesFor(scope, listed)));
+    for (const scope of ["app", "modules", "tools"]) expect(swiftFilesFor(scope, listed).length).toBeGreaterThan(0);
+    const covered = new Set(["app", "modules", "tools"].flatMap((scope) => swiftFilesFor(scope, listed)));
     expect([...covered].sort()).toEqual(swiftFilesFor("all", listed).sort());
   });
 
@@ -2010,17 +2012,15 @@ describe("the CodeQL Swift scopes", () => {
       database: "db",
       derived: "derived",
     });
-    expect(coverageArguments(["--scope", "tools", "db"])).toEqual({
-      scope: "tools",
-      database: "db",
-      derived: undefined,
-    });
+    for (const scope of ["modules", "tools"])
+      expect(coverageArguments(["--scope", scope, "db"])).toEqual({ scope, database: "db", derived: undefined });
     for (const args of [
       [],
       ["db"],
       ["--scope", "app", "db"],
       ["--scope", "all", "db"],
       ["--scope", "tools", "db", "derived"],
+      ["--scope", "modules", "db", "derived"],
       ["--scope", "seeder", "db"],
       ["--scope", "core", "db"],
       ["--scope", "Tools", "db"],
@@ -2034,20 +2034,25 @@ describe("the CodeQL Swift scopes", () => {
     expect(result.stderr).toContain("Usage");
   });
 
-  test("replay-swift compiles all targets by default, or the app's or the seeder's", () => {
+  test("replay-swift compiles all targets by default, or the app's, the modules' or the seeder's", () => {
     expect(replayScope([])).toBe("all");
-    for (const scope of ["all", "app", "seeder"]) expect(replayScope([scope])).toBe(scope);
+    for (const scope of ["all", "app", "modules", "seeder"]) expect(replayScope([scope])).toBe(scope);
     for (const args of [["tools"], ["App"], ["app", "seeder"], [""]]) expect(() => replayScope(args)).toThrow("scope");
-    // The seeder scope reads only the seeder build, so it never reads the
-    // generated app project: the CodeQL tools job runs without a prebuild.
+    // Only the app target reads the generated app project: the CodeQL tools
+    // job runs without a prebuild, and the modules need only the build log.
     const noProject = () => {
-      throw new Error("The seeder scope read the app project.");
+      throw new Error("The scope read the app project.");
     };
-    const app = ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", "bentFitness"];
+    const app = { log: "app-build.log", targets: ["WorkoutActivity", "WorkoutActivityExtension", "bentFitness"] };
+    const modules = { log: "app-build.log", targets: ["FitnessHealth", "FitnessCharts"] };
     const seeder = { log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] };
     expect(replayBuilds("seeder", noProject)).toEqual([seeder]);
-    expect(replayBuilds("app", () => "bentFitness")).toEqual([{ log: "app-build.log", targets: app }]);
-    expect(replayBuilds("all", () => "bentFitness")).toEqual([{ log: "app-build.log", targets: app }, seeder]);
+    expect(replayBuilds("modules", noProject)).toEqual([modules]);
+    expect(replayBuilds("app", () => "bentFitness")).toEqual([app]);
+    expect(replayBuilds("all", () => "bentFitness")).toEqual([
+      { log: "app-build.log", targets: [...modules.targets, ...app.targets] },
+      seeder,
+    ]);
     expect(() => replayBuilds("app", noProject)).toThrow("app project");
     const source = readFileSync(new URL("../scripts/native.mjs", import.meta.url), "utf8");
     const replay = source.slice(source.indexOf('"replay-swift"(args)'), source.indexOf('"core-build"()'));

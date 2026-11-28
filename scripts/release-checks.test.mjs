@@ -99,9 +99,10 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     if (script) assert.ok(!script.includes("${{"), block);
   }
   const declared = [...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map(match => match[1]);
-  assert.deepEqual(declared, ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow", "verification"]);
+  assert.deepEqual(declared, ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow", "verification"]);
   const job = name => qualityJob(source, name);
   for (const [name, scope, traces] of [["codeql-swift-app", "app", ["native.mjs replay-swift app"]],
+    ["codeql-swift-modules", "modules", ["native.mjs replay-swift modules"]],
     ["codeql-swift-tools", "tools", ["native.mjs replay-swift seeder", "native.mjs core-build"]]]) {
     const codeql = job(name);
     assert.ok(codeql.includes(`    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 27\n`));
@@ -129,8 +130,13 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
       "            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0\n" +
       "            DEBUG_INFORMATION_FORMAT=dwarf\n"), name);
   }
-  assert.ok(job("codeql-swift-app").includes("SKIP_BUNDLING: '1'"));
-  assert.ok(job("codeql-swift-app").includes("run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n"));
+  // The app and modules jobs each build the production app, then replay their own targets.
+  for (const name of ["codeql-swift-app", "codeql-swift-modules"]) {
+    assert.ok(job(name).includes("SKIP_BUNDLING: '1'"), name);
+    assert.ok(job(name).includes("run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n"), name);
+  }
+  assert.ok(job("codeql-swift-app").includes('--scope app "$RUNNER_TEMP/codeql_databases/swift" "$NATIVE_BUILD_DIR/app"\n'));
+  assert.ok(job("codeql-swift-modules").includes('--scope modules "$RUNNER_TEMP/codeql_databases/swift"\n'));
   // The tools job builds the seeder untraced, then traces it and the module's package into one database.
   const tools = job("codeql-swift-tools");
   assert.ok(tools.indexOf("run: node scripts/native.mjs seeder\n") < tools.indexOf("codeql-action/init@"));
@@ -173,7 +179,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   const aggregate = job("verification");
   assert.ok(aggregate.includes("    name: Fitness iOS verification\n    if: always()\n"));
   assert.deepEqual(jobDependencies(aggregate), declared.filter(name => name !== "verification"));
-  assert.ok(aggregate.includes('const expected = ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];'));
+  assert.ok(aggregate.includes('const expected = ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];'));
   assert.ok(aggregate.includes('Object.values(jobs).some(job => job.result !== "success")'));
 });
 
@@ -184,16 +190,16 @@ test("Fitness iOS Verification never uploads to Code Scanning and keeps each ori
   assert.ok(!source.includes("codeql-action/upload-sarif"));
   assert.ok(!/^\s*upload: (?!never$)/m.test(source));
   const analyses = [...source.matchAll(/uses: github\/codeql-action\/analyze@\S+\n        with:\n((?:          .*\n)+)/g)];
-  assert.equal(analyses.length, 2);
+  assert.equal(analyses.length, 3);
   for (const [, inputs] of analyses) {
     assert.match(inputs, /^          upload: never$/m);
     assert.match(inputs, /^          upload-database: false$/m);
     assert.match(inputs, /^          output: \$\{\{ runner\.temp \}\}\/codeql-swift-results$/m);
   }
   assert.ok(!/^\s*upload-database: (?!false$)/m.test(source));
-  assert.equal(source.match(/uses: github\/codeql-action\/analyze@/g).length, 2);
-  assert.equal(source.match(/run: node scripts\/check-sarif\.mjs\n/g).length, 2);
-  assert.equal(source.match(/name: codeql-swift-(app|tools)-original-sarif\n/g).length, 2);
+  assert.equal(source.match(/uses: github\/codeql-action\/analyze@/g).length, 3);
+  assert.equal(source.match(/run: node scripts\/check-sarif\.mjs\n/g).length, 3);
+  assert.equal(source.match(/name: codeql-swift-(app|modules|tools)-original-sarif\n/g).length, 3);
 });
 
 const timeouts = (source, name) => {
@@ -226,10 +232,10 @@ test("Fitness iOS Verification fits five macOS runners and keeps every job short
   // CodeQL jobs stop at 27 minutes, every other macOS job at 20.
   for (const name of declared.filter(name => jobs[name].macos))
     assert.ok(jobs[name].minutes <= (name.startsWith("codeql-") ? 27 : 20), `${name} runs too long`);
-  // The jobs that start at once leave one of the five macOS runners free.
+  // The jobs that start at once fit the five macOS runners.
   const first = declared.filter(name => jobs[name].macos && jobs[name].needs.length === 0);
-  assert.deepEqual(first, ["codeql-swift-app", "codeql-swift-tools", "production-build", "simulator-build"]);
-  assert.ok(first.reduce((total, name) => total + jobs[name].runners, 0) <= 4);
+  assert.deepEqual(first, ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build"]);
+  assert.ok(first.reduce((total, name) => total + jobs[name].runners, 0) <= 5);
   // The flows wait only for the flow build, never for the CodeQL jobs.
   assert.deepEqual(jobs["simulator-flow"].needs, ["simulator-build"]);
   assert.equal(jobs["simulator-flow"].runners, 3);

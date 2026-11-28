@@ -11,7 +11,7 @@
 //   node scripts/native.mjs flows [filter]      run the Simulator flows on a new Simulator
 //   node scripts/native.mjs replay-swift [scope] compile the first-party Swift again from
 //                                               the build logs, for CodeQL: all (the
-//                                               default), app or seeder
+//                                               default), app, modules or seeder
 //
 // Build output goes to NATIVE_BUILD_DIR, or ~/Library/Caches/fitness-ios-build,
 // never into the repository.
@@ -89,25 +89,28 @@ const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filte
 
 /**
  * The builds a replay-swift scope reads, with the targets each must show.
- * `project` names the generated app project; it is read only for the app
- * build, because the seeder scope runs without a prebuilt ios folder.
+ * The app scope is the app target with the workout-activity module and its
+ * extension, which share a source file; the modules scope is the
+ * fitness-health and fitness-charts modules from the same app build; the
+ * seeder scope is the seeder and its UI tests. `project` names the generated
+ * app project and is read only for the app target, because the modules and
+ * seeder scopes can run without it.
  */
 export function replayBuilds(scope, project) {
-  const builds = [];
-  if (scope !== "seeder")
-    builds.push({
-      log: "app-build.log",
-      targets: ["FitnessHealth", "FitnessCharts", "WorkoutActivity", "WorkoutActivityExtension", project()],
-    });
-  if (scope !== "app") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
+  const app = [];
+  if (scope === "all" || scope === "modules") app.push("FitnessHealth", "FitnessCharts");
+  if (scope === "all" || scope === "app") app.push("WorkoutActivity", "WorkoutActivityExtension", project());
+  const builds = app.length ? [{ log: "app-build.log", targets: app }] : [];
+  if (scope === "all" || scope === "seeder") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
   return builds;
 }
 
-/** The replay-swift scope: all, app or seeder, with all as the default. */
+/** The replay-swift scope: all, app, modules or seeder, with all as the default. */
 export function replayScope(args) {
-  if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app or seeder.");
+  if (args.length > 1) throw new Error("Pass at most one replay-swift scope: all, app, modules or seeder.");
   const [scope = "all"] = args;
-  if (!["all", "app", "seeder"].includes(scope)) throw new Error("Choose a replay-swift scope: all, app or seeder.");
+  if (!["all", "app", "modules", "seeder"].includes(scope))
+    throw new Error("Choose a replay-swift scope: all, app, modules or seeder.");
   return scope;
 }
 
@@ -194,8 +197,8 @@ const commands = {
    * with the Swift prebuild generates, the fitness-health, fitness-charts and
    * workout-activity modules, the Live Activity extension, the seeder and its
    * UI tests. CodeQL traces this instead of a whole Xcode build.
-   * The app scope reads only the app build, and the seeder scope only the
-   * seeder build.
+   * The app and modules scopes read only the app build, and the seeder scope
+   * only the seeder build; see replayBuilds.
    */
   "replay-swift"(args) {
     const builds = replayBuilds(replayScope(args), project);
