@@ -122,6 +122,7 @@ test("permissions follow what sign-in can grant, and local endpoints skip hosted
 
 test("only HTTPS endpoints on public domain names count as public", () => {
   expect(publicEndpoint("https://fitness.bent.build/api/mcp")).toBe(true);
+  expect(publicEndpoint("https://fitness.bent.build./api/mcp")).toBe(true);
   for (const url of [
     "http://127.0.0.1:3025/api/mcp",
     "http://localhost:3025/api/mcp",
@@ -133,6 +134,10 @@ test("only HTTPS endpoints on public domain names count as public", () => {
     "https://fitness.local/api/mcp",
     "https://app.localhost/api/mcp",
     "http://fitness.example.com/api/mcp",
+    "https://fitness.test/api/mcp",
+    "https://app.localhost./api/mcp",
+    "https://fitness.home.arpa/api/mcp",
+    "https://fitness.internal/api/mcp",
   ])
     expect(publicEndpoint(url)).toBe(false);
 });

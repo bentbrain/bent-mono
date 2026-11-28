@@ -106,21 +106,34 @@ export function assistantEndpoint() {
     ? resource
     : null;
 }
+/** Top-level names reserved for local, private or documentation use. */
+const nonPublicNames = [
+  "localhost",
+  "local",
+  "test",
+  "example",
+  "invalid",
+  "internal",
+  "lan",
+  "alt",
+  "onion",
+];
 /**
  * Whether hosted chat apps can be expected to reach an endpoint: HTTPS on
- * a public domain name. IP addresses and local names such as localhost or
- * *.local don't count.
+ * a public domain name. IP addresses, and names under reserved local or
+ * special-use domains such as localhost, .local, .test or home.arpa,
+ * don't count.
  */
 export function publicEndpoint(resource: string) {
   const url = new URL(resource);
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const labels = host.split(".");
   return (
     url.protocol === "https:" &&
-    host.includes(".") &&
+    labels.length > 1 &&
     !host.startsWith("[") &&
     !/^[\d.]+$/.test(host) &&
-    ![".localhost", ".local", ".internal", ".lan", ".home.arpa"].some(
-      (suffix) => host.endsWith(suffix),
-    )
+    !nonPublicNames.includes(labels.at(-1) ?? "") &&
+    !host.endsWith(".home.arpa")
   );
 }
