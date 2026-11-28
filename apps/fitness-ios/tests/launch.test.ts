@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LaunchRouter, TapBuffer } from "../src/logic/launch";
+import { LaunchRouter, TapBuffer, tapTarget } from "../src/logic/launch";
 import type { LaunchSources, LaunchTarget } from "../src/logic/launch";
 
 type Link = { tab: "week" | "food"; day: string };
@@ -213,5 +213,15 @@ describe("taps while the app loads", () => {
       expect(opened).toMatchObject([{ ...last, early: true }]);
     }
   });
-});
 
+  test("a tap from an ended sign-in never opens, even after the same account signs in again", () => {
+    const reminder = { kind: "reminder" as const, day: "2026-12-02", owner: "user_a" };
+    const widget = { kind: "widget" as const, link: { tab: "food" as const, day: "2026-12-01" } };
+    // Tapped while the account loaded under sign-in 3; the session then expired (4) and user_a signed in again (5).
+    expect(tapTarget<Link>({ ...reminder, generation: 3 }, "user_a", 5)).toBeNull();
+    expect(tapTarget<Link>({ ...widget, generation: 3 }, "user_a", 5)).toBeNull();
+    expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_a", 5)).toEqual({ kind: "reminder", day: "2026-12-02" });
+    expect(tapTarget<Link>({ ...reminder, generation: 5 }, "user_b", 5)).toBeNull();
+    expect(tapTarget<Link>({ ...widget, generation: 5 }, "user_a", 5)).toEqual(widget);
+  });
+});

@@ -7,6 +7,8 @@
  * launch destination. These rules stay apart from React Native for Bun tests.
  */
 
+import { openedDay } from "./reminders";
+
 export type LaunchTarget<Link> = (
   | { kind: "reminder"; day: string }
   | { kind: "widget"; link: Link }
@@ -93,4 +95,25 @@ export class TapBuffer<T> {
       if (this.listener === listener) this.listener = null;
     };
   }
+}
+
+/** A reminder or widget tap while the app runs, with the sign-in it arrived during. */
+export type AppTap<Link> = ({ kind: "reminder"; day: string; owner: string } | { kind: "widget"; link: Link }) & {
+  generation: number;
+};
+
+/**
+ * Where a tap opens, or null when it shouldn't: a tap from another sign-in,
+ * such as one made before the session expired and the same account signed
+ * in again, or a reminder for another account.
+ */
+export function tapTarget<Link>(
+  tap: AppTap<Link>,
+  owner: string,
+  generation: number,
+): { kind: "reminder"; day: string } | { kind: "widget"; link: Link } | null {
+  if (tap.generation !== generation) return null;
+  if (tap.kind === "widget") return { kind: "widget", link: tap.link };
+  const day = openedDay(tap, owner);
+  return day ? { kind: "reminder", day } : null;
 }
