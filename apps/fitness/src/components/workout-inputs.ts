@@ -185,7 +185,7 @@ export function holdInBackground(
  * Whether `key` is a field the editor doesn't show, such as a weight typed
  * for an exercise that now records none. Saving drops it.
  */
-export function hiddenField(workout: Workout, key: string) {
+function hiddenField(workout: Workout, key: string) {
   const match = fieldPattern.exec(key);
   const prescription = workout.exercises[Number(match?.[1])]?.prescription;
   return (
