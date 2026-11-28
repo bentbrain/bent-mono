@@ -9,13 +9,13 @@
  * Release the iPhone build that declares 2 to TestFlight before the
  * website release that raises the minimum to 2.
  *
- * Both apps label weights by load type (loadWording in the shared domain)
- * and leave weight entry out of band exercises. Before raising the minimum
- * to 3, ship an iPhone build that declares contract 3, then release it to
- * TestFlight ahead of the website. Records below contract 3 hold only
- * dumbbell loads.
+ * Contract 3 stores load types on exercises outside the catalogue and the
+ * planning profile. Both apps label weights by load type, leave weight
+ * entry out of band exercises and show the planning profile. Release the
+ * iPhone build that declares 3 to TestFlight before the website release
+ * that raises the minimum to 3.
  */
-const defaultMinimum = 2;
+const defaultMinimum = 3;
 let minimum = defaultMinimum;
 export function minimumAppContract() {
   return minimum;

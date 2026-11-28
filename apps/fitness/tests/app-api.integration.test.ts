@@ -143,7 +143,7 @@ describe.skipIf(!configured)("app API", () => {
     const response = await api.handleRecordsLoad(
       bearer(
         token(),
-        { headers: { "X-Fitness-Contract": "2" } },
+        { headers: { "X-Fitness-Contract": "3" } },
         "/api/app/records",
       ),
     );
@@ -159,8 +159,9 @@ describe.skipIf(!configured)("app API", () => {
     const loaded = AppRecords.parse(await response.json());
     expect(loaded.owner).toBe(owner);
     expect(loaded.records.map((r) => r.id)).toEqual([settingsId]);
-    // The app offers nutrient fields once Fitness says it stores contract 2.
-    expect(loaded.contract).toBe(2);
+    // The app offers nutrient fields once Fitness says it stores contract 2,
+    // and Fitness stores the planning profile and load types from 3.
+    expect(loaded.contract).toBe(3);
   });
 
   test("saves a mutation once, and reports a conflict with the current record", async () => {
@@ -234,7 +235,7 @@ describe.skipIf(!configured)("app API", () => {
       expect(refused.status).toBe(422);
       expect((await body(refused)).error).toContain("can't read yet");
     }
-    setMinimumAppContractForTests();
+    setMinimumAppContractForTests(2);
     try {
       const saved = await body(await save(nutrients, 1, "2"));
       expect(saved.status).toBe("saved");

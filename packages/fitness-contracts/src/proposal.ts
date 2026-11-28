@@ -345,3 +345,60 @@ export function planChanges(current: Settings, plan: StoredPlan): PlanChange[] {
   }
   return changes;
 }
+
+/**
+ * The planning profile `settings` holds, as labelled rows for display. Only
+ * the fields that are set appear; weight steps show the default progression
+ * uses for kinds without their own.
+ */
+export function planningProfile(settings: Settings) {
+  const units = settings.units;
+  const rows: { label: string; value: string }[] = [];
+  if (settings.experience)
+    rows.push({
+      label: "Experience",
+      value: experienceNames[settings.experience],
+    });
+  if (settings.sessionMinutes)
+    rows.push({
+      label: "Session length",
+      value: `${settings.sessionMinutes} min`,
+    });
+  if (settings.limitations !== undefined)
+    rows.push({
+      label: "Injuries and limits",
+      value: settings.limitations || "None",
+    });
+  if (settings.availableEquipment)
+    rows.push({
+      label: "Equipment",
+      value: settings.availableEquipment.length
+        ? settings.availableEquipment
+            .map((item) => equipmentNames[item])
+            .join(", ")
+        : "None",
+    });
+  if (settings.kettlebellsKg)
+    rows.push({
+      label: "Kettlebells",
+      value: weightTexts(settings.kettlebellsKg, [], units)[0],
+    });
+  if (settings.incrementsKg)
+    rows.push({
+      label: "Weight steps",
+      value: (["barbell", "machine", "cable"] as const)
+        .map((kind) => {
+          const own = settings.incrementsKg?.[kind];
+          const text = weightTexts(
+            [own ?? defaultIncrementsKg[kind]],
+            [],
+            units,
+          )[0];
+          return own === undefined
+            ? `${kind} default (${text})`
+            : `${kind} ${text}`;
+        })
+        .join(", "),
+    });
+  return rows;
+}
