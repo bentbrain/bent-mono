@@ -1158,6 +1158,10 @@ describe("text field limits", () => {
     expect(fits("2028-02-29", { type: "date" })).toBe(true);
     expect(fits("2026-04-31", { type: "date" })).toBe(false);
     expect(fits("0000-01-01", { type: "date" })).toBe(false);
+    expect(fits("0096-02-29", { type: "date" })).toBe(true);
+    expect(fits("0099-01-01", { type: "date" })).toBe(true);
+    expect(fits("0097-02-29", { type: "date" })).toBe(false);
+    expect(fits("", { type: "date", keepFilled: true })).toBe(false);
   });
 
   test("numbers need a finite value within range and on the step", () => {
@@ -1175,5 +1179,7 @@ describe("text field limits", () => {
     expect(fits("-2", { type: "number", min: -5, step: 1 })).toBe(true);
     expect(fits("2.5", { type: "number", min: 1 })).toBe(false);
     expect(fits("1e2", { type: "number" })).toBe(true);
+    expect(fits("800.0000000001", { type: "number", min: 800 })).toBe(false);
+    expect(fits("0.3", { type: "number", min: 0, step: 0.1 })).toBe(true);
   });
 });

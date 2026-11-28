@@ -12,6 +12,8 @@ type Limits = {
   max?: string | number;
   step?: string | number;
   required?: boolean;
+  /** Refuses an empty value from an agent. People get the form's own error. */
+  keepFilled?: boolean;
 };
 
 const isoDate = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -21,15 +23,16 @@ const decimal = /^-?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?$/;
 /** Whether a value suits the field's type, range, step and whether it's required. */
 export function fits(
   value: string,
-  { type, min, max, step, required }: Limits,
+  { type, min, max, step, required, keepFilled }: Limits,
 ) {
-  if (value === "") return !required;
+  if (value === "") return !required && !keepFilled;
   if (type === "date") {
     const parts = isoDate.exec(value);
     if (!parts) return false;
     const [year, month, day] = parts.slice(1).map(Number);
     if (!year || !month || !day) return false;
-    const date = new Date(Date.UTC(year, month - 1, day));
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
     if (
       date.getUTCFullYear() !== year ||
       date.getUTCMonth() !== month - 1 ||
@@ -48,7 +51,11 @@ export function fits(
     if (min !== undefined && number < Number(min)) return false;
     if (max !== undefined && number > Number(max)) return false;
     if (step === "any") return true;
-    const steps = (number - Number(min ?? 0)) / Number(step ?? 1);
+    const base = Number(min ?? 0);
+    const size = Number(step ?? 1);
+    if (Number.isInteger(base) && Number.isInteger(size))
+      return Number.isInteger(number) && (number - base) % size === 0;
+    const steps = (number - base) / size;
     return Math.abs(steps - Math.round(steps)) < 1e-9;
   }
   return true;
@@ -58,6 +65,7 @@ export function fits(
 export function TextField({
   label,
   context,
+  keepFilled,
   id,
   value,
   defaultValue,
@@ -65,6 +73,7 @@ export function TextField({
 }: Omit<ComponentProps<typeof Input>, "onChange" | "value" | "defaultValue"> & {
   label: string;
   context?: string;
+  keepFilled?: boolean;
   value?: string | number;
   defaultValue?: string | number;
 }) {
@@ -81,7 +90,10 @@ export function TextField({
         onValueChange={(next, details) => {
           // The browser drops a value its input type can't hold, and an agent
           // gets no form validation, so check what an agent sends here.
-          if (details.source === "agent" && !fits(next, props)) {
+          if (
+            details.source === "agent" &&
+            !fits(next, { ...props, keepFilled })
+          ) {
             details.cancel();
             return;
           }

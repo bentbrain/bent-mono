@@ -478,6 +478,7 @@ export function SettingsEditor({
               <TextField
                 label="Plan start date"
                 id="start-date"
+                keepFilled
                 type="date"
                 value={draft.startDate}
                 onValueChange={(value) => update({ startDate: value })}
