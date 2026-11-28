@@ -54,8 +54,19 @@ type WorkoutRemindersNative = {
   addListener(event: "onReminderOpened", listener: (event: { day: string; owner: string }) => void): EventSubscription;
 };
 
+/** The Today widget's snapshot, shared with the widget extension through the App Group. */
+type WorkoutWidgetNative = {
+  /** Writes the snapshot JSON for the widget and reloads its timelines. Rejects JSON the widget can't read. */
+  save(json: string): Promise<void>;
+  /** Deletes the snapshot and reloads the widget's timelines. */
+  clear(): Promise<void>;
+};
+
 /** The native module, or null where it isn't linked, such as in unit tests. */
 export const WorkoutActivity = requireOptionalNativeModule<WorkoutActivityNative>("WorkoutActivity");
 
 /** The reminders module, or null where it isn't linked. */
 export const WorkoutReminders = requireOptionalNativeModule<WorkoutRemindersNative>("WorkoutReminders");
+
+/** The widget module, or null where it isn't linked. */
+export const WorkoutWidget = requireOptionalNativeModule<WorkoutWidgetNative>("WorkoutWidget");

@@ -9,6 +9,7 @@ import { ApiError, createApi } from "../data/api";
 import type { Api } from "../data/api";
 import { drafts, sqliteStorage } from "../data/storage";
 import { RejectedChange, SyncEngine } from "../data/sync-engine";
+import { widget } from "../data/widget";
 import type { SyncState } from "../data/sync-engine";
 import { Session } from "./session";
 import type { OAuthClient } from "./session";
@@ -24,6 +25,14 @@ const unconfigured: OAuthClient = {
 /** The one session for this app process. */
 export const session = new Session(settings ? clerkOAuth(settings) : unconfigured, keychainStore);
 export const api = createApi(fitnessOrigin, session);
+
+// The moment the session closes, by signing out, at launch while signed out
+// or because Fitness ended the sign-in, the widget drops the account's
+// snapshots still waiting and shows the signed-out snapshot.
+session.subscribe(() => {
+  const { status } = session.getState();
+  if (status === "signingOut" || status === "signedOut") void widget.signOut(session.generation());
+});
 export const signInConfigured = settings !== null;
 
 export function useSession() {

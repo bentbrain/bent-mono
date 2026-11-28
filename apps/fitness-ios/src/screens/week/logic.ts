@@ -3,10 +3,12 @@ import {
   addDays,
   formatDate,
   formatShortDate,
+  nextSession,
   reorganiseDays,
   runSchema,
   sameData,
   scheduled,
+  sessionMinutes,
   trainingRecords,
 } from "@bent/fitness-contracts/domain";
 import type { DayActivity, Entity, RecordEntry, Routine, Settings, Workout } from "@bent/fitness-contracts/domain";
@@ -56,6 +58,31 @@ export function dayInfo(settings: Settings, activity: Map<string, DayActivity>, 
 }
 
 export type DayInfo = ReturnType<typeof dayInfo>;
+
+/**
+ * A day's session as the reminders and the widget name it: "Strength A"
+ * with "6 exercises · about 45 min", "Easy run", or "Rest day".
+ */
+export function sessionText(info: DayInfo): { title: string; detail: string | null } {
+  const { plan } = info;
+  if (plan.type === "strength") {
+    if (!plan.routine) return { title: info.name, detail: "Strength session" };
+    const count = plan.routine.exercises.length;
+    return {
+      title: plan.routine.name,
+      detail: `${count} ${count === 1 ? "exercise" : "exercises"} · about ${sessionMinutes(plan.routine, plan.intro)} min`,
+    };
+  }
+  return { title: plan.type === "run" ? "Easy run" : "Rest day", detail: null };
+}
+
+/** "Next: Mon 30 Nov · Strength B" for the first session after `day`, or null with none in the next two weeks. */
+export function nextSessionText(settings: Settings, records: RecordEntry[], day: string) {
+  const upcoming = nextSession(settings, addDays(day, 1), records);
+  if (!upcoming) return null;
+  const name = upcoming.plan.type === "strength" ? (upcoming.plan.routine?.name ?? "Strength") : "Easy run";
+  return `Next: ${formatShortDate(upcoming.date)} · ${name}`;
+}
 
 /** Splits "Strength A" into "Strength" and "A" for the narrow week board. */
 export function boardLabel(type: string, name: string): [string, string] {

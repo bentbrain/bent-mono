@@ -2,11 +2,14 @@ import { DarkTheme, DefaultTheme, createNavigationContainerRef, createStaticNavi
 import type { StaticParamList } from "@react-navigation/native";
 import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/unstable";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useColorScheme } from "react-native";
 import { FitnessHealth } from "../../modules/fitness-health";
-import { useAccount } from "../account/AccountProvider";
+import { session, useAccount } from "../account/AccountProvider";
+import { LaunchRouter } from "../logic/launch";
+import type { LaunchTarget } from "../logic/launch";
 import { screenFor } from "../logic/screens";
+import type { WidgetLink } from "../logic/widget";
 import { useCSSVariable } from "uniwind";
 import { exerciseScreens } from "../screens/exercises";
 import { foodScreens } from "../screens/food";
@@ -14,7 +17,9 @@ import { progressScreens } from "../screens/progress";
 import { settingsScreens } from "../screens/settings";
 import { weekScreens } from "../screens/week";
 import { rootScreens } from "../screens/root";
-import { takeOpenedReminder, useReminderSchedule, useReminderTaps } from "./reminders";
+import { takeOpenedReminder, useReminderSchedule } from "./reminders";
+import { useAppTaps } from "./taps";
+import { takeLaunchWidgetLink, useWidgetSnapshot } from "./widget";
 
 /*
  * The route table. Each tab has its own native stack, so pushed screens
@@ -105,44 +110,85 @@ function useConflictReview() {
 }
 
 /**
- * A Health connection waiting for consent or for the Health step opens at
- * that step, so a relaunch returns to the step it left. The native status
- * keeps the wait, and nothing syncs until the step is done. A reminder
- * tapped to open the app takes precedence, so its day stays open.
+ * Whether a Health connection waits for consent or for the Health step. A
+ * relaunch returns to that step, since the native status keeps the wait and
+ * nothing syncs until the step is done.
  */
-function resumeHealthStep(reminderOpened: () => boolean) {
-  FitnessHealth.getStatus().then(
-    (status) => {
-      const step = screenFor(status);
-      if ((step === "consent" || step === "health") && navigationRef.isReady() && !reminderOpened())
-        navigationRef.navigate("Tabs", { screen: "SettingsTab", params: { screen: "HealthSync", initial: false } });
-    },
-    () => undefined,
-  );
+async function healthStepWaiting() {
+  const step = screenFor(await FitnessHealth.getStatus());
+  return step === "consent" || step === "health";
 }
 
-/**
- * Opens the Week tab at a tapped reminder's day, for a tap while the app
- * runs and for the tap that opened it, once navigation is ready.
- */
+function openHealthStep() {
+  if (navigationRef.isReady())
+    navigationRef.navigate("Tabs", { screen: "SettingsTab", params: { screen: "HealthSync", initial: false } });
+}
+
+/** Opens the Week tab at a reminder's day. */
 function useOpenReminder() {
   const { owner, setDate } = useAccount();
-  const opened = useRef(false);
   const open = useCallback(
     (day: string) => {
-      opened.current = true;
       setDate(day);
       if (navigationRef.isReady()) navigationRef.navigate("Tabs", { screen: "WeekTab", params: { screen: "Week" } });
     },
     [setDate],
   );
-  useReminderTaps(owner, open);
-  return {
-    ready: () => {
-      const day = takeOpenedReminder(owner);
-      if (day) open(day);
-      resumeHealthStep(() => opened.current);
+  return useMemo(() => ({ owner, open }), [owner, open]);
+}
+
+/** Opens the Week or Food tab at the day a widget link names. */
+function useOpenWidgetLink() {
+  const { setDate } = useAccount();
+  return useCallback(
+    ({ tab, day }: WidgetLink) => {
+      setDate(day);
+      if (!navigationRef.isReady()) return;
+      if (tab === "food") navigationRef.navigate("Tabs", { screen: "FoodTab", params: { screen: "Food" } });
+      else navigationRef.navigate("Tabs", { screen: "WeekTab", params: { screen: "Week" } });
     },
+    [setDate],
+  );
+}
+
+/**
+ * Opens the screen a launch or a tap asks for: a reminder's day, a widget
+ * link, or a Health step waiting at launch. A reminder or widget tapped while
+ * the app runs replaces the launch destination; before navigation is ready
+ * it opens in its place.
+ */
+function useLaunchRouting() {
+  // The sign-in this navigation opened under; the launch widget link must belong to it.
+  const [generation] = useState(() => session.generation());
+  const reminder = useOpenReminder();
+  const openWidgetLink = useOpenWidgetLink();
+  const [router] = useState(() => new LaunchRouter<WidgetLink>(() => session.generation() === generation));
+  const openTarget = useCallback(
+    (target: LaunchTarget<WidgetLink>) => {
+      if (target.kind === "reminder") reminder.open(target.day);
+      else if (target.kind === "widget") openWidgetLink(target.link);
+      else openHealthStep();
+    },
+    [reminder, openWidgetLink],
+  );
+  const tapped = useCallback(
+    (target: LaunchTarget<WidgetLink>) => {
+      if (!navigationRef.isReady()) return router.replace(target);
+      router.replace();
+      openTarget(target);
+    },
+    [router, openTarget],
+  );
+  useAppTaps(reminder.owner, tapped);
+  /** Opens the launch destination once navigation is ready. */
+  return () => {
+    void router
+      .resolve({
+        reminder: () => takeOpenedReminder(reminder.owner),
+        widget: () => takeLaunchWidgetLink(generation),
+        health: healthStepWaiting,
+      })
+      .then((target) => router.openIfCurrent(target, openTarget));
   };
 }
 
@@ -155,7 +201,8 @@ function useColor(name: string, fallback: string) {
 export function Navigation() {
   useConflictReview();
   useReminderSchedule();
-  const { ready } = useOpenReminder();
+  useWidgetSnapshot();
+  const ready = useLaunchRouting();
   const dark = useColorScheme() === "dark";
   const base = dark ? DarkTheme : DefaultTheme;
   const theme = {
