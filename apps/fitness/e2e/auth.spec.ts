@@ -125,7 +125,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     page.getByRole("heading", { name: "Strength A", exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("8");
   await page
     .getByRole("button", { name: "Goblet squat set 1 complete", exact: true })
@@ -133,7 +133,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page.context().setOffline(true);
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 2 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 2 weight(,|$)/ })
     .fill("9");
   await expect(page.getByRole("status").first()).toContainText("Offline");
   await page
@@ -152,8 +152,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await page.reload();
   await expect(
     page.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await page
@@ -192,8 +191,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
     page.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await page.getByRole("link", { name: "Food", exact: true }).click();
@@ -273,8 +271,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .click();
   await expect(
     pageA2.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await openBodyweight(pageA2);

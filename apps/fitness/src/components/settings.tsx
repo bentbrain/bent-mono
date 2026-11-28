@@ -389,8 +389,8 @@ export function SettingsEditor({
             </div>
             <h2 className="section-label">Your equipment</h2>
             <p>
-              Add only the sizes you have checked. A dumbbell weight in a workout
-              is for one dumbbell.
+              Add only the sizes you have checked. A dumbbell weight in a
+              workout is for one dumbbell.
             </p>
             <TextField
               label={`Dumbbell sizes · ${draft.units}, comma separated`}
@@ -416,6 +416,8 @@ export function SettingsEditor({
                   label="Equipment"
                   context={`equipment ${i + 1}`}
                   id={`equipment-${i}`}
+                  maxLength={160}
+                  keepFilled
                   value={item.name}
                   onValueChange={(value) =>
                     update({
@@ -541,6 +543,8 @@ export function SettingsEditor({
                     label="Routine name"
                     context={`routine ${ri + 1}`}
                     id={`routine-${ri}`}
+                    maxLength={160}
+                    keepFilled
                     value={routine.name}
                     onValueChange={(value) =>
                       changeRoutine({ ...routine, name: value })

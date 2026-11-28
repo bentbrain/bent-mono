@@ -583,4 +583,13 @@ test("an agent can't enter a date or number the field doesn't take", async ({
     { ref: "Goal", action: "setValue", args: ["x".repeat(161)] },
   ]);
   expect(long.ok).toBe(false);
+  for (const value of ["   ", "Updated\nGoal"]) {
+    const result = await act(page, [
+      { ref: "Goal", action: "setValue", args: [value] },
+    ]);
+    expect(result.ok, JSON.stringify(value)).toBe(false);
+  }
+  await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Build strength consistently",
+  );
 });

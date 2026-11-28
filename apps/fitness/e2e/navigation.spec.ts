@@ -732,7 +732,7 @@ test("typed set values save when leaving the set, invalid text stays, sets can b
   await expect(status).toHaveText("Unsaved input on device");
   await reps.pressSequentially("9");
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("6.5");
   expect(writes).toHaveLength(0);
   await page.locator("h1").click();
@@ -858,7 +858,7 @@ test("history corrects, removes and restores workouts without changing the origi
     page.getByRole("heading", { name: "Correct Strength A" }),
   ).toBeVisible();
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("4");
   await page.getByRole("button", { name: "Save correction" }).click();
   await expect(
@@ -1173,12 +1173,10 @@ test("recovered weights keep the units they were typed in when units change else
   const owner = await ownerId(page);
   const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
   const first = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   const second = page.getByRole("spinbutton", {
-    name: "Goblet squat set 2 weight",
-    exact: true,
+    name: /^Goblet squat set 2 weight(,|$)/,
   });
   // Both sets start from a saved weight of zero.
   await first.fill("0");
@@ -1270,8 +1268,7 @@ test("sections open offline on their first visit and typed workout values save a
   // A value kept only in this page shows the app was not reloaded.
   await page.evaluate(() => Reflect.set(window, "fitnessVisit", "open"));
   const weight = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   await weight.fill("9");
   await expect(status).toHaveText("Unsaved input on device");
@@ -1979,8 +1976,7 @@ test("plan actions stay in reach and exercise guides keep session values", async
   await page.goto("/?date=2026-01-05");
   const workoutId = await startPastWorkout(page);
   const weight = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   await weight.fill("7");
   const help = page.getByRole("button", {

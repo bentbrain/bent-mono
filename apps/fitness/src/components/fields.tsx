@@ -13,7 +13,7 @@ type Limits = {
   step?: string | number;
   required?: boolean;
   maxLength?: number;
-  /** Refuses an empty value from an agent. People get the form's own error. */
+  /** Refuses an empty or blank value from an agent. People get the form's own error. */
   keepFilled?: boolean;
 };
 
@@ -28,6 +28,11 @@ export function fits(
 ) {
   if (value === "") return !required && !keepFilled;
   if (maxLength !== undefined && value.length > maxLength) return false;
+  if (type !== "date" && type !== "number") {
+    // A single-line input drops line breaks, so a value with them isn't what it shows.
+    if (/[\r\n]/.test(value)) return false;
+    if ((required || keepFilled) && value.trim() === "") return false;
+  }
   if (type === "date") {
     const parts = isoDate.exec(value);
     if (!parts) return false;
