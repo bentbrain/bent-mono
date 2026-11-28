@@ -235,6 +235,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     ...source.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z0-9-]*):$/gm),
   ].map((match) => match[1]);
   assert.deepEqual(declared, [
+    "codeql-swift-build",
     "codeql-swift-app",
     "codeql-swift-modules",
     "codeql-swift-tools",
@@ -244,20 +245,27 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     "verification",
   ]);
   const job = (name) => qualityJob(source, name);
-  for (const [name, scope, traces] of [
-    ["codeql-swift-app", "app", ["native.mjs replay-swift app"]],
-    ["codeql-swift-modules", "modules", ["native.mjs replay-swift modules"]],
+  const replay =
+    "    needs: codeql-swift-build\n    runs-on: macos-26\n    timeout-minutes: 25\n";
+  for (const [name, scope, traces, head] of [
+    ["codeql-swift-app", "app", ["native.mjs replay-swift app"], replay],
+    [
+      "codeql-swift-modules",
+      "modules",
+      ["native.mjs replay-swift modules"],
+      replay,
+    ],
     [
       "codeql-swift-tools",
       "tools",
       ["native.mjs replay-swift seeder", "native.mjs core-build"],
+      "    runs-on: macos-26\n    timeout-minutes: 27\n",
     ],
   ]) {
     const codeql = job(name);
     assert.ok(
-      codeql.includes(
-        `    name: CodeQL Swift (${scope})\n    runs-on: macos-26\n    timeout-minutes: 27\n`,
-      ),
+      codeql.includes(`    name: CodeQL Swift (${scope})\n${head}`),
+      name,
     );
     assert.match(
       codeql,
@@ -316,25 +324,60 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
       2,
       name,
     );
-    // The CodeQL builds compile one unoptimised arm64 Simulator slice without a dSYM.
+  }
+  // One job builds the production app for the app and modules jobs: one unoptimised arm64 Simulator slice without a dSYM.
+  const codeqlBuild = job("codeql-swift-build");
+  assert.ok(
+    codeqlBuild.includes(
+      "    name: CodeQL Swift build\n    runs-on: macos-26\n    timeout-minutes: 20\n",
+    ),
+  );
+  assert.ok(codeqlBuild.includes("APP_VARIANT: production"));
+  assert.ok(codeqlBuild.includes('SKIP_BUNDLING: "1"'));
+  assert.ok(
+    codeqlBuild.includes(
+      "          XCODEBUILD_SETTINGS: >-\n" +
+        "            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO\n" +
+        "            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n" +
+        "            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO\n" +
+        "            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0\n" +
+        "            DEBUG_INFORMATION_FORMAT=dwarf\n",
+    ),
+  );
+  assert.ok(
+    codeqlBuild.includes(
+      "run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n",
+    ),
+  );
+  assert.ok(!codeqlBuild.includes("codeql-action/"));
+  assert.ok(
+    codeqlBuild.includes(
+      'printf \'%s\\n%s\\n\' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR" > "$NATIVE_BUILD_DIR/paths.txt"\n',
+    ),
+  );
+  assert.ok(
+    codeqlBuild.includes(
+      "          name: fitness-ios-codeql-build\n          path: |\n" +
+        "            ${{ runner.temp }}/fitness-ios-codeql-build.tar\n            ${{ runner.temp }}/fitness-ios-codeql-project.tar\n" +
+        "          if-no-files-found: error\n",
+    ),
+  );
+  // The app and modules jobs replay that build's logged commands at the same paths, after init and before analysis.
+  for (const name of ["codeql-swift-app", "codeql-swift-modules"]) {
+    const body = job(name);
+    assert.ok(!/native\.mjs (prebuild|build)\n/.test(body), name);
+    assert.ok(!body.includes("XCODEBUILD_SETTINGS"), name);
     assert.ok(
-      codeql.includes(
-        "          XCODEBUILD_SETTINGS: >-\n" +
-          "            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO\n" +
-          "            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n" +
-          "            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO\n" +
-          "            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0\n" +
-          "            DEBUG_INFORMATION_FORMAT=dwarf\n",
+      body.includes(
+        "uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\n        with:\n          name: fitness-ios-codeql-build\n",
       ),
       name,
     );
-  }
-  // The app and modules jobs each build the production app, then replay their own targets.
-  for (const name of ["codeql-swift-app", "codeql-swift-modules"]) {
-    assert.ok(job(name).includes('SKIP_BUNDLING: "1"'), name);
+    const unpack = body.indexOf("name: Unpack the production build\n");
+    assert.ok(unpack > 0 && unpack < body.indexOf("codeql-action/init@"), name);
     assert.ok(
-      job(name).includes(
-        "run: |\n          node scripts/native.mjs prebuild\n          node scripts/native.mjs build\n",
+      body.includes(
+        'if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then\n',
       ),
       name,
     );
@@ -435,10 +478,31 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
       ),
     );
   }
-  // The flow has a time budget inside the 25-minute limit, so the limit never cuts an attempt or its cleanup short.
+  // The flow's time budget ends 22.5 minutes after the job started, and the two steps after it
+  // take at most a minute each, so the 25-minute limit never cuts an attempt, its cleanup or
+  // a failed flow's upload short, however long setup takes.
+  const started = flows.indexOf(
+    'echo "FLOW_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"\n',
+  );
+  assert.ok(started > 0 && started < flows.indexOf("uses: actions/checkout@"));
   assert.ok(
     flows.includes(
-      'FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: "1200"\n        run: node scripts/flows.mjs --prebuilt "$FLOW"\n',
+      "FLOW: ${{ matrix.flow }}\n        run: |\n          budget=$((FLOW_JOB_STARTED + 1350 - $(date +%s)))\n",
+    ),
+  );
+  assert.ok(
+    flows.includes(
+      "      - name: Retain the Simulator flow results\n        if: failure()\n        timeout-minutes: 1\n",
+    ),
+  );
+  assert.ok(
+    flows.includes(
+      "      - name: Stop Postgres\n        if: always()\n        timeout-minutes: 1\n",
+    ),
+  );
+  assert.ok(
+    flows.includes(
+      '          FITNESS_FLOW_BUDGET_SECONDS="$budget" node scripts/flows.mjs --prebuilt "$FLOW"\n',
     ),
   );
   // No flow shard builds the app or runs the module's checks; each runs the flow build's app and seeder.
@@ -467,7 +531,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   );
   assert.ok(
     aggregate.includes(
-      'const expected = ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];',
+      'const expected = ["codeql-swift-build", "codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];',
     ),
   );
   assert.ok(
@@ -574,27 +638,26 @@ test("Fitness iOS Verification fits five macOS runners and keeps every job short
       ];
     }),
   );
-  // CodeQL jobs stop at 27 minutes, the flows at 25 and the builds at 20.
+  // The tools job stops at 27 minutes, the jobs that wait for a build at 25 and the builds at 20.
+  const limit = (name) =>
+    name === "codeql-swift-tools" ? 27 : jobs[name].needs.length ? 25 : 20;
   for (const name of declared.filter((name) => jobs[name].macos))
-    assert.ok(
-      jobs[name].minutes <=
-        (name.startsWith("codeql-") ? 27 : name === "simulator-flow" ? 25 : 20),
-      `${name} runs too long`,
-    );
+    assert.ok(jobs[name].minutes <= limit(name), `${name} runs too long`);
   // The jobs that start at once fit the five macOS runners.
   const first = declared.filter(
     (name) => jobs[name].macos && jobs[name].needs.length === 0,
   );
   assert.deepEqual(first, [
-    "codeql-swift-app",
-    "codeql-swift-modules",
+    "codeql-swift-build",
     "codeql-swift-tools",
     "production-build",
     "simulator-build",
   ]);
   assert.ok(first.reduce((total, name) => total + jobs[name].runners, 0) <= 5);
-  // The flows wait only for the flow build, never for the CodeQL jobs.
+  // The flows wait only for the flow build, and the app and modules CodeQL jobs only for theirs.
   assert.deepEqual(jobs["simulator-flow"].needs, ["simulator-build"]);
+  assert.deepEqual(jobs["codeql-swift-app"].needs, ["codeql-swift-build"]);
+  assert.deepEqual(jobs["codeql-swift-modules"].needs, ["codeql-swift-build"]);
   assert.equal(jobs["simulator-flow"].runners, 3);
   assert.ok(!source.includes("max-parallel"));
   assert.deepEqual(
@@ -603,7 +666,7 @@ test("Fitness iOS Verification fits five macOS runners and keeps every job short
   );
   assert.equal(jobs.verification.macos, false);
   assert.equal(jobs.verification.minutes, 2);
-  // Every job running to its limit: the flow build, then a flow, then the aggregate.
+  // Every job running to its limit: a build, then a flow or a CodeQL replay, then the aggregate.
   const worst = (name) =>
     jobs[name].minutes + Math.max(0, ...jobs[name].needs.map(worst));
   assert.equal(worst("verification"), 47);

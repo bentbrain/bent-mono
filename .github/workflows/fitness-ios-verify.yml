@@ -39,17 +39,19 @@ concurrency:
   cancel-in-progress: true
 # This workflow reports on main after merges that touch the native iPhone
 # inputs, daily at 17:00 UTC and on dispatch. Releases do not wait for it.
-# Time budget: the three CodeQL Swift jobs (app, modules and tools), the
-# production build and the Simulator flow build start together on the
-# repository's five macOS runners. The three Simulator flows start when the flow build finishes
-# and a runner is free, and run its app and seeder, so no flow builds the app
-# itself. The production build also runs SwiftLint, the module's XCTest suite
-# and the contract round trip. The CodeQL jobs stop at 27 minutes, the flows
-# at 25 and the builds at 20; the aggregate starts when they finish and stops
-# at 2.
-# Measured before the app CodeQL job was split in two: CodeQL tools about 22
-# minutes, each build about 12, each flow 7 to 10; the app scope alone took
-# 26 to 28, so its targets now share two jobs.
+# Time budget: the CodeQL Swift build, CodeQL Swift (tools), the production
+# build and the Simulator flow build start together on four of the
+# repository's five macOS runners. CodeQL Swift (app) and (modules) start when
+# the CodeQL build finishes and replay its logged compile commands, and the
+# three Simulator flows start when the flow build finishes and run its app
+# and seeder, each as a runner is free. The production build also runs
+# SwiftLint, the module's XCTest suite and the contract round trip. CodeQL
+# Swift (tools) stops at 27 minutes, the app and modules CodeQL jobs and the
+# flows at 25 and the builds at 20; the aggregate starts when they finish and
+# stops at 2.
+# In each traced replay the first target also takes about 8 minutes to build
+# the Swift module cache under Rosetta, and each production build takes about
+# 9, so the app and modules jobs share one build.
 # Every build compiles only the arm64 Simulator slice; the CodeQL builds also
 # skip optimisation and dSYM generation, and the flow build skips the dSYM.
 # The CodeQL Swift reports and databases stay out of Code Scanning: pull
@@ -58,10 +60,69 @@ concurrency:
 # zero raw findings here, and each original report is kept as a workflow
 # artifact.
 jobs:
+  codeql-swift-build:
+    # Builds the production app once for the app and modules CodeQL jobs,
+    # which replay its logged Swift compile commands.
+    name: CodeQL Swift build
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      APP_VARIANT: production
+      # The analysis covers Swift, so the JavaScript bundle is not built.
+      SKIP_BUNDLING: "1"
+    steps:
+      - name: Keep native build output outside the checkout
+        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.6
+        working-directory: apps/fitness-ios
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          node scripts/native.mjs xcode 26.6
+      - uses: ./.github/actions/setup
+      - name: Build the production app
+        working-directory: apps/fitness-ios
+        env:
+          # Whole-module compiles, and the bridging header read as source: the
+          # extractor stops without recording anything when the app target
+          # imports the header precompiled by Xcode's clang. The replay
+          # compiles the arm64 slice, so the build makes only that slice,
+          # unoptimised and without a dSYM.
+          XCODEBUILD_SETTINGS: >-
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
+            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0
+            DEBUG_INFORMATION_FORMAT=dwarf
+        run: |
+          node scripts/native.mjs prebuild
+          node scripts/native.mjs build
+      # Everything the replay reads: the generated project, the build log and
+      # the derived data, without the objects, archives and bundles it never reads.
+      - name: Pack the production build for the CodeQL jobs
+        run: |
+          printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR" > "$NATIVE_BUILD_DIR/paths.txt"
+          tar -cf "$RUNNER_TEMP/fitness-ios-codeql-build.tar" -C "$RUNNER_TEMP" \
+            --exclude='*.o' --exclude='*.a' --exclude='*.d' --exclude='*.dia' \
+            --exclude='*.app' --exclude='*.appex' \
+            --exclude='fitness-ios/app/Logs' --exclude='fitness-ios/app/CompilationCache.noindex' \
+            fitness-ios
+          tar -cf "$RUNNER_TEMP/fitness-ios-codeql-project.tar" -C apps/fitness-ios ios
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fitness-ios-codeql-build
+          path: |
+            ${{ runner.temp }}/fitness-ios-codeql-build.tar
+            ${{ runner.temp }}/fitness-ios-codeql-project.tar
+          if-no-files-found: error
+          retention-days: 1
   codeql-swift-app:
     name: CodeQL Swift (app)
+    needs: codeql-swift-build
     runs-on: macos-26
-    timeout-minutes: 27
+    timeout-minutes: 25
     env:
       # The raw-flow gate requires both complete suites.
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"
@@ -87,23 +148,21 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           node scripts/native.mjs xcode 26.6
       - uses: ./.github/actions/setup
-      - name: Build the production app
-        working-directory: apps/fitness-ios
-        env:
-          # Whole-module compiles, and the bridging header read as source: the
-          # extractor stops without recording anything when the app target
-          # imports the header precompiled by Xcode's clang. The replay
-          # compiles the arm64 slice, so the build makes only that slice,
-          # unoptimised and without a dSYM.
-          XCODEBUILD_SETTINGS: >-
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
-            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
-            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0
-            DEBUG_INFORMATION_FORMAT=dwarf
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: fitness-ios-codeql-build
+          path: ${{ runner.temp }}
+      # The replay runs Xcode's logged compile commands, which name the build's
+      # absolute paths, so the build must come from the same paths.
+      - name: Unpack the production build
         run: |
-          node scripts/native.mjs prebuild
-          node scripts/native.mjs build
+          tar -xf "$RUNNER_TEMP/fitness-ios-codeql-build.tar" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/fitness-ios-codeql-project.tar" -C apps/fitness-ios
+          expected="$(printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR")"
+          if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then
+            echo "The CodeQL build was made at other paths than this job's." >&2
+            exit 1
+          fi
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
         env:
@@ -164,8 +223,9 @@ jobs:
           retention-days: 90
   codeql-swift-modules:
     name: CodeQL Swift (modules)
+    needs: codeql-swift-build
     runs-on: macos-26
-    timeout-minutes: 27
+    timeout-minutes: 25
     env:
       # The raw-flow gate requires both complete suites.
       CODEQL_ACTION_DIFF_INFORMED_QUERIES: "false"
@@ -191,23 +251,21 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.6.app
           node scripts/native.mjs xcode 26.6
       - uses: ./.github/actions/setup
-      - name: Build the production app
-        working-directory: apps/fitness-ios
-        env:
-          # Whole-module compiles, and the bridging header read as source: the
-          # extractor stops without recording anything when the app target
-          # imports the header precompiled by Xcode's clang. The replay
-          # compiles the arm64 slice, so the build makes only that slice,
-          # unoptimised and without a dSYM.
-          XCODEBUILD_SETTINGS: >-
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
-            SWIFT_COMPILATION_MODE=wholemodule SWIFT_PRECOMPILE_BRIDGING_HEADER=NO
-            SWIFT_OPTIMIZATION_LEVEL=-Onone GCC_OPTIMIZATION_LEVEL=0
-            DEBUG_INFORMATION_FORMAT=dwarf
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: fitness-ios-codeql-build
+          path: ${{ runner.temp }}
+      # The replay runs Xcode's logged compile commands, which name the build's
+      # absolute paths, so the build must come from the same paths.
+      - name: Unpack the production build
         run: |
-          node scripts/native.mjs prebuild
-          node scripts/native.mjs build
+          tar -xf "$RUNNER_TEMP/fitness-ios-codeql-build.tar" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/fitness-ios-codeql-project.tar" -C apps/fitness-ios
+          expected="$(printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR")"
+          if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then
+            echo "The CodeQL build was made at other paths than this job's." >&2
+            exit 1
+          fi
       - name: Download verified CodeQL bundle
         timeout-minutes: 10
         env:
@@ -497,7 +555,9 @@ jobs:
     steps:
       - name: Keep native build output outside the checkout
         working-directory: .
-        run: echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+        run: |
+          echo "NATIVE_BUILD_DIR=$RUNNER_TEMP/fitness-ios" >> "$GITHUB_ENV"
+          echo "FLOW_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
@@ -525,16 +585,24 @@ jobs:
           "$pg/createdb" -h 127.0.0.1 -p 55432 -U test fitness_test
           echo "POSTGRES_BIN=$pg" >> "$GITHUB_ENV"
           echo "FITNESS_TEST_DATABASE_URL=postgres://test@127.0.0.1:55432/fitness_test" >> "$GITHUB_ENV"
-      # The flow has 20 of the job's 25 minutes: each attempt keeps time for
-      # its cleanup, and a retry starts only with enough time left for a whole
-      # attempt, so the job's limit never cuts an attempt or its cleanup short.
+      # The flow ends 22.5 minutes after the job started, leaving 2.5 of the
+      # job's 25 for the steps after it, each limited to a minute. Each attempt
+      # keeps time for its cleanup and the harness's stop, and a retry starts
+      # only with enough time left for a whole attempt, so the job's limit
+      # never cuts an attempt, its cleanup or a failed flow's upload short.
       - name: Run the Simulator flow against the local harness
         env:
           FLOW: ${{ matrix.flow }}
-          FITNESS_FLOW_BUDGET_SECONDS: "1200"
-        run: node scripts/flows.mjs --prebuilt "$FLOW"
+        run: |
+          budget=$((FLOW_JOB_STARTED + 1350 - $(date +%s)))
+          if [ "$budget" -le 0 ]; then
+            echo "The job's setup used the flow's time budget." >&2
+            exit 1
+          fi
+          FITNESS_FLOW_BUDGET_SECONDS="$budget" node scripts/flows.mjs --prebuilt "$FLOW"
       - name: Retain the Simulator flow results
         if: failure()
+        timeout-minutes: 1
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: fitness-ios-flows-${{ matrix.label }}
@@ -545,13 +613,15 @@ jobs:
           retention-days: 7
       - name: Stop Postgres
         if: always()
+        timeout-minutes: 1
         run: |
-          if [ -n "${POSTGRES_BIN:-}" ]; then "$POSTGRES_BIN/pg_ctl" -D "$RUNNER_TEMP/postgres" -w stop; fi
+          if [ -n "${POSTGRES_BIN:-}" ]; then "$POSTGRES_BIN/pg_ctl" -D "$RUNNER_TEMP/postgres" -m fast -t 30 -w stop; fi
   verification:
     # Requires each job above. Releases don't wait for this workflow; it reports the result after merge and nightly.
     name: Fitness iOS verification
     if: always()
     needs:
+      - codeql-swift-build
       - codeql-swift-app
       - codeql-swift-modules
       - codeql-swift-tools
@@ -567,7 +637,7 @@ jobs:
         run: |
           node --input-type=module -e '
             const jobs = JSON.parse(process.env.VERIFY_RESULTS);
-            const expected = ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];
+            const expected = ["codeql-swift-build", "codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build", "simulator-flow"];
             if (Object.keys(jobs).sort().join() !== expected.sort().join() ||
                 Object.values(jobs).some(job => job.result !== "success")) {
               throw new Error("Every Fitness iOS Verification job must succeed");

@@ -16,8 +16,10 @@
 // starts unanswered. The Simulator, the harness and its schema are removed
 // at the end. FITNESS_FLOW_BUDGET_SECONDS gives the flows a time budget, for
 // a CI job's limit: each attempt, from creating its Simulator to the end of
-// its test, must finish with time kept for its cleanup, and a retry starts
-// only when enough of the budget is left for a whole attempt.
+// its test, must finish with time kept for its cleanup; booting and
+// installing each have their own limit, so a slow Simulator ends its attempt
+// early; and a retry starts only when enough of the budget is left for a
+// whole attempt.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -59,21 +61,31 @@ const budgetSeconds = Number(process.env.FITNESS_FLOW_BUDGET_SECONDS || 0);
 if (!Number.isFinite(budgetSeconds) || budgetSeconds < 0)
   throw new Error("FITNESS_FLOW_BUDGET_SECONDS must be a number of seconds, or unset.");
 const budgetEnd = budgetSeconds > 0 ? Date.now() + budgetSeconds * 1000 : null;
-// Kept from each attempt for its log and the Simulator's removal, each bounded below.
-const cleanupMs = 150_000;
-// The least time an attempt needs: a Simulator's boot, the install and a flow.
-const attemptMs = 360_000;
+// Kept from each attempt for its log and the Simulator's removal: the log
+// read, the shutdown and two deletions, 30 seconds each.
+const cleanupMs = 120_000;
+// Kept at the end of the budget for the harness to stop, dropping its schema.
+// A harness still running then is killed.
+const stopMs = 30_000;
+// The least time an attempt needs: on CI, booting a Simulator takes up to
+// 2 minutes, installing the app up to 2 and a flow 3 to 4.
+const attemptMs = 480_000;
+// With a budget, a Simulator that boots or installs slowly ends its attempt early.
+const bootMs = 240_000;
+const installMs = 180_000;
 
+// The harness has a minute to start answering, each request included.
 async function waitForHarness() {
-  for (let i = 0; i < 120; i++) {
+  const end = Date.now() + 60_000;
+  while (Date.now() < end) {
     try {
-      if ((await fetch(`${origin}/__state`)).ok) return;
+      if ((await fetch(`${origin}/__state`, { signal: AbortSignal.timeout(Math.max(1, end - Date.now())) })).ok) return;
     } catch {
-      // Not listening yet.
+      // Not listening yet, or too slow to answer.
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error("The harness did not start.");
+  throw new Error("The harness did not start within a minute.");
 }
 
 // The harness closes idle connections while a flow runs, so a request can
@@ -165,6 +177,7 @@ const harness = spawn("bun", ["test", "tests/ios-simulator.harness.test.ts", "--
     FITNESS_TEST_DEADLINE_MS: harnessLimitMs,
   },
 });
+const harnessExited = new Promise((resolve) => harness.once("exit", resolve));
 let failed = false;
 try {
   await waitForHarness();
@@ -176,20 +189,33 @@ try {
   ];
   // A flow that fails runs once more on a new Simulator: a newly booted
   // Simulator can time out launching an app. Both attempts are logged.
-  const attempt = (flow, number) => {
-    // The attempt ends early enough to leave its cleanup time in the budget.
-    const deadline = budgetEnd === null ? null : budgetEnd - cleanupMs;
+  // Each attempt starts from an empty account and zero request counts.
+  const reset = async () => {
+    const response = await post("/__reset");
+    if (!response.ok) throw new Error(`The harness reset answered ${response.status}.`);
+  };
+  const attempt = async (flow, number) => {
+    // The attempt ends early enough to leave its cleanup and the harness's
+    // stop in the budget.
+    const deadline = budgetEnd === null ? null : budgetEnd - stopMs - cleanupMs;
     if (deadline !== null && deadline - Date.now() < attemptMs) {
       console.error(`${flow}, attempt ${number}: not enough of the time budget is left for an attempt.`);
       return false;
     }
+    await reset();
     const left = () => (deadline === null ? undefined : Math.max(1000, deadline - Date.now()));
     let udid;
     try {
       udid = newSimulator(left);
-      run("xcrun", ["simctl", "boot", udid], { timeout: left() });
-      run("xcrun", ["simctl", "bootstatus", udid, "-b"], { timeout: left() });
-      run("xcrun", ["simctl", "install", udid, appPath], { timeout: left() });
+      // With a budget, booting and installing each have a limit of their own.
+      const capped = (ms) => {
+        const end = deadline === null ? null : Math.min(deadline, Date.now() + ms);
+        return () => (end === null ? undefined : Math.max(1000, end - Date.now()));
+      };
+      const booting = capped(bootMs);
+      run("xcrun", ["simctl", "boot", udid], { timeout: booting() });
+      run("xcrun", ["simctl", "bootstatus", udid, "-b"], { timeout: booting() });
+      run("xcrun", ["simctl", "install", udid, appPath], { timeout: capped(installMs)() });
       const source =
         mode === "prebuilt"
           ? ["-xctestrun", testRun[0]]
@@ -229,7 +255,7 @@ try {
           "--predicate",
           'process BEGINSWITH "bentFitness"',
         ],
-        { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 45_000, killSignal: "SIGKILL" },
+        { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 30_000, killSignal: "SIGKILL" },
       );
       writeFileSync(join(buildDir, `flows-${flow}-${number}-app.log`), log.stdout ?? "");
       return false;
@@ -237,21 +263,30 @@ try {
       if (udid && !removeSimulator(udid)) leftovers.push(udid);
     }
   };
-  // Each attempt starts from an empty account and zero request counts.
-  const reset = async () => {
-    const response = await post("/__reset");
-    if (!response.ok) throw new Error(`The harness reset answered ${response.status}.`);
-  };
   for (const flow of flows) {
-    await reset();
-    if (attempt(flow, 1)) continue;
+    if (await attempt(flow, 1)) continue;
     console.error(`${flow} failed; running it again on a new Simulator.`);
-    await reset();
-    if (!attempt(flow, 2)) failed = true;
+    if (!(await attempt(flow, 2))) failed = true;
   }
 } finally {
-  await post("/__stop").catch(() => harness.kill());
-  await new Promise((resolve) => harness.on("exit", resolve));
+  let timer;
+  const stopped = await Promise.race([
+    post("/__stop").then(
+      () => harnessExited.then(() => true),
+      () => {
+        harness.kill();
+        return harnessExited.then(() => true);
+      },
+    ),
+    new Promise((resolve) => (timer = setTimeout(resolve, stopMs, false))),
+  ]);
+  clearTimeout(timer);
+  if (!stopped && harness.exitCode === null && harness.signalCode === null) {
+    console.error(`The harness did not stop within ${stopMs / 1000} seconds, so it was killed.`);
+    harness.kill("SIGKILL");
+    await harnessExited;
+    failed = true;
+  }
 }
 if (leftovers.length) {
   console.error(`These Simulators could not be removed: ${leftovers.join(", ")}`);
