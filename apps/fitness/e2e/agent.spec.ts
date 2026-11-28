@@ -30,7 +30,8 @@ type Tool = {
 declare global {
   interface Window {
     webmcpTools?: Map<string, Tool>;
-    staleTools?: Map<string, Tool>;
+    findTool?: (base: string) => Tool | undefined;
+    staleTools?: Map<string, Tool | undefined>;
     firstSignedOutSnapshot?: Promise<unknown> | unknown;
     cancelled?: Promise<unknown> | unknown;
     cancel?: () => void;
@@ -42,6 +43,9 @@ async function installModelContext(page: Page) {
   await page.addInitScript(() => {
     const tools = new Map<string, Tool>();
     window.webmcpTools = tools;
+    // The app suffixes each registration's names, like `snapshot_3f9c2a1b`.
+    window.findTool = (base) =>
+      [...tools].find(([name]) => name.startsWith(`${base}_`))?.[1];
     Object.defineProperty(document, "modelContext", {
       configurable: true,
       value: {
@@ -63,12 +67,15 @@ async function installModelContext(page: Page) {
 }
 async function tool(page: Page, name: string, input: object = {}) {
   await expect
-    .poll(() => page.evaluate((key) => !!window.webmcpTools?.has(key), name))
+    .poll(() => page.evaluate((key) => !!window.findTool?.(key), name))
     .toBe(true);
   return page.evaluate(
-    ([key, value]) => window.webmcpTools?.get(key)?.execute(value),
+    ([key, value]) => window.findTool?.(key)?.execute(value),
     [name, input] as const,
   );
+}
+function toolNames(page: Page) {
+  return page.evaluate(() => [...(window.webmcpTools?.keys() ?? [])].sort());
 }
 async function snapshot(page: Page) {
   return z
@@ -202,6 +209,10 @@ test("an agent's export waits for the person to allow it", async ({ page }) => {
 });
 
 test("signing out ends the agent's access to the page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   await page.goto("/settings");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   const ask = page.getByRole("alertdialog", {
@@ -212,9 +223,15 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   });
   await expect(ask).toBeVisible();
   const queued = tool(page, "query", { text: "Sign in" });
+  const earlier = await toolNames(page);
   await page.evaluate(() => {
-    window.staleTools = new Map(window.webmcpTools);
-    const snapshot = window.webmcpTools?.get("snapshot");
+    window.staleTools = new Map(
+      ["act", "query", "snapshot"].map((base) => [
+        base,
+        window.findTool?.(base),
+      ]),
+    );
+    const snapshot = window.findTool?.("snapshot");
     // Reads the earlier registration the moment the signed-out page appears.
     const watcher = new MutationObserver(() => {
       const signIn = [...document.querySelectorAll("button")].some(
@@ -250,16 +267,31 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   );
   expect(late.ok, "a call made through the earlier registration").toBe(false);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(errors.filter((text) => text.includes("useInsertionEffect"))).toEqual(
+    [],
+  );
 
-  // Signing in again in this page registers tools under new names, so a
-  // handle that looks a tool up by its earlier name can't reach them.
+  // Signing in again registers tools under new names, so a handle that looks
+  // a tool up by its earlier name can't reach them.
   await clerk.signIn({ page, emailAddress: email });
   await expect(page.locator(".sync-state")).toHaveText("Saved");
-  await expect
-    .poll(() =>
-      page.evaluate(() => [...(window.webmcpTools?.keys() ?? [])].sort()),
-    )
-    .toEqual(["act_1", "query_1", "snapshot_1"]);
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const later = await toolNames(page);
+  expect(later.filter((name) => earlier.includes(name))).toEqual([]);
+});
+
+test("each page load registers tools under names of its own", async ({
+  page,
+}) => {
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const first = await toolNames(page);
+  for (const name of first)
+    expect(name).toMatch(/^(act|query|snapshot)_[0-9a-f]{8}$/);
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const second = await toolNames(page);
+  expect(second.filter((name) => first.includes(name))).toEqual([]);
 });
 
 test("an agent's marked step is refused while a native modal is open", async ({
@@ -289,8 +321,8 @@ test("a cancelled agent call closes its question", async ({ page }) => {
   await page.evaluate(() => {
     const controller = new AbortController();
     window.cancel = () => controller.abort();
-    window.cancelled = window.webmcpTools
-      ?.get("act")
+    window.cancelled = window
+      .findTool?.("act")
       ?.execute(
         { steps: [{ ref: "Export account data and photos", action: "press" }] },
         { signal: controller.signal },
@@ -339,4 +371,44 @@ test("the account opens without WebMCP or AbortSignal.any", async ({
   ).toBeVisible();
   expect(await page.evaluate(() => "any" in AbortSignal)).toBe(false);
   expect(errors).toEqual([]);
+});
+
+test("a cancelled agent call reports the steps it finished", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const equipment = page.getByRole("button", { name: "Remove equipment" });
+  const before = await equipment.count();
+  await page.evaluate(() => {
+    const controller = new AbortController();
+    window.cancel = () => controller.abort();
+    window.cancelled = window.findTool?.("act")?.execute(
+      {
+        steps: [
+          { ref: "Add equipment", action: "press" },
+          { ref: "Export account data and photos", action: "press" },
+        ],
+      },
+      { signal: controller.signal },
+    );
+  });
+  const ask = page.getByRole("alertdialog", {
+    name: "Allow your assistant to do this?",
+  });
+  await expect(ask).toBeVisible();
+  await page.evaluate(() => window.cancel?.());
+  await expect(ask).toBeHidden();
+  const result = z
+    .object({
+      ok: z.boolean(),
+      steps: z.array(z.unknown()),
+      error: z.object({ step: z.number() }).optional(),
+    })
+    .parse(await page.evaluate(() => window.cancelled));
+  expect(result.ok).toBe(false);
+  expect(result.error?.step).toBe(1);
+  expect(result.steps).toHaveLength(1);
+  await expect(equipment).toHaveCount(before + 1);
 });

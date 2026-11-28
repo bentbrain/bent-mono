@@ -19,8 +19,8 @@ type Bridge = {
   ask: ReturnType<typeof createConfirm<Request>>;
   lifetime: AbortSignal;
   end: () => void;
-  /** Which registration in this page the bridge's tools are, once registered. */
-  round?: number;
+  /** The suffix of the bridge's tool names, once registered. */
+  id?: string;
 };
 type ModelContext = {
   registerTool?: (
@@ -106,6 +106,9 @@ function either(first: AbortSignal, second: AbortSignal) {
  */
 function createBridge(): Bridge {
   const ask = createConfirm<Request>();
+  // Closing the dialog updates React, so it waits until any commit that
+  // ended the account has finished.
+  const closeLater = () => queueMicrotask(() => ask.controller.close());
   const lifetime = new AbortController();
   const live = () => !lifetime.signal.aborted;
   const agent = createAgent({
@@ -114,9 +117,7 @@ function createBridge(): Bridge {
       if (!step.confirm) return true;
       // A native modal dialog makes the question underneath it unanswerable.
       if (document.querySelector("dialog:modal")) return false;
-      signal.addEventListener("abort", () => ask.controller.close(), {
-        once: true,
-      });
+      signal.addEventListener("abort", closeLater, { once: true });
       return (await ask({ action: step.confirm })) && live();
     },
   });
@@ -156,19 +157,27 @@ function createBridge(): Bridge {
       const { signal, release } = cancel
         ? either(cancel, lifetime.signal)
         : { signal: lifetime.signal, release: () => undefined };
+      let started = false;
+      let stopWaiting: () => void = () => undefined;
       const run = inTurn(async () => {
+        started = true;
+        stopWaiting();
         if (!live()) return refused();
         const result = await agent.act(request.data, { signal });
         return live() ? result : refused();
       }).finally(release);
       if (!cancel) return run;
       // A call still queued behind another reports its cancellation at once.
-      const cancelled = new Promise((resolve) => {
-        const settle = () => resolve(refused("The call was cancelled."));
-        if (cancel.aborted) settle();
-        else cancel.addEventListener("abort", settle, { once: true });
+      // Once it runs, the bridge reports which steps finished.
+      const queued = new Promise((resolve) => {
+        const settle = () => {
+          if (!started) resolve(refused("The call was cancelled."));
+        };
+        if (cancel.aborted) return settle();
+        cancel.addEventListener("abort", settle, { once: true });
+        stopWaiting = () => cancel.removeEventListener("abort", settle);
       });
-      return Promise.race([run, cancelled]);
+      return Promise.race([run, queued]);
     },
   };
   return {
@@ -177,27 +186,25 @@ function createBridge(): Bridge {
     lifetime: lifetime.signal,
     end: () => {
       lifetime.abort();
-      ask.controller.close();
+      closeLater();
     },
   };
 }
 
-let registrations = 0;
-
 /**
  * Registers the tools with the browser's WebMCP until `signal` aborts. A
- * browser can find a tool by name, so a later registration in the same page,
- * like the next account's, gets names of its own and an earlier handle can't
- * reach it.
+ * browser can keep a tool by name across registrations and page loads in a
+ * tab, so every registration gets names of its own, and an earlier handle,
+ * like one from another account, can't reach it.
  */
 function registerBrowserTools(bridge: Bridge, signal: AbortSignal) {
   const context = document.modelContext;
   if (typeof context?.registerTool !== "function" || signal.aborted) return;
-  const round = (bridge.round ??= registrations++);
+  const id = (bridge.id ??= crypto.randomUUID().slice(0, 8));
   for (const tool of agentTools) {
     const execute = bridge.tools[tool.name];
     if (!execute) continue;
-    const name = round ? `${tool.name}_${round}` : tool.name;
+    const name = `${tool.name}_${id}`;
     try {
       void Promise.resolve(
         context.registerTool(
