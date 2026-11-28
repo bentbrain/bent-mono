@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assistantEndpoint, localEndpoint } from "../src/server/config";
+import { assistantEndpoint, publicEndpoint } from "../src/server/config";
 import { assistantGuide } from "../src/server/guide";
 import { setUpTraining } from "../src/server/mcp";
 
@@ -115,14 +115,24 @@ test("permissions follow what sign-in can grant, and local endpoints skip hosted
     resource: "http://127.0.0.1:3025/api/mcp",
     planning: true,
   });
-  expect(local).toContain("local development server");
-  expect(local).toContain("can't connect directly to this local address");
+  expect(local).toContain("isn't on a public domain name");
+  expect(local).toContain("may not reach it directly");
   expect(local).not.toContain("help.openai.com");
 });
 
-test("only loopback endpoints count as local", () => {
-  expect(localEndpoint("http://127.0.0.1:3025/api/mcp")).toBe(true);
-  expect(localEndpoint("http://localhost:3025/api/mcp")).toBe(true);
-  expect(localEndpoint("http://[::1]:3025/api/mcp")).toBe(true);
-  expect(localEndpoint("https://fitness.bent.build/api/mcp")).toBe(false);
+test("only HTTPS endpoints on public domain names count as public", () => {
+  expect(publicEndpoint("https://fitness.bent.build/api/mcp")).toBe(true);
+  for (const url of [
+    "http://127.0.0.1:3025/api/mcp",
+    "http://localhost:3025/api/mcp",
+    "http://[::1]:3025/api/mcp",
+    "https://127.0.0.2/api/mcp",
+    "https://192.168.1.10/api/mcp",
+    "https://[fd00::1]/api/mcp",
+    "https://localhost/api/mcp",
+    "https://fitness.local/api/mcp",
+    "https://app.localhost/api/mcp",
+    "http://fitness.example.com/api/mcp",
+  ])
+    expect(publicEndpoint(url)).toBe(false);
 });

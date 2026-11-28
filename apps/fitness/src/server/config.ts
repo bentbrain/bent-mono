@@ -106,9 +106,21 @@ export function assistantEndpoint() {
     ? resource
     : null;
 }
-/** Whether an endpoint is on this computer, where hosted chat apps can't reach it. */
-export function localEndpoint(resource: string) {
-  return ["localhost", "127.0.0.1", "[::1]"].includes(
-    new URL(resource).hostname,
+/**
+ * Whether hosted chat apps can be expected to reach an endpoint: HTTPS on
+ * a public domain name. IP addresses and local names such as localhost or
+ * *.local don't count.
+ */
+export function publicEndpoint(resource: string) {
+  const url = new URL(resource);
+  const host = url.hostname.toLowerCase();
+  return (
+    url.protocol === "https:" &&
+    host.includes(".") &&
+    !host.startsWith("[") &&
+    !/^[\d.]+$/.test(host) &&
+    ![".localhost", ".local", ".internal", ".lan", ".home.arpa"].some(
+      (suffix) => host.endsWith(suffix),
+    )
   );
 }

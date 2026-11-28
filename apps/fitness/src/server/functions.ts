@@ -5,7 +5,7 @@ import { loadRecords, saveRecord } from "./store";
 import {
   assistantEndpoint,
   configurationReady,
-  localEndpoint,
+  publicEndpoint,
   planScopeEnabled,
 } from "./config";
 /**
@@ -19,7 +19,7 @@ export const readiness = createServerFn({ method: "GET" }).handler(() => {
     ready: configurationReady(),
     // The invitation names hosted chat apps, which reach public endpoints.
     assistantPlans:
-      planScopeEnabled() && endpoint !== null && !localEndpoint(endpoint),
+      planScopeEnabled() && endpoint !== null && publicEndpoint(endpoint),
   };
 });
 export const load = createServerFn({ method: "GET" }).handler(async () => {
