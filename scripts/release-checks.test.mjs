@@ -163,14 +163,14 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   assert.ok(build.includes("app/Build/Products/Release-iphonesimulator/bentFitnessDev.app \\\n            seeder/Build/Products\n"));
   assert.ok(build.includes("          name: fitness-ios-sim-build\n          path: ${{ runner.temp }}/fitness-ios-sim-build.tar\n          if-no-files-found: error\n"));
   const flows = job("simulator-flow");
-  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    needs: simulator-build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
+  assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    needs: simulator-build\n    runs-on: macos-26\n    # Room for two attempts on new Simulators, with cleanup, inside the limit.\n    timeout-minutes: 25\n"));
   for (const [label, flow] of [["denied", "testDeniedHealthAccessSendsNothing"],
     ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory"],
     ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance"]]) {
     assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
   }
-  // The flow has a time budget inside the 20-minute limit, so the limit never cuts an attempt or its cleanup short.
-  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: '900'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
+  // The flow has a time budget inside the 25-minute limit, so the limit never cuts an attempt or its cleanup short.
+  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: '1200'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
   // No flow shard builds the app or runs the module's checks; each runs the flow build's app and seeder.
   assert.ok(!/native\.mjs (prebuild|build|seeder|lint|core-test)\n|roundtrip\.mjs/.test(flows));
   assert.ok(flows.includes("          name: fitness-ios-sim-build\n"));
@@ -229,9 +229,9 @@ test("Fitness iOS Verification fits five macOS runners and keeps every job short
     assert.ok(Number.isInteger(minutes) && minutes > 0, `${name} needs a fixed job timeout`);
     return [name, { macos: /^    runs-on: macos-/m.test(body), runners: Math.max(1, shards), minutes, needs: needs(body) }];
   }));
-  // CodeQL jobs stop at 27 minutes, every other macOS job at 20.
+  // CodeQL jobs stop at 27 minutes, the flows at 25 and the builds at 20.
   for (const name of declared.filter(name => jobs[name].macos))
-    assert.ok(jobs[name].minutes <= (name.startsWith("codeql-") ? 27 : 20), `${name} runs too long`);
+    assert.ok(jobs[name].minutes <= (name.startsWith("codeql-") ? 27 : name === "simulator-flow" ? 25 : 20), `${name} runs too long`);
   // The jobs that start at once fit the five macOS runners.
   const first = declared.filter(name => jobs[name].macos && jobs[name].needs.length === 0);
   assert.deepEqual(first, ["codeql-swift-app", "codeql-swift-modules", "codeql-swift-tools", "production-build", "simulator-build"]);
@@ -245,7 +245,7 @@ test("Fitness iOS Verification fits five macOS runners and keeps every job short
   assert.equal(jobs.verification.minutes, 2);
   // Every job running to its limit: the flow build, then a flow, then the aggregate.
   const worst = name => jobs[name].minutes + Math.max(0, ...jobs[name].needs.map(worst));
-  assert.equal(worst("verification"), 42);
+  assert.equal(worst("verification"), 47);
 });
 
 test("the required browser aggregate only admits successful work or an intentional empty matrix", async () => {

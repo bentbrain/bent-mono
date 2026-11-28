@@ -63,7 +63,6 @@ const budgetEnd = budgetSeconds > 0 ? Date.now() + budgetSeconds * 1000 : null;
 const cleanupMs = 150_000;
 // The least time an attempt needs: a Simulator's boot, the install and a flow.
 const attemptMs = 360_000;
-const output = (command, args) => execFileSync(command, args, { encoding: "utf8" });
 
 async function waitForHarness() {
   for (let i = 0; i < 120; i++) {
@@ -90,25 +89,30 @@ async function post(path) {
   }
 }
 
-/** Creates a Simulator for one attempt. The attempt boots it, within its deadline. */
-function newSimulator(timeout) {
-  const runtime = JSON.parse(output("xcrun", ["simctl", "list", "runtimes", "available", "-j"]))
+/**
+ * Creates a Simulator for one attempt. `left` gives the time left before the
+ * attempt's deadline, read again for each command. The attempt boots it.
+ */
+function newSimulator(left) {
+  const bounded = () => ({ encoding: "utf8", timeout: left(), killSignal: "SIGKILL" });
+  const runtime = JSON.parse(execFileSync("xcrun", ["simctl", "list", "runtimes", "available", "-j"], bounded()))
     .runtimes.filter((r) => r.platform === "iOS")
     .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
   if (!runtime) throw new Error("No iOS Simulator runtime is installed.");
   const type = runtime.supportedDeviceTypes.filter((t) => t.productFamily === "iPhone").at(-1);
-  return execFileSync("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier], {
-    encoding: "utf8",
-    timeout,
-    killSignal: "SIGKILL",
-  }).trim();
+  return execFileSync("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier], bounded()).trim();
 }
 
-/** Removes a Simulator, trying the deletion twice. Returns whether it is gone. */
+/**
+ * Removes a Simulator, trying the deletion twice. Returns whether it is gone,
+ * and names a Simulator that stays at once, in case the run stops before its
+ * summary.
+ */
 function removeSimulator(udid) {
   const bounded = { stdio: "inherit", timeout: 30_000, killSignal: "SIGKILL" };
   spawnSync("xcrun", ["simctl", "shutdown", udid], bounded);
   for (let i = 0; i < 2; i++) if (spawnSync("xcrun", ["simctl", "delete", udid], bounded).status === 0) return true;
+  console.error(`The Simulator ${udid} could not be removed.`);
   return false;
 }
 /** Simulators the run could not remove; the run fails and names them. */
@@ -178,7 +182,7 @@ try {
     const left = () => (deadline === null ? undefined : Math.max(1000, deadline - Date.now()));
     let udid;
     try {
-      udid = newSimulator(left());
+      udid = newSimulator(left);
       run("xcrun", ["simctl", "boot", udid], { timeout: left() });
       run("xcrun", ["simctl", "bootstatus", udid, "-b"], { timeout: left() });
       run("xcrun", ["simctl", "install", udid, appPath], { timeout: left() });
