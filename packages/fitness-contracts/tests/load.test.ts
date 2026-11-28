@@ -190,4 +190,13 @@ test("band charts rank by reps, and naming the implicit load type keeps the char
   expect(series.map((s) => [s.key, s.points.length])).toEqual([
     ["custom-press:reps:single", 2],
   ]);
+  // Timed holds keep one chart whatever their load type.
+  const hold = { ...custom(undefined, "seconds"), id: "custom-hold" };
+  const holds = strengthSeries([
+    session(hold, [done(20)], 1),
+    session({ ...hold, load: "bodyweight" }, [done(30)], 2),
+  ]);
+  expect(holds.map((s) => [s.key, s.points.length])).toEqual([
+    ["custom-hold:seconds:single", 2],
+  ]);
 });

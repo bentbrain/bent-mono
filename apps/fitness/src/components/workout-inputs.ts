@@ -519,7 +519,8 @@ export function useWorkoutInputs({
   return {
     pending: Object.keys(buffer).length > 0,
     errors,
-    held,
+    // A held field the editor no longer shows has nothing to review.
+    held: held.filter((key) => !hiddenField(workout, key)),
     /** Weights kept without units, waiting for the person to confirm them. */
     unconfirmed: Object.entries(buffer)
       .filter(

@@ -120,11 +120,12 @@ export function strengthSeries(records: RecordEntry[]): StrengthSeries[] {
       const load = loadTypeOf(p);
       const best = bestSet(exercise, load === "band");
       if (!best) continue;
-      // A load type other than the one the exercise would have without one
-      // charts apart. Others keep the key they always had.
+      // A weighed exercise recorded with a load type other than the one it
+      // would have without one charts apart. Timed holds record seconds
+      // whatever the load type, so they keep one chart.
       const implicit = loadTypeOf({ id: p.id, mode: p.mode });
       const key = `${p.id}:${p.mode}:${p.side ? "sides" : "single"}${
-        load === implicit ? "" : `:${load}`
+        load === implicit || p.mode === "seconds" ? "" : `:${load}`
       }`;
       const entry = series.get(key) ?? {
         key,
