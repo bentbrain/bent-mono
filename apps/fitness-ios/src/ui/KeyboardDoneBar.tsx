@@ -24,7 +24,13 @@ export function KeyboardDoneBar() {
       style={{ bottom: height }}
       testID="keyboard-done-bar"
     >
-      <Button label="Done" tone="plain" size="compact" accessibilityLabel="Close keyboard" onPress={() => Keyboard.dismiss()} />
+      <Button
+        label="Done"
+        tone="plain"
+        size="compact"
+        accessibilityLabel="Close keyboard"
+        onPress={() => Keyboard.dismiss()}
+      />
     </View>
   );
 }

@@ -53,7 +53,9 @@ export function HealthSync() {
     case "signIn":
       return status ? <Connect status={status} onChange={refresh} /> : null;
     case "reconnect":
-      return status ? <Connect status={status} onChange={refresh} title={copy.reconnect.title} body={copy.reconnect.body} /> : null;
+      return status ? (
+        <Connect status={status} onChange={refresh} title={copy.reconnect.title} body={copy.reconnect.body} />
+      ) : null;
     case "consent":
       return status ? <Consent status={status} onChange={refresh} /> : null;
     case "health":

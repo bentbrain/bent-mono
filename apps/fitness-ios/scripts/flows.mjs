@@ -100,7 +100,11 @@ function newSimulator(left) {
     .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
   if (!runtime) throw new Error("No iOS Simulator runtime is installed.");
   const type = runtime.supportedDeviceTypes.filter((t) => t.productFamily === "iPhone").at(-1);
-  return execFileSync("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier], bounded()).trim();
+  return execFileSync(
+    "xcrun",
+    ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier],
+    bounded(),
+  ).trim();
 }
 
 /**

@@ -20,7 +20,8 @@ export function ExercisesScreen() {
   return (
     <Screen testID="exercises-screen">
       <AppText tone="secondary" className="px-1">
-        Read the setup, practise with a light weight, then watch the tutorial. Each guide shows the movement from two angles.
+        Read the setup, practise with a light weight, then watch the tutorial. Each guide shows the movement from two
+        angles.
       </AppText>
       {planned.length ? (
         <ListSection title="In your routines" testID="exercises-planned">
@@ -62,7 +63,10 @@ function ExerciseRow({ exercise }: { exercise: Exercise }) {
       accessibilityHint="Opens the exercise guide"
       onPress={() => {
         haptic("selection");
-        navigation.navigate("Tabs", { screen: "ExercisesTab", params: { screen: "Exercise", params: { id: exercise.id } } });
+        navigation.navigate("Tabs", {
+          screen: "ExercisesTab",
+          params: { screen: "Exercise", params: { id: exercise.id } },
+        });
       }}
       className="active:bg-card-alt"
     >

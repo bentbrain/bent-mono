@@ -98,7 +98,9 @@ export function CorrectionSets({ workout, inputs }: { workout: Workout; inputs: 
         </View>
         {exercise.sets.map((set, si) => {
           const name = `${p.name} set ${si + 1}`;
-          const problems = setKeys(ei, si).flatMap((key) => (inputs.errors[key] ? [{ key, text: inputs.errors[key] }] : []));
+          const problems = setKeys(ei, si).flatMap((key) =>
+            inputs.errors[key] ? [{ key, text: inputs.errors[key] }] : [],
+          );
           return (
             <View
               key={si}
@@ -107,7 +109,11 @@ export function CorrectionSets({ workout, inputs }: { workout: Workout; inputs: 
               testID={`correction-set-${ei}-${si}`}
             >
               <View className="flex-row items-end gap-2">
-                <View className="size-8 items-center justify-center rounded-full bg-card" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <View
+                  className="size-8 items-center justify-center rounded-full bg-card"
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                >
                   <AppText textRole="footnote" weight="bold">
                     {si + 1}
                   </AppText>

@@ -159,7 +159,15 @@ export function DateField({
   const [year, month, day] = value.split("-").map(Number);
   const selection = new Date(year ?? 2000, (month ?? 1) - 1, day ?? 1, 12);
   const range = maximum
-    ? { end: new Date(Number(maximum.slice(0, 4)), Number(maximum.slice(5, 7)) - 1, Number(maximum.slice(8, 10)), 23, 59) }
+    ? {
+        end: new Date(
+          Number(maximum.slice(0, 4)),
+          Number(maximum.slice(5, 7)) - 1,
+          Number(maximum.slice(8, 10)),
+          23,
+          59,
+        ),
+      }
     : undefined;
   return (
     <View className="flex-row items-center justify-between gap-3">

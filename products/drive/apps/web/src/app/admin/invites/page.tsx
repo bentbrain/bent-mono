@@ -41,8 +41,12 @@ export default async function InvitesPage() {
       <div className="mx-auto max-w-5xl space-y-8">
         <header className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-primary">Bent Drive Copilot</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Invite access</h1>
+            <p className="text-sm font-medium text-primary">
+              Bent Drive Copilot
+            </p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+              Invite access
+            </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               Only GitHub users on this list can connect a Tesla account.
             </p>
@@ -54,7 +58,8 @@ export default async function InvitesPage() {
           <CardHeader>
             <CardTitle>Invite a tester</CardTitle>
             <CardDescription>
-              Re-inviting a GitHub username reactivates it and replaces its expiry date.
+              Re-inviting a GitHub username reactivates it and replaces its
+              expiry date.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -114,16 +119,27 @@ export default async function InvitesPage() {
               <TableBody>
                 {invites.length === 0 ? (
                   <TableRow>
-                    <TableCell className="py-10 text-center text-muted-foreground" colSpan={4}>
+                    <TableCell
+                      className="py-10 text-center text-muted-foreground"
+                      colSpan={4}
+                    >
                       No testers have been invited yet.
                     </TableCell>
                   </TableRow>
                 ) : (
                   invites.map((invite) => (
                     <TableRow key={invite.id}>
-                      <TableCell className="font-medium">@{invite.githubUsername}</TableCell>
+                      <TableCell className="font-medium">
+                        @{invite.githubUsername}
+                      </TableCell>
                       <TableCell>
-                        <Badge variant={invite.status === "revoked" ? "outline" : "secondary"}>
+                        <Badge
+                          variant={
+                            invite.status === "revoked"
+                              ? "outline"
+                              : "secondary"
+                          }
+                        >
                           {invite.status}
                         </Badge>
                       </TableCell>

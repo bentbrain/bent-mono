@@ -11,7 +11,6 @@ export async function requireUserId(ctx: AuthContext): Promise<string> {
   return identity.subject;
 }
 
-
 export async function requireAdmin(ctx: AuthContext): Promise<string> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Unauthenticated");

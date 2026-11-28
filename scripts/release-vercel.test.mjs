@@ -1,185 +1,436 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, readFile, rm, writeFile, chmod, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+  chmod,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configurationHash, protectedJson, releaseVercel, validateRuntime, vercelApi } from "./release-vercel.mjs";
+import {
+  configurationHash,
+  protectedJson,
+  releaseVercel,
+  validateRuntime,
+  vercelApi,
+} from "./release-vercel.mjs";
 
 const sha = "a".repeat(40);
-const app = { name: "stay", directory: "apps/stay", project: "synthetic-guide", platform: "vercel" };
-const config = { projectId: "prj_fixture", teamId: "team_fixture", expectedProductionId: "dpl_original", requiredCheckId: "chk_quality" };
+const app = {
+  name: "stay",
+  directory: "apps/stay",
+  project: "synthetic-guide",
+  platform: "vercel",
+};
+const config = {
+  projectId: "prj_fixture",
+  teamId: "team_fixture",
+  expectedProductionId: "dpl_original",
+  requiredCheckId: "chk_quality",
+};
 function fixture(change = () => {}) {
-  const project = { id: config.projectId, accountId: config.teamId, name: app.project, rootDirectory: app.directory,
-    nodeVersion: "24.x", sourceFilesOutsideRootDirectory: true, autoAssignCustomDomains: false,
-    link: { type: "github", org: "bentbrain", repo: "bent-mono", productionBranch: "main", repoId: 123 },
-    targets: { production: { id: config.expectedProductionId } } };
-  const deployment = { id: "dpl_candidate", project: { id: config.projectId }, team: { id: config.teamId }, name: app.project,
-    target: "production", readyState: "READY", nodeVersion: "24.x", createdAt: 10,
+  const project = {
+    id: config.projectId,
+    accountId: config.teamId,
+    name: app.project,
+    rootDirectory: app.directory,
+    nodeVersion: "24.x",
+    sourceFilesOutsideRootDirectory: true,
+    autoAssignCustomDomains: false,
+    link: {
+      type: "github",
+      org: "bentbrain",
+      repo: "bent-mono",
+      productionBranch: "main",
+      repoId: 123,
+    },
+    targets: { production: { id: config.expectedProductionId } },
+  };
+  const deployment = {
+    id: "dpl_candidate",
+    project: { id: config.projectId },
+    team: { id: config.teamId },
+    name: app.project,
+    target: "production",
+    readyState: "READY",
+    nodeVersion: "24.x",
+    createdAt: 10,
     gitSource: { type: "github", sha, ref: "main", repoId: 123 },
-    meta: { githubCommitOrg: "bentbrain", githubCommitRepo: "bent-mono", githubCommitSha: sha } };
-  const definition = { id: config.requiredCheckId, name: "Release qualification", source: { kind: "git-provider", provider: "github", externalCheckName: "Release qualification" },
-    blocks: "deployment-alias", targets: ["production"], projectId: config.projectId, ownerId: config.teamId };
-  const state = { project, deployment, definitions: [definition], runs: [], inventory: [{ uid: deployment.id, created: 10, state: "READY" }], posts: [], qualifications: 0 };
+    meta: {
+      githubCommitOrg: "bentbrain",
+      githubCommitRepo: "bent-mono",
+      githubCommitSha: sha,
+    },
+  };
+  const definition = {
+    id: config.requiredCheckId,
+    name: "Release qualification",
+    source: {
+      kind: "git-provider",
+      provider: "github",
+      externalCheckName: "Release qualification",
+    },
+    blocks: "deployment-alias",
+    targets: ["production"],
+    projectId: config.projectId,
+    ownerId: config.teamId,
+  };
+  const state = {
+    project,
+    deployment,
+    definitions: [definition],
+    runs: [],
+    inventory: [{ uid: deployment.id, created: 10, state: "READY" }],
+    posts: [],
+    qualifications: 0,
+  };
   const quality = { sha, qualityRunId: 12, qualityAttempt: 1, pullRequest: 3 };
-  const receipt = { at: new Date().toISOString(), app: "stay", deploymentId: deployment.id, sourceRevision: sha,
-    runtimeQualified: true, configurationSha256: configurationHash(project, [definition]),
-    checks: { hostPrivateGuide: true, hostPhotos: true, hostDraftEditorLoads: true, guestGuidePhotos: true, guestEditorDenied: true } };
+  const receipt = {
+    at: new Date().toISOString(),
+    app: "stay",
+    deploymentId: deployment.id,
+    sourceRevision: sha,
+    runtimeQualified: true,
+    configurationSha256: configurationHash(project, [definition]),
+    checks: {
+      hostPrivateGuide: true,
+      hostPhotos: true,
+      hostDraftEditorLoads: true,
+      guestGuidePhotos: true,
+      guestEditorDenied: true,
+    },
+  };
   change(state, receipt);
   const vercel = async (path, method = "GET", body) => {
-    if (method === "POST") { state.posts.push({ path, body }); if (state.uncertain) throw new Error("timeout"); return { accepted: true }; }
+    if (method === "POST") {
+      state.posts.push({ path, body });
+      if (state.uncertain) throw new Error("timeout");
+      return { accepted: true };
+    }
     if (path.startsWith("/v9/")) return structuredClone(state.project);
     if (path.startsWith("/v13/")) return structuredClone(state.deployment);
-    if (path.includes("check-runs")) return { runs: structuredClone(state.runs) };
-    if (path.includes("/checks")) return { checks: structuredClone(state.definitions) };
+    if (path.includes("check-runs"))
+      return { runs: structuredClone(state.runs) };
+    if (path.includes("/checks"))
+      return { checks: structuredClone(state.definitions) };
     if (path.includes("/v6/")) {
       state.duringInventory?.(state);
       if (path.includes("&until=")) {
         state.duringOlderInventory?.(state);
-        return { deployments: [{ uid: "dpl_older", created: 900, state: "READY" }], pagination: { next: null } };
+        return {
+          deployments: [{ uid: "dpl_older", created: 900, state: "READY" }],
+          pagination: { next: null },
+        };
       }
-      return { deployments: structuredClone(state.inventory),
-        pagination: { next: state.paginated ? state.inventoryCursor ?? state.inventory.at(-1).created : null } };
+      return {
+        deployments: structuredClone(state.inventory),
+        pagination: {
+          next: state.paginated
+            ? (state.inventoryCursor ?? state.inventory.at(-1).created)
+            : null,
+        },
+      };
     }
     throw new Error(`Unexpected API route ${path}`);
   };
-  return { state, receipt, vercel, qualify: async () => {
-    state.qualifications++;
-    if (state.rejectQuality) throw new Error("Quality not passed");
-    if (state.qualifications === 2) state.duringFinalQualification?.(state);
-    if (state.mutateOnFinalQuality && state.qualifications === 2) state.runs.push(state.mutateOnFinalQuality);
-    return { ...quality, qualityAttempt: state.changeAttempt && state.qualifications === 2 ? 2 : 1 };
-  }, checkout: async () => { if (state.dirty) throw new Error("dirty checkout"); } };
+  return {
+    state,
+    receipt,
+    vercel,
+    qualify: async () => {
+      state.qualifications++;
+      if (state.rejectQuality) throw new Error("Quality not passed");
+      if (state.qualifications === 2) state.duringFinalQualification?.(state);
+      if (state.mutateOnFinalQuality && state.qualifications === 2)
+        state.runs.push(state.mutateOnFinalQuality);
+      return {
+        ...quality,
+        qualityAttempt:
+          state.changeAttempt && state.qualifications === 2 ? 2 : 1,
+      };
+    },
+    checkout: async () => {
+      if (state.dirty) throw new Error("dirty checkout");
+    },
+  };
 }
 async function trial(action, change, verify) {
   const directory = await mkdtemp(join(tmpdir(), "bent-release-test-"));
   try {
     const f = fixture(change);
-    const options = { action, app, config, deploymentId: "dpl_candidate", receipt: f.receipt, journalPath: join(directory, "intent.jsonl"), sha };
+    const options = {
+      action,
+      app,
+      config,
+      deploymentId: "dpl_candidate",
+      receipt: f.receipt,
+      journalPath: join(directory, "intent.jsonl"),
+      sha,
+    };
     await verify(f, options);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function firstRelease(f, options) {
-  options.config = { ...config, firstRelease: true, expectedProductionId: null };
+  options.config = {
+    ...config,
+    firstRelease: true,
+    expectedProductionId: null,
+  };
   f.state.project.targets = {};
   if (options.action === "stage") f.state.inventory = [];
 }
 
 test("first release stages once from empty history with the existing release gates", async () => {
-  await trial("stage", () => {}, async (f, options) => {
-    firstRelease(f, options);
-    await releaseVercel(options, f);
-    assert.equal(f.state.qualifications, 2);
-    assert.deepEqual(f.state.posts, [{ path: "/v13/deployments", body: {
-      name: app.project, project: config.projectId, target: "production",
-      gitSource: { type: "github", repoId: 123, ref: "main", sha },
-    } }]);
-    await assert.rejects(releaseVercel(options, f), /EEXIST/);
-    assert.equal(f.state.posts.length, 1);
-  });
+  await trial(
+    "stage",
+    () => {},
+    async (f, options) => {
+      firstRelease(f, options);
+      await releaseVercel(options, f);
+      assert.equal(f.state.qualifications, 2);
+      assert.deepEqual(f.state.posts, [
+        {
+          path: "/v13/deployments",
+          body: {
+            name: app.project,
+            project: config.projectId,
+            target: "production",
+            gitSource: { type: "github", repoId: 123, ref: "main", sha },
+          },
+        },
+      ]);
+      await assert.rejects(releaseVercel(options, f), /EEXIST/);
+      assert.equal(f.state.posts.length, 1);
+    },
+  );
 });
 
 test("first release promotes only its qualified candidate before production is assigned", async () => {
-  for (const identity of ["uid", "id"]) await trial("promote", () => {}, async (f, options) => {
-    firstRelease(f, options);
-    f.state.inventory = [{ [identity]: "dpl_candidate", created: 10, state: "READY" }];
-    await releaseVercel(options, f);
-    assert.deepEqual(f.state.posts, [{ path: "/v10/projects/prj_fixture/promote/dpl_candidate", body: {} }]);
-  });
+  for (const identity of ["uid", "id"])
+    await trial(
+      "promote",
+      () => {},
+      async (f, options) => {
+        firstRelease(f, options);
+        f.state.inventory = [
+          { [identity]: "dpl_candidate", created: 10, state: "READY" },
+        ];
+        await releaseVercel(options, f);
+        assert.deepEqual(f.state.posts, [
+          { path: "/v10/projects/prj_fixture/promote/dpl_candidate", body: {} },
+        ]);
+      },
+    );
 });
 
 test("first-release anchors require an explicit flag and null production ID", async () => {
   for (const anchor of [
-    { expectedProductionId: null }, { firstRelease: false, expectedProductionId: null },
-    { firstRelease: "true", expectedProductionId: null }, { firstRelease: true },
+    { expectedProductionId: null },
+    { firstRelease: false, expectedProductionId: null },
+    { firstRelease: "true", expectedProductionId: null },
+    { firstRelease: true },
     { firstRelease: true, expectedProductionId: "dpl_original" },
-  ]) await trial("stage", () => {}, async (f, options) => {
-    firstRelease(f, options);
-    options.config = { projectId: config.projectId, teamId: config.teamId, requiredCheckId: config.requiredCheckId, ...anchor };
-    await assert.rejects(releaseVercel(options, f), /Unsupported release target/);
-    assert.equal(f.state.posts.length, 0);
-  });
+  ])
+    await trial(
+      "stage",
+      () => {},
+      async (f, options) => {
+        firstRelease(f, options);
+        options.config = {
+          projectId: config.projectId,
+          teamId: config.teamId,
+          requiredCheckId: config.requiredCheckId,
+          ...anchor,
+        };
+        await assert.rejects(
+          releaseVercel(options, f),
+          /Unsupported release target/,
+        );
+        assert.equal(f.state.posts.length, 0);
+      },
+    );
 });
 
 test("first staging rejects existing targets, history and admission races", async () => {
   const cases = [
-    f => { f.state.project.targets.production = { id: "dpl_original" }; },
-    f => { f.state.project.targets.production = {}; },
-    ...["READY", "CANCELED", "ERROR", "BUILDING"].map(state => f => {
+    (f) => {
+      f.state.project.targets.production = { id: "dpl_original" };
+    },
+    (f) => {
+      f.state.project.targets.production = {};
+    },
+    ...["READY", "CANCELED", "ERROR", "BUILDING"].map((state) => (f) => {
       f.state.inventory = [{ uid: "dpl_old", created: 1, state }];
     }),
-    f => { f.state.duringFinalQualification = s => { s.project.targets.production = { id: "dpl_new" }; }; },
-    f => { f.state.duringFinalQualification = s => { s.inventory.push({ uid: "dpl_new", created: 1, state: "READY" }); }; },
+    (f) => {
+      f.state.duringFinalQualification = (s) => {
+        s.project.targets.production = { id: "dpl_new" };
+      };
+    },
+    (f) => {
+      f.state.duringFinalQualification = (s) => {
+        s.inventory.push({ uid: "dpl_new", created: 1, state: "READY" });
+      };
+    },
   ];
-  for (const mutate of cases) await trial("stage", () => {}, async (f, options) => {
-    firstRelease(f, options); mutate(f);
-    await assert.rejects(releaseVercel(options, f));
-    assert.equal(f.state.posts.length, 0);
-    await assert.rejects(readFile(options.journalPath), /ENOENT/);
-  });
+  for (const mutate of cases)
+    await trial(
+      "stage",
+      () => {},
+      async (f, options) => {
+        firstRelease(f, options);
+        mutate(f);
+        await assert.rejects(releaseVercel(options, f));
+        assert.equal(f.state.posts.length, 0);
+        await assert.rejects(readFile(options.journalPath), /ENOENT/);
+      },
+    );
 });
 
 test("first promotion retains source, native-check and runtime admission", async () => {
   const cases = [
-    f => { f.state.rejectQuality = true; },
-    f => { f.state.project.autoAssignCustomDomains = true; },
-    f => { f.state.project.targets.production = { id: "dpl_candidate" }; },
-    f => { f.state.definitions = []; },
-    f => { f.state.deployment.gitSource.sha = "b".repeat(40); },
-    f => { f.receipt.checks.guestEditorDenied = false; },
-    f => { f.state.inventory = []; },
-    f => { f.state.inventory = [{ uid: "dpl_other", created: 1, state: "READY" }]; },
-    f => { f.state.inventory.push({ uid: "dpl_old", created: 1, state: "CANCELED" }); },
-    f => { f.state.inventory[0].id = "dpl_other"; },
-    f => { f.state.runs = [{ checkId: config.requiredCheckId, deploymentId: "dpl_candidate", projectId: config.projectId,
-      ownerId: config.teamId, status: "completed", conclusion: "failed" }]; },
+    (f) => {
+      f.state.rejectQuality = true;
+    },
+    (f) => {
+      f.state.project.autoAssignCustomDomains = true;
+    },
+    (f) => {
+      f.state.project.targets.production = { id: "dpl_candidate" };
+    },
+    (f) => {
+      f.state.definitions = [];
+    },
+    (f) => {
+      f.state.deployment.gitSource.sha = "b".repeat(40);
+    },
+    (f) => {
+      f.receipt.checks.guestEditorDenied = false;
+    },
+    (f) => {
+      f.state.inventory = [];
+    },
+    (f) => {
+      f.state.inventory = [{ uid: "dpl_other", created: 1, state: "READY" }];
+    },
+    (f) => {
+      f.state.inventory.push({ uid: "dpl_old", created: 1, state: "CANCELED" });
+    },
+    (f) => {
+      f.state.inventory[0].id = "dpl_other";
+    },
+    (f) => {
+      f.state.runs = [
+        {
+          checkId: config.requiredCheckId,
+          deploymentId: "dpl_candidate",
+          projectId: config.projectId,
+          ownerId: config.teamId,
+          status: "completed",
+          conclusion: "failed",
+        },
+      ];
+    },
   ];
-  for (const mutate of cases) await trial("promote", () => {}, async (f, options) => {
-    firstRelease(f, options); mutate(f);
-    await assert.rejects(releaseVercel(options, f));
-    assert.equal(f.state.posts.length, 0);
-  });
+  for (const mutate of cases)
+    await trial(
+      "promote",
+      () => {},
+      async (f, options) => {
+        firstRelease(f, options);
+        mutate(f);
+        await assert.rejects(releaseVercel(options, f));
+        assert.equal(f.state.posts.length, 0);
+      },
+    );
 });
 
 test("manual staged promotion uses genuine source qualification without manufacturing a Vercel result", async () => {
-  await trial("promote", () => {}, async (f, options) => {
-    const result = await releaseVercel(options, f);
-    assert.equal(result.status, "accepted-readback-required");
-    assert.equal(result.nativeMirrorPresent, false);
-    assert.equal(f.state.qualifications, 2);
-    assert.deepEqual(f.state.posts, [{ path: "/v10/projects/prj_fixture/promote/dpl_candidate", body: {} }]);
-    assert.match(await readFile(options.journalPath, "utf8"), /intent-recorded-no-retry/);
-    await assert.rejects(releaseVercel(options, f), /EEXIST/);
-    assert.equal(f.state.posts.length, 1);
-  });
+  await trial(
+    "promote",
+    () => {},
+    async (f, options) => {
+      const result = await releaseVercel(options, f);
+      assert.equal(result.status, "accepted-readback-required");
+      assert.equal(result.nativeMirrorPresent, false);
+      assert.equal(f.state.qualifications, 2);
+      assert.deepEqual(f.state.posts, [
+        { path: "/v10/projects/prj_fixture/promote/dpl_candidate", body: {} },
+      ]);
+      assert.match(
+        await readFile(options.journalPath, "utf8"),
+        /intent-recorded-no-retry/,
+      );
+      await assert.rejects(releaseVercel(options, f), /EEXIST/);
+      assert.equal(f.state.posts.length, 1);
+    },
+  );
 });
-test("empty successful HTTP promotion acknowledgements preserve the accepted journal without a retry", async t => {
-  const previous = { token: process.env.VERCEL_TOKEN, team: process.env.VERCEL_ORG_ID };
+test("empty successful HTTP promotion acknowledgements preserve the accepted journal without a retry", async (t) => {
+  const previous = {
+    token: process.env.VERCEL_TOKEN,
+    team: process.env.VERCEL_ORG_ID,
+  };
   process.env.VERCEL_TOKEN = "synthetic-token";
   process.env.VERCEL_ORG_ID = config.teamId;
   try {
-    for (const [status, body, expected = {}] of [[202, null], [200, ""], [202, " \n"], [204, null], [202, '{"accepted":true}', { accepted: true }]]) {
-      await trial("promote", () => {}, async (f, options) => {
-        const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
-          const target = new URL(url);
-          assert.equal(target.origin, "https://api.vercel.com");
-          assert.equal(target.searchParams.get("teamId"), config.teamId);
-          assert.equal(init.headers.Authorization, "Bearer synthetic-token");
-          target.searchParams.delete("teamId");
-          const value = await f.vercel(target.pathname + target.search, init.method,
-            init.body ? JSON.parse(init.body) : undefined);
-          return init.method === "POST" ? new Response(body, { status }) : Response.json(value);
-        });
-        try {
-          const result = await releaseVercel(options, { ...f, vercel: vercelApi });
-          assert.equal(result.status, "accepted-readback-required");
-          const entries = (await readFile(options.journalPath, "utf8")).trim().split("\n").map(line => JSON.parse(line));
-          assert.deepEqual(entries.map(entry => entry.status), ["intent-recorded-no-retry", "accepted-readback-required"]);
-          assert.deepEqual(entries[1].result, expected);
-          await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), /EEXIST/);
-          assert.equal(f.state.posts.length, 1);
-        } finally { mock.mock.restore(); }
-      });
+    for (const [status, body, expected = {}] of [
+      [202, null],
+      [200, ""],
+      [202, " \n"],
+      [204, null],
+      [202, '{"accepted":true}', { accepted: true }],
+    ]) {
+      await trial(
+        "promote",
+        () => {},
+        async (f, options) => {
+          const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
+            const target = new URL(url);
+            assert.equal(target.origin, "https://api.vercel.com");
+            assert.equal(target.searchParams.get("teamId"), config.teamId);
+            assert.equal(init.headers.Authorization, "Bearer synthetic-token");
+            target.searchParams.delete("teamId");
+            const value = await f.vercel(
+              target.pathname + target.search,
+              init.method,
+              init.body ? JSON.parse(init.body) : undefined,
+            );
+            return init.method === "POST"
+              ? new Response(body, { status })
+              : Response.json(value);
+          });
+          try {
+            const result = await releaseVercel(options, {
+              ...f,
+              vercel: vercelApi,
+            });
+            assert.equal(result.status, "accepted-readback-required");
+            const entries = (await readFile(options.journalPath, "utf8"))
+              .trim()
+              .split("\n")
+              .map((line) => JSON.parse(line));
+            assert.deepEqual(
+              entries.map((entry) => entry.status),
+              ["intent-recorded-no-retry", "accepted-readback-required"],
+            );
+            assert.deepEqual(entries[1].result, expected);
+            await assert.rejects(
+              releaseVercel(options, { ...f, vercel: vercelApi }),
+              /EEXIST/,
+            );
+            assert.equal(f.state.posts.length, 1);
+          } finally {
+            mock.mock.restore();
+          }
+        },
+      );
     }
   } finally {
     if (previous.token === undefined) delete process.env.VERCEL_TOKEN;
@@ -188,32 +439,58 @@ test("empty successful HTTP promotion acknowledgements preserve the accepted jou
     else process.env.VERCEL_ORG_ID = previous.team;
   }
 });
-test("HTTP failures and malformed acknowledgements remain failures without automatic mutation retries", async t => {
-  const previous = { token: process.env.VERCEL_TOKEN, team: process.env.VERCEL_ORG_ID };
+test("HTTP failures and malformed acknowledgements remain failures without automatic mutation retries", async (t) => {
+  const previous = {
+    token: process.env.VERCEL_TOKEN,
+    team: process.env.VERCEL_ORG_ID,
+  };
   process.env.VERCEL_TOKEN = "synthetic-token";
   process.env.VERCEL_ORG_ID = config.teamId;
   try {
-    for (const unauthorized of [true, false]) await trial("promote", () => {}, async (f, options) => {
-      const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
-        if (unauthorized) return new Response("denied", { status: 403 });
-        const target = new URL(url);
-        target.searchParams.delete("teamId");
-        const value = await f.vercel(target.pathname + target.search, init.method,
-          init.body ? JSON.parse(init.body) : undefined);
-        return init.method === "POST" ? new Response("{", { status: 202 }) : Response.json(value);
-      });
-      try {
-        await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), unauthorized ? /HTTP 403/ : SyntaxError);
-        if (unauthorized) {
-          assert.equal(f.state.posts.length, 0);
-          await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
-        } else {
-          assert.match(await readFile(options.journalPath, "utf8"), /intent-recorded-no-retry/);
-          await assert.rejects(releaseVercel(options, { ...f, vercel: vercelApi }), /EEXIST/);
-          assert.equal(f.state.posts.length, 1);
-        }
-      } finally { mock.mock.restore(); }
-    });
+    for (const unauthorized of [true, false])
+      await trial(
+        "promote",
+        () => {},
+        async (f, options) => {
+          const mock = t.mock.method(globalThis, "fetch", async (url, init) => {
+            if (unauthorized) return new Response("denied", { status: 403 });
+            const target = new URL(url);
+            target.searchParams.delete("teamId");
+            const value = await f.vercel(
+              target.pathname + target.search,
+              init.method,
+              init.body ? JSON.parse(init.body) : undefined,
+            );
+            return init.method === "POST"
+              ? new Response("{", { status: 202 })
+              : Response.json(value);
+          });
+          try {
+            await assert.rejects(
+              releaseVercel(options, { ...f, vercel: vercelApi }),
+              unauthorized ? /HTTP 403/ : SyntaxError,
+            );
+            if (unauthorized) {
+              assert.equal(f.state.posts.length, 0);
+              await assert.rejects(readFile(options.journalPath), {
+                code: "ENOENT",
+              });
+            } else {
+              assert.match(
+                await readFile(options.journalPath, "utf8"),
+                /intent-recorded-no-retry/,
+              );
+              await assert.rejects(
+                releaseVercel(options, { ...f, vercel: vercelApi }),
+                /EEXIST/,
+              );
+              assert.equal(f.state.posts.length, 1);
+            }
+          } finally {
+            mock.mock.restore();
+          }
+        },
+      );
   } finally {
     if (previous.token === undefined) delete process.env.VERCEL_TOKEN;
     else process.env.VERCEL_TOKEN = previous.token;
@@ -223,147 +500,341 @@ test("HTTP failures and malformed acknowledgements remain failures without autom
 });
 test("refreshes provider admission after final qualification before stage or promote", async () => {
   const drifts = [
-    s => { s.project.targets.production.id = "dpl_otherRelease"; },
-    s => { s.project.autoAssignCustomDomains = true; },
-    s => { s.project.env = [{ key: "CHANGED_SETTING", value: "synthetic" }]; },
-    s => { s.inventory.push({ uid: "dpl_newer", created: 11, state: "BUILDING" }); },
-    s => { s.definitions[0].blocks = "none"; },
-    s => { s.project.lastAliasRequest = { jobStatus: "pending" }; },
+    (s) => {
+      s.project.targets.production.id = "dpl_otherRelease";
+    },
+    (s) => {
+      s.project.autoAssignCustomDomains = true;
+    },
+    (s) => {
+      s.project.env = [{ key: "CHANGED_SETTING", value: "synthetic" }];
+    },
+    (s) => {
+      s.inventory.push({ uid: "dpl_newer", created: 11, state: "BUILDING" });
+    },
+    (s) => {
+      s.definitions[0].blocks = "none";
+    },
+    (s) => {
+      s.project.lastAliasRequest = { jobStatus: "pending" };
+    },
   ];
   for (const action of ["stage", "promote"]) {
-    for (const drift of drifts) await trial(action, s => { s.duringFinalQualification = drift; }, async (f, options) => {
-      await assert.rejects(releaseVercel(options, f));
-      assert.equal(f.state.posts.length, 0);
-      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
-    });
+    for (const drift of drifts)
+      await trial(
+        action,
+        (s) => {
+          s.duringFinalQualification = drift;
+        },
+        async (f, options) => {
+          await assert.rejects(releaseVercel(options, f));
+          assert.equal(f.state.posts.length, 0);
+          await assert.rejects(readFile(options.journalPath), {
+            code: "ENOENT",
+          });
+        },
+      );
   }
 });
 test("promotion rechecks immutable deployment identity and readiness after qualification", async () => {
-  for (const drift of [s => { s.deployment.gitSource.sha = "b".repeat(40); },
-    s => { s.deployment.id = "dpl_other"; }, s => { s.deployment.readyState = "ERROR"; }]) {
-    await trial("promote", s => { s.duringFinalQualification = drift; }, async (f, options) => {
-      await assert.rejects(releaseVercel(options, f));
-      assert.equal(f.state.posts.length, 0);
-      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
-    });
+  for (const drift of [
+    (s) => {
+      s.deployment.gitSource.sha = "b".repeat(40);
+    },
+    (s) => {
+      s.deployment.id = "dpl_other";
+    },
+    (s) => {
+      s.deployment.readyState = "ERROR";
+    },
+  ]) {
+    await trial(
+      "promote",
+      (s) => {
+        s.duringFinalQualification = drift;
+      },
+      async (f, options) => {
+        await assert.rejects(releaseVercel(options, f));
+        assert.equal(f.state.posts.length, 0);
+        await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+      },
+    );
   }
 });
 test("final project admission follows the potentially paginated inventory read", async () => {
-  for (const action of ["stage", "promote"]) await trial(action, s => {
-    s.duringInventory = state => { state.project.autoAssignCustomDomains = true; };
-  }, async (f, options) => {
-    await assert.rejects(releaseVercel(options, f));
-    assert.equal(f.state.posts.length, 0);
-    await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
-  });
+  for (const action of ["stage", "promote"])
+    await trial(
+      action,
+      (s) => {
+        s.duringInventory = (state) => {
+          state.project.autoAssignCustomDomains = true;
+        };
+      },
+      async (f, options) => {
+        await assert.rejects(releaseVercel(options, f));
+        assert.equal(f.state.posts.length, 0);
+        await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
+      },
+    );
 });
 function paginatedInventory(state) {
   state.paginated = true;
   state.deployment.createdAt = 1000;
   state.inventory = Array.from({ length: 100 }, (_, index) => ({
-    uid: index === 0 ? "dpl_candidate" : `dpl_ready${index}`, created: 1000 - index, state: "READY",
+    uid: index === 0 ? "dpl_candidate" : `dpl_ready${index}`,
+    created: 1000 - index,
+    state: "READY",
   }));
 }
 test("newest-page drift during historical pagination stops stage and promote before intent", async () => {
-  for (const action of ["stage", "promote"]) for (const newState of ["BUILDING", "READY", "cursor-only"]) {
-    await trial(action, s => {
-      paginatedInventory(s);
-      s.duringOlderInventory = state => {
-        if (newState === "cursor-only") { state.inventoryCursor = 899; return; }
-        state.inventory.unshift({ uid: "dpl_concurrent", created: 1001, state: newState });
-        state.inventory.pop();
-      };
-    }, async (f, options) => {
-      await assert.rejects(releaseVercel(options, f));
-      assert.equal(f.state.posts.length, 0);
-      await assert.rejects(readFile(options.journalPath), { code: "ENOENT" });
-    });
-  }
+  for (const action of ["stage", "promote"])
+    for (const newState of ["BUILDING", "READY", "cursor-only"]) {
+      await trial(
+        action,
+        (s) => {
+          paginatedInventory(s);
+          s.duringOlderInventory = (state) => {
+            if (newState === "cursor-only") {
+              state.inventoryCursor = 899;
+              return;
+            }
+            state.inventory.unshift({
+              uid: "dpl_concurrent",
+              created: 1001,
+              state: newState,
+            });
+            state.inventory.pop();
+          };
+        },
+        async (f, options) => {
+          await assert.rejects(releaseVercel(options, f));
+          assert.equal(f.state.posts.length, 0);
+          await assert.rejects(readFile(options.journalPath), {
+            code: "ENOENT",
+          });
+        },
+      );
+    }
 });
 test("unchanged multi-page inventory still permits the single guarded mutation", async () => {
-  for (const action of ["stage", "promote"]) await trial(action, paginatedInventory, async (f, options) => {
-    await releaseVercel(options, f);
-    assert.equal(f.state.posts.length, 1);
-  });
+  for (const action of ["stage", "promote"])
+    await trial(action, paginatedInventory, async (f, options) => {
+      await releaseVercel(options, f);
+      assert.equal(f.state.posts.length, 1);
+    });
 });
 test("uncertain promotion retains its one-use intent and cannot be retried", async () => {
-  await trial("promote", s => { s.uncertain = true; }, async (f, options) => {
-    await assert.rejects(releaseVercel(options, f), /timeout/);
-    assert.match(await readFile(options.journalPath, "utf8"), /intent-recorded-no-retry/);
-    await assert.rejects(releaseVercel(options, f), /EEXIST/);
-    assert.equal(f.state.posts.length, 1);
-  });
+  await trial(
+    "promote",
+    (s) => {
+      s.uncertain = true;
+    },
+    async (f, options) => {
+      await assert.rejects(releaseVercel(options, f), /timeout/);
+      assert.match(
+        await readFile(options.journalPath, "utf8"),
+        /intent-recorded-no-retry/,
+      );
+      await assert.rejects(releaseVercel(options, f), /EEXIST/);
+      assert.equal(f.state.posts.length, 1);
+    },
+  );
 });
 test("stage sends Git source only and never uploads source files, environment overrides or aliases", async () => {
-  await trial("stage", () => {}, async (f, options) => {
-    await releaseVercel(options, f);
-    assert.deepEqual(f.state.posts, [{ path: "/v13/deployments", body: { name: app.project, project: config.projectId,
-      target: "production", gitSource: { type: "github", repoId: 123, ref: "main", sha } } }]);
-  });
+  await trial(
+    "stage",
+    () => {},
+    async (f, options) => {
+      await releaseVercel(options, f);
+      assert.deepEqual(f.state.posts, [
+        {
+          path: "/v13/deployments",
+          body: {
+            name: app.project,
+            project: config.projectId,
+            target: "production",
+            gitSource: { type: "github", repoId: 123, ref: "main", sha },
+          },
+        },
+      ]);
+    },
+  );
 });
 test("stage rejects changed workspace access, Node, native gate or automatic assignment", async () => {
-  for (const mutate of [s => { s.project.nodeVersion = "22.x"; }, s => { s.project.sourceFilesOutsideRootDirectory = false; },
-    s => { s.project.autoAssignCustomDomains = true; }, s => { s.definitions[0].blocks = "none"; }]) {
+  for (const mutate of [
+    (s) => {
+      s.project.nodeVersion = "22.x";
+    },
+    (s) => {
+      s.project.sourceFilesOutsideRootDirectory = false;
+    },
+    (s) => {
+      s.project.autoAssignCustomDomains = true;
+    },
+    (s) => {
+      s.definitions[0].blocks = "none";
+    },
+  ]) {
     await trial("stage", mutate, async (f, options) => {
-      await assert.rejects(releaseVercel(options, f)); assert.equal(f.state.posts.length, 0);
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
     });
   }
 });
 test("inspect is read only and reports absent mirrors without treating them as native success", async () => {
-  await trial("inspect", () => {}, async (f, options) => {
-    const result = await releaseVercel(options, f);
-    assert.equal(result.nativeMirrorPresent, false);
-    assert.equal(result.quality.sha, sha);
-    assert.equal(f.state.posts.length, 0);
-  });
+  await trial(
+    "inspect",
+    () => {},
+    async (f, options) => {
+      const result = await releaseVercel(options, f);
+      assert.equal(result.nativeMirrorPresent, false);
+      assert.equal(result.quality.sha, sha);
+      assert.equal(f.state.posts.length, 0);
+    },
+  );
 });
 test("quality, ownership, source, runtime, concurrency and policy failures stop before mutation", async () => {
   const cases = [
-    s => { s.rejectQuality = true; }, s => { s.dirty = true; },
-    s => { s.project.accountId = "team_foreign"; }, s => { s.deployment.team.id = "team_foreign"; },
-    s => { s.project.rootDirectory = "apps/elsewhere"; }, s => { s.project.link.repo = "old-repo"; },
-    s => { s.project.link.productionBranch = "development"; }, s => { s.deployment.gitSource.sha = "b".repeat(40); },
-    s => { s.deployment.meta.githubCommitRepo = "old-repo"; }, s => { s.deployment.target = "preview"; },
-    s => { s.deployment.readyState = "ERROR"; }, s => { s.project.targets.production.id = "dpl_changed"; },
-    s => { s.project.autoAssignCustomDomains = true; }, s => { s.changeAttempt = true; },
-    s => { s.definitions[0].blocks = "none"; }, s => { s.definitions = []; },
-    s => { s.inventory.push({ uid: "dpl_newer", created: 11, state: "READY" }); },
-    s => { s.inventory.push({ uid: "dpl_older", created: 9, state: "BUILDING" }); },
-    (_, r) => { r.checks.guestEditorDenied = false; }, (_, r) => { r.sourceRevision = "b".repeat(40); },
-    (_, r) => { r.at = new Date(Date.now() + 60_000).toISOString(); },
-    (_, r) => { r.at = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(); },
-    (_, r) => { r.configurationSha256 = "b".repeat(64); },
+    (s) => {
+      s.rejectQuality = true;
+    },
+    (s) => {
+      s.dirty = true;
+    },
+    (s) => {
+      s.project.accountId = "team_foreign";
+    },
+    (s) => {
+      s.deployment.team.id = "team_foreign";
+    },
+    (s) => {
+      s.project.rootDirectory = "apps/elsewhere";
+    },
+    (s) => {
+      s.project.link.repo = "old-repo";
+    },
+    (s) => {
+      s.project.link.productionBranch = "development";
+    },
+    (s) => {
+      s.deployment.gitSource.sha = "b".repeat(40);
+    },
+    (s) => {
+      s.deployment.meta.githubCommitRepo = "old-repo";
+    },
+    (s) => {
+      s.deployment.target = "preview";
+    },
+    (s) => {
+      s.deployment.readyState = "ERROR";
+    },
+    (s) => {
+      s.project.targets.production.id = "dpl_changed";
+    },
+    (s) => {
+      s.project.autoAssignCustomDomains = true;
+    },
+    (s) => {
+      s.changeAttempt = true;
+    },
+    (s) => {
+      s.definitions[0].blocks = "none";
+    },
+    (s) => {
+      s.definitions = [];
+    },
+    (s) => {
+      s.inventory.push({ uid: "dpl_newer", created: 11, state: "READY" });
+    },
+    (s) => {
+      s.inventory.push({ uid: "dpl_older", created: 9, state: "BUILDING" });
+    },
+    (_, r) => {
+      r.checks.guestEditorDenied = false;
+    },
+    (_, r) => {
+      r.sourceRevision = "b".repeat(40);
+    },
+    (_, r) => {
+      r.at = new Date(Date.now() + 60_000).toISOString();
+    },
+    (_, r) => {
+      r.at = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    },
+    (_, r) => {
+      r.configurationSha256 = "b".repeat(64);
+    },
   ];
-  for (const mutate of cases) await trial("promote", mutate, async (f, options) => {
-    await assert.rejects(releaseVercel(options, f)); assert.equal(f.state.posts.length, 0);
-  });
+  for (const mutate of cases)
+    await trial("promote", mutate, async (f, options) => {
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
+    });
 });
 test("native queued, failed, duplicate, foreign and unknown blocking results cannot be overridden", async () => {
-  const run = { checkId: config.requiredCheckId, deploymentId: "dpl_candidate", projectId: config.projectId,
-    ownerId: config.teamId, status: "completed", conclusion: "succeeded" };
+  const run = {
+    checkId: config.requiredCheckId,
+    deploymentId: "dpl_candidate",
+    projectId: config.projectId,
+    ownerId: config.teamId,
+    status: "completed",
+    conclusion: "succeeded",
+  };
   for (const mutate of [
-    s => { s.runs = [{ ...run, status: "queued" }]; }, s => { s.runs = [{ ...run, conclusion: "failed" }]; },
-    s => { s.runs = [run, run]; }, s => { s.runs = [{ ...run, deploymentId: "dpl_foreign" }]; },
-    s => { s.runs = [{ ...run, checkId: "chk_unknown" }]; },
-    s => { s.definitions.push({ ...s.definitions[0], id: "chk_unknown" }); },
-    s => { s.mutateOnFinalQuality = { ...run, status: "queued" }; },
-  ]) await trial("promote", mutate, async (f, options) => {
-    await assert.rejects(releaseVercel(options, f)); assert.equal(f.state.posts.length, 0);
-  });
+    (s) => {
+      s.runs = [{ ...run, status: "queued" }];
+    },
+    (s) => {
+      s.runs = [{ ...run, conclusion: "failed" }];
+    },
+    (s) => {
+      s.runs = [run, run];
+    },
+    (s) => {
+      s.runs = [{ ...run, deploymentId: "dpl_foreign" }];
+    },
+    (s) => {
+      s.runs = [{ ...run, checkId: "chk_unknown" }];
+    },
+    (s) => {
+      s.definitions.push({ ...s.definitions[0], id: "chk_unknown" });
+    },
+    (s) => {
+      s.mutateOnFinalQuality = { ...run, status: "queued" };
+    },
+  ])
+    await trial("promote", mutate, async (f, options) => {
+      await assert.rejects(releaseVercel(options, f));
+      assert.equal(f.state.posts.length, 0);
+    });
 });
 test("configuration changes invalidate runtime qualification; object key order does not", () => {
   const f = fixture();
-  assert.equal(configurationHash(f.state.project, f.state.definitions), configurationHash({ ...f.state.project }, f.state.definitions));
+  assert.equal(
+    configurationHash(f.state.project, f.state.definitions),
+    configurationHash({ ...f.state.project }, f.state.definitions),
+  );
   f.state.project.env = [{ key: "PRIVATE_SETTING", value: "synthetic" }];
-  assert.throws(() => validateRuntime(f.receipt, { app, deployment: f.state.deployment, sha,
-    fingerprint: configurationHash(f.state.project, f.state.definitions) }));
+  assert.throws(() =>
+    validateRuntime(f.receipt, {
+      app,
+      deployment: f.state.deployment,
+      sha,
+      fingerprint: configurationHash(f.state.project, f.state.definitions),
+    }),
+  );
 });
 test("release inputs reject symlinks and broadly readable files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "bent-release-input-"));
   try {
-    const path = join(directory, "input.json"); await writeFile(path, '{"synthetic":true}', { mode: 0o600 });
+    const path = join(directory, "input.json");
+    await writeFile(path, '{"synthetic":true}', { mode: 0o600 });
     assert.deepEqual(await protectedJson(path), { synthetic: true });
-    await symlink(path, join(directory, "link.json")); await assert.rejects(protectedJson(join(directory, "link.json")));
-    await chmod(path, 0o644); await assert.rejects(protectedJson(path), /private files/);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+    await symlink(path, join(directory, "link.json"));
+    await assert.rejects(protectedJson(join(directory, "link.json")));
+    await chmod(path, 0o644);
+    await assert.rejects(protectedJson(path), /private files/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

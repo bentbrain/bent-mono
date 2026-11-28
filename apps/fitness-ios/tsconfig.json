@@ -8,9 +8,7 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true,
-    "types": [
-      "bun"
-    ]
+    "types": ["bun"]
   },
   "include": [
     "index.ts",

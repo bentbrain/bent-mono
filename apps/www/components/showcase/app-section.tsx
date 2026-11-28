@@ -53,7 +53,10 @@ export function AppSection({ app }: Readonly<{ app: ShowcaseApp }>) {
                 rel="noopener noreferrer"
               >
                 Open
-                <span className="sr-only"> {app.name} (opens in a new tab)</span>
+                <span className="sr-only">
+                  {" "}
+                  {app.name} (opens in a new tab)
+                </span>
                 <span aria-hidden="true">↗</span>
               </a>
             </Button>

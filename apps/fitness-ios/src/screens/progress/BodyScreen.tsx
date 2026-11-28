@@ -12,7 +12,17 @@ import { AppText } from "../../ui/Text";
 import { haptic } from "../../ui/haptics";
 import { DateBar } from "../shared/DateBar";
 import { TrendChart } from "./charts";
-import { bodyChart, daysBetween, parseWeighIn, replacedWeighIn, roundedWeight, shownWeight, weighInLabels, weighInOn, weightLimits } from "./summary";
+import {
+  bodyChart,
+  daysBetween,
+  parseWeighIn,
+  replacedWeighIn,
+  roundedWeight,
+  shownWeight,
+  weighInLabels,
+  weighInOn,
+  weightLimits,
+} from "./summary";
 import type { Weigh } from "./summary";
 
 export function BodyScreen() {
@@ -101,15 +111,21 @@ function Bodyweight() {
           <AppText tone="muted">{units}</AppText>
         </View>
         {chart.points.length > 0 && chart.lowest !== null && chart.highest !== null ? (
-          <BodyChart points={chart.points} trend={chart.trend} lowest={chart.lowest} highest={chart.highest} units={units} />
+          <BodyChart
+            points={chart.points}
+            trend={chart.trend}
+            lowest={chart.lowest}
+            highest={chart.highest}
+            units={units}
+          />
         ) : (
           <AppText tone="muted">Add your first weigh-in to start the chart.</AppText>
         )}
       </Card>
       {chart.points.length > 0 ? (
         <AppText textRole="footnote" tone="muted" className="px-1">
-          Blue line: each weigh-in. Dashed line: average of up to 7 weigh-ins ending on that date. Dotted lines mark your
-          highest and lowest weigh-ins in this view.
+          Blue line: each weigh-in. Dashed line: average of up to 7 weigh-ins ending on that date. Dotted lines mark
+          your highest and lowest weigh-ins in this view.
         </AppText>
       ) : null}
 
@@ -121,8 +137,20 @@ function Bodyweight() {
             icon="scalemass"
             trailing={
               <View className="flex-row gap-1">
-                <Button label="Edit" tone="tinted" size="compact" accessibilityLabel={`Edit weigh-in ${formatDate(onDay.date)}`} onPress={() => edit(onDay)} />
-                <Button label="Remove" tone="plain" size="compact" accessibilityLabel={`Remove weigh-in ${formatDate(onDay.date)}`} onPress={() => remove(onDay)} />
+                <Button
+                  label="Edit"
+                  tone="tinted"
+                  size="compact"
+                  accessibilityLabel={`Edit weigh-in ${formatDate(onDay.date)}`}
+                  onPress={() => edit(onDay)}
+                />
+                <Button
+                  label="Remove"
+                  tone="plain"
+                  size="compact"
+                  accessibilityLabel={`Remove weigh-in ${formatDate(onDay.date)}`}
+                  onPress={() => remove(onDay)}
+                />
               </View>
             }
             testID="body-day-entry"
@@ -247,7 +275,11 @@ function BodyChart({
         )}
         guides={lowest === highest ? [highest] : [highest, lowest]}
       />
-      <View className="flex-row justify-between" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View
+        className="flex-row justify-between"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         <AppText textRole="caption" tone="muted">
           {formatShortDate(first.date)}
         </AppText>

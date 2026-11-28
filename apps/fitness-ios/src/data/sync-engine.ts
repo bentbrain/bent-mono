@@ -170,7 +170,9 @@ export class SyncEngine {
         this.emit({ ready: true });
       } else this.emit();
     } catch {
-      this.emit({ error: "Saved data on this iPhone could not be read. Export the pending changes before signing out." });
+      this.emit({
+        error: "Saved data on this iPhone could not be read. Export the pending changes before signing out.",
+      });
     }
     await this.refresh();
   }
@@ -341,7 +343,9 @@ export class SyncEngine {
       this.storage.addPending(this.owner, item);
       this.readQueue();
     } catch {
-      this.emit({ error: "This iPhone's storage is full or unavailable. This change was not saved. Free space and retry." });
+      this.emit({
+        error: "This iPhone's storage is full or unavailable. This change was not saved. Free space and retry.",
+      });
       return false;
     }
     this.emit({ error: "" });
@@ -369,7 +373,8 @@ export class SyncEngine {
   async useCloud() {
     const id = this.conflictId;
     if (!id) return;
-    for (const item of this.queue.filter((p) => p.request.id === id)) this.storage.removePending(this.owner, item.request.operationId);
+    for (const item of this.queue.filter((p) => p.request.id === id))
+      this.storage.removePending(this.owner, item.request.operationId);
     this.readQueue();
     this.conflictId = null;
     this.emit({ conflict: null, error: "" });

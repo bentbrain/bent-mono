@@ -57,7 +57,9 @@ export function WorkoutScreen({ route }: StaticScreenProps<{ workoutId: string }
           icon="checkmark.seal"
           title="Workout completed"
           body="View your results in History. Check the save status before closing the app."
-          action={<Button label="Open history" testID="workout-open-history" onPress={() => openHistory(workout.date)} />}
+          action={
+            <Button label="Open history" testID="workout-open-history" onPress={() => openHistory(workout.date)} />
+          }
         />
         {Object.keys(leftover).length ? (
           <Notice
@@ -75,7 +77,9 @@ export function WorkoutScreen({ route }: StaticScreenProps<{ workoutId: string }
                       "fitness-typed-values.json",
                       JSON.stringify({ format: "fitness-typed-values-v1", workoutId, typed: leftover }, null, 2),
                       "Export typed values",
-                    ).catch((e: unknown) => setExportError(e instanceof Error ? e.message : "The values could not be exported."))
+                    ).catch((e: unknown) =>
+                      setExportError(e instanceof Error ? e.message : "The values could not be exported."),
+                    )
                   }
                 />
                 <Button

@@ -54,7 +54,11 @@ export function HealthAccess({ status, onStarted }: { status: SyncStatus; onStar
       {history ? (
         <>
           <ListSection title={copy.health.readable}>
-            <ValueRow label="Weigh-ins from" value={formatDay(history.weight) ?? copy.health.none} testID="readable-weight" />
+            <ValueRow
+              label="Weigh-ins from"
+              value={formatDay(history.weight) ?? copy.health.none}
+              testID="readable-weight"
+            />
             <ValueRow label="Runs from" value={formatDay(history.run) ?? copy.health.none} testID="readable-run" />
             {history.weightAllowedFrom ? (
               <ValueRow

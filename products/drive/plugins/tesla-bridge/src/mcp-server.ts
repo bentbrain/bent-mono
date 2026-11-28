@@ -12,44 +12,59 @@ const vinInput = vinSchema.describe("VIN returned by tesla_list_vehicles");
 export function createMcpServer(
   config: TeslaBridgeConfig,
   adapter: TeslaAdapter,
-  actionStore: ActionStore
+  actionStore: ActionStore,
 ): McpServer {
   const server = new McpServer(
     { name: "tesla-bridge", version: "0.2.0" },
     {
       instructions:
         "Use read tools freely. For vehicle changes, prepare the exact action first and execute only after explicit user approval. Never invent VINs or action IDs. Unsupported high-risk actions must remain unsupported.",
-    }
+    },
   );
 
   server.registerTool(
     "tesla_list_vehicles",
     {
       title: "List linked Tesla vehicles",
-      description: "Lists Tesla vehicles available to the authenticated connection.",
+      description:
+        "Lists Tesla vehicles available to the authenticated connection.",
       inputSchema: {},
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     async () => {
       try {
         const vehicles = await adapter.listVehicles();
         return {
-          content: [{ type: "text", text: `Found ${vehicles.length} linked vehicle(s).` }],
+          content: [
+            {
+              type: "text",
+              text: `Found ${vehicles.length} linked vehicle(s).`,
+            },
+          ],
           structuredContent: { vehicles },
         };
       } catch (error) {
         return toolFailure(error);
       }
-    }
+    },
   );
 
   server.registerTool(
     "tesla_get_vehicle_status",
     {
       title: "Get Tesla vehicle status",
-      description: "Returns current battery, charging, lock, cabin climate, and Sentry state for one linked Tesla.",
+      description:
+        "Returns current battery, charging, lock, cabin climate, and Sentry state for one linked Tesla.",
       inputSchema: { vin: vinInput },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ vin }) => {
       try {
@@ -66,7 +81,7 @@ export function createMcpServer(
       } catch (error) {
         return toolFailure(error);
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -78,9 +93,17 @@ export function createMcpServer(
       inputSchema: {
         vin: vinInput,
         action: vehicleActionSchema,
-        reason: z.string().min(1).max(240).describe("Why the user requested this exact action"),
+        reason: z
+          .string()
+          .min(1)
+          .max(240)
+          .describe("Why the user requested this exact action"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ vin, action, reason }) => {
       try {
@@ -106,7 +129,7 @@ export function createMcpServer(
       } catch (error) {
         return toolFailure(error);
       }
-    }
+    },
   );
 
   server.registerTool(
@@ -116,14 +139,23 @@ export function createMcpServer(
       description:
         "Executes one previously prepared action. This changes private vehicle state and must be shown to the user for approval.",
       inputSchema: {
-        actionId: z.string().uuid().describe("Unexpired ID returned by tesla_prepare_action"),
+        actionId: z
+          .string()
+          .uuid()
+          .describe("Unexpired ID returned by tesla_prepare_action"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ actionId }) => {
       try {
         if (!config.actionsEnabled) {
-          throw new Error("Vehicle actions are disabled. Set TESLA_ACTIONS_ENABLED=true to enable them.");
+          throw new Error(
+            "Vehicle actions are disabled. Set TESLA_ACTIONS_ENABLED=true to enable them.",
+          );
         }
         const pending = actionStore.consume(actionId);
         const result = await adapter.executeAction(pending.vin, pending.action);
@@ -139,7 +171,7 @@ export function createMcpServer(
       } catch (error) {
         return toolFailure(error);
       }
-    }
+    },
   );
 
   return server;
@@ -152,7 +184,8 @@ type ToolFailure = {
 };
 
 function toolFailure(error: unknown): ToolFailure {
-  const message = error instanceof Error ? error.message : "Unknown Tesla Bridge error.";
+  const message =
+    error instanceof Error ? error.message : "Unknown Tesla Bridge error.";
   return {
     content: [{ type: "text", text: message }],
     structuredContent: { error: message },

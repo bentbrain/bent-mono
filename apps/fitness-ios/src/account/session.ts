@@ -95,7 +95,8 @@ export class Session {
   async signIn() {
     const generation = ++this.current;
     const tokens = await this.oauth.authorize();
-    if (!tokens.refreshToken) throw new Error("Clerk did not return a refresh token. Allow offline access when you sign in.");
+    if (!tokens.refreshToken)
+      throw new Error("Clerk did not return a refresh token. Allow offline access when you sign in.");
     const refreshToken = tokens.refreshToken;
     await this.exclusive(async () => {
       if (generation !== this.current) {
@@ -132,7 +133,8 @@ export class Session {
     if (this.state.status !== "signedIn" || (generation !== undefined && generation !== this.current))
       throw new SessionExpired();
     const current = this.access;
-    if (!fresh && current && (current.expiresAt === null || current.expiresAt - marginMs > this.now())) return current.token;
+    if (!fresh && current && (current.expiresAt === null || current.expiresAt - marginMs > this.now()))
+      return current.token;
     return this.refresh();
   }
 
@@ -229,7 +231,8 @@ export class Session {
     try {
       await cleanup();
     } catch {
-      message = "You're signed out, but some of your data on this iPhone could not be removed. Sign in and out again to remove it.";
+      message =
+        "You're signed out, but some of your data on this iPhone could not be removed. Sign in and out again to remove it.";
     }
     this.set(message ? { status: "signedOut", message } : { status: "signedOut" });
     if (saved) this.revokeLater(saved);

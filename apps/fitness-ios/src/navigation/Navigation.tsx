@@ -1,4 +1,9 @@
-import { DarkTheme, DefaultTheme, createNavigationContainerRef, createStaticNavigation } from "@react-navigation/native";
+import {
+  DarkTheme,
+  DefaultTheme,
+  createNavigationContainerRef,
+  createStaticNavigation,
+} from "@react-navigation/native";
 import type { StaticParamList } from "@react-navigation/native";
 import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/unstable";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -97,7 +102,9 @@ const navigationRef = createNavigationContainerRef<RootParamList>();
 function useConflictReview() {
   const { sync } = useAccount();
   const shown = useRef<string | null>(null);
-  const conflict = sync.conflict ? (sync.conflict.current?.id ?? "removed") + ":" + (sync.conflict.current?.revision ?? 0) : null;
+  const conflict = sync.conflict
+    ? (sync.conflict.current?.id ?? "removed") + ":" + (sync.conflict.current?.revision ?? 0)
+    : null;
   useEffect(() => {
     if (!conflict) {
       shown.current = null;

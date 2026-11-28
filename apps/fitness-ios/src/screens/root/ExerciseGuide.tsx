@@ -18,7 +18,12 @@ export function ExerciseGuide({ route }: StaticScreenProps<{ id: string; prescri
     navigation.setOptions({
       title: guideFor(id) ? nameFor(id) : (prescription?.name ?? nameFor(id)),
       headerRight: () => (
-        <HeaderIconButton icon="xmark" label="Close guide" onPress={() => navigation.goBack()} testID="exercise-guide-close" />
+        <HeaderIconButton
+          icon="xmark"
+          label="Close guide"
+          onPress={() => navigation.goBack()}
+          testID="exercise-guide-close"
+        />
       ),
     });
   }, [id, navigation, prescription?.name]);
@@ -28,12 +33,14 @@ export function ExerciseGuide({ route }: StaticScreenProps<{ id: string; prescri
       {/* Only catalogue exercises have a page in Exercises. */}
       {guideFor(id) ? (
         <Button
-        label="Open in Exercises"
-        tone="tinted"
-        icon="dumbbell"
-        fullWidth
-        testID="exercise-guide-open"
-        onPress={() => navigation.navigate("Tabs", { screen: "ExercisesTab", params: { screen: "Exercise", params: { id } } })}
+          label="Open in Exercises"
+          tone="tinted"
+          icon="dumbbell"
+          fullWidth
+          testID="exercise-guide-open"
+          onPress={() =>
+            navigation.navigate("Tabs", { screen: "ExercisesTab", params: { screen: "Exercise", params: { id } } })
+          }
         />
       ) : null}
     </Screen>

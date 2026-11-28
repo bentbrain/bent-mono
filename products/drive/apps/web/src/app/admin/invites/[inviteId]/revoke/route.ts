@@ -18,7 +18,10 @@ interface RevokeRouteContext {
   params: Promise<{ inviteId: string }>;
 }
 
-export async function POST(request: Request, context: RevokeRouteContext): Promise<Response> {
+export async function POST(
+  request: Request,
+  context: RevokeRouteContext,
+): Promise<Response> {
   await auth.protect();
   const program = Effect.gen(function* () {
     const identityResult = yield* Effect.either(requireAdminIdentity);
@@ -27,7 +30,8 @@ export async function POST(request: Request, context: RevokeRouteContext): Promi
     }
     const params = yield* Effect.tryPromise({
       try: () => context.params,
-      catch: () => new RouteParametersError({ message: "Could not read the invite ID." }),
+      catch: () =>
+        new RouteParametersError({ message: "Could not read the invite ID." }),
     });
     const inviteId = inviteIdSchema.safeParse(params.inviteId);
     if (!inviteId.success) {
@@ -36,7 +40,7 @@ export async function POST(request: Request, context: RevokeRouteContext): Promi
     const revoked = yield* revokeInvite(
       inviteId.data,
       randomUUID(),
-      identityResult.right.clerkUserId
+      identityResult.right.clerkUserId,
     );
     if (!revoked) {
       return Response.json({ error: "invite_not_found" }, { status: 404 });

@@ -97,7 +97,14 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
           {message}
         </Notice>
       ))}
-      <Button label={copy.status.syncNow} icon="arrow.triangle.2.circlepath" onPress={syncNow} busy={syncing} fullWidth testID="sync-now" />
+      <Button
+        label={copy.status.syncNow}
+        icon="arrow.triangle.2.circlepath"
+        onPress={syncNow}
+        busy={syncing}
+        fullWidth
+        testID="sync-now"
+      />
 
       {(["weight", "run"] as const).map((type) => (
         <TypeCounts key={type} type={type} lines={countLines(status.counts, type)} />
@@ -151,7 +158,13 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
             />
           );
         })}
-        <ListRow label={copy.settings.resync} tone="primary" onPress={() => void resync()} disabled={syncing} testID="resync" />
+        <ListRow
+          label={copy.settings.resync}
+          tone="primary"
+          onPress={() => void resync()}
+          disabled={syncing}
+          testID="resync"
+        />
       </ListSection>
       {status.pendingRevocations > 0 ? (
         <AppText textRole="footnote" tone="muted" className="px-1" testID="pending-revocations">
@@ -160,7 +173,13 @@ export function Status({ status, onChange }: { status: SyncStatus; onChange: () 
         </AppText>
       ) : null}
       <ListSection>
-        <ListRow label={copy.settings.disconnect} tone="danger" onPress={disconnect} disabled={disconnecting} testID="disconnect" />
+        <ListRow
+          label={copy.settings.disconnect}
+          tone="danger"
+          onPress={disconnect}
+          disabled={disconnecting}
+          testID="disconnect"
+        />
       </ListSection>
     </Screen>
   );
@@ -171,7 +190,12 @@ function TypeCounts({ type, lines }: { type: "weight" | "run"; lines: { label: s
     <ListSection title={type === "weight" ? "Weigh-ins" : "Runs"}>
       {lines.length ? (
         lines.map((line) => (
-          <ValueRow key={line.label} label={line.label} value={String(line.value)} testID={`count-${type}-${line.label}`} />
+          <ValueRow
+            key={line.label}
+            label={line.label}
+            value={String(line.value)}
+            testID={`count-${type}-${line.label}`}
+          />
         ))
       ) : (
         <ValueRow label="None yet" value="" />

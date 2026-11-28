@@ -21,7 +21,12 @@ import {
 let next = 0;
 function record(data: Entity, revision = 1): RecordEntry {
   next += 1;
-  return { id: `00000000-0000-4000-8000-${String(next).padStart(12, "0")}`, revision, data, updatedAt: "2026-11-20T08:00:00.000Z" };
+  return {
+    id: `00000000-0000-4000-8000-${String(next).padStart(12, "0")}`,
+    revision,
+    data,
+    updatedAt: "2026-11-20T08:00:00.000Z",
+  };
 }
 const day = "2026-11-20";
 const breakfast = record({ kind: "meal", date: day, name: "Porridge", calories: 420.4, protein: 18.6 });
@@ -30,7 +35,14 @@ const yesterday = record({ kind: "meal", date: "2026-11-19", name: "Soup", calor
 const regular = record({ kind: "regular", name: "Yoghurt and berries", calories: 250, protein: 20 });
 const records = [breakfast, lunch, yesterday, regular];
 const targets = { calories: 2400, protein: 150 };
-const typed = (values: { name: string; calories: string; protein: string; carbs?: string; fat?: string; fibre?: string }) => ({
+const typed = (values: {
+  name: string;
+  calories: string;
+  protein: string;
+  carbs?: string;
+  fat?: string;
+  fibre?: string;
+}) => ({
   carbs: "",
   fat: "",
   fibre: "",
@@ -54,8 +66,24 @@ describe("meal form", () => {
   });
 
   test("records the tracked nutrients typed, and keeps the others", () => {
-    const previous = { kind: "meal" as const, date: day, name: "Toast", calories: 300, protein: 9, carbs: 40, fat: 6, fibre: 3 };
-    expect(parseMeal(typed({ name: "Toast", calories: "300", protein: "9", carbs: "45,5", fat: "" }), day, ["carbs", "fat"], previous)).toEqual({
+    const previous = {
+      kind: "meal" as const,
+      date: day,
+      name: "Toast",
+      calories: 300,
+      protein: 9,
+      carbs: 40,
+      fat: 6,
+      fibre: 3,
+    };
+    expect(
+      parseMeal(
+        typed({ name: "Toast", calories: "300", protein: "9", carbs: "45,5", fat: "" }),
+        day,
+        ["carbs", "fat"],
+        previous,
+      ),
+    ).toEqual({
       meal: { ...previous, carbs: 45.5, fat: undefined, fibre: 3 },
     });
     // Values typed for nutrients the account doesn't track are left out.
@@ -83,7 +111,9 @@ describe("meal form", () => {
 
   test("opens a saved meal as text", () => {
     expect(mealInput(undefined)).toEqual(typed({ name: "", calories: "", protein: "" }));
-    expect(mealInput({ name: "Porridge", calories: 420.4, protein: 18.6 })).toEqual(typed({ name: "Porridge", calories: "420.4", protein: "18.6" }));
+    expect(mealInput({ name: "Porridge", calories: 420.4, protein: 18.6 })).toEqual(
+      typed({ name: "Porridge", calories: "420.4", protein: "18.6" }),
+    );
     expect(mealInput({ name: "Porridge", calories: 420, protein: 18, carbs: 60.5, fibre: 0 })).toEqual(
       typed({ name: "Porridge", calories: "420", protein: "18", carbs: "60.5", fibre: "0" }),
     );
@@ -98,7 +128,12 @@ describe("edit checks", () => {
   test("compare the saved version with the opened one", () => {
     expect(editStatus(opened, { revision: 1, data: breakfast.data })).toBe("current");
     expect(editStatus(opened, { revision: 2, data: breakfast.data })).toBe("changed");
-    expect(editStatus(opened, { revision: 1, data: { ...breakfast.data, kind: "meal", date: day, name: "Oats", calories: 1, protein: 1 } })).toBe("changed");
+    expect(
+      editStatus(opened, {
+        revision: 1,
+        data: { ...breakfast.data, kind: "meal", date: day, name: "Oats", calories: 1, protein: 1 },
+      }),
+    ).toBe("changed");
     expect(editStatus(opened, { revision: 2, data: null })).toBe("removed");
     expect(editStatus(opened, undefined)).toBe("removed");
   });
@@ -115,9 +150,21 @@ describe("saved meals", () => {
   test("convert between meals and saved meals", () => {
     const meal = { kind: "meal" as const, date: day, name: "Toast", calories: 300, protein: 9 };
     expect(regularFor(meal)).toEqual({ kind: "regular", name: "Toast", calories: 300, protein: 9 });
-    expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9 }, "2026-11-21")).toEqual({ ...meal, date: "2026-11-21" });
-    expect(regularFor({ ...meal, fat: 4 })).toEqual({ kind: "regular", name: "Toast", calories: 300, protein: 9, fat: 4 });
-    expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9, fibre: 2 }, day)).toEqual({ ...meal, fibre: 2 });
+    expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9 }, "2026-11-21")).toEqual({
+      ...meal,
+      date: "2026-11-21",
+    });
+    expect(regularFor({ ...meal, fat: 4 })).toEqual({
+      kind: "regular",
+      name: "Toast",
+      calories: 300,
+      protein: 9,
+      fat: 4,
+    });
+    expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9, fibre: 2 }, day)).toEqual({
+      ...meal,
+      fibre: 2,
+    });
   });
 
   test("list saved meals and the day's meals", () => {
@@ -136,7 +183,9 @@ describe("messages", () => {
   });
   test("summarise rounded amounts", () => {
     expect(mealSummary(meal)).toBe("300 kcal · 10g protein");
-    expect(mealSummary({ ...meal, carbs: 30.4, fat: 2 }, ["carbs", "fibre"])).toBe("300 kcal · 10g protein · 30g carbs");
+    expect(mealSummary({ ...meal, carbs: 30.4, fat: 2 }, ["carbs", "fibre"])).toBe(
+      "300 kcal · 10g protein · 30g carbs",
+    );
   });
 });
 
@@ -160,9 +209,36 @@ describe("day totals", () => {
     ];
     const settings = { ...targets, nutrients: { fibre: { target: 30 }, carbs: { target: null }, fat: { target: 70 } } };
     expect(daySummary(meals, day2, settings).nutrients).toEqual([
-      { nutrient: "carbs", label: "Carbs", value: 85, target: null, progress: null, tone: "default", note: "", coverage: "" },
-      { nutrient: "fat", label: "Fat", value: 80, target: 70, progress: 1, tone: "missed", note: "10g over", coverage: "from 1 of 2 meals" },
-      { nutrient: "fibre", label: "Fibre", value: 31, target: 30, progress: 1, tone: "done", note: "Fibre target reached", coverage: "from 1 of 2 meals" },
+      {
+        nutrient: "carbs",
+        label: "Carbs",
+        value: 85,
+        target: null,
+        progress: null,
+        tone: "default",
+        note: "",
+        coverage: "",
+      },
+      {
+        nutrient: "fat",
+        label: "Fat",
+        value: 80,
+        target: 70,
+        progress: 1,
+        tone: "missed",
+        note: "10g over",
+        coverage: "from 1 of 2 meals",
+      },
+      {
+        nutrient: "fibre",
+        label: "Fibre",
+        value: 31,
+        target: 30,
+        progress: 1,
+        tone: "done",
+        note: "Fibre target reached",
+        coverage: "from 1 of 2 meals",
+      },
     ]);
     expect(daySummary(meals, day2, targets).nutrients).toEqual([]);
   });
@@ -196,7 +272,9 @@ describe("last seven days", () => {
     expect(labels).toHaveLength(7);
     expect(labels.at(-1)).toEqual({ title: "Fri 20 Nov", detail: "1030 kcal · 61 g protein\n1370 kcal under target" });
     expect(labels.at(-2)?.detail).toEndWith("\n200 kcal over target");
-    expect(dayLabels([{ day, calories: 2400, protein: 0 }], 2400)[0]?.detail).toBe("2400 kcal · 0 g protein\nOn target");
+    expect(dayLabels([{ day, calories: 2400, protein: 0 }], 2400)[0]?.detail).toBe(
+      "2400 kcal · 0 g protein\nOn target",
+    );
   });
   test("read as text", () => {
     const week = lastSevenDays(records, day, 2400);

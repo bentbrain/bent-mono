@@ -9,9 +9,7 @@ import "./src/env.js";
 const config = {
   cacheComponents: true,
   outputFileTracingIncludes: {
-    "/*": [
-      "../../node_modules/@img/sharp-libvips-linux-x64/lib/**/*",
-    ],
+    "/*": ["../../node_modules/@img/sharp-libvips-linux-x64/lib/**/*"],
   },
   images: {
     minimumCacheTTL: 2678400,

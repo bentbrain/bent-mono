@@ -3,7 +3,15 @@ import { exercises } from "@bent/fitness-contracts/domain";
 import type { Entity, RecordEntry, Workout } from "@bent/fitness-contracts/domain";
 import { dailyWeights } from "@bent/fitness-contracts/progress";
 import type { StrengthSeries, WeekSummary } from "@bent/fitness-contracts/progress";
-import { applyText, changeSet, commitTyped, fieldKey, fieldText, setKeys, without } from "../src/screens/progress/correction-inputs";
+import {
+  applyText,
+  changeSet,
+  commitTyped,
+  fieldKey,
+  fieldText,
+  setKeys,
+  without,
+} from "../src/screens/progress/correction-inputs";
 import {
   correctionStatus,
   correctionText,
@@ -134,7 +142,10 @@ describe("progress summary", () => {
     if (!first) throw new Error("The series has a first point.");
     const byReps: StrengthSeries = { ...byLoad, points: [first, { date: "2026-11-09", loadKg: 10, value: 12 }] };
     expect(strengthSummary(byReps, "kg")?.measure).toBe("Reps at 10 kg per dumbbell");
-    expect(strengthSummary({ ...byReps, load: "barbell" }, "kg")).toMatchObject({ measure: "Reps at 10 kg on the bar", chip: "Reps · Whole bar" });
+    expect(strengthSummary({ ...byReps, load: "barbell" }, "kg")).toMatchObject({
+      measure: "Reps at 10 kg on the bar",
+      chip: "Reps · Whole bar",
+    });
     expect(strengthSummary(byReps, "kg")?.change).toBe("+2 reps");
 
     const hold: StrengthSeries = {
@@ -155,7 +166,9 @@ describe("progress summary", () => {
   });
 
   test("describes the weight trend", () => {
-    expect(trendText({ change: null, comparedCount: 0 }, "kg")).toBe("Record more than 7 weigh-ins to compare averages.");
+    expect(trendText({ change: null, comparedCount: 0 }, "kg")).toBe(
+      "Record more than 7 weigh-ins to compare averages.",
+    );
     expect(trendText({ change: -0.5, comparedCount: 1 }, "kg")).toBe("−0.5 kg compared with the 1 weigh-in before.");
     expect(trendText({ change: 0, comparedCount: 7 }, "kg")).toBe("±0.0 kg compared with the 7 weigh-ins before.");
   });
@@ -205,7 +218,9 @@ describe("progress summary", () => {
     expect(parseWeighIn("2026-11-02", "", "kg")).toEqual({ error: "Enter a valid date and weight." });
     expect(parseWeighIn("2026-11-02", "12", "kg")).toEqual({ error: "Enter a weight from 20 to 500 kg." });
     expect(parseWeighIn("", "80", "kg")).toEqual({ error: "Enter a valid date and weight." });
-    expect(parseWeighIn("2026-11-02", "80,5", "kg")).toEqual({ data: { kind: "weight", date: "2026-11-02", kg: 80.5 } });
+    expect(parseWeighIn("2026-11-02", "80,5", "kg")).toEqual({
+      data: { kind: "weight", date: "2026-11-02", kg: 80.5 },
+    });
     const pounds = parseWeighIn("2026-11-02", "176.4", "lb");
     expect("data" in pounds && Math.round(pounds.data.kg * 10) / 10).toBe(80);
   });
@@ -256,7 +271,12 @@ describe("chart popovers", () => {
     ]);
     expect(strengthLabels({ ...goblet, side: true }, "kg")[0]?.detail).toBe("10 kg × 8 each side\nFirst in this chart");
     expect(
-      strengthChange({ date: "2026-11-02", loadKg: 12, value: 8 }, { date: "2026-11-04", loadKg: 10, value: 12 }, goblet, "kg"),
+      strengthChange(
+        { date: "2026-11-02", loadKg: 12, value: 8 },
+        { date: "2026-11-04", loadKg: 10, value: 12 },
+        goblet,
+        "kg",
+      ),
     ).toBe("−2 kg");
   });
 
@@ -278,7 +298,13 @@ describe("chart popovers", () => {
     ]);
     // The average counts at most 7 weigh-ins.
     const many = Array.from({ length: 9 }, (_, i) => ({ date: `2026-11-1${i}`, kg: 80 }));
-    expect(weighInLabels(many, "kg", many.map(() => 80))[8]?.detail).toBe("80.0 kg\nAverage of 7: 80.0 kg\nNo change since Tue 17 Nov");
+    expect(
+      weighInLabels(
+        many,
+        "kg",
+        many.map(() => 80),
+      )[8]?.detail,
+    ).toBe("80.0 kg\nAverage of 7: 80.0 kg\nNo change since Tue 17 Nov");
   });
 
   test("weight changes carry a sign, and one that rounds away is no change", () => {
@@ -307,7 +333,12 @@ describe("history", () => {
   const second = entry(21, workout("2026-11-02"), "2026-11-02T18:00:00.000Z");
   const easy = entry(22, run("2026-11-03"));
   const removedOne = entry(23, workout("2026-10-30"));
-  const removal = entry(24, { kind: "workoutCorrection", workoutId: id(23), replacement: null, reason: "Removed from history" });
+  const removal = entry(24, {
+    kind: "workoutCorrection",
+    workoutId: id(23),
+    replacement: null,
+    reason: "Removed from history",
+  });
   const fix = entry(25, {
     kind: "workoutCorrection",
     workoutId: id(20),
@@ -354,7 +385,11 @@ describe("history", () => {
     if (!first) throw new Error("Missing original");
     const corrections = correctionsByWorkout(records);
     const opened = openCorrection(first, corrections.get(id(20)), () => id(99));
-    expect(opened.version).toEqual({ id: id(25), revision: fix.revision, data: fix.data.kind === "workoutCorrection" ? fix.data : null });
+    expect(opened.version).toEqual({
+      id: id(25),
+      revision: fix.revision,
+      data: fix.data.kind === "workoutCorrection" ? fix.data : null,
+    });
     expect(opened.workout.date).toBe("2026-11-01");
     expect(opened.workout.finishedAt).toBeNull();
     expect(opened.reason).toBe("Wrong weight");
@@ -447,4 +482,3 @@ describe("history notice", () => {
     expect(calls).toBe(1);
   });
 });
-

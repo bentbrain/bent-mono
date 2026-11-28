@@ -25,7 +25,10 @@ export function formatDumbbells(values: number[], units: Settings["units"]) {
 }
 
 /** Reads "5, 7.5, 10" in the display unit as sorted, unique sizes in kg. */
-export function parseDumbbells(text: string, units: Settings["units"]): { values: number[]; error?: undefined } | { values?: undefined; error: string } {
+export function parseDumbbells(
+  text: string,
+  units: Settings["units"],
+): { values: number[]; error?: undefined } | { values?: undefined; error: string } {
   const parts = text
     .split(",")
     .map((part) => part.trim())
@@ -62,7 +65,8 @@ export function describeIssue(issue: z.core.$ZodIssue | undefined, draft: Settin
   if (field === "routines" && typeof index === "number") {
     const routine = draft.routines[index];
     const name = routine?.name.trim() || `Routine ${index + 1}`;
-    if (part === "name") return { id: `routine-${index}`, text: `${name}: enter a routine name of up to 160 characters.` };
+    if (part === "name")
+      return { id: `routine-${index}`, text: `${name}: enter a routine name of up to 160 characters.` };
     if (part === "exercises" && typeof exerciseIndex === "number") {
       const exercise = routine?.exercises[exerciseIndex];
       const help = typeof exerciseField === "string" ? exerciseHelp[exerciseField] : undefined;
@@ -75,17 +79,25 @@ export function describeIssue(issue: z.core.$ZodIssue | undefined, draft: Settin
   }
   if (field === "routines") return { text: "Keep 1 to 8 routines." };
   if (field === "equipment" && typeof index === "number")
-    return { id: `equipment-${index}`, text: "Equipment: enter a name of up to 160 characters and notes of up to 500." };
+    return {
+      id: `equipment-${index}`,
+      text: "Equipment: enter a name of up to 160 characters and notes of up to 500.",
+    };
   if (field === "nutrients" && isNutrient(index)) {
     const { label, target } = nutrientInfo[index];
-    return { id: `${index}-target`, text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.` };
+    return {
+      id: `${index}-target`,
+      text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.`,
+    };
   }
   const help = typeof field === "string" ? fieldHelp[field] : undefined;
   return help ?? { text: "Check the highlighted settings and try again." };
 }
 
 /** Validates edited settings; on failure, the sentence and the field to fix. */
-export function checkSettings(candidate: Settings): { data: Settings; error?: undefined } | { data?: undefined; error: { text: string; id?: string } } {
+export function checkSettings(
+  candidate: Settings,
+): { data: Settings; error?: undefined } | { data?: undefined; error: { text: string; id?: string } } {
   const result = settingsSchema.safeParse(candidate);
   if (result.success) return { data: result.data };
   return { error: describeIssue(result.error.issues[0], candidate) };
@@ -161,7 +173,11 @@ export function move<T>(list: T[], index: number, direction: -1 | 1): T[] {
 export function exerciseChoices(routine: Routine) {
   return exercises.map((exercise) => {
     const included = routine.exercises.some((item) => item.id === exercise.id);
-    return { id: exercise.id, label: included ? `${exercise.name} · already in this routine` : exercise.name, included };
+    return {
+      id: exercise.id,
+      label: included ? `${exercise.name} · already in this routine` : exercise.name,
+      included,
+    };
   });
 }
 
@@ -223,7 +239,10 @@ export function photoTypeOf(base64: string): PhotoType | null {
 }
 
 /** Checks a chosen photo before upload; the error is safe to show. */
-export function checkPhoto(base64: string | null | undefined, saved: number): { type: PhotoType; error?: undefined } | { type?: undefined; error: string } {
+export function checkPhoto(
+  base64: string | null | undefined,
+  saved: number,
+): { type: PhotoType; error?: undefined } | { type?: undefined; error: string } {
   if (saved >= photoLimits.count) return { error: tooManyPhotos };
   if (!base64) return { error: "Upload failed. Choose the photo again to retry." };
   const type = photoTypeOf(base64);

@@ -7,7 +7,13 @@ import plugin from "tailwindcss/plugin";
 // UploadThing's public element/state variants, without withUt's dynamic
 // require.resolve, which Turbopack expands into declaration-file imports.
 const uploadthingPlugin = plugin((api) => {
-  for (const element of ["button", "allowed-content", "label", "upload-icon", "clear-btn"]) {
+  for (const element of [
+    "button",
+    "allowed-content",
+    "label",
+    "upload-icon",
+    "clear-btn",
+  ]) {
     api.addVariant(`ut-${element}`, `&>*[data-ut-element="${element}"]`);
   }
   for (const state of ["readying", "ready", "uploading"]) {

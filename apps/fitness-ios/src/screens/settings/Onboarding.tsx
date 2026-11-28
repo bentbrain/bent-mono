@@ -41,7 +41,12 @@ export function Onboarding() {
 
       <Card className="gap-4">
         {rows.map((row) => (
-          <View key={row.label} className="flex-row items-start gap-3" accessible accessibilityLabel={`${row.label}: ${row.value}`}>
+          <View
+            key={row.label}
+            className="flex-row items-start gap-3"
+            accessible
+            accessibilityLabel={`${row.label}: ${row.value}`}
+          >
             <View className="size-8 items-center justify-center rounded-[9px] bg-primary-soft">
               <Symbol name={row.icon} size={16} weight="semibold" tintColorClassName="accent-primary" />
             </View>

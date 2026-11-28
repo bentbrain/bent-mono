@@ -13,10 +13,12 @@ import { workoutProgress } from "./logic";
 import { useWeekNavigation } from "./navigation";
 
 /** The badge tone for a day's state. */
-export const stateTone = { done: "done", missed: "missed", planned: "primary", rest: "default" } as const satisfies Record<
-  DayState,
-  "done" | "missed" | "primary" | "default"
->;
+export const stateTone = {
+  done: "done",
+  missed: "missed",
+  planned: "primary",
+  rest: "default",
+} as const satisfies Record<DayState, "done" | "missed" | "primary" | "default">;
 
 /** A "How to" button that opens the exercise guide sheet. */
 export function ExerciseHelp({ id, prescription }: { id: string; prescription?: Exercise }) {
@@ -37,8 +39,15 @@ export function ExerciseHelp({ id, prescription }: { id: string; prescription?: 
 /** A thin bar showing a share of the work done. */
 export function Meter({ fraction, fill = "bg-primary" }: { fraction: number; fill?: "bg-primary" | "bg-done" }) {
   return (
-    <View className="h-1.5 overflow-hidden rounded-full bg-card-alt" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <View className={cn("h-full rounded-full", fill)} style={{ width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }} />
+    <View
+      className="h-1.5 overflow-hidden rounded-full bg-card-alt"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <View
+        className={cn("h-full rounded-full", fill)}
+        style={{ width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }}
+      />
     </View>
   );
 }
@@ -103,7 +112,9 @@ export function Unavailable({ title }: { title: string }) {
         icon="calendar.badge.exclamationmark"
         title={title}
         body="Open your current plan from your week."
-        action={<Button label="Back to week" tone="tinted" onPress={() => navigation.popTo("Week")} testID="back-to-week" />}
+        action={
+          <Button label="Back to week" tone="tinted" onPress={() => navigation.popTo("Week")} testID="back-to-week" />
+        }
       />
     </Screen>
   );

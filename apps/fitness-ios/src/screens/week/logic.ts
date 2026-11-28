@@ -32,7 +32,8 @@ export function isDay(value: string | undefined): value is string {
 export function dayInfo(settings: Settings, activity: Map<string, DayActivity>, day: string, today: string) {
   const plan = scheduled(settings, day);
   const done = activity.get(day);
-  const completed = plan.type === "strength" ? Boolean(done?.strength) : plan.type === "run" ? Boolean(done?.run) : false;
+  const completed =
+    plan.type === "strength" ? Boolean(done?.strength) : plan.type === "run" ? Boolean(done?.run) : false;
   const other = !completed && Boolean(done?.strength || done?.run);
   const name = sessionName(plan);
   const status = completed
@@ -44,7 +45,8 @@ export function dayInfo(settings: Settings, activity: Map<string, DayActivity>, 
         : day < today
           ? "Not recorded"
           : "Planned";
-  const state: DayState = completed || other ? "done" : plan.type === "rest" ? "rest" : day < today ? "missed" : "planned";
+  const state: DayState =
+    completed || other ? "done" : plan.type === "rest" ? "rest" : day < today ? "missed" : "planned";
   return { plan, done, completed, other, name, status, state };
 }
 
@@ -85,7 +87,8 @@ export function boardLabel(type: string, name: string): [string, string] {
 
 /** What was recorded on a day, as the day panel words it. */
 export function recordedText(info: DayInfo, day: string, today: string) {
-  const kind = info.done?.strength && info.done.run ? "Strength and run" : info.done?.strength ? "Strength workout" : "Run";
+  const kind =
+    info.done?.strength && info.done.run ? "Strength and run" : info.done?.strength ? "Strength workout" : "Run";
   return `${kind} recorded ${day === today ? "today" : `on ${formatDate(day)}`}.`;
 }
 
@@ -147,7 +150,8 @@ export function planAction(settings: Settings, routine: Routine, date: string, t
   // A future plan is done today, so it uses today's introduction setting.
   const workoutDate = date > today ? today : date;
   const workoutIntro = scheduled(settings, workoutDate).intro;
-  const label = date > today ? "Do this workout today" : date < today ? `Log workout for ${formatDate(date)}` : "Start workout";
+  const label =
+    date > today ? "Do this workout today" : date < today ? `Log workout for ${formatDate(date)}` : "Start workout";
   const note =
     date > today
       ? `This starts ${routine.name} now and records it for today, ${formatDate(today)}.${

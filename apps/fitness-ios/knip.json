@@ -1,9 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "tests/**/*.test.{ts,mjs}",
-    "scripts/*.mjs"
-  ],
+  "entry": ["tests/**/*.test.{ts,mjs}", "scripts/*.mjs"],
   "project": [
     "src/**/*.{ts,tsx}",
     "tests/**/*.{ts,mjs}",
@@ -12,7 +9,5 @@
     "modules/workout-activity/*.{ts,js}",
     "modules/fitness-charts/*.ts"
   ],
-  "ignoreDependencies": [
-    "expo-updates"
-  ]
+  "ignoreDependencies": ["expo-updates"]
 }

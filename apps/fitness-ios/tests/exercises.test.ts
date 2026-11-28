@@ -20,7 +20,12 @@ const base = (id: string) => {
   return exercise;
 };
 
-function workout(id: string, finishedAt: string | null, prescription: Exercise, sets: Workout["exercises"][number]["sets"]): RecordEntry {
+function workout(
+  id: string,
+  finishedAt: string | null,
+  prescription: Exercise,
+  sets: Workout["exercises"][number]["sets"],
+): RecordEntry {
   return {
     id,
     revision: 1,
@@ -69,7 +74,10 @@ describe("library order", () => {
       {
         id: "00000000-0000-4000-8000-0000000000c1",
         name: "Short",
-        exercises: [{ ...base("curl"), sets: 4 }, { ...base("squat"), id: "custom-move", name: "Custom move" }],
+        exercises: [
+          { ...base("curl"), sets: 4 },
+          { ...base("squat"), id: "custom-move", name: "Custom move" },
+        ],
       },
     ];
     const order = libraryOrder(custom).map((item) => item.id);
@@ -98,7 +106,11 @@ describe("routines", () => {
 
   test("give each routine's prescription and prefer the first for recording", () => {
     const custom: Routine[] = [
-      { id: "00000000-0000-4000-8000-0000000000c1", name: "Heavy", exercises: [{ ...base("row"), sets: 5, min: 5, max: 8 }] },
+      {
+        id: "00000000-0000-4000-8000-0000000000c1",
+        name: "Heavy",
+        exercises: [{ ...base("row"), sets: 5, min: 5, max: 8 }],
+      },
       { id: "00000000-0000-4000-8000-0000000000c2", name: "Light", exercises: [base("row")] },
     ];
     expect(planEntries(custom, "row").map(({ routine, exercise }) => [routine, exercise.sets])).toEqual([
@@ -115,21 +127,40 @@ describe("routines", () => {
 describe("last result", () => {
   test("is null before the exercise is recorded", () => {
     expect(lastResult([], "squat", "kg")).toBeNull();
-    expect(lastResult([workout("00000000-0000-4000-8000-000000000101", null, base("squat"), [set(10, 8)])], "squat", "kg")).toBeNull();
+    expect(
+      lastResult([workout("00000000-0000-4000-8000-000000000101", null, base("squat"), [set(10, 8)])], "squat", "kg"),
+    ).toBeNull();
   });
 
   test("uses the most recent finished workout and the shared set wording", () => {
     const records = [
-      workout("00000000-0000-4000-8000-000000000101", "2026-01-05T10:00:00.000Z", base("squat"), [set(10, 8), set(10, 8), set(10, 7)]),
-      workout("00000000-0000-4000-8000-000000000102", "2026-01-07T10:00:00.000Z", base("squat"), [set(12, 9), set(12, 8), set(0, 0, null, true)]),
+      workout("00000000-0000-4000-8000-000000000101", "2026-01-05T10:00:00.000Z", base("squat"), [
+        set(10, 8),
+        set(10, 8),
+        set(10, 7),
+      ]),
+      workout("00000000-0000-4000-8000-000000000102", "2026-01-07T10:00:00.000Z", base("squat"), [
+        set(12, 9),
+        set(12, 8),
+        set(0, 0, null, true),
+      ]),
     ];
     expect(lastResult(records, "squat", "kg")).toBe("12 kg × 9 reps · 12 kg × 8 reps · Skipped");
   });
 
   test("shows both sides and timed holds", () => {
-    const row = workout("00000000-0000-4000-8000-000000000103", "2026-01-05T10:00:00.000Z", base("row"), [set(8, 10, 11), set(8, 10, 10), set(8, 9, 9)]);
-    expect(lastResult([row], "row", "kg")).toBe("8 kg × 10 left / 11 right · 8 kg × 10 left / 10 right · 8 kg × 9 left / 9 right");
-    const plank = workout("00000000-0000-4000-8000-000000000104", "2026-01-05T10:00:00.000Z", base("plank"), [set(0, 30), set(0, 25)]);
+    const row = workout("00000000-0000-4000-8000-000000000103", "2026-01-05T10:00:00.000Z", base("row"), [
+      set(8, 10, 11),
+      set(8, 10, 10),
+      set(8, 9, 9),
+    ]);
+    expect(lastResult([row], "row", "kg")).toBe(
+      "8 kg × 10 left / 11 right · 8 kg × 10 left / 10 right · 8 kg × 9 left / 9 right",
+    );
+    const plank = workout("00000000-0000-4000-8000-000000000104", "2026-01-05T10:00:00.000Z", base("plank"), [
+      set(0, 30),
+      set(0, 25),
+    ]);
     expect(lastResult([plank], "plank", "kg")).toBe("30 seconds · 25 seconds");
   });
 });

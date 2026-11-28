@@ -43,7 +43,11 @@ export function Screen({
       automaticallyAdjustKeyboardInsets
       refreshControl={
         onRefresh ? (
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={typeof tint === "string" ? tint : undefined} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={typeof tint === "string" ? tint : undefined}
+          />
         ) : undefined
       }
       {...props}
@@ -56,7 +60,11 @@ export function Screen({
 /** A rounded card for content that is not a list. */
 export function Card({ children, className, testID }: { children: ReactNode; className?: string; testID?: string }) {
   return (
-    <View testID={testID} className={cn("gap-3 bg-card p-4", className)} style={{ borderRadius: shape.card, borderCurve: "continuous" }}>
+    <View
+      testID={testID}
+      className={cn("gap-3 bg-card p-4", className)}
+      style={{ borderRadius: shape.card, borderCurve: "continuous" }}
+    >
       {children}
     </View>
   );
@@ -149,8 +157,18 @@ export function Badge({
   tone?: "default" | "primary" | "done" | "missed";
   icon?: SFSymbol;
 }) {
-  const surfaces = { default: "bg-card-alt", primary: "bg-primary-soft", done: "bg-done-soft", missed: "bg-missed-soft" };
-  const tints = { default: "accent-foreground-muted", primary: "accent-primary", done: "accent-done", missed: "accent-missed" };
+  const surfaces = {
+    default: "bg-card-alt",
+    primary: "bg-primary-soft",
+    done: "bg-done-soft",
+    missed: "bg-missed-soft",
+  };
+  const tints = {
+    default: "accent-foreground-muted",
+    primary: "accent-primary",
+    done: "accent-done",
+    missed: "accent-missed",
+  };
   return (
     <View className={cn("flex-row items-center gap-1 self-start rounded-full px-2.5 py-1", surfaces[tone])}>
       {icon ? <Symbol name={icon} size={11} weight="semibold" tintColorClassName={tints[tone]} /> : null}

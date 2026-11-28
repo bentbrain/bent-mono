@@ -72,7 +72,14 @@ export function Connect({
         </Notice>
       ) : null}
       <ManualRevocations status={status} onChange={onChange} />
-      <Button label={copy.signIn.button} icon="heart.fill" onPress={() => void start(false)} busy={busy} fullWidth testID="health-connect" />
+      <Button
+        label={copy.signIn.button}
+        icon="heart.fill"
+        onPress={() => void start(false)}
+        busy={busy}
+        fullWidth
+        testID="health-connect"
+      />
       {pending ? (
         <Button
           label="Continue and revoke later"

@@ -3,9 +3,7 @@
     {
       "roomId": "living-room",
       "areaId": "living_room",
-      "entityIds": [
-        "light.living_room"
-      ]
+      "entityIds": ["light.living_room"]
     }
   ],
   "objects": [

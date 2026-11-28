@@ -70,7 +70,14 @@ export function HealthOutsideAccount() {
             <AppText textRole="headline" weight="bold" accessibilityRole="header">
               Apple Health
             </AppText>
-            <IconButton icon="xmark" label="Close" tone="secondary" size={34} onPress={() => setOpen(false)} testID="close-health-outside" />
+            <IconButton
+              icon="xmark"
+              label="Close"
+              tone="secondary"
+              size={34}
+              onPress={() => setOpen(false)}
+              testID="close-health-outside"
+            />
           </View>
           <HealthSync />
         </SafeAreaView>

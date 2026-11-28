@@ -5,7 +5,9 @@ import { hashToken, randomToken } from "./crypto";
 
 import type { OAuthTokenMaterial, OAuthTokenRecord } from "./db/store";
 
-class OAuthTokenGenerationError extends Data.TaggedError("OAuthTokenGenerationError")<{
+class OAuthTokenGenerationError extends Data.TaggedError(
+  "OAuthTokenGenerationError",
+)<{
   message: string;
 }> {}
 
@@ -37,7 +39,8 @@ export const prepareOAuthTokens = (scopes: string, nowEpoch?: number) =>
           refreshTokenHash: hashToken(refreshToken),
         };
       },
-      catch: (cause) => new OAuthTokenGenerationError({ message: causeMessage(cause) }),
+      catch: (cause) =>
+        new OAuthTokenGenerationError({ message: causeMessage(cause) }),
     }).pipe(Effect.withSpan("oauth.tokens.generate"));
 
     return {
@@ -57,18 +60,21 @@ export const prepareOAuthTokens = (scopes: string, nowEpoch?: number) =>
     } satisfies PreparedOAuthTokens;
   }).pipe(
     Effect.annotateSpans({ "oauth.scopes": scopes }),
-    Effect.withSpan("oauth.tokens.prepare")
+    Effect.withSpan("oauth.tokens.prepare"),
   );
 
 export const logOAuthTokensIssued = (record: OAuthTokenRecord) =>
   Effect.logInfo("oauth.tokens.issued").pipe(
-    Effect.annotateLogs({ clientId: record.clientId, connectionId: record.connectionId }),
-    Effect.withSpan("oauth.tokens.issued")
+    Effect.annotateLogs({
+      clientId: record.clientId,
+      connectionId: record.connectionId,
+    }),
+    Effect.withSpan("oauth.tokens.issued"),
   );
 
-const currentEpochSeconds = Effect.sync(() => Math.floor(Date.now() / 1_000)).pipe(
-  Effect.withSpan("oauth.clock.epoch_seconds")
-);
+const currentEpochSeconds = Effect.sync(() =>
+  Math.floor(Date.now() / 1_000),
+).pipe(Effect.withSpan("oauth.clock.epoch_seconds"));
 
 function causeMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);

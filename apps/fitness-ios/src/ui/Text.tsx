@@ -32,7 +32,13 @@ const tones = {
 } as const;
 
 /** Text in one of the app's roles, coloured by a semantic tone. */
-export function AppText({ className, textRole = "body", weight = "regular", tone = "default", ...props }: AppTextProps) {
+export function AppText({
+  className,
+  textRole = "body",
+  weight = "regular",
+  tone = "default",
+  ...props
+}: AppTextProps) {
   return <RNText className={cn(textClasses[textRole], weights[weight], tones[tone], className)} {...props} />;
 }
 
@@ -48,7 +54,8 @@ const numberPads = new Set(["number-pad", "decimal-pad", "numeric"]);
  * shows the Done bar above the keyboard while it has focus.
  */
 export function AppTextInput({ className, ref, onFocus, onBlur, ...props }: AppTextInputProps) {
-  const pad = numberPads.has(props.keyboardType ?? "") || props.inputMode === "decimal" || props.inputMode === "numeric";
+  const pad =
+    numberPads.has(props.keyboardType ?? "") || props.inputMode === "decimal" || props.inputMode === "numeric";
   return (
     <RNTextInput
       ref={ref}

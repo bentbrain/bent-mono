@@ -51,7 +51,9 @@ export default function Home() {
             </span>
             <div>
               <p className="text-sm font-semibold">Bent Drive Copilot</p>
-              <p className="text-xs text-muted-foreground">Read your Tesla vehicle status</p>
+              <p className="text-xs text-muted-foreground">
+                Read your Tesla vehicle status
+              </p>
             </div>
           </div>
           <Button asChild variant="ghost">
@@ -62,7 +64,10 @@ export default function Home() {
 
         <section className="grid flex-1 items-center gap-14 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:py-28">
           <div>
-            <Badge className="mb-7 gap-2 px-3 py-1.5 text-muted-foreground" variant="outline">
+            <Badge
+              className="mb-7 gap-2 px-3 py-1.5 text-muted-foreground"
+              variant="outline"
+            >
               <span className="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
               Read-only pilot
             </Badge>
@@ -77,7 +82,11 @@ export default function Home() {
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               {securityFeatures.map((label) => (
-                <Badge className="h-auto px-3 py-2 text-muted-foreground" key={label} variant="outline">
+                <Badge
+                  className="h-auto px-3 py-2 text-muted-foreground"
+                  key={label}
+                  variant="outline"
+                >
                   {label}
                 </Badge>
               ))}
@@ -90,15 +99,23 @@ export default function Home() {
                 <CardDescription className="text-xs font-semibold tracking-[0.2em] uppercase">
                   Connection flow
                 </CardDescription>
-                <Badge className="border-0 bg-emerald-400/10 text-emerald-300" variant="outline">
+                <Badge
+                  className="border-0 bg-emerald-400/10 text-emerald-300"
+                  variant="outline"
+                >
                   OAuth 2.1
                 </Badge>
               </CardHeader>
               <CardContent className="px-6 pb-4 sm:px-8 sm:pb-6">
                 <ol className="space-y-7">
                   {steps.map((step) => (
-                    <li className="grid grid-cols-[2.5rem_1fr] gap-4" key={step.number}>
-                      <span className="font-mono text-xs text-primary">{step.number}</span>
+                    <li
+                      className="grid grid-cols-[2.5rem_1fr] gap-4"
+                      key={step.number}
+                    >
+                      <span className="font-mono text-xs text-primary">
+                        {step.number}
+                      </span>
                       <div>
                         <CardTitle>
                           <h2>{step.title}</h2>
@@ -118,7 +135,10 @@ export default function Home() {
         <Separator />
         <footer className="flex flex-col gap-3 py-4 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>Built by Bent Build · Not affiliated with Tesla, Inc.</p>
-          <nav aria-label="Legal and service links" className="flex flex-wrap gap-1">
+          <nav
+            aria-label="Legal and service links"
+            className="flex flex-wrap gap-1"
+          >
             <Button asChild size="xs" variant="link">
               <Link href="/privacy">Privacy</Link>
             </Button>

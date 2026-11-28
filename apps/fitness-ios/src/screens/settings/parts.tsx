@@ -12,7 +12,15 @@ import { haptic } from "../../ui/haptics";
 import { Notice } from "../../ui/Layout";
 import { AppText, AppTextInput } from "../../ui/Text";
 import { cn } from "../../ui/typography";
-import { checkSettings, numberText, parseNumberText, queuedNotice, saveStatus, settingsRevision, unsavedNotice } from "./rules";
+import {
+  checkSettings,
+  numberText,
+  parseNumberText,
+  queuedNotice,
+  saveStatus,
+  settingsRevision,
+  unsavedNotice,
+} from "./rules";
 
 type FieldError = { text: string; id?: string };
 
@@ -121,7 +129,6 @@ export function useFieldFocus() {
   return { register, focus };
 }
 
-
 /** A labelled text input whose focus the editor can move to. */
 export function InputField({
   label,
@@ -175,7 +182,9 @@ export function NumberInput({
   const [text, setText] = useState(() => numberText(value));
   useEffect(() => {
     const typed = parseNumberText(text, optional);
-    const same = Object.is(typed, value) || (typeof typed === "number" && typeof value === "number" && Number.isNaN(typed) && Number.isNaN(value));
+    const same =
+      Object.is(typed, value) ||
+      (typeof typed === "number" && typeof value === "number" && Number.isNaN(typed) && Number.isNaN(value));
     if (!same) setText(numberText(value));
     // Only a value changed from outside replaces the typed text.
   }, [value]);
@@ -227,7 +236,13 @@ export function SaveBar({
     <View className="gap-3">
       <Button label="Save settings" icon="checkmark" fullWidth onPress={onSave} testID={testID} />
       {status ? (
-        <AppText textRole="footnote" tone="muted" className="text-center" accessibilityLiveRegion="polite" testID="settings-status">
+        <AppText
+          textRole="footnote"
+          tone="muted"
+          className="text-center"
+          accessibilityLiveRegion="polite"
+          testID="settings-status"
+        >
           {status}
         </AppText>
       ) : null}

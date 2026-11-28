@@ -39,12 +39,20 @@ export type AuthorizeState = z.infer<typeof authorizeStateSchema>;
 
 const supportedScopes: readonly string[] = ["tesla.read"];
 
-export function normalizeRequestedScopes(requested: string | undefined): string {
+export function normalizeRequestedScopes(
+  requested: string | undefined,
+): string {
   const scopes = requested
-    ? requested.split(/\s+/).map((scope) => scope.trim()).filter(Boolean)
+    ? requested
+        .split(/\s+/)
+        .map((scope) => scope.trim())
+        .filter(Boolean)
     : ["tesla.read"];
   const uniqueScopes = [...new Set(scopes)];
-  if (uniqueScopes.length === 0 || uniqueScopes.some((scope) => !supportedScopes.includes(scope))) {
+  if (
+    uniqueScopes.length === 0 ||
+    uniqueScopes.some((scope) => !supportedScopes.includes(scope))
+  ) {
     throw new Error("The request includes an unsupported scope.");
   }
   if (!uniqueScopes.includes("tesla.read")) {
@@ -55,7 +63,7 @@ export function normalizeRequestedScopes(requested: string | undefined): string 
 
 export function hasDuplicateParameters(
   parameters: URLSearchParams,
-  allowedIdenticalParameters: readonly string[] = []
+  allowedIdenticalParameters: readonly string[] = [],
 ): boolean {
   const values = new Map<string, string>();
   for (const [name, value] of parameters) {
@@ -71,7 +79,10 @@ export function hasDuplicateParameters(
   return false;
 }
 
-export function isAllowedOAuthRedirect(uri: string, allowLocal: boolean): boolean {
+export function isAllowedOAuthRedirect(
+  uri: string,
+  allowLocal: boolean,
+): boolean {
   let url: URL;
   try {
     url = new URL(uri);
@@ -90,27 +101,39 @@ export function isAllowedOAuthRedirect(uri: string, allowLocal: boolean): boolea
     return false;
   }
   const localHosts: readonly string[] = ["localhost", "127.0.0.1", "::1"];
-  return localHosts.includes(url.hostname) && (url.protocol === "http:" || url.protocol === "https:");
+  return (
+    localHosts.includes(url.hostname) &&
+    (url.protocol === "http:" || url.protocol === "https:")
+  );
 }
 
 function sealAuthorizeState(state: AuthorizeState, config: AppConfig): string {
   return seal(
     JSON.stringify(authorizeStateSchema.parse(state)),
-    reveal(config.tokenEncryptionKey)
+    reveal(config.tokenEncryptionKey),
   );
 }
 
-export function openAuthorizeState(value: string, config: AppConfig, nowEpoch = Date.now() / 1000): AuthorizeState {
+export function openAuthorizeState(
+  value: string,
+  config: AppConfig,
+  nowEpoch = Date.now() / 1000,
+): AuthorizeState {
   const plaintext = open(value, reveal(config.tokenEncryptionKey));
   const parsedJson: unknown = JSON.parse(plaintext);
   const state = authorizeStateSchema.parse(parsedJson);
   if (state.expiresAtEpoch <= nowEpoch) {
-    throw new Error("The authorization request expired. Start the connection again.");
+    throw new Error(
+      "The authorization request expired. Start the connection again.",
+    );
   }
   return state;
 }
 
-export function buildTeslaAuthorizationUrl(state: AuthorizeState, config: AppConfig): URL {
+export function buildTeslaAuthorizationUrl(
+  state: AuthorizeState,
+  config: AppConfig,
+): URL {
   const teslaState = sealAuthorizeState(state, config);
   const url = new URL(config.teslaAuthorizationEndpoint);
   url.search = new URLSearchParams({
@@ -127,7 +150,11 @@ export function buildTeslaAuthorizationUrl(state: AuthorizeState, config: AppCon
   return url;
 }
 
-export function oauthErrorResponse(error: string, description: string, status = 400): Response {
+export function oauthErrorResponse(
+  error: string,
+  description: string,
+  status = 400,
+): Response {
   return Response.json(
     { error, error_description: description },
     {
@@ -136,14 +163,14 @@ export function oauthErrorResponse(error: string, description: string, status = 
         "cache-control": "no-store",
         pragma: "no-cache",
       },
-    }
+    },
   );
 }
 
 export function redirectWithOAuthResult(
   redirectUri: string,
   state: string,
-  result: { code: string } | { error: string; description: string }
+  result: { code: string } | { error: string; description: string },
 ): Response {
   const url = new URL(redirectUri);
   url.searchParams.set("state", state);

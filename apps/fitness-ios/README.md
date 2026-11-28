@@ -78,10 +78,10 @@ The app keeps sample UUIDs, positions and per-run counts in `Application Support
 
 ## Variants
 
-| Variant | Bundle ID | Redirect URI | Fitness origin |
-| --- | --- | --- | --- |
+| Variant       | Bundle ID                | Redirect URI                     | Fitness origin                                    |
+| ------------- | ------------------------ | -------------------------------- | ------------------------------------------------- |
 | `development` | `build.bent.fitness.dev` | `build.bent.fitness.dev://oauth` | `https://fitness.bent.build`, or `FITNESS_ORIGIN` |
-| `production` | `build.bent.fitness` | `build.bent.fitness://oauth` | `https://fitness.bent.build` |
+| `production`  | `build.bent.fitness`     | `build.bent.fitness://oauth`     | `https://fitness.bent.build`                      |
 
 `APP_VARIANT` selects the variant and defaults to `production`. Build settings:
 

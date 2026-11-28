@@ -145,10 +145,20 @@ describe("reminderText", () => {
 
   test("follows corrections: a removed workout frees its day and a moved one counts on its new date", () => {
     const original = record(workout("2026-11-23", true));
-    const removed = record({ kind: "workoutCorrection", workoutId: original.id, replacement: null, reason: "Removed from history" });
+    const removed = record({
+      kind: "workoutCorrection",
+      workoutId: original.id,
+      replacement: null,
+      reason: "Removed from history",
+    });
     expect(reminderText(settings, [original, removed], "2026-11-23", false)?.title).toBe("Today: Strength A");
     const movedWorkout = { ...workout("2026-11-25", true), date: "2026-11-25" };
-    const moved = record({ kind: "workoutCorrection", workoutId: original.id, replacement: movedWorkout, reason: "Wrong day" });
+    const moved = record({
+      kind: "workoutCorrection",
+      workoutId: original.id,
+      replacement: movedWorkout,
+      reason: "Wrong day",
+    });
     expect(reminderText(settings, [original, moved], "2026-11-23", false)?.title).toBe("Today: Strength A");
     expect(reminderText(settings, [original, moved], "2026-11-25", false)).toBeNull();
   });
@@ -214,7 +224,9 @@ describe("reminderPlan", () => {
     const sydney: Settings = { ...settings, timezone: "Australia/Sydney" };
     const plan = reminderPlan(sydney, [], { ...on, restDays: true, minutes: 18 * 60 }, at("2026-10-01T00:00:00Z"));
     const local = plan.map((item) =>
-      new Intl.DateTimeFormat("en-GB", { timeZone: "Australia/Sydney", hour: "2-digit", minute: "2-digit" }).format(item.at),
+      new Intl.DateTimeFormat("en-GB", { timeZone: "Australia/Sydney", hour: "2-digit", minute: "2-digit" }).format(
+        item.at,
+      ),
     );
     expect(new Set(local)).toEqual(new Set(["18:00"]));
     expect(plan.map((item) => item.day)).toContain("2026-10-04");
@@ -254,7 +266,9 @@ describe("ReminderScheduler", () => {
       scheduleReminders: (owner, reminders) =>
         new Promise((resolve, reject) => {
           calls.push(`schedule ${owner} ${reminders.map((item) => item.day).join(",")}`);
-          gates.push(() => (result === "fails" ? reject(new Error("1 workout reminders could not be scheduled.")) : resolve(result)));
+          gates.push(() =>
+            result === "fails" ? reject(new Error("1 workout reminders could not be scheduled.")) : resolve(result),
+          );
         }),
       cancelReminders: () => {
         calls.push("cancel");

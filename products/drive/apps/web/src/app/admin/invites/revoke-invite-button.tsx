@@ -18,7 +18,10 @@ interface RevokeInviteButtonProps {
   inviteId: string;
 }
 
-export function RevokeInviteButton({ githubUsername, inviteId }: RevokeInviteButtonProps) {
+export function RevokeInviteButton({
+  githubUsername,
+  inviteId,
+}: RevokeInviteButtonProps) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -30,8 +33,8 @@ export function RevokeInviteButton({ githubUsername, inviteId }: RevokeInviteBut
         <AlertDialogHeader>
           <AlertDialogTitle>Revoke Tesla Bridge access?</AlertDialogTitle>
           <AlertDialogDescription>
-            @{githubUsername} will no longer be able to connect, and their active MCP sessions will be
-            revoked.
+            @{githubUsername} will no longer be able to connect, and their
+            active MCP sessions will be revoked.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

@@ -23,11 +23,11 @@ describe("four-quarter scene rotation", () => {
 
   test("projects onto a two-to-one isometric grid", () => {
     expect(
-      projectWorldPoint(
-        { x: 1, z: 0 },
-        0,
-        { tileWidth: 32, tileHeight: 16, origin: { x: 160, y: 64 } },
-      ),
+      projectWorldPoint({ x: 1, z: 0 }, 0, {
+        tileWidth: 32,
+        tileHeight: 16,
+        origin: { x: 160, y: 64 },
+      }),
     ).toEqual({ x: 176, y: 72 });
   });
 });

@@ -164,7 +164,12 @@ export function RunScreen({ route }: StaticScreenProps<{ date: string; runId?: s
               : "This run was removed on another device. Your changes are still in the form."}
           </Notice>
         ) : null}
-        <Button label={run ? "Save run changes" : "Save run"} disabled={Boolean(status)} onPress={() => save(editing)} testID="save-run" />
+        <Button
+          label={run ? "Save run changes" : "Save run"}
+          disabled={Boolean(status)}
+          onPress={() => save(editing)}
+          testID="save-run"
+        />
         {error ? (
           <Notice tone="danger" testID="run-error">
             {error}

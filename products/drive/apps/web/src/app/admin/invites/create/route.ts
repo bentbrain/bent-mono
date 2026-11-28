@@ -22,23 +22,27 @@ export async function POST(request: Request): Promise<Response> {
       try: () => request.formData(),
       catch: () => new Error("The invite form could not be read."),
     });
-    const parsed = createInviteInputSchema.safeParse(Object.fromEntries(formData));
+    const parsed = createInviteInputSchema.safeParse(
+      Object.fromEntries(formData),
+    );
     if (!parsed.success) {
       return Response.json(
         { error: "invalid_invite", issues: parsed.error.flatten().fieldErrors },
-        { status: 400 }
+        { status: 400 },
       );
     }
     const nowEpoch = Math.floor(Date.now() / 1_000);
     const expiresAtEpoch = nowEpoch + parsed.data.expiresInDays * 24 * 60 * 60;
-    const githubUsernameFingerprint = hashToken(parsed.data.githubUsername).slice(0, 16);
+    const githubUsernameFingerprint = hashToken(
+      parsed.data.githubUsername,
+    ).slice(0, 16);
     yield* createInvite(
       randomUUID(),
       parsed.data.githubUsername,
       expiresAtEpoch,
       randomUUID(),
       identityResult.right.clerkUserId,
-      githubUsernameFingerprint
+      githubUsernameFingerprint,
     );
     return Response.redirect(new URL("/admin/invites", request.url), 303);
   }).pipe(Effect.withSpan("admin.invite.create"));

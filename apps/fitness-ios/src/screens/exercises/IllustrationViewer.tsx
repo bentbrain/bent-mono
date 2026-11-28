@@ -30,17 +30,40 @@ export function IllustrationViewer({
   const imageWidth = Math.min(width, available * illustrationRatio);
   const imageHeight = imageWidth / illustrationRatio;
   return (
-    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      animationType="fade"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
       <View className="flex-1 bg-screen" accessibilityViewIsModal testID="illustration-viewer">
         <View className="flex-row items-center gap-3 px-4 pb-2" style={{ paddingTop: insets.top + 8 }}>
-          <AppText textRole="headline" weight="semibold" accessibilityRole="header" numberOfLines={1} className="flex-1">
+          <AppText
+            textRole="headline"
+            weight="semibold"
+            accessibilityRole="header"
+            numberOfLines={1}
+            className="flex-1"
+          >
             {title}
           </AppText>
-          <IconButton icon="xmark" label="Close illustration" tone="secondary" onPress={onClose} testID="illustration-close" />
+          <IconButton
+            icon="xmark"
+            label="Close illustration"
+            tone="secondary"
+            onPress={onClose}
+            testID="illustration-close"
+          />
         </View>
         <ScrollView
           className="flex-1"
-          contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingBottom: insets.bottom }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingBottom: insets.bottom,
+          }}
           maximumZoomScale={4}
           minimumZoomScale={1}
           centerContent

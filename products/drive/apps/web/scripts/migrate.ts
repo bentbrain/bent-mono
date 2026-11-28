@@ -18,7 +18,10 @@ const program = Effect.gen(function* () {
     catch: (error) =>
       new MigrationFileError({
         path: schemaPath,
-        message: error instanceof Error ? error.message : "Could not read the migration file.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not read the migration file.",
       }),
   });
   const statements = schema
@@ -27,12 +30,16 @@ const program = Effect.gen(function* () {
     .filter((statement) => statement.length > 0);
   const sql = yield* PgClient.PgClient;
   yield* sql.withTransaction(
-    Effect.forEach(statements, (statement) => sql.unsafe<Record<string, unknown>>(statement), {
-      discard: true,
-    })
+    Effect.forEach(
+      statements,
+      (statement) => sql.unsafe<Record<string, unknown>>(statement),
+      {
+        discard: true,
+      },
+    ),
   );
   yield* Effect.logInfo("database.migration.complete").pipe(
-    Effect.annotateLogs({ statementCount: statements.length })
+    Effect.annotateLogs({ statementCount: statements.length }),
   );
 }).pipe(Effect.withSpan("database.migrate"));
 

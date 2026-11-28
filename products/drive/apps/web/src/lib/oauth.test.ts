@@ -9,27 +9,48 @@ import {
 
 void test("OAuth redirect allowlist accepts ChatGPT callbacks", () => {
   assert.equal(
-    isAllowedOAuthRedirect("https://chatgpt.com/connector/oauth/example-callback", false),
-    true
+    isAllowedOAuthRedirect(
+      "https://chatgpt.com/connector/oauth/example-callback",
+      false,
+    ),
+    true,
   );
-  assert.equal(isAllowedOAuthRedirect("https://attacker.example/callback", false), false);
+  assert.equal(
+    isAllowedOAuthRedirect("https://attacker.example/callback", false),
+    false,
+  );
 });
 
 void test("OAuth redirect allowlist rejects deceptive hosts and path prefixes", () => {
   assert.equal(
-    isAllowedOAuthRedirect("https://chatgpt.com.attacker.example/connector/oauth/callback", false),
-    false
+    isAllowedOAuthRedirect(
+      "https://chatgpt.com.attacker.example/connector/oauth/callback",
+      false,
+    ),
+    false,
   );
   assert.equal(
-    isAllowedOAuthRedirect("https://chatgpt.com/connector/oauthish/callback", false),
-    false
+    isAllowedOAuthRedirect(
+      "https://chatgpt.com/connector/oauthish/callback",
+      false,
+    ),
+    false,
   );
 });
 
 void test("local redirects require an explicit development flag", () => {
-  assert.equal(isAllowedOAuthRedirect("http://127.0.0.1:6274/callback", false), false);
-  assert.equal(isAllowedOAuthRedirect("http://127.0.0.1:6274/callback", true), true);
-  assert.equal(isAllowedOAuthRedirect("http://localhost.attacker.example/callback", true), false);
+  assert.equal(
+    isAllowedOAuthRedirect("http://127.0.0.1:6274/callback", false),
+    false,
+  );
+  assert.equal(
+    isAllowedOAuthRedirect("http://127.0.0.1:6274/callback", true),
+    true,
+  );
+  assert.equal(
+    isAllowedOAuthRedirect("http://localhost.attacker.example/callback", true),
+    false,
+  );
   assert.equal(isAllowedOAuthRedirect("ftp://localhost/callback", true), false);
 });
 
@@ -53,5 +74,8 @@ void test("OAuth resource may repeat only when every value is identical", () => 
     ["resource", "https://drive.bent.build/mcp"],
     ["resource", "https://attacker.example/mcp"],
   ]);
-  assert.equal(hasDuplicateParameters(conflictingResources, ["resource"]), true);
+  assert.equal(
+    hasDuplicateParameters(conflictingResources, ["resource"]),
+    true,
+  );
 });

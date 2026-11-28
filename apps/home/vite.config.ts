@@ -1,12 +1,12 @@
 import vinext from "vinext";
-import {locationDefines} from "./config/location";
-import {releaseDefines} from "./config/release";
-import {publicMetadata} from "./config/public-metadata";
+import { locationDefines } from "./config/location";
+import { releaseDefines } from "./config/release";
+import { publicMetadata } from "./config/public-metadata";
 import { defineConfig } from "vite";
 
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
-export default defineConfig(async ({mode}) => {
+export default defineConfig(async ({ mode }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -18,9 +18,9 @@ export default defineConfig(async ({mode}) => {
 
   return {
     ...(isCodexSeatbeltSandbox
-      ? {server: {watch: {useFsEvents: false, usePolling: true}}}
+      ? { server: { watch: { useFsEvents: false, usePolling: true } } }
       : {}),
-    define:{...locationDefines(mode, 'public'), ...releaseDefines()},
+    define: { ...locationDefines(mode, "public"), ...releaseDefines() },
     plugins: [
       publicMetadata(),
       vinext(),

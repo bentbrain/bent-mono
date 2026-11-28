@@ -78,7 +78,9 @@ await test("real PostgreSQL migration restores current Payload reads without cha
       const media: unknown = payload.db.tables.media;
       assert.ok(media instanceof PgTable);
       const columns = Object.values(
-        z.record(z.string(), z.object({ name: z.string() })).parse(getTableColumns(media)),
+        z
+          .record(z.string(), z.object({ name: z.string() }))
+          .parse(getTableColumns(media)),
       );
       assert.ok(columns.some((column) => column.name === "_objectkey"));
       const names = columns.map((column) => column.name);

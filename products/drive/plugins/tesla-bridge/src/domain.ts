@@ -8,9 +8,7 @@ export {
   vinSchema,
 } from "@bent-build/tesla-contracts";
 
-export type {
-  VehicleSummary,
-} from "@bent-build/tesla-contracts";
+export type { VehicleSummary } from "@bent-build/tesla-contracts";
 
 export const vehicleStatusSchema = baseVehicleStatusSchema.extend({
   dataSource: z.enum(["mock", "fleet-api"]),

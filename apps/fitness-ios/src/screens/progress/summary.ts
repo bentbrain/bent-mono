@@ -1,4 +1,12 @@
-import { displayLoad, formatShortDate, loadTypeWording, mondayOf, toKg, trainingRecords, weightSchema } from "@bent/fitness-contracts/domain";
+import {
+  displayLoad,
+  formatShortDate,
+  loadTypeWording,
+  mondayOf,
+  toKg,
+  trainingRecords,
+  weightSchema,
+} from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings, Workout } from "@bent/fitness-contracts/domain";
 import type { StrengthPoint, StrengthSeries, WeekSummary } from "@bent/fitness-contracts/progress";
 import { runText } from "../../logic/format";
@@ -165,10 +173,7 @@ export function strengthSummary(series: StrengthSeries, units: Units) {
 }
 
 /** The averages comparison under the Progress bodyweight summary. */
-export function trendText(
-  trend: { change: number | null; comparedCount: number },
-  units: Units,
-) {
+export function trendText(trend: { change: number | null; comparedCount: number }, units: Units) {
   if (trend.change === null) return "Record more than 7 weigh-ins to compare averages.";
   const sign = trend.change > 0 ? "+" : trend.change < 0 ? "−" : "±";
   return `${sign}${shownWeight(Math.abs(trend.change), units)} compared with the ${trend.comparedCount} weigh-in${trend.comparedCount === 1 ? "" : "s"} before.`;

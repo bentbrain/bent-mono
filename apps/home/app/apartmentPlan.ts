@@ -1,10 +1,7 @@
 export type FloorMaterial = "oak" | "wet-tile" | "balcony-tile";
 export type WallFinish = "paint" | "tile" | "glass";
 export type WallKind =
-  | "exterior"
-  | "partition"
-  | "sliding-glazing"
-  | "glass-balustrade";
+  "exterior" | "partition" | "sliding-glazing" | "glass-balustrade";
 export type WallAxis = "x" | "z";
 export type OpeningKind = "door";
 
@@ -325,10 +322,7 @@ function visibleIntervals(run: WallRun): readonly VisibleInterval[] {
   return intervals;
 }
 
-function pointForTick(
-  run: WallRun,
-  variableTick: number,
-): PlanPoint {
+function pointForTick(run: WallRun, variableTick: number): PlanPoint {
   if (run.axis === "x") {
     return { x: variableTick / 2, z: run.fixedTick / 2 };
   }

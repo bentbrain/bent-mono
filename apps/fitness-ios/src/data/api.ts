@@ -1,4 +1,10 @@
-import { ApiError as ApiErrorBody, AppRecords, PhotoList, appContract, appContractHeader } from "@bent/fitness-contracts";
+import {
+  ApiError as ApiErrorBody,
+  AppRecords,
+  PhotoList,
+  appContract,
+  appContractHeader,
+} from "@bent/fitness-contracts";
 import type { PhotoSummary, PhotoUpload } from "@bent/fitness-contracts";
 import { resultSchema } from "@bent/fitness-contracts/domain";
 import type { Mutation, SaveResult } from "@bent/fitness-contracts/domain";
