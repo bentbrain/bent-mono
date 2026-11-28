@@ -475,7 +475,7 @@ small,
   font-size: 0.8125rem;
   color: var(--muted);
 }
-.date-pick > span {
+.date-pick > label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -483,7 +483,7 @@ small,
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.date-pick input {
+.date-pick .bent-control {
   min-height: 44px;
   padding: 6px 12px;
   border: 1px solid var(--field-line);
@@ -2131,6 +2131,7 @@ small,
 .food-form > .bent-field:nth-child(2),
 .food-form > h2,
 .food-form > label:not(.bent-field),
+.food-form > .bent-check,
 .food-form > .edit-conflict,
 .food-form > [role="alert"],
 .food-form > .form-actions {
@@ -2724,6 +2725,7 @@ small,
 }
 .form-grid h2,
 .form-grid > label:not(.bent-field),
+.form-grid > .bent-check,
 .form-grid > .error,
 .form-grid > .edit-conflict,
 .form-grid > [role="alert"] {
@@ -2768,6 +2770,7 @@ input[type="checkbox"] {
 .set.is-done input[type="checkbox"] {
   accent-color: var(--done);
 }
+.bent-check,
 label:has(> input[type="checkbox"]) {
   display: flex;
   align-items: center;
@@ -2821,6 +2824,11 @@ legend {
 .schedule-editor .bent-field {
   grid-template-columns: 56px minmax(0, 1fr);
   align-items: center;
+}
+.schedule-editor .bent-segment {
+  padding: 8px 4px;
+  white-space: nowrap;
+  font-size: 0.875rem;
 }
 .schedule-editor .bent-field > label {
   text-transform: uppercase;
@@ -3218,7 +3226,7 @@ legend {
     --header: 64px;
     --tabbar: 0px;
   }
-  .date-pick > span {
+  .date-pick > label {
     position: static;
     width: auto;
     height: auto;
@@ -3232,6 +3240,12 @@ legend {
   }
   .schedule-editor .bent-field > label {
     text-align: center;
+  }
+  .schedule-editor .bent-segments {
+    flex-direction: column;
+  }
+  .schedule-editor .bent-segment {
+    flex: none;
   }
   .exercise-grid {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

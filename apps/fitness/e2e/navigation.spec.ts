@@ -74,7 +74,7 @@ test.beforeEach(async ({ page, context }) => {
     .getByRole("navigation")
     .getByRole("link", { name: "Week", exact: true })
     .click();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
 });
 test("plan preview is read-only and browser back returns to Today", async ({
@@ -158,10 +158,10 @@ test("main navigation returns to today and the date picker adds browser history 
   ).toHaveText("Food");
   await expect(page).toHaveTitle("Food · Fitness · bent.build");
   await expect(page.locator("h1")).toBeFocused();
-  const today = await page.locator("#view-date").inputValue();
+  const today = await page.getByLabel("Choose date").inputValue();
   await page.reload();
   await expect(page.getByLabel("Meal or snack")).toBeVisible();
-  await page.locator("#view-date").fill("2026-01-06");
+  await page.getByLabel("Choose date").fill("2026-01-06");
   await expect(page).toHaveURL(/date=2026-01-06/);
   await expect(page).toHaveURL(/\/food\?date=2026-01-06/);
   await expect(page.locator(".date-label")).toContainText("Tue 6 Jan 2026");
@@ -170,22 +170,22 @@ test("main navigation returns to today and the date picker adds browser history 
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/food$/);
-  await expect(page.locator("#view-date")).toHaveValue(today);
+  await expect(page.getByLabel("Choose date")).toHaveValue(today);
   await page.goBack();
   await expect(
     page.getByRole("heading", { level: 1, name: "Your week" }),
   ).toBeVisible();
-  await expect(page.locator("#view-date")).toHaveValue("2026-01-05");
+  await expect(page.getByLabel("Choose date")).toHaveValue("2026-01-05");
   await page.goForward();
   await page.goForward();
   await expect(page.getByLabel("Meal or snack")).toBeVisible();
-  await expect(page.locator("#view-date")).toHaveValue("2026-01-06");
+  await expect(page.getByLabel("Choose date")).toHaveValue("2026-01-06");
   await page.getByRole("link", { name: /^Back to today/ }).click();
   await expect(page).toHaveURL(/\/food$/);
   await page.getByRole("link", { name: "Week", exact: true }).click();
   await page.getByRole("link", { name: "Exercises", exact: true }).click();
   await expect(page).toHaveURL(/\/guides/);
-  await expect(page.locator("#view-date")).toHaveCount(0);
+  await expect(page.getByLabel("Choose date")).toHaveCount(0);
   await expect(
     page.getByRole("navigation").locator("[aria-current=page]"),
   ).toHaveText("Exercises");
@@ -369,7 +369,10 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByRole("link", { name: /Repeating week and routines/ }).click();
   await page.locator(".routine-editor > summary").first().click();
-  await page.getByLabel("Sets", { exact: true }).first().fill("1");
+  await page
+    .getByLabel(/^Sets \(/)
+    .first()
+    .fill("1");
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
@@ -378,7 +381,7 @@ test("introductory plan matches a custom one-set workout", async ({ page }) => {
     .getByRole("navigation")
     .getByRole("link", { name: "Week", exact: true })
     .click();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await page
     .getByRole("link", { name: "View workout plan", exact: true })
@@ -415,7 +418,7 @@ test("toolbar configure, navigation and selection redact private activity URL pa
   await page.getByRole("link", { name: "Edit repeating week" }).click();
   await page.locator(".routine-editor > summary").first().click();
   await page
-    .getByLabel("Routine name", { exact: true })
+    .getByLabel(/^Routine name \(/)
     .first()
     .fill(privateRoutine);
   await page
@@ -426,7 +429,7 @@ test("toolbar configure, navigation and selection redact private activity URL pa
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("link", { name: "Week", exact: true })
     .click();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await page.route("https://toolbar.bent.build/toolbar?**", async (route) =>
     route.fulfill({
       contentType: "text/html",
@@ -587,7 +590,10 @@ async function openSecondTab(page: Page, path: string) {
 }
 async function setUnits(page: Page, units: "Kilograms" | "Pounds") {
   await page.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.getByLabel("Display units").selectOption({ label: units });
+  await page
+    .getByRole("radiogroup", { name: "Display units" })
+    .getByRole("radio", { name: units })
+    .click();
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
@@ -726,7 +732,7 @@ test("typed set values save when leaving the set, invalid text stays, sets can b
   await expect(status).toHaveText("Unsaved input on device");
   await reps.pressSequentially("9");
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("6.5");
   expect(writes).toHaveLength(0);
   await page.locator("h1").click();
@@ -852,7 +858,7 @@ test("history corrects, removes and restores workouts without changing the origi
     page.getByRole("heading", { name: "Correct Strength A" }),
   ).toBeVisible();
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("4");
   await page.getByRole("button", { name: "Save correction" }).click();
   await expect(
@@ -974,13 +980,17 @@ test("settings confirm saves, explain errors, warn before losing edits and expor
   await expect(page.getByText(/Strength days take turns/)).toBeVisible();
   await page.locator(".routine-editor > summary").first().click();
   const routine = page.locator(".routine-editor").first();
+  await routine.getByRole("button", { name: /^Add an exercise/ }).click();
   await expect(
-    routine.getByRole("option", {
+    page.getByRole("menuitem", {
       name: /Goblet squat · already in this routine/,
     }),
-  ).toBeDisabled();
+  ).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
   await routine
-    .getByRole("button", { name: "Move Flat dumbbell bench press up" })
+    .getByRole("button", {
+      name: "Move up (2. Flat dumbbell bench press, Strength A, routine 1)",
+    })
     .click();
   await expect(routine.locator("legend").first()).toHaveText(
     "1. Flat dumbbell bench press",
@@ -1019,7 +1029,7 @@ test("food entries can be edited and removed, and the body chart labels recorded
   await expect(
     page.getByRole("heading", { level: 1, name: "Food" }),
   ).toBeVisible();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await expect(
     page.getByText("No food recorded for this date.", { exact: false }),
@@ -1106,7 +1116,7 @@ test("food entries can be edited and removed, and the body chart labels recorded
     ["2026-01-05", "70.25"],
     ["2026-01-06", "71.2"],
   ]) {
-    await page.locator("#weight-date").fill(date);
+    await page.getByLabel("Date", { exact: true }).fill(date);
     await page.getByLabel("Weight · kg", { exact: true }).fill(kg);
     await page.getByRole("button", { name: "Save weigh-in" }).click();
     await expect(page.locator(".sync-state")).toHaveText("Saved");
@@ -1163,12 +1173,10 @@ test("recovered weights keep the units they were typed in when units change else
   const owner = await ownerId(page);
   const key = `bent:fitness:inputs:v2:${owner}:${workoutId}`;
   const first = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   const second = page.getByRole("spinbutton", {
-    name: "Goblet squat set 2 weight",
-    exact: true,
+    name: /^Goblet squat set 2 weight(,|$)/,
   });
   // Both sets start from a saved weight of zero.
   await first.fill("0");
@@ -1260,8 +1268,7 @@ test("sections open offline on their first visit and typed workout values save a
   // A value kept only in this page shows the app was not reloaded.
   await page.evaluate(() => Reflect.set(window, "fitnessVisit", "open"));
   const weight = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   await weight.fill("9");
   await expect(status).toHaveText("Unsaved input on device");
@@ -1573,8 +1580,7 @@ test("correction saves explain unhandled sets and keep typed changes when the cl
   await page.getByRole("button", { name: `Correct ${label}` }).click();
   const weight = (set: number) =>
     page.getByRole("spinbutton", {
-      name: `Goblet squat set ${set} weight`,
-      exact: true,
+      name: new RegExp(`^Goblet squat set ${set} weight(,|$)`),
     });
   await weight(2).fill("5");
   await page.getByRole("button", { name: "Save correction" }).click();
@@ -1969,8 +1975,7 @@ test("plan actions stay in reach and exercise guides keep session values", async
   await page.goto("/?date=2026-01-05");
   const workoutId = await startPastWorkout(page);
   const weight = page.getByRole("spinbutton", {
-    name: "Goblet squat set 1 weight",
-    exact: true,
+    name: /^Goblet squat set 1 weight(,|$)/,
   });
   await weight.fill("7");
   const help = page.getByRole("button", {
@@ -2122,7 +2127,7 @@ test("progress starts empty, then compares sessions, strength and bodyweight fro
   ).toContainText("each side");
   // Bodyweight compares averages only with enough weigh-ins.
   await openBodyweight(page);
-  await page.locator("#weight-date").fill("2026-01-05");
+  await page.getByLabel("Date", { exact: true }).fill("2026-01-05");
   await page.getByLabel("Weight · kg", { exact: true }).fill("70");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(page.locator(".sync-state")).toHaveText("Saved");
@@ -2196,7 +2201,7 @@ test("reorganise days manually preserves the next week and recovers after reload
   const thursday = addDays(monday, 3);
   const routine = scheduled(original.data, monday).routine;
   if (!routine) throw Error("Missing routine");
-  await page.locator("#view-date").fill(monday);
+  await page.getByLabel("Choose date").fill(monday);
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
@@ -2299,7 +2304,7 @@ test("reorganise days manually preserves the next week and recovers after reload
   expect(exported.records.filter((r) => r.data.kind !== "settings")).toEqual(
     before.records.filter((r) => r.data.kind !== "settings"),
   );
-  await page.locator("#view-date").fill(thursday);
+  await page.getByLabel("Choose date").fill(thursday);
   await page
     .getByRole("link", { name: "View workout plan", exact: true })
     .click();
@@ -2324,8 +2329,8 @@ test("reorganise closes when the week changes and scrolls while dragging by touc
   isMobile,
 }) => {
   const monday = addDays(mondayOf(localDate("UTC")), 7);
-  await page.locator("#view-date").fill(monday);
-  await page.locator("#view-date").fill(addDays(monday, 14));
+  await page.getByLabel("Choose date").fill(monday);
+  await page.getByLabel("Choose date").fill(addDays(monday, 14));
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
@@ -2446,7 +2451,10 @@ test("reorganise keeps long sessions steady, ignores a release outside the list 
   const editor = await context.newPage();
   await editor.goto("/schedule");
   await editor.locator(".routine-editor > summary").first().click();
-  await editor.getByLabel("Routine name", { exact: true }).first().fill(long);
+  await editor
+    .getByLabel(/^Routine name \(/)
+    .first()
+    .fill(long);
   await editor
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
@@ -2476,7 +2484,9 @@ test("reorganise keeps long sessions steady, ignores a release outside the list 
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
-  await page.locator("#view-date").fill(addDays(mondayOf(localDate("UTC")), 7));
+  await page
+    .getByLabel("Choose date")
+    .fill(addDays(mondayOf(localDate("UTC")), 7));
   const panel = page.getByRole("dialog", { name: "Reorganise week" });
   const rows = panel.getByRole("listitem");
   const center = async (target: Locator) => {
@@ -2690,7 +2700,7 @@ test("reorganise rejects a stale plan when another tab saves settings", async ({
   context,
 }) => {
   const monday = addDays(mondayOf(localDate("UTC")), 7);
-  await page.locator("#view-date").fill(monday);
+  await page.getByLabel("Choose date").fill(monday);
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
@@ -2703,7 +2713,7 @@ test("reorganise rejects a stale plan when another tab saves settings", async ({
   const other = await context.newPage();
   await other.goto("/settings");
   await other
-    .locator("#goal")
+    .getByLabel("Goal", { exact: true })
     .fill("Synthetic changed goal for conflict coverage");
   await other
     .getByRole("button", { name: "Save settings", exact: true })

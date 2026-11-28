@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker } from "@tanstack/react-router";
 import { Button } from "@bent/ui/sdk/button";
+import { TextField } from "./fields";
 import {
   correctionReplacement,
   formatDate,
@@ -425,28 +426,22 @@ function CorrectionEditor({
         results, and you can restore them at any time.
       </p>
       <div className="card form-grid">
-        <label className="bent-field">
-          Workout date
-          <input
-            className="bent-control"
-            type="date"
-            value={date}
-            max={today}
-            required
-            onChange={(event) => setDate(event.target.value)}
-          />
-        </label>
-        <label className="bent-field">
-          Reason for correction
-          <input
-            className="bent-control"
-            value={reason}
-            maxLength={160}
-            required
-            placeholder="e.g. Entered the wrong weight"
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </label>
+        <TextField
+          label="Workout date"
+          type="date"
+          value={date}
+          max={today}
+          required
+          onValueChange={setDate}
+        />
+        <TextField
+          label="Reason for correction"
+          value={reason}
+          maxLength={160}
+          required
+          placeholder="e.g. Entered the wrong weight"
+          onValueChange={setReason}
+        />
       </div>
       <InputNotices inputs={inputs} />
       <ExerciseList workout={draft} settings={settings} inputs={inputs} />

@@ -27,6 +27,7 @@ import { useAccount } from "./account-context";
 import { foodDayDetail } from "./chart-details";
 import { ChartCard, spokenDetail, useDismiss } from "./chart-popover";
 import { DateBar } from "./date-bar";
+import { Checkbox } from "@bent/ui/sdk/field";
 import { TextField } from "./fields";
 import { Icon } from "./icons";
 import { savedMealLabels } from "./meal-names";
@@ -289,7 +290,6 @@ export function Nutrition({
         <h2 className="section-label">{editing ? "Edit food" : "Add food"}</h2>
         <TextField
           label="Meal or snack"
-          id="meal-name"
           ref={nameInput}
           name="name"
           required
@@ -299,7 +299,6 @@ export function Nutrition({
         />
         <TextField
           label="Calories · kcal"
-          id="meal-calories"
           defaultValue={shown?.calories ?? ""}
           name="calories"
           type="number"
@@ -311,7 +310,6 @@ export function Nutrition({
         />
         <TextField
           label="Protein · g"
-          id="meal-protein"
           defaultValue={shown?.protein ?? ""}
           name="protein"
           type="number"
@@ -327,7 +325,6 @@ export function Nutrition({
               <TextField
                 key={nutrient}
                 label={`${nutrientInfo[nutrient].label} · g, optional`}
-                id={`meal-${nutrient}`}
                 defaultValue={shown?.[nutrient] ?? ""}
                 name={nutrient}
                 type="number"
@@ -339,9 +336,7 @@ export function Nutrition({
             ))}
           </div>
         )}
-        <label>
-          <input type="checkbox" name="regular" /> Save as a regular meal
-        </label>
+        <Checkbox name="regular" label="Save as a regular meal" />
         {status && (
           <EditConflict
             status={status}

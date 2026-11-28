@@ -22,7 +22,9 @@ import { planningProfile } from "@bent/fitness-contracts/proposal";
 import type { Nutrient, Settings } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sync } from "../sync";
-import { download, SelectField, TextField } from "./fields";
+import { Checkbox } from "@bent/ui/sdk/field";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@ui-sdk/react/menu";
+import { ChoiceField, download, Hidden, TextField } from "./fields";
 import { deletePhoto, listPhotos, uploadPhoto } from "../server/photos";
 import { useAccount } from "./account-context";
 function formatDumbbells(values: number[], units: Settings["units"]) {
@@ -112,6 +114,8 @@ function describeIssue(
       text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.`,
     };
   }
+  if (field === "equipment" && index === undefined)
+    return { text: "Keep up to 40 equipment items." };
   if (field === "equipment" && typeof index === "number")
     return {
       id: `equipment-${index}`,
@@ -120,6 +124,12 @@ function describeIssue(
   const help = typeof field === "string" ? fieldHelp[field] : undefined;
   return help ?? { text: "Check the highlighted settings and try again." };
 }
+const dayTypes = [
+  { value: "strength", label: "Strength" },
+  { value: "run", label: "Easy run" },
+  { value: "rest", label: "Rest" },
+];
+
 export function SettingsEditor({
   section,
   settings,
@@ -146,6 +156,7 @@ export function SettingsEditor({
   );
   const [dumbbellError, setDumbbellError] = useState("");
   const [errorField, setErrorField] = useState<string>();
+  const form = useRef<HTMLFormElement>(null);
   const [exporting, setExporting] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
   const dirty =
@@ -166,6 +177,40 @@ export function SettingsEditor({
     const element = document.getElementById(id);
     element?.closest("details")?.setAttribute("open", "");
     element?.focus();
+  }
+  /** Saves the draft, or shows and returns why it can't be saved. */
+  function save(): string | undefined {
+    const dumbbells = parseDumbbells(dumbbellText, draft.units);
+    if (!dumbbells.values) {
+      setDumbbellError(dumbbells.error);
+      showError(dumbbells.error, "dumbbells");
+      return dumbbells.error;
+    }
+    setDumbbellError("");
+    const result = settingsSchema.safeParse({
+      ...draft,
+      dumbbellsKg: dumbbells.values,
+    });
+    if (!result.success) {
+      const issue = describeIssue(result.error.issues[0], draft);
+      showError(issue.text, issue.id);
+      return issue.text;
+    }
+    if (sync.put(result.data, settingsId, originRevision)) {
+      setOriginRevision(originRevision + 1);
+      setDraft(result.data);
+      setSavedDraft(result.data);
+      setDumbbellText(
+        formatDumbbells(result.data.dumbbellsKg, result.data.units),
+      );
+      setNotice("Settings queued for saving.");
+      setError("");
+      return;
+    }
+    const problem =
+      "Settings changed on another device or need attention. Check the message at the top of the page.";
+    showError(problem);
+    return problem;
   }
   useEffect(() => {
     void listPhotos()
@@ -215,37 +260,10 @@ export function SettingsEditor({
         </header>
       )}
       <form
+        ref={form}
         onSubmit={(e) => {
           e.preventDefault();
-          const dumbbells = parseDumbbells(dumbbellText, draft.units);
-          if (!dumbbells.values) {
-            setDumbbellError(dumbbells.error);
-            showError(dumbbells.error, "dumbbells");
-            return;
-          }
-          setDumbbellError("");
-          const result = settingsSchema.safeParse({
-            ...draft,
-            dumbbellsKg: dumbbells.values,
-          });
-          if (!result.success) {
-            const issue = describeIssue(result.error.issues[0], draft);
-            showError(issue.text, issue.id);
-            return;
-          }
-          if (sync.put(result.data, settingsId, originRevision)) {
-            setOriginRevision(originRevision + 1);
-            setDraft(result.data);
-            setSavedDraft(result.data);
-            setDumbbellText(
-              formatDumbbells(result.data.dumbbellsKg, result.data.units),
-            );
-            setNotice("Settings queued for saving.");
-            setError("");
-          } else
-            showError(
-              "Settings changed on another device or need attention. Check the message at the top of the page.",
-            );
+          save();
         }}
       >
         {section === "profile" ? (
@@ -255,15 +273,18 @@ export function SettingsEditor({
                 label="Goal"
                 id="goal"
                 value={draft.goal}
-                onChange={(e) => update({ goal: e.target.value })}
+                onValueChange={(value) => update({ goal: value })}
                 maxLength={160}
                 required
               />
               <TextField
                 label="Timezone"
                 id="timezone"
+                accepts={(value) =>
+                  settingsSchema.shape.timezone.safeParse(value).success
+                }
                 value={draft.timezone}
-                onChange={(e) => update({ timezone: e.target.value })}
+                onValueChange={(value) => update({ timezone: value })}
                 required
                 list="timezones"
               />
@@ -285,9 +306,9 @@ export function SettingsEditor({
                 min={16}
                 max={120}
                 value={draft.age ?? ""}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
-                    age: e.target.value ? Number(e.target.value) : null,
+                    age: value ? Number(value) : null,
                   })
                 }
               />
@@ -298,44 +319,46 @@ export function SettingsEditor({
                 min={80}
                 max={250}
                 value={draft.heightCm ?? ""}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update({
-                    heightCm: e.target.value ? Number(e.target.value) : null,
+                    heightCm: value ? Number(value) : null,
                   })
                 }
               />
-              <SelectField
+              <ChoiceField
                 label="Display units"
-                id="units"
+                items={[
+                  { value: "kg", label: "Kilograms" },
+                  { value: "lb", label: "Pounds" },
+                ]}
                 value={draft.units}
-                onChange={(e) => {
-                  const units = e.target.value === "lb" ? "lb" : "kg";
+                onValueChange={(value) => {
+                  const units = value === "lb" ? "lb" : "kg";
                   const parsed = parseDumbbells(dumbbellText, draft.units);
                   if (parsed.values)
                     setDumbbellText(formatDumbbells(parsed.values, units));
                   update({ units });
                 }}
-              >
-                <option value="kg">Kilograms</option>
-                <option value="lb">Pounds</option>
-              </SelectField>
+              />
               <TextField
                 label="Daily calorie trial · kcal"
                 id="calories"
+                required
                 type="number"
                 min={800}
                 max={10000}
                 value={draft.calories}
-                onChange={(e) => update({ calories: Number(e.target.value) })}
+                onValueChange={(value) => update({ calories: Number(value) })}
               />
               <TextField
                 label="Daily protein target · g"
                 id="protein"
+                required
                 type="number"
                 min={20}
                 max={400}
                 value={draft.protein}
-                onChange={(e) => update({ protein: Number(e.target.value) })}
+                onValueChange={(value) => update({ protein: Number(value) })}
               />
             </div>
             <h2 className="section-label">Nutrients</h2>
@@ -349,22 +372,16 @@ export function SettingsEditor({
                 const setting = draft.nutrients?.[nutrient];
                 return (
                   <div className="nutrient-setting" key={nutrient}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        id={`track-${nutrient}`}
-                        checked={Boolean(setting)}
-                        onChange={(e) =>
-                          track(
-                            nutrient,
-                            e.target.checked
-                              ? (setting?.target ?? null)
-                              : false,
-                          )
-                        }
-                      />{" "}
-                      Track {label.toLowerCase()}
-                    </label>
+                    <Checkbox
+                      label={`Track ${label.toLowerCase()}`}
+                      checked={Boolean(setting)}
+                      onCheckedChange={(checked) =>
+                        track(
+                          nutrient,
+                          checked ? (setting?.target ?? null) : false,
+                        )
+                      }
+                    />
                     {setting && (
                       <TextField
                         label={`Daily ${label.toLowerCase()} target · g, optional`}
@@ -375,13 +392,8 @@ export function SettingsEditor({
                         max={target.max}
                         step="any"
                         value={setting.target ?? ""}
-                        onChange={(e) =>
-                          track(
-                            nutrient,
-                            e.target.value === ""
-                              ? null
-                              : Number(e.target.value),
-                          )
+                        onValueChange={(value) =>
+                          track(nutrient, value === "" ? null : Number(value))
                         }
                       />
                     )}
@@ -413,12 +425,15 @@ export function SettingsEditor({
             <TextField
               label={`Dumbbell sizes · ${draft.units}, comma separated`}
               id="dumbbells"
+              accepts={(value) =>
+                Boolean(parseDumbbells(value, draft.units).values)
+              }
               value={dumbbellText}
               inputMode="decimal"
               aria-invalid={Boolean(dumbbellError)}
               aria-describedby={dumbbellError ? "dumbbell-error" : undefined}
-              onChange={(e) => {
-                setDumbbellText(e.target.value);
+              onValueChange={(value) => {
+                setDumbbellText(value);
                 setDumbbellError("");
                 setNotice("Unsaved settings");
               }}
@@ -432,25 +447,29 @@ export function SettingsEditor({
               <div className="equipment-editor card" key={item.id}>
                 <TextField
                   label="Equipment"
+                  context={`equipment ${i + 1}`}
                   id={`equipment-${i}`}
+                  maxLength={160}
+                  keepFilled
                   value={item.name}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     update({
                       equipment: draft.equipment.map((v, j) =>
-                        j === i ? { ...v, name: e.target.value } : v,
+                        j === i ? { ...v, name: value } : v,
                       ),
                     })
                   }
                 />
                 <TextField
                   label="Notes and confirmed sizes"
+                  context={`equipment ${i + 1}`}
                   id={`equipment-notes-${i}`}
                   value={item.notes}
                   maxLength={500}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     update({
                       equipment: draft.equipment.map((v, j) =>
-                        j === i ? { ...v, notes: e.target.value } : v,
+                        j === i ? { ...v, notes: value } : v,
                       ),
                     })
                   }
@@ -466,7 +485,7 @@ export function SettingsEditor({
                     })
                   }
                 >
-                  Remove equipment
+                  Remove equipment<Hidden>{`equipment ${i + 1}`}</Hidden>
                 </Button>
               </div>
             ))}
@@ -494,32 +513,33 @@ export function SettingsEditor({
               <TextField
                 label="Plan start date"
                 id="start-date"
+                keepFilled
                 type="date"
                 value={draft.startDate}
-                onChange={(e) => update({ startDate: e.target.value })}
+                onValueChange={(value) => update({ startDate: value })}
               />
               <TextField
                 label="Introduction · weeks at 2 sets"
                 id="introduction"
+                required
                 type="number"
                 min={0}
                 max={8}
                 value={draft.introductionWeeks}
-                onChange={(e) =>
-                  update({ introductionWeeks: Number(e.target.value) })
+                onValueChange={(value) =>
+                  update({ introductionWeeks: Number(value) })
                 }
               />
             </div>
             <h2 className="section-label">Days</h2>
             <div className="schedule-editor">
               {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, i) => (
-                <SelectField
+                <ChoiceField
                   key={d}
                   label={d}
-                  id={`day-${i}`}
+                  items={dayTypes}
                   value={draft.schedule[i]}
-                  onChange={(e) => {
-                    const value = e.target.value;
+                  onValueChange={(value) => {
                     if (
                       value === "run" ||
                       value === "rest" ||
@@ -531,11 +551,7 @@ export function SettingsEditor({
                         ),
                       });
                   }}
-                >
-                  <option value="strength">Strength</option>
-                  <option value="run">Easy run</option>
-                  <option value="rest">Rest</option>
-                </SelectField>
+                />
               ))}
             </div>
             <RotationPreview draft={draft} />
@@ -545,6 +561,7 @@ export function SettingsEditor({
               exercise list and targets.
             </p>
             {draft.routines.map((routine, ri) => {
+              const where = `${routine.name.trim() || `Routine ${ri + 1}`}, routine ${ri + 1}`;
               function changeRoutine(next: typeof routine) {
                 update({
                   routines: draft.routines.map((r, i) => (i === ri ? next : r)),
@@ -557,13 +574,17 @@ export function SettingsEditor({
                   </summary>
                   <TextField
                     label="Routine name"
+                    context={`routine ${ri + 1}`}
                     id={`routine-${ri}`}
+                    maxLength={160}
+                    keepFilled
                     value={routine.name}
-                    onChange={(e) =>
-                      changeRoutine({ ...routine, name: e.target.value })
+                    onValueChange={(value) =>
+                      changeRoutine({ ...routine, name: value })
                     }
                   />
                   {routine.exercises.map((ex, ei) => {
+                    const at = `${ei + 1}. ${ex.name}, ${where}`;
                     function change(patch: Partial<typeof ex>) {
                       changeRoutine({
                         ...routine,
@@ -580,7 +601,6 @@ export function SettingsEditor({
                         <div className="row">
                           <Button
                             appearance="ghost"
-                            aria-label={`Move ${ex.name} up`}
                             disabled={ei === 0}
                             onClick={() => {
                               const next = [...routine.exercises];
@@ -588,15 +608,18 @@ export function SettingsEditor({
                               if (before) {
                                 next[ei - 1] = ex;
                                 next[ei] = before;
-                                changeRoutine({ ...routine, exercises: next });
+                                changeRoutine({
+                                  ...routine,
+                                  exercises: next,
+                                });
                               }
                             }}
                           >
                             Move up
+                            <Hidden>{at}</Hidden>
                           </Button>
                           <Button
                             appearance="ghost"
-                            aria-label={`Move ${ex.name} down`}
                             disabled={ei === routine.exercises.length - 1}
                             onClick={() => {
                               const next = [...routine.exercises];
@@ -604,83 +627,94 @@ export function SettingsEditor({
                               if (after) {
                                 next[ei + 1] = ex;
                                 next[ei] = after;
-                                changeRoutine({ ...routine, exercises: next });
+                                changeRoutine({
+                                  ...routine,
+                                  exercises: next,
+                                });
                               }
                             }}
                           >
                             Move down
+                            <Hidden>{at}</Hidden>
                           </Button>
                         </div>
                         <div className="prescription-grid">
                           <TextField
                             label="Sets"
+                            context={at}
                             id={`sets-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={8}
                             value={ex.sets}
-                            onChange={(e) =>
-                              change({ sets: Number(e.target.value) })
+                            onValueChange={(value) =>
+                              change({ sets: Number(value) })
                             }
                           />
                           <TextField
                             label="Minimum"
+                            context={at}
                             id={`min-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={600}
                             value={ex.min}
-                            onChange={(e) =>
-                              change({ min: Number(e.target.value) })
+                            onValueChange={(value) =>
+                              change({ min: Number(value) })
                             }
                           />
                           <TextField
                             label="Maximum"
+                            context={at}
                             id={`max-${ri}-${ei}`}
+                            required
                             type="number"
                             min={1}
                             max={600}
                             value={ex.max}
-                            onChange={(e) =>
-                              change({ max: Number(e.target.value) })
+                            onValueChange={(value) =>
+                              change({ max: Number(value) })
                             }
                           />
                           <TextField
                             label="Rest · seconds"
+                            context={at}
                             id={`rest-${ri}-${ei}`}
+                            required
                             type="number"
                             min={15}
                             max={600}
                             value={ex.rest}
-                            onChange={(e) =>
-                              change({ rest: Number(e.target.value) })
+                            onValueChange={(value) =>
+                              change({ rest: Number(value) })
                             }
                           />
                         </div>
-                        <SelectField
+                        <ChoiceField
                           label="Measure"
-                          id={`mode-${ri}-${ei}`}
+                          context={at}
+                          items={[
+                            { value: "reps", label: "Reps" },
+                            { value: "seconds", label: "Seconds" },
+                          ]}
                           value={ex.mode}
-                          onChange={(e) =>
+                          onValueChange={(value) =>
                             change({
-                              mode:
-                                e.target.value === "seconds"
-                                  ? "seconds"
-                                  : "reps",
+                              mode: value === "seconds" ? "seconds" : "reps",
                             })
                           }
-                        >
-                          <option value="reps">Reps</option>
-                          <option value="seconds">Seconds</option>
-                        </SelectField>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={ex.side}
-                            onChange={(e) => change({ side: e.target.checked })}
-                          />{" "}
-                          Log both sides
-                        </label>
+                        />
+                        <Checkbox
+                          label={
+                            <>
+                              Log both sides<Hidden>{at}</Hidden>
+                            </>
+                          }
+                          checked={ex.side}
+                          onCheckedChange={(side) => change({ side })}
+                        />
                         <Button
                           appearance="ghost"
                           onClick={() =>
@@ -695,17 +729,14 @@ export function SettingsEditor({
                             })
                           }
                         >
-                          Remove exercise
+                          Remove exercise<Hidden>{at}</Hidden>
                         </Button>
                       </fieldset>
                     );
                   })}
-                  <SelectField
-                    label="Add an exercise"
-                    id={`add-${ri}`}
-                    value=""
-                    onChange={(e) => {
-                      const ex = exercises.find((v) => v.id === e.target.value);
+                  <Menu
+                    onAction={(value) => {
+                      const ex = exercises.find((v) => v.id === value);
                       if (
                         ex &&
                         !routine.exercises.some((item) => item.id === ex.id)
@@ -716,22 +747,33 @@ export function SettingsEditor({
                         });
                     }}
                   >
-                    <option value="">Choose exercise</option>
-                    {exercises.map((ex) => (
-                      <option
-                        key={ex.id}
-                        value={ex.id}
-                        disabled={routine.exercises.some(
+                    <MenuTrigger className="bent-control bent-select-trigger add-exercise">
+                      Add an exercise<Hidden>{where}</Hidden>
+                    </MenuTrigger>
+                    <MenuContent
+                      className="bent-select-content"
+                      data-feedback-private
+                      data-feedback-redact
+                    >
+                      {exercises.map((ex) => {
+                        const added = routine.exercises.some(
                           (item) => item.id === ex.id,
-                        )}
-                      >
-                        {ex.name}
-                        {routine.exercises.some((item) => item.id === ex.id)
-                          ? " · already in this routine"
-                          : ""}
-                      </option>
-                    ))}
-                  </SelectField>
+                        );
+                        return (
+                          <MenuItem
+                            key={ex.id}
+                            value={ex.id}
+                            disabled={added}
+                            className="bent-select-item"
+                          >
+                            {added
+                              ? `${ex.name} · already in this routine`
+                              : ex.name}
+                          </MenuItem>
+                        );
+                      })}
+                    </MenuContent>
+                  </Menu>
                   <Button
                     appearance="ghost"
                     onClick={() =>
@@ -743,7 +785,7 @@ export function SettingsEditor({
                       })
                     }
                   >
-                    Remove routine
+                    Remove routine<Hidden>{where}</Hidden>
                   </Button>
                 </details>
               );
@@ -768,7 +810,24 @@ export function SettingsEditor({
           </>
         )}
         <div className="save-settings">
-          <Button type="submit" appearance="primary">
+          <Button
+            type="submit"
+            appearance="primary"
+            onClick={(event, details) => {
+              // People submit the form, so the browser checks its fields
+              // first. An agent's press saves here and fails with the reason.
+              if (details.source !== "agent") return;
+              event.preventDefault();
+              const invalid =
+                form.current?.querySelector<HTMLInputElement>("input:invalid");
+              if (invalid) {
+                const label = invalid.labels?.[0]?.textContent ?? "A setting";
+                throw new Error(`${label}: ${invalid.validationMessage}`);
+              }
+              const problem = save();
+              if (problem) throw new Error(problem);
+            }}
+          >
             Save settings
           </Button>
           <span role="status">

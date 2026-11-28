@@ -28,6 +28,7 @@ import {
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
+import { fits } from "../src/components/fields";
 import {
   matchKey,
   savedMealLabels,
@@ -1144,5 +1145,48 @@ describe("saved meal variant names", () => {
           if (mine !== other)
             expect(` ${other} `.includes(` ${mine} `)).toBe(false);
     }
+  });
+});
+
+describe("text field limits", () => {
+  test("dates need the ISO form and the field's range", () => {
+    expect(fits("2026-01-06", { type: "date" })).toBe(true);
+    expect(fits("06/01/2026", { type: "date" })).toBe(false);
+    expect(fits("2026-02-30x", { type: "date" })).toBe(false);
+    expect(fits("2026-11-29", { type: "date", max: "2026-11-28" })).toBe(false);
+    expect(fits("2026-02-29", { type: "date" })).toBe(false);
+    expect(fits("2028-02-29", { type: "date" })).toBe(true);
+    expect(fits("2026-04-31", { type: "date" })).toBe(false);
+    expect(fits("0000-01-01", { type: "date" })).toBe(false);
+    expect(fits("0096-02-29", { type: "date" })).toBe(true);
+    expect(fits("0099-01-01", { type: "date" })).toBe(true);
+    expect(fits("0097-02-29", { type: "date" })).toBe(false);
+    expect(fits("", { type: "date", keepFilled: true })).toBe(false);
+    expect(fits("x".repeat(160), { maxLength: 160 })).toBe(true);
+    expect(fits("x".repeat(161), { maxLength: 160 })).toBe(false);
+    expect(fits("   ", { required: true })).toBe(false);
+    expect(fits("   ", { keepFilled: true })).toBe(false);
+    expect(fits("   ", {})).toBe(true);
+    expect(fits("Updated\nGoal", {})).toBe(false);
+    expect(fits("Updated\rGoal", {})).toBe(false);
+  });
+
+  test("numbers need a finite value within range and on the step", () => {
+    expect(
+      fits("12.5", { type: "number", min: 0, max: 200, step: "any" }),
+    ).toBe(true);
+    expect(fits("abc", { type: "number" })).toBe(false);
+    expect(fits("250", { type: "number", max: 200 })).toBe(false);
+    expect(fits("2.5", { type: "number", min: 1, step: 1 })).toBe(false);
+    expect(fits("3", { type: "number", min: 1, step: 1 })).toBe(true);
+    expect(fits("", { type: "number", min: 1 })).toBe(true);
+    expect(fits("", { type: "number", min: 1, required: true })).toBe(false);
+    for (const odd of ["0x50", "+68", " 69", "69 ", "1."])
+      expect(fits(odd, { type: "number" }), odd).toBe(false);
+    expect(fits("-2", { type: "number", min: -5, step: 1 })).toBe(true);
+    expect(fits("2.5", { type: "number", min: 1 })).toBe(false);
+    expect(fits("1e2", { type: "number" })).toBe(true);
+    expect(fits("800.0000000001", { type: "number", min: 800 })).toBe(false);
+    expect(fits("0.3", { type: "number", min: 0, step: 0.1 })).toBe(true);
   });
 });

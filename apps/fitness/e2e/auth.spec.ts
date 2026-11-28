@@ -96,7 +96,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   ).toBeVisible();
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await expect(page.locator("[data-feedback-host]")).toBeAttached();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByRole("link", { name: "Edit repeating week" }).click();
   await page.getByLabel("Plan start date").fill("2026-01-05");
@@ -108,7 +108,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .getByRole("navigation")
     .getByRole("link", { name: "Week", exact: true })
     .click();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await mkdir("private/screenshots", { recursive: true });
   await page.screenshot({
@@ -125,7 +125,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     page.getByRole("heading", { name: "Strength A", exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 1 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 1 weight(,|$)/ })
     .fill("8");
   await page
     .getByRole("button", { name: "Goblet squat set 1 complete", exact: true })
@@ -133,7 +133,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("status").first()).toHaveText("Saved");
   await page.context().setOffline(true);
   await page
-    .getByRole("spinbutton", { name: "Goblet squat set 2 weight", exact: true })
+    .getByRole("spinbutton", { name: /^Goblet squat set 2 weight(,|$)/ })
     .fill("9");
   await expect(page.getByRole("status").first()).toContainText("Offline");
   await page
@@ -152,8 +152,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await page.reload();
   await expect(
     page.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await page
@@ -192,15 +191,14 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
     page.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await page.getByRole("link", { name: "Food", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "Food" }),
   ).toBeVisible();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Meal or snack").fill("Synthetic lunch");
   await page.getByLabel("Calories · kcal").fill("600");
@@ -211,7 +209,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(
     page.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Weight · kg", { exact: true }).fill("70");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
@@ -273,17 +271,18 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
     .click();
   await expect(
     pageA2.getByRole("spinbutton", {
-      name: "Goblet squat set 2 weight",
-      exact: true,
+      name: /^Goblet squat set 2 weight(,|$)/,
     }),
   ).toHaveValue("9");
   await openBodyweight(pageA2);
   await expect(
     pageA2.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
-  await pageA2.locator("#view-date").fill("2026-01-05");
+  await pageA2.getByLabel("Choose date").fill("2026-01-05");
   await expect(pageA2).toHaveURL(/date=2026-01-05/);
-  await expect(pageA2.locator("#weight-date")).toHaveValue("2026-01-05");
+  await expect(pageA2.getByLabel("Date", { exact: true })).toHaveValue(
+    "2026-01-05",
+  );
   await pageA2.getByLabel("Weight · kg", { exact: true }).fill("71");
   await pageA2.getByRole("button", { name: "Save weigh-in" }).click();
   await expect(pageA2.getByRole("status").first()).toHaveText("Saved");
@@ -291,7 +290,7 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(
     page.getByRole("heading", { level: 1, name: "Bodyweight" }),
   ).toBeVisible();
-  await page.locator("#view-date").fill("2026-01-05");
+  await page.getByLabel("Choose date").fill("2026-01-05");
   await expect(page).toHaveURL(/date=2026-01-05/);
   await page.getByLabel("Weight · kg", { exact: true }).fill("72");
   await page.getByRole("button", { name: "Save weigh-in" }).click();
@@ -325,7 +324,10 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
     "Synthetic private cloud goal",
   );
-  await page.getByLabel("Display units").selectOption("lb");
+  await page
+    .getByRole("radiogroup", { name: "Display units" })
+    .getByRole("radio", { name: "Pounds" })
+    .click();
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();
@@ -353,8 +355,11 @@ test("real accounts sync workout drafts, food and weight and isolate photos and 
   ).toBeVisible();
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByRole("link", { name: /Repeating week and routines/ }).click();
-  for (let day = 0; day < 7; day++)
-    await page.locator(`#day-${day}`).selectOption("rest");
+  for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+    await page
+      .getByRole("radiogroup", { name: day, exact: true })
+      .getByRole("radio", { name: "Rest" })
+      .click();
   await page
     .getByRole("button", { name: "Save settings", exact: true })
     .click();

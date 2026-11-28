@@ -142,11 +142,19 @@ test("an agent finds every control by name on each screen", async ({
   const screens: [string, string[]][] = [
     ["/", ["Week", "Exercises", "Food", "Progress", "Settings"]],
     ["/guides", ["Goblet squat"]],
-    ["/food", ["Add food"]],
+    ["/food", ["Add food", "Meal or snack", "Save as a regular meal"]],
     ["/progress", ["Sessions", "Bodyweight"]],
     ["/history", ["Overview"]],
     ["/body", ["Save weigh-in"]],
-    ["/settings", ["Save settings", "Export account data and photos"]],
+    [
+      "/settings",
+      [
+        "Save settings",
+        "Export account data and photos",
+        "Goal",
+        "Display units",
+      ],
+    ],
     ["/schedule", ["Save settings"]],
   ];
   for (const [path, expected] of screens) {
@@ -385,7 +393,7 @@ test("a cancelled agent call reports the steps it finished", async ({
   await page.goto("/settings");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await expect.poll(async () => (await toolNames(page)).length).toBe(3);
-  const equipment = page.getByRole("button", { name: "Remove equipment" });
+  const equipment = page.getByRole("button", { name: /^Remove equipment/ });
   const before = await equipment.count();
   await page.evaluate(() => {
     const controller = new AbortController();
@@ -472,4 +480,200 @@ test("an agent tells saved meals with the same name apart", async ({
     .filter((data) => data.kind === "meal" && data.name === "Oats");
   expect(meals.filter((data) => data.protein === 12.4)).toHaveLength(2);
   expect(meals.filter((data) => data.protein === 12.1)).toHaveLength(1);
+});
+
+test("an agent fills in and submits the food form", async ({ page }) => {
+  await page.goto("/food");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const result = await act(page, [
+    { ref: "Meal or snack", action: "setValue", args: ["Agent porridge"] },
+    { ref: "Calories · kcal", action: "setValue", args: ["320"] },
+    { ref: "Protein · g", action: "setValue", args: ["11"] },
+    { ref: "Save as a regular meal", action: "setChecked", args: [true] },
+    { ref: "Add food", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect(page.locator(".food-screen > .entries .list-row")).toContainText(
+    "Agent porridge",
+  );
+  await expect(
+    page.getByRole("button", { name: /^Add saved meal \d+: Agent porridge/ }),
+  ).toHaveCount(1);
+});
+
+test("an agent changes settings and saves them", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const result = await act(page, [
+    { ref: "Goal", action: "setValue", args: ["Agent-set goal"] },
+    { ref: "Display units", action: "setValue", args: ["Pounds"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.reload();
+  await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Agent-set goal",
+  );
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Display units" })
+      .getByRole("radio", { name: "Pounds" }),
+  ).toHaveAttribute("aria-checked", "true");
+});
+
+test("an agent edits a routine by its exercises' names and adds one", async ({
+  page,
+}) => {
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const summary of await page.locator(".routine-editor > summary").all())
+    await summary.click();
+  const names = (await snapshot(page)).map((entry) => entry.label ?? "");
+  const sets = names.filter((name) => name.startsWith("Sets ("));
+  expect(sets.length).toBeGreaterThan(6);
+  expect(new Set(sets).size).toBe(sets.length);
+  const routine = names.find((name) =>
+    /^Routine name \(routine 1\)$/.test(name),
+  );
+  expect(routine).toBeTruthy();
+  const squat = sets.find((name) =>
+    /^Sets \(\d+\. Goblet squat, .*routine 1\)$/.test(name),
+  );
+  const add = names.find((name) =>
+    /^Add an exercise \(.*routine 1\)$/.test(name),
+  );
+  const result = await act(page, [
+    { ref: squat ?? "", action: "setValue", args: ["4"] },
+    { ref: add ?? "", action: "press", args: ["Hammer curl"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const first = page.locator(".routine-editor").first();
+  await expect(first.locator("legend").last()).toContainText("Hammer curl");
+  await expect(first.getByLabel(/^Sets \(\d+\. Goblet squat/)).toHaveValue("4");
+});
+
+test("an agent can't enter a date or number the field doesn't take", async ({
+  page,
+}) => {
+  await page.goto("/body");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  for (const [ref, value] of [
+    ["Date", "06/01/2026"],
+    ["Weight", "abc"],
+  ]) {
+    const result = await act(page, [
+      { ref, action: "setValue", args: [value] },
+    ]);
+    expect(result.ok, `${ref} took ${value}`).toBe(false);
+  }
+  await page.goto("/food?date=2026-11-20");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const refused = await act(page, [
+    { ref: "Choose date", action: "setValue", args: ["2026-02-30"] },
+  ]);
+  expect(refused.ok).toBe(false);
+  await expect(page).toHaveURL(/date=2026-11-20/);
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const long = await act(page, [
+    { ref: "Goal", action: "setValue", args: ["x".repeat(161)] },
+  ]);
+  expect(long.ok).toBe(false);
+  for (const value of ["   ", "Updated\nGoal"]) {
+    const result = await act(page, [
+      { ref: "Goal", action: "setValue", args: [value] },
+    ]);
+    expect(result.ok, JSON.stringify(value)).toBe(false);
+  }
+  await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Build strength consistently",
+  );
+  const zone = await act(page, [
+    { ref: "Timezone", action: "setValue", args: ["Mars/Olympus"] },
+  ]);
+  expect(zone.ok).toBe(false);
+  const sizes = await act(page, [
+    { ref: "Dumbbell sizes", action: "setValue", args: ["wat"] },
+  ]);
+  expect(sizes.ok).toBe(false);
+});
+
+test("an agent sees why settings didn't save", async ({ page }) => {
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.locator(".routine-editor > summary").first().click();
+  const minimum = (await snapshot(page)).find((entry) =>
+    /^Minimum \(1\. Goblet squat/.test(entry.label ?? ""),
+  );
+  const range = await act(page, [
+    { ref: minimum?.ref ?? "", action: "setValue", args: ["600"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(range.ok).toBe(false);
+  expect(range.error?.step).toBe(1);
+  expect(range.error?.message).toContain("no larger than the maximum");
+
+  // A reason with no field on the page still reaches the agent.
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const many = await act(page, [
+    ...Array.from({ length: 7 }, () => ({
+      ref: "Add routine",
+      action: "press",
+    })),
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(many.ok).toBe(false);
+  expect(many.error?.message).toMatch(/8 routines/);
+});
+
+test("people's saves still check the form's own rules", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const protein = page.getByLabel(/^Daily protein/);
+  const saved = await protein.inputValue();
+  const status = page.locator(".save-settings [role=status]");
+  await protein.fill("120.5");
+  await expect(status).toHaveText("Unsaved settings");
+  await page
+    .getByRole("button", { name: "Save settings", exact: true })
+    .click();
+  await protein.press("Enter");
+  await expect(status).toHaveText("Unsaved settings");
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect(protein).toHaveValue(saved);
+
+  // An agent that saves over a person's invalid value hears which field and why.
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.locator(".routine-editor > summary").first().click();
+  await page
+    .getByLabel(/^Sets \(1\. /)
+    .first()
+    .fill("9");
+  const result = await act(page, [{ ref: "Save settings", action: "press" }]);
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toMatch(/Sets \(1\. .*: \S/);
+});
+
+test("an agent learns the equipment limit", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const existing = await page
+    .getByRole("button", { name: /^Remove equipment/ })
+    .count();
+  const result = await act(page, [
+    ...Array.from({ length: 41 - existing }, () => ({
+      ref: "Add equipment",
+      action: "press",
+    })),
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toContain("Keep up to 40 equipment items.");
 });

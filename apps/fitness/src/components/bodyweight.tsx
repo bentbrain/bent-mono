@@ -185,7 +185,6 @@ export function Bodyweight({
       >
         <TextField
           label="Date"
-          id="weight-date"
           name="date"
           type="date"
           defaultValue={date}
@@ -193,7 +192,6 @@ export function Bodyweight({
         />
         <TextField
           label={`Weight · ${settings.units}`}
-          id="bodyweight"
           name="weight"
           type="number"
           inputMode="decimal"
