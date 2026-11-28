@@ -438,7 +438,7 @@ test("an agent tells saved meals with the same name apart", async ({
 }) => {
   await page.goto("/food");
   await expect(page.locator(".sync-state")).toHaveText("Saved");
-  for (const protein of ["12", "20"]) {
+  for (const protein of ["12.1", "12.4"]) {
     await page.getByLabel("Meal or snack").fill("Oats");
     await page.getByLabel("Calories · kcal").fill("350");
     await page.getByLabel("Protein · g", { exact: true }).fill(protein);
@@ -449,18 +449,21 @@ test("an agent tells saved meals with the same name apart", async ({
   const quickAdds = (await snapshot(page)).filter((entry) =>
     entry.label?.startsWith("Add Oats"),
   );
-  expect(quickAdds).toHaveLength(2);
-  expect(new Set(quickAdds.map((entry) => entry.label)).size).toBe(2);
+  expect(quickAdds.map((entry) => entry.label?.split(", ").at(-1))).toEqual([
+    "12.1g protein",
+    "12.4g protein",
+  ]);
   const richer = quickAdds.find((entry) =>
-    entry.label?.endsWith("20g protein"),
+    entry.label?.endsWith("12.4g protein"),
   );
-  expect(richer, "the 20g variant is named by its protein").toBeTruthy();
-  const logged = page
-    .locator(".food-screen > .entries .list-row")
-    .filter({ hasText: "20g protein" });
-  await expect(logged).toHaveCount(1);
   const result = await act(page, [{ ref: richer?.ref ?? "", action: "press" }]);
   expect(result.ok, result.error?.message).toBe(true);
-  await expect(logged).toHaveCount(2);
   await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const meals = z
+    .object({ records: z.array(z.object({ data: z.looseObject({}) })) })
+    .parse(await (await page.request.get("/api/export")).json())
+    .records.map((record) => record.data)
+    .filter((data) => data.kind === "meal" && data.name === "Oats");
+  expect(meals.filter((data) => data.protein === 12.4)).toHaveLength(2);
+  expect(meals.filter((data) => data.protein === 12.1)).toHaveLength(1);
 });

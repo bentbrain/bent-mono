@@ -29,6 +29,7 @@ import { ChartCard, spokenDetail, useDismiss } from "./chart-popover";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
 import { Icon } from "./icons";
+import { variantNames } from "./meal-names";
 import { EditConflict, editStatus } from "./record-edit";
 import type { Opened } from "./record-edit";
 type Meal = Extract<Entity, { kind: "meal" }>;
@@ -159,6 +160,11 @@ export function Nutrition({
   const regulars = sync.records.flatMap((record) =>
     record.data.kind === "regular" ? [{ ...record, data: record.data }] : [],
   );
+  const variants = variantNames(regulars);
+  const variant = (id: string) => {
+    const name = variants.get(id);
+    return name ? `, ${name}` : "";
+  };
   const left = {
     calories: Math.round(settings.calories - total.calories),
     protein: Math.round(settings.protein - total.protein),
@@ -254,7 +260,7 @@ export function Nutrition({
             <li key={r.id}>
               <Button
                 className="quick-add"
-                aria-label={`Add ${r.data.name} to ${formatDate(date)}, ${foodSummary(r.data, tracked)}`}
+                aria-label={`Add ${r.data.name} to ${formatDate(date)}${variant(r.id)}`}
                 onClick={() => {
                   if (sync.put({ ...r.data, kind: "meal", date }))
                     setNotice(`Added ${r.data.name} for ${formatDate(date)}.`);
@@ -444,7 +450,7 @@ export function Nutrition({
                   </div>
                   <Button
                     appearance="ghost"
-                    aria-label={`Remove regular ${r.data.name}, ${foodSummary(r.data, tracked)}`}
+                    aria-label={`Remove regular ${r.data.name}${variant(r.id)}`}
                     onClick={() =>
                       window.confirm(`Remove ${r.data.name}?`) &&
                       sync.put(null, r.id, r.revision)

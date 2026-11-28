@@ -2013,9 +2013,7 @@ test("food steps between days, adds saved meals in one tap and compares the week
   await expect(page).toHaveURL(/\/food\?date=2026-01-06$/);
   await expect(page.locator(".food-screen > .entries")).toHaveCount(0);
   await page
-    .getByRole("button", {
-      name: "Add Synthetic oats to Tue 6 Jan 2026, 350 kcal · 12g protein",
-    })
+    .getByRole("button", { name: "Add Synthetic oats to Tue 6 Jan 2026" })
     .click();
   await expect(
     page.getByText("Added Synthetic oats for Tue 6 Jan 2026."),

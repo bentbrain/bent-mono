@@ -28,6 +28,7 @@ import {
   workoutSchema,
 } from "@bent/fitness-contracts/domain";
 import { isPublicPage } from "../src/public-pages";
+import { variantNames } from "../src/components/meal-names";
 import {
   dailyWeights,
   strengthSeries,
@@ -1060,5 +1061,42 @@ describe("public pages", () => {
     expect(isPublicPage("/")).toBe(false);
     expect(isPublicPage("/privacy-policy")).toBe(false);
     expect(isPublicPage("/settings")).toBe(false);
+  });
+});
+
+describe("saved meal variant names", () => {
+  const meal = (
+    id: string,
+    data: Partial<Parameters<typeof variantNames>[0][number]["data"]>,
+  ) => ({ id, data: { name: "Oats", calories: 350, protein: 12, ...data } });
+
+  test("a meal with a name of its own gets none", () => {
+    expect(
+      variantNames([meal("a", {}), meal("b", { name: "Toast" })]).size,
+    ).toBe(0);
+  });
+
+  test("names the exact values that differ, decimals included", () => {
+    const names = variantNames([
+      meal("a", { protein: 12.1 }),
+      meal("b", { protein: 12.4 }),
+    ]);
+    expect(names.get("a")).toBe("12.1g protein");
+    expect(names.get("b")).toBe("12.4g protein");
+  });
+
+  test("names a missing nutrient, whether or not it is tracked", () => {
+    const names = variantNames([meal("a", { carbs: 40 }), meal("b", {})]);
+    expect(names.get("a")).toBe("40g carbs");
+    expect(names.get("b")).toBe("no carbs");
+  });
+
+  test("groups names regardless of case and lists every differing field", () => {
+    const names = variantNames([
+      meal("a", {}),
+      meal("b", { name: "oats", calories: 400, protein: 20, fibre: 6 }),
+    ]);
+    expect(names.get("a")).toBe("350 kcal · 12g protein · no fibre");
+    expect(names.get("b")).toBe("400 kcal · 20g protein · 6g fibre");
   });
 });
