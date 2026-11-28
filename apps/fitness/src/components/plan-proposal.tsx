@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import { catalogueEntry } from "@bent/fitness-contracts/catalogue";
 import {
   formatDate,
@@ -79,9 +79,9 @@ export function ProposalNotice() {
         <strong>Your assistant proposed a new training plan.</strong> Your plan
         stays the same until you accept it.
       </p>
-      <Link className="bent-button bent-button--outline" to="/proposal">
+      <Button appearance="outline" render={<Link to="/proposal" />}>
         Review plan
-      </Link>
+      </Button>
     </div>
   );
 }
@@ -132,9 +132,9 @@ export function ProposalScreen() {
     return "done";
   }
   const head = (
-    <Link className="back-link" to="/">
+    <Button className="back-link" render={<Link to="/" />}>
       <Icon name="back" size={16} /> Back to week
-    </Link>
+    </Button>
   );
   if (loadError)
     return (
@@ -283,6 +283,7 @@ export function ProposalScreen() {
               <Button
                 appearance="primary"
                 disabled={busy || blocked || unsaved || !check}
+                data-agent-confirm="Replaces your routines, repeating week and planned sessions with this proposed plan"
                 onClick={() =>
                   check &&
                   void decide({
@@ -297,6 +298,7 @@ export function ProposalScreen() {
               <Button
                 appearance="outline"
                 disabled={busy}
+                data-agent-confirm="Dismisses this proposed plan"
                 onClick={() =>
                   void decide({ id: proposal.id, decision: "dismissed" })
                 }
