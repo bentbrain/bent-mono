@@ -19,18 +19,33 @@ final class SyncFlowTests: XCTestCase {
 
   // MARK: Helpers
 
-  private func seed() {
+  /// Thrown to end a flow at a failed check that the later steps depend on.
+  /// `continueAfterFailure` doesn't stop an async test, so without it each
+  /// later wait would run to its timeout and use up the time for a retry.
+  private struct FlowStopped: Error {}
+
+  /// Fails and ends the flow when `condition` is false.
+  private func require(
+    _ condition: Bool, _ message: @autoclosure () -> String, file: StaticString = #filePath, line: UInt = #line
+  ) throws {
+    guard condition else {
+      XCTFail(message(), file: file, line: line)
+      throw FlowStopped()
+    }
+  }
+
+  private func seed() throws {
     let seeder = XCUIApplication()
     seeder.launch()
     HealthSheet.seed(seeder)
-    wait(for: seeder.staticTexts["status"], label: "Seeded", timeout: 10)
+    try wait(for: seeder.staticTexts["status"], label: "Seeded", timeout: 10)
     seeder.terminate()
   }
 
-  private func wait(for element: XCUIElement, label prefix: String, timeout: TimeInterval) {
+  private func wait(for element: XCUIElement, label prefix: String, timeout: TimeInterval) throws {
     let predicate = NSPredicate(format: "label BEGINSWITH %@", prefix)
     let found = XCTWaiter.wait(for: [expectation(for: predicate, evaluatedWith: element)], timeout: timeout)
-    XCTAssertEqual(found, .completed, "Waiting for \(prefix): \(element.debugDescription)")
+    try require(found == .completed, "Waiting for \(prefix): \(element.debugDescription)")
   }
 
   private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
@@ -65,41 +80,41 @@ final class SyncFlowTests: XCTestCase {
   private func connect(_ app: XCUIApplication) async throws {
     app.launch()
     let signIn = element(app, "sign-in")
-    XCTAssertTrue(signIn.waitForExistence(timeout: 30), app.debugDescription)
+    try require(signIn.waitForExistence(timeout: 30), app.debugDescription)
     signIn.tap()
-    openHealth(app)
+    try openHealth(app)
     let email = element(app, "consent-email")
-    XCTAssertTrue(email.waitForExistence(timeout: 120), app.debugDescription)
+    try require(email.waitForExistence(timeout: 120), app.debugDescription)
     XCTAssertTrue(app.staticTexts["fitness-device+clerk_test@example.com"].exists)
     let beforeConsent = try await serverState()
     XCTAssertEqual(beforeConsent.imports, 0)
     // A relaunch while consent is pending comes back to consent.
     app.terminate()
     app.launch()
-    XCTAssertTrue(element(app, "consent-email").waitForExistence(timeout: 60), app.debugDescription)
+    try require(element(app, "consent-email").waitForExistence(timeout: 60), app.debugDescription)
     let afterRelaunch = try await serverState()
     XCTAssertEqual(afterRelaunch.imports, 0)
     element(app, "backfill-30d").tap()
     element(app, "consent-confirm").tap()
-    XCTAssertTrue(element(app, "health-allow").waitForExistence(timeout: 30))
+    try require(element(app, "health-allow").waitForExistence(timeout: 30), app.debugDescription)
     // A relaunch before the Health step returns to it, and nothing syncs.
     app.terminate()
     app.launch()
-    XCTAssertTrue(element(app, "health-allow").waitForExistence(timeout: 60), app.debugDescription)
+    try require(element(app, "health-allow").waitForExistence(timeout: 60), app.debugDescription)
     let atHealthStep = try await serverState()
     XCTAssertEqual(atHealthStep.imports, 0)
   }
 
   /// Opens Settings › Apple Health and starts connecting this iPhone.
-  private func openHealth(_ app: XCUIApplication) {
+  private func openHealth(_ app: XCUIApplication) throws {
     let settings = app.tabBars.buttons["Settings"]
-    XCTAssertTrue(settings.waitForExistence(timeout: 90), app.debugDescription)
+    try require(settings.waitForExistence(timeout: 90), app.debugDescription)
     settings.tap()
     let health = element(app, "open-health")
-    XCTAssertTrue(health.waitForExistence(timeout: 30), app.debugDescription)
+    try require(health.waitForExistence(timeout: 30), app.debugDescription)
     health.tap()
     let connect = element(app, "health-connect")
-    XCTAssertTrue(connect.waitForExistence(timeout: 30), app.debugDescription)
+    try require(connect.waitForExistence(timeout: 30), app.debugDescription)
     connect.tap()
   }
 
@@ -135,7 +150,7 @@ final class SyncFlowTests: XCTestCase {
 
   /// With Health access denied, the app reads nothing and sends nothing.
   func testDeniedHealthAccessSendsNothing() async throws {
-    seed()
+    try seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
     try await connect(app)
     requestHealth(app, .none)
@@ -161,7 +176,7 @@ final class SyncFlowTests: XCTestCase {
   /// distance is shared for every date, so the run with no distance waits
   /// until the user sends it without one.
   func testAllowedHealthAccessSyncsTheSeededHistory() async throws {
-    seed()
+    try seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
     try await connect(app)
     requestHealth(app, .all)
@@ -205,7 +220,7 @@ final class SyncFlowTests: XCTestCase {
   /// weigh-ins sync and no run is sent as 0 km: runs without a readable
   /// distance, including the one whose distance was attached later, wait.
   func testPartialHealthAccessHoldsRunsWithoutDistance() async throws {
-    seed()
+    try seed()
     let app = XCUIApplication(bundleIdentifier: Self.appId)
     try await connect(app)
     requestHealth(app, .withoutDistance)

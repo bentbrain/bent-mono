@@ -100,7 +100,8 @@ jobs:
           node scripts/native.mjs prebuild
           node scripts/native.mjs build
       # Everything the replay reads: the generated project, the build log and
-      # the derived data, without the objects, archives and bundles it never reads.
+      # the derived data, without the objects, archives and bundles it never
+      # reads, or the SDK stat caches, which each CodeQL job makes again.
       - name: Pack the production build for the CodeQL jobs
         run: |
           printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR" > "$NATIVE_BUILD_DIR/paths.txt"
@@ -108,6 +109,7 @@ jobs:
             --exclude='*.o' --exclude='*.a' --exclude='*.d' --exclude='*.dia' \
             --exclude='*.app' --exclude='*.appex' \
             --exclude='fitness-ios/app/Logs' --exclude='fitness-ios/app/CompilationCache.noindex' \
+            --exclude='fitness-ios/app/SDKStatCaches.noindex' \
             fitness-ios
           tar -cf "$RUNNER_TEMP/fitness-ios-codeql-project.tar" -C apps/fitness-ios ios
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -161,6 +163,14 @@ jobs:
           expected="$(printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR")"
           if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then
             echo "The CodeQL build was made at other paths than this job's." >&2
+            exit 1
+          fi
+          # The SDK stat caches hold file IDs from the build's runner, which
+          # differ here, so they are made again for this runner's SDK.
+          grep -h '^ClangStatCache ' "$NATIVE_BUILD_DIR/app-build.log" | sort -u |
+            while read -r _ tool sdk cache; do mkdir -p "$(dirname "$cache")" && "$tool" "$sdk" -o "$cache"; done
+          if [ -z "$(ls "$NATIVE_BUILD_DIR/app/SDKStatCaches.noindex")" ]; then
+            echo "The production build log names no SDK stat cache." >&2
             exit 1
           fi
       - name: Download verified CodeQL bundle
@@ -264,6 +274,14 @@ jobs:
           expected="$(printf '%s\n%s\n' "$GITHUB_WORKSPACE" "$NATIVE_BUILD_DIR")"
           if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then
             echo "The CodeQL build was made at other paths than this job's." >&2
+            exit 1
+          fi
+          # The SDK stat caches hold file IDs from the build's runner, which
+          # differ here, so they are made again for this runner's SDK.
+          grep -h '^ClangStatCache ' "$NATIVE_BUILD_DIR/app-build.log" | sort -u |
+            while read -r _ tool sdk cache; do mkdir -p "$(dirname "$cache")" && "$tool" "$sdk" -o "$cache"; done
+          if [ -z "$(ls "$NATIVE_BUILD_DIR/app/SDKStatCaches.noindex")" ]; then
+            echo "The production build log names no SDK stat cache." >&2
             exit 1
           fi
       - name: Download verified CodeQL bundle

@@ -362,6 +362,9 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
         "          if-no-files-found: error\n",
     ),
   );
+  assert.ok(
+    codeqlBuild.includes("--exclude='fitness-ios/app/SDKStatCaches.noindex'"),
+  );
   // The app and modules jobs replay that build's logged commands at the same paths, after init and before analysis.
   for (const name of ["codeql-swift-app", "codeql-swift-modules"]) {
     const body = job(name);
@@ -379,6 +382,14 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
       body.includes(
         'if [ "$(cat "$NATIVE_BUILD_DIR/paths.txt")" != "$expected" ]; then\n',
       ),
+      name,
+    );
+    // The SDK stat caches hold the build runner's file IDs, so each job makes them again before the replay.
+    const statCaches = body.indexOf(
+      "grep -h '^ClangStatCache ' \"$NATIVE_BUILD_DIR/app-build.log\"",
+    );
+    assert.ok(
+      statCaches > 0 && statCaches < body.indexOf("codeql-action/init@"),
       name,
     );
   }
