@@ -811,7 +811,7 @@ export function progression(
           text:
             type === "dumbbell"
               ? "Top of range reached. Add an available dumbbell size in Settings before increasing."
-              : "Top of range reached. Ask your assistant to add a heavier kettlebell to your planning profile, then accept its plan.",
+              : "Top of range reached. Keep this kettlebell and slow the lowering, or move to a harder variation, until a heavier one is in your planning profile.",
           loadKg: load,
         };
   }

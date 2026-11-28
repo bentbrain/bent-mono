@@ -426,7 +426,7 @@ export function ExerciseList({
             </h3>
             <p>{prescriptionText(p)}</p>
           </div>
-          <ExerciseHelp id={p.id} />
+          <ExerciseHelp id={p.id} prescription={p} />
         </div>
         {history && (
           <p className="previous">
