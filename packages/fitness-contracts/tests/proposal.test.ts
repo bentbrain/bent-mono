@@ -297,10 +297,22 @@ test("distinct weights never share a label", () => {
       plan(base.dumbbellsKg, { barbell: 2.500000000000001 }),
     )[0]?.to,
   ).toStartWith("barbell 2.500000000000001 kg");
-  // In lb, weights whose conversions match show their stored kg too.
+  // In lb, weights that round alike show their full pound value.
   const pounds = { ...base, units: "lb" as const, dumbbellsKg: [8] };
-  const [change] = planChanges(pounds, plan([8.000000000000002]));
-  expect(change?.from).not.toBe(change?.to);
+  expect(planChanges(pounds, plan([8.000000000000002]))[0]).toMatchObject({
+    from: "17.6369809744 lb",
+    to: "17.636980974400004 lb",
+  });
+  // Weights whose pound values match exactly show their stored kg too.
+  expect(
+    planChanges(
+      { ...pounds, dumbbellsKg: [7.5] },
+      plan([7.500000000000001]),
+    )[0],
+  ).toMatchObject({
+    from: "16.5346696635 (7.5 kg) lb",
+    to: "16.5346696635 (7.500000000000001 kg) lb",
+  });
   // Every weight step that stays the same shows no change.
   expect(planChanges({ ...base }, plan(base.dumbbellsKg, undefined))).toEqual(
     [],
