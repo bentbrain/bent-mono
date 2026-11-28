@@ -812,12 +812,27 @@ export function nutrientList(list: readonly Nutrient[]) {
 }
 /** What the day's total means for a nutrient's target: "40g left", "12g over", "8g to go". */
 export function nutrientNote(nutrient: Nutrient, grams: number, target: number) {
-  const left = Math.round(target - grams);
+  const left = target - grams;
+  // Compares exact grams and rounds only the amount shown.
+  const amount = (value: number) =>
+    value < 0.5 ? "<1g" : `${Math.round(value)}g`;
   if (nutrientInfo[nutrient].aim === "least")
     return left > 0
-      ? `${left}g to go`
+      ? `${amount(left)} to go`
       : `${nutrientInfo[nutrient].label} target reached`;
-  return left >= 0 ? `${left}g left` : `${-left}g over`;
+  if (left === 0) return "On target";
+  return left > 0 ? `${amount(left)} left` : `${amount(-left)} over`;
+}
+/**
+ * The nutrient fields a meal form shows: those tracked when it opened and
+ * those tracked now. A field stays while its form is open, so a tracking
+ * change elsewhere never drops a typed value.
+ */
+export function formNutrients(
+  openedWith: readonly Nutrient[],
+  now: readonly Nutrient[],
+) {
+  return nutrients.filter((n) => openedWith.includes(n) || now.includes(n));
 }
 /** "450 kcal · 30g protein · 40g carbs", listing the tracked nutrients the meal recorded. */
 export function foodSummary(

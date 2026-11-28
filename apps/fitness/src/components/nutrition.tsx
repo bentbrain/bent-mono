@@ -5,6 +5,7 @@ import {
   addDays,
   dateSearch,
   foodSummary,
+  formNutrients,
   formatDate,
   formatShortDate,
   mealEntryError,
@@ -48,6 +49,10 @@ export function Nutrition({
   const [error, setError] = useState("");
   const total = totals(sync.records, date);
   const tracked = trackedNutrients(settings);
+  // The form keeps the fields it opened with, so a tracking change made
+  // elsewhere while it is open never drops a typed value.
+  const [openedWith, setOpenedWith] = useState(tracked);
+  const fields = formNutrients(openedWith, tracked);
   const eaten = nutrientTotals(sync.records, date);
   const [notice, setNotice] = useState("");
   // The meal version the form opened with. Saving checks it is still current.
@@ -75,7 +80,9 @@ export function Nutrition({
     opened.current = next;
     setEditing(next);
     setChecked(undefined);
-    if (reload) setFormVersion((value) => value + 1);
+    if (!reload) return;
+    setOpenedWith(trackedNutrients(settings));
+    setFormVersion((value) => value + 1);
   }
   function savedVersion() {
     const target = opened.current;
@@ -96,7 +103,7 @@ export function Nutrition({
     const data = new FormData(element);
     // Values for nutrients the account doesn't track stay on the meal.
     const values = mealNutrientValues(source?.data ?? {});
-    for (const nutrient of tracked) {
+    for (const nutrient of fields) {
       const text = String(data.get(nutrient) ?? "").trim();
       if (text === "") delete values[nutrient];
       else values[nutrient] = Number(text);
@@ -110,7 +117,7 @@ export function Nutrition({
       ...values,
     });
     if (!result.success) {
-      setError(mealEntryError(tracked));
+      setError(mealEntryError(fields));
       return;
     }
     if (target) {
@@ -313,9 +320,9 @@ export function Nutrition({
           step="any"
           required
         />
-        {tracked.length > 0 && (
+        {fields.length > 0 && (
           <div className="food-nutrient-fields">
-            {tracked.map((nutrient) => (
+            {fields.map((nutrient) => (
               <TextField
                 key={nutrient}
                 label={`${nutrientInfo[nutrient].label} · g, optional`}

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   defaultSettings,
   foodSummary,
+  formNutrients,
   isNutrient,
   mealEntryError,
   nutrientList,
@@ -110,6 +111,13 @@ describe("nutrients", () => {
     expect(nutrientNote("fat", 82, 70)).toBe("12g over");
     expect(nutrientNote("fibre", 22, 30)).toBe("8g to go");
     expect(nutrientNote("fibre", 31, 30)).toBe("Fibre target reached");
+    expect(nutrientNote("fibre", 29.6, 30)).toBe("<1g to go");
+    expect(nutrientNote("fat", 70.4, 70)).toBe("<1g over");
+    expect(nutrientNote("fat", 69.6, 70)).toBe("<1g left");
+    expect(nutrientNote("fat", 70, 70)).toBe("On target");
+    expect(nutrientNote("carbs", 248.6, 250)).toBe("1g left");
+    expect(formNutrients(["fibre"], ["carbs"])).toEqual(["carbs", "fibre"]);
+    expect(formNutrients([], [])).toEqual([]);
     expect(foodSummary({ calories: 450.4, protein: 30, carbs: 40.2, fibre: 3 }, ["carbs", "fat"])).toBe(
       "450 kcal · 30g protein · 40g carbs",
     );
