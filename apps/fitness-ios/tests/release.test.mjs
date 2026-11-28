@@ -1963,17 +1963,20 @@ describe("the CodeQL Swift scopes", () => {
     "apps/fitness-ios/tools/health-seed/HealthSeed/Seeder.swift",
     "apps/fitness-ios/tools/health-seed/SimulatorFlows/SyncFlowTests.swift",
     "apps/fitness-ios/modules/fitness-charts/ios/ChartBody.swift",
+    "apps/fitness-ios/modules/workout-activity/ios/Module/WorkoutActivityModule.swift",
+    "apps/fitness-ios/modules/workout-activity/ios/Shared/WorkoutActivityAttributes.swift",
     "",
   ];
 
   test("split the tracked Swift into the app, the modules and the tools, with the health module's core in two", () => {
-    // The app scope is the workout-activity module with its Live Activity extension.
-    expect(swiftFilesFor("app", tracked)).toEqual([tracked[4]]);
-    // The modules scope is the health module's Core, Platform and Module, and the charts module.
-    expect(swiftFilesFor("modules", tracked)).toEqual([...tracked.slice(1, 4), tracked[8]]);
+    // The app scope is the widget extension and the workout-activity sources it shares.
+    expect(swiftFilesFor("app", tracked)).toEqual([tracked[4], tracked[10]]);
+    // The modules scope is the health module's Core, Platform and Module, the charts module,
+    // and the workout-activity module with its shared sources.
+    expect(swiftFilesFor("modules", tracked)).toEqual([...tracked.slice(1, 4), ...tracked.slice(8, 11)]);
     // The tools scope is the seeder with its UI tests and the health module's Core and Tests.
     expect(swiftFilesFor("tools", tracked)).toEqual([tracked[1], ...tracked.slice(5, 8)]);
-    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 9));
+    expect(swiftFilesFor("all", tracked)).toEqual(tracked.slice(1, 11));
     // Together the three CodeQL jobs' scopes cover every tracked Swift source.
     const covered = new Set(["app", "modules", "tools"].flatMap((scope) => swiftFilesFor(scope, tracked)));
     expect([...covered].sort()).toEqual(swiftFilesFor("all", tracked).sort());
@@ -2043,8 +2046,8 @@ describe("the CodeQL Swift scopes", () => {
     const noProject = () => {
       throw new Error("The scope read the app project.");
     };
-    const app = { log: "app-build.log", targets: ["WorkoutActivity", "WorkoutActivityExtension", "bentFitness"] };
-    const modules = { log: "app-build.log", targets: ["FitnessHealth", "FitnessCharts"] };
+    const app = { log: "app-build.log", targets: ["WorkoutActivityExtension", "bentFitness"] };
+    const modules = { log: "app-build.log", targets: ["FitnessHealth", "FitnessCharts", "WorkoutActivity"] };
     const seeder = { log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] };
     expect(replayBuilds("seeder", noProject)).toEqual([seeder]);
     expect(replayBuilds("modules", noProject)).toEqual([modules]);

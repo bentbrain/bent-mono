@@ -124,8 +124,8 @@ jobs:
           build-mode: manual
           queries: security-extended,security-and-quality
       # Traced, every process runs under Rosetta, so the trace covers Xcode's
-      # own logged compile commands for the app target, the workout-activity
-      # module and its Live Activity extension instead of a whole Xcode build.
+      # own logged compile commands for the app target and the widget
+      # extension instead of a whole Xcode build.
       - name: Compile the app's first-party Swift for extraction
         working-directory: apps/fitness-ios
         run: time node scripts/native.mjs replay-swift app
@@ -228,8 +228,8 @@ jobs:
           build-mode: manual
           queries: security-extended,security-and-quality
       # Traced, every process runs under Rosetta, so the trace covers Xcode's
-      # own logged compile commands for the fitness-health and fitness-charts
-      # modules instead of a whole Xcode build.
+      # own logged compile commands for the fitness-health, fitness-charts and
+      # workout-activity modules instead of a whole Xcode build.
       - name: Compile the modules' Swift for extraction
         working-directory: apps/fitness-ios
         run: time node scripts/native.mjs replay-swift modules

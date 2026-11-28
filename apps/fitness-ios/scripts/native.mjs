@@ -89,17 +89,17 @@ const extraSettings = (process.env.XCODEBUILD_SETTINGS ?? "").split(/\s+/).filte
 
 /**
  * The builds a replay-swift scope reads, with the targets each must show.
- * The app scope is the app target with the workout-activity module and its
- * extension, which share a source file; the modules scope is the
- * fitness-health and fitness-charts modules from the same app build; the
- * seeder scope is the seeder and its UI tests. `project` names the generated
- * app project and is read only for the app target, because the modules and
- * seeder scopes can run without it.
+ * The app scope is the app target and the widget extension; the modules scope
+ * is the fitness-health, fitness-charts and workout-activity modules from the
+ * same app build, which balances the two jobs' replay times; the seeder scope
+ * is the seeder and its UI tests. `project` names the generated app project
+ * and is read only for the app target, because the modules and seeder scopes
+ * can run without it.
  */
 export function replayBuilds(scope, project) {
   const app = [];
-  if (scope === "all" || scope === "modules") app.push("FitnessHealth", "FitnessCharts");
-  if (scope === "all" || scope === "app") app.push("WorkoutActivity", "WorkoutActivityExtension", project());
+  if (scope === "all" || scope === "modules") app.push("FitnessHealth", "FitnessCharts", "WorkoutActivity");
+  if (scope === "all" || scope === "app") app.push("WorkoutActivityExtension", project());
   const builds = app.length ? [{ log: "app-build.log", targets: app }] : [];
   if (scope === "all" || scope === "seeder") builds.push({ log: "seeder-build.log", targets: ["HealthSeed", "SimulatorFlows"] });
   return builds;

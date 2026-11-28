@@ -3,11 +3,12 @@
 // the app, modules or tools scope, or more than one, and a file in none fails
 // the check:
 //
-// - app: the workout-activity module and its Live Activity extension, and
-//   each Swift file the production app target compiles, including the ones
-//   prebuild generates.
-// - modules: the fitness-health module's Core, Platform and Module sources
-//   and the fitness-charts module.
+// - app: the widget extension's sources and the workout-activity sources it
+//   shares, and each Swift file the production app target compiles,
+//   including the ones prebuild generates.
+// - modules: the fitness-health module's Core, Platform and Module sources,
+//   the fitness-charts module, and the workout-activity module's Module and
+//   shared sources.
 // - tools: the fitness-health module's Core sources and XCTest suite, and the
 //   seeder with its UI tests.
 // - all: every scope.
@@ -27,8 +28,15 @@ const healthModule = "apps/fitness-ios/modules/fitness-health/ios";
 const chartsModule = "apps/fitness-ios/modules/fitness-charts/ios/";
 const activityModule = "apps/fitness-ios/modules/workout-activity/ios";
 const partition = {
-  app: [`${activityModule}/Module/`, `${activityModule}/Shared/`, `${activityModule}/Extension/`],
-  modules: [`${healthModule}/Core/`, `${healthModule}/Platform/`, `${healthModule}/Module/`, chartsModule],
+  app: [`${activityModule}/Shared/`, `${activityModule}/Extension/`],
+  modules: [
+    `${healthModule}/Core/`,
+    `${healthModule}/Platform/`,
+    `${healthModule}/Module/`,
+    chartsModule,
+    `${activityModule}/Module/`,
+    `${activityModule}/Shared/`,
+  ],
   tools: [`${healthModule}/Core/`, `${healthModule}/Tests/`, "apps/fitness-ios/tools/health-seed/"],
 };
 const scopes = Object.keys(partition);
