@@ -136,7 +136,7 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   assert.ok(tools.indexOf("run: node scripts/native.mjs seeder\n") < tools.indexOf("codeql-action/init@"));
   assert.ok(!tools.includes("./.github/actions/setup"));
   assert.ok(tools.includes("uses: actions/setup-node@"));
-  // The production build checks the arm64 production app, as Quality's native suite does.
+  // The production build job runs the rest of Quality's native suite on the arm64 production app.
   const production = job("production-build");
   assert.ok(production.includes("    name: Production build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
   assert.ok(production.includes("    env:\n      APP_VARIANT: production\n      XCODEBUILD_SETTINGS: ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\n"));
@@ -145,7 +145,10 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     assert.ok(positions.every(position => position > 0), runs.join());
     assert.deepEqual([...positions].sort((x, y) => x - y), positions);
   };
-  order(production, ["node scripts/native.mjs prebuild", "node scripts/native.mjs build", "node scripts/native.mjs artifact"]);
+  order(production, ["node scripts/native.mjs prebuild", "node scripts/native.mjs build", "node scripts/native.mjs artifact",
+    "node scripts/native.mjs lint", "node scripts/native.mjs core-test", "node scripts/roundtrip.mjs"]);
+  assert.ok(production.indexOf("name: Install verified SwiftLint\n") < production.indexOf("run: node scripts/native.mjs lint\n"));
+  assert.ok(production.indexOf("name: Start a temporary Postgres\n") < production.indexOf("run: node scripts/roundtrip.mjs\n"));
   // One job builds the development app and the seeder for every flow shard.
   const build = job("simulator-build");
   assert.ok(build.includes("    name: Simulator flow build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
@@ -155,35 +158,18 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
   assert.ok(build.includes("          name: fitness-ios-sim-build\n          path: ${{ runner.temp }}/fitness-ios-sim-build.tar\n          if-no-files-found: error\n"));
   const flows = job("simulator-flow");
   assert.ok(flows.includes("    name: Simulator flow (${{ matrix.label }})\n    needs: simulator-build\n    runs-on: macos-26\n    timeout-minutes: 20\n"));
-  for (const [label, flow, native] of [["denied", "testDeniedHealthAccessSendsNothing", "module"],
-    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory", "none"],
-    ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance", "none"]]) {
-    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n            native: ${native}\n`));
+  for (const [label, flow] of [["denied", "testDeniedHealthAccessSendsNothing"],
+    ["allowed", "testAllowedHealthAccessSyncsTheSeededHistory"],
+    ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance"]]) {
+    assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
   }
-  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
-  // No flow shard builds the app; each runs the flow build's app and seeder.
-  assert.ok(!/native\.mjs (prebuild|build|seeder)\n/.test(flows));
+  // Each attempt has a deadline, so a stuck first attempt leaves time for the retry within the 20-minute limit.
+  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_ATTEMPT_SECONDS: '480'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
+  // No flow shard builds the app or runs the module's checks; each runs the flow build's app and seeder.
+  assert.ok(!/native\.mjs (prebuild|build|seeder|lint|core-test)\n|roundtrip\.mjs/.test(flows));
   assert.ok(flows.includes("          name: fitness-ios-sim-build\n"));
-  // The module's checks run in the denied shard: each once, in its own named step, before the flow.
-  const steps = flows.split("\n      - ").slice(1).map(body => `${body}\n`);
-  const step = run => {
-    const found = steps.filter(body => body.includes(`run: ${run}\n`));
-    assert.equal(found.length, 1, run);
-    return found[0];
-  };
-  const unpack = steps.findIndex(body => body.startsWith("name: Unpack the built app and the seeder's test products\n"));
-  const flowStep = steps.indexOf(step('node scripts/flows.mjs --prebuilt "$FLOW"'));
-  assert.ok(unpack >= 0 && unpack < flowStep);
-  for (const run of ["node scripts/native.mjs lint", "node scripts/native.mjs core-test", "node scripts/roundtrip.mjs"]) {
-    const body = step(run);
-    assert.match(body, /^name: \S/, run);
-    assert.ok(body.includes("\n        if: matrix.native == 'module'\n"), run);
-    assert.ok(steps.indexOf(body) < flowStep, run);
-  }
-  assert.ok(step("node scripts/native.mjs lint").includes("name: Lint the Swift sources\n"));
-  assert.ok(steps.findIndex(body => body.startsWith("name: Install verified SwiftLint\n        if: matrix.native == 'module'\n")) <
-    steps.indexOf(step("node scripts/native.mjs lint")));
-  assert.ok(steps.findIndex(body => body.startsWith("name: Start a temporary Postgres\n")) < steps.indexOf(step("node scripts/roundtrip.mjs")));
+  const unpack = flows.indexOf("name: Unpack the built app and the seeder's test products\n");
+  assert.ok(unpack > 0 && unpack < flows.indexOf('node scripts/flows.mjs --prebuilt "$FLOW"'));
   const aggregate = job("verification");
   assert.ok(aggregate.includes("    name: Fitness iOS verification\n    if: always()\n"));
   assert.deepEqual(jobDependencies(aggregate), declared.filter(name => name !== "verification"));

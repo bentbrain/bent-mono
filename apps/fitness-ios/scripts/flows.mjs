@@ -14,7 +14,9 @@
 //
 // Each flow runs on a new Simulator with a fresh install, so Health access
 // starts unanswered. The Simulator, the harness and its schema are removed
-// at the end.
+// at the end. FITNESS_FLOW_ATTEMPT_SECONDS gives each attempt a deadline
+// covering the Simulator's boot, the install and the test, so a stuck
+// attempt ends in time for the retry inside a CI job's limit.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -46,10 +48,15 @@ const build = {
 
 function run(command, args, options = {}) {
   console.log(`$ ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, { stdio: "inherit", cwd: app, ...options });
+  const result = spawnSync(command, args, { stdio: "inherit", cwd: app, killSignal: "SIGKILL", ...options });
+  if (result.error?.code === "ETIMEDOUT") throw new Error(`${command} passed the attempt's deadline`);
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
+  if (result.status !== 0) throw new Error(`${command} exited with ${result.status ?? result.signal}`);
 }
+
+const attemptSeconds = Number(process.env.FITNESS_FLOW_ATTEMPT_SECONDS || 0);
+if (!Number.isFinite(attemptSeconds) || attemptSeconds < 0)
+  throw new Error("FITNESS_FLOW_ATTEMPT_SECONDS must be a number of seconds, or unset.");
 const output = (command, args) => execFileSync(command, args, { encoding: "utf8" });
 
 async function waitForHarness() {
@@ -77,21 +84,20 @@ async function post(path) {
   }
 }
 
+/** Creates a Simulator for one attempt. The attempt boots it, within its deadline. */
 function newSimulator() {
   const runtime = JSON.parse(output("xcrun", ["simctl", "list", "runtimes", "available", "-j"]))
     .runtimes.filter((r) => r.platform === "iOS")
     .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
   if (!runtime) throw new Error("No iOS Simulator runtime is installed.");
   const type = runtime.supportedDeviceTypes.filter((t) => t.productFamily === "iPhone").at(-1);
-  const udid = output("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier]).trim();
-  run("xcrun", ["simctl", "boot", udid]);
-  run("xcrun", ["simctl", "bootstatus", udid, "-b"]);
-  return udid;
+  return output("xcrun", ["simctl", "create", "Fitness flows", type.identifier, runtime.identifier]).trim();
 }
 
 function removeSimulator(udid) {
-  spawnSync("xcrun", ["simctl", "shutdown", udid], { stdio: "inherit" });
-  spawnSync("xcrun", ["simctl", "delete", udid], { stdio: "inherit" });
+  const bounded = { stdio: "inherit", timeout: 60_000, killSignal: "SIGKILL" };
+  spawnSync("xcrun", ["simctl", "shutdown", udid], bounded);
+  spawnSync("xcrun", ["simctl", "delete", udid], bounded);
 }
 
 // Build the development variant against the harness, and the seeder.
@@ -150,8 +156,13 @@ try {
   // Simulator can time out launching an app. Both attempts are logged.
   const attempt = (flow, number) => {
     const udid = newSimulator();
+    // The time left before the attempt's deadline, for each step's own limit.
+    const deadline = attemptSeconds > 0 ? Date.now() + attemptSeconds * 1000 : null;
+    const left = () => (deadline === null ? undefined : Math.max(1000, deadline - Date.now()));
     try {
-      run("xcrun", ["simctl", "install", udid, appPath]);
+      run("xcrun", ["simctl", "boot", udid], { timeout: left() });
+      run("xcrun", ["simctl", "bootstatus", udid, "-b"], { timeout: left() });
+      run("xcrun", ["simctl", "install", udid, appPath], { timeout: left() });
       const source =
         mode === "prebuilt"
           ? ["-xctestrun", testRun[0]]
@@ -168,12 +179,13 @@ try {
           `-only-testing:SimulatorFlows/SyncFlowTests/${flow}`,
           "test-without-building",
         ],
-        { cwd: seeder, env: { ...process.env, TEST_RUNNER_FITNESS_SIM_ORIGIN: origin } },
+        { cwd: seeder, env: { ...process.env, TEST_RUNNER_FITNESS_SIM_ORIGIN: origin }, timeout: left() },
       );
       return true;
     } catch (error) {
       console.error(`${flow}, attempt ${number}: ${error.message}`);
       // Keep the app's own log for the failed flow; it records codes only.
+      // Collecting it is bounded, so it leaves time for the retry.
       const log = spawnSync(
         "xcrun",
         [
@@ -189,7 +201,7 @@ try {
           "--predicate",
           'process BEGINSWITH "bentFitness"',
         ],
-        { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+        { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 60_000, killSignal: "SIGKILL" },
       );
       writeFileSync(join(buildDir, `flows-${flow}-${number}-app.log`), log.stdout ?? "");
       return false;
