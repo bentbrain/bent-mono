@@ -7,7 +7,7 @@ import { Button } from "../../ui/Button";
 import { Badge, Card, EmptyState, Screen } from "../../ui/Layout";
 import { AppText } from "../../ui/Text";
 import { cn } from "../../ui/typography";
-import { nameFor } from "../shared/exercise";
+import { guideFor, nameFor } from "../shared/exercise";
 import type { DayState } from "./logic";
 import { workoutProgress } from "./logic";
 import { useWeekNavigation } from "./navigation";
@@ -27,7 +27,7 @@ export function ExerciseHelp({ id, prescription }: { id: string; prescription?: 
       icon="info.circle"
       tone="tinted"
       size="compact"
-      accessibilityLabel={`How to do ${nameFor(id)}`}
+      accessibilityLabel={`How to do ${guideFor(id) ? nameFor(id) : (prescription?.name ?? nameFor(id))}`}
       onPress={() => navigation.navigate("ExerciseGuide", { id, prescription })}
       testID={`exercise-help-${id}`}
     />

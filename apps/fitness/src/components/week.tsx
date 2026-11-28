@@ -418,7 +418,10 @@ function DayPanel({ day }: { day: string }) {
                     )}
                   </small>
                 </span>
-                <ExerciseHelp id={exercise.id} prescription={exercise} />
+                <ExerciseHelp
+                  id={exercise.id}
+                  prescription={effectivePrescription(exercise, plan.intro)}
+                />
               </li>
             ))}
           </ol>
