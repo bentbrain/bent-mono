@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { catalogueEntry, equipmentNames } from "./catalogue";
-import { displayLoad, settingsSchema } from "./domain";
+import { defaultIncrementsKg, displayLoad, settingsSchema } from "./domain";
 import type { Settings } from "./domain";
 import { checkPlan } from "./plan";
 import type { PlanCheck } from "./plan";
@@ -206,31 +206,41 @@ const experienceNames = {
 
 export type PlanChange = { label: string; from: string; to: string };
 
+/** A weight in the account's units, rounded as the app shows weights. */
+const shownWeight = (kg: number, units: Settings["units"]) =>
+  String(displayLoad(kg, units));
+/** A weight in the account's units with every stored digit. */
+const exactWeight = (kg: number, units: Settings["units"]) =>
+  String(Number((units === "lb" ? kg * 2.2046226218 : kg).toPrecision(15)));
+
 /**
- * Weights as the owner reads them. When two lists differ but round to the
- * same text, both show more decimals so the difference stays visible.
+ * Two weight lists as the owner reads them. A weight that differs from the
+ * other list's weights but rounds to the same text as one of them shows
+ * every stored digit, so each change stays visible.
  */
 function weightTexts(
   from: readonly number[] | undefined,
   to: readonly number[] | undefined,
   units: Settings["units"],
 ) {
-  const text = (values: readonly number[] | undefined, decimals: number) =>
-    values?.length
-      ? values
-          .map((kg) => {
-            const shown = units === "lb" ? kg * 2.2046226218 : kg;
-            return decimals === 2
-              ? String(displayLoad(kg, units))
-              : String(Number(shown.toFixed(decimals)));
-          })
-          .join(", ") + ` ${units}`
-      : "None";
-  for (const decimals of [2, 3, 4, 6]) {
-    const pair = [text(from, decimals), text(to, decimals)] as const;
-    if (pair[0] !== pair[1] || decimals === 6) return pair;
-  }
-  return [text(from, 6), text(to, 6)] as const;
+  const text = (
+    values: readonly number[] | undefined,
+    other: readonly number[] | undefined,
+  ) => {
+    if (!values?.length) return "None";
+    const otherShown = new Set(other?.map((kg) => shownWeight(kg, units)));
+    return (
+      values
+        .map((kg) => {
+          const shown = shownWeight(kg, units);
+          return !other?.includes(kg) && otherShown.has(shown)
+            ? exactWeight(kg, units)
+            : shown;
+        })
+        .join(", ") + ` ${units}`
+    );
+  };
+  return [text(from, to), text(to, from)] as const;
 }
 
 const sameValues = (a: unknown, b: unknown) =>
@@ -307,23 +317,22 @@ export function planChanges(current: Settings, plan: StoredPlan): PlanChange[] {
     profile.incrementsKg !== undefined &&
     !sameValues(current.incrementsKg, profile.incrementsKg)
   ) {
-    const kinds = ["barbell", "machine", "cable"] as const;
-    const step = (
-      value: Settings["incrementsKg"],
-      kind: (typeof kinds)[number],
-    ) => (value?.[kind] === undefined ? undefined : [value[kind]]);
-    const parts = kinds.map((kind) =>
-      weightTexts(
-        step(current.incrementsKg, kind),
-        step(profile.incrementsKg, kind),
-        units,
-      ),
+    // A kind without its own step uses the step progression defaults to.
+    const before = current.incrementsKg ?? {};
+    const after = profile.incrementsKg;
+    const texts = (["barbell", "machine", "cable"] as const).map((kind) => {
+      const from = before[kind] ?? defaultIncrementsKg[kind];
+      const to = after[kind] ?? defaultIncrementsKg[kind];
+      const [fromText, toText] = weightTexts([from], [to], units);
+      const label = (own: number | undefined, text: string) =>
+        own === undefined ? `${kind} default (${text})` : `${kind} ${text}`;
+      return [label(before[kind], fromText), label(after[kind], toText)];
+    });
+    add(
+      "Weight steps",
+      texts.map(([from]) => from).join(", "),
+      texts.map(([, to]) => to).join(", "),
     );
-    const join = (index: 0 | 1) =>
-      kinds
-        .map((kind, k) => `${kind} ${parts[k]?.[index] ?? "None"}`)
-        .join(", ");
-    add("Weight steps", join(0), join(1));
   }
   return changes;
 }

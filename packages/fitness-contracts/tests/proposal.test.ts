@@ -237,8 +237,40 @@ test("plan changes list each other setting a plan changes, compared as stored", 
     { label: "Equipment", from: "Not set", to: "Dumbbells, Flat bench" },
     {
       label: "Weight steps",
-      from: "barbell None, machine None, cable None",
-      to: "barbell 2.5 kg, machine None, cable None",
+      from: "barbell default (2.5 kg), machine default (5 kg), cable default (2.5 kg)",
+      to: "barbell 2.5 kg, machine default (5 kg), cable default (2.5 kg)",
     },
   ]);
+});
+
+test("each changed weight stays visible however it rounds", () => {
+  const base = { ...current(), dumbbellsKg: [8, 10] };
+  const plan = (dumbbellsKg: number[]) =>
+    storePlan({ ...proposal, goal: base.goal, dumbbellsKg }, ids);
+  // Another weight changing too doesn't hide the one that rounds the same.
+  expect(planChanges(base, plan([8.004, 12]))).toEqual([
+    { label: "Dumbbells", from: "8, 10 kg", to: "8.004, 12 kg" },
+  ]);
+  expect(planChanges(base, plan([8.00000001, 10]))).toEqual([
+    { label: "Dumbbells", from: "8, 10 kg", to: "8.00000001, 10 kg" },
+  ]);
+  // A cleared step shows the default progression then uses.
+  const steps = storePlan(
+    {
+      ...proposal,
+      goal: base.goal,
+      dumbbellsKg: [8, 10],
+      profile: { incrementsKg: { barbell: 1 } },
+    },
+    ids,
+  );
+  expect(planChanges({ ...base, incrementsKg: { machine: 1 } }, steps)).toEqual(
+    [
+      {
+        label: "Weight steps",
+        from: "barbell default (2.5 kg), machine 1 kg, cable default (2.5 kg)",
+        to: "barbell 1 kg, machine default (5 kg), cable default (2.5 kg)",
+      },
+    ],
+  );
 });

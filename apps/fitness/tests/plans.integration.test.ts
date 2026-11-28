@@ -415,6 +415,13 @@ test.skipIf(!configured)(
 
     // Repeating the decision returns the same result; a different one is refused.
     expect(await accept(decider, made.id)).toEqual(accepted);
+    // A client that lost the reply resends the revision it reviewed.
+    expect(
+      await decideProposal(decider, made.id, {
+        status: "accepted",
+        reviewedRevision: before.revision,
+      }),
+    ).toEqual(accepted);
     expect((await settingsOf(decider))?.revision).toBe(after.revision);
     expect(dismiss(decider, made.id)).rejects.toThrow(
       new StoreRuleError("This plan proposal was accepted."),
