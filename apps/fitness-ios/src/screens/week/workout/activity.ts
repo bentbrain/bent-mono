@@ -1,4 +1,4 @@
-import { displayLoad, loadWording } from "@bent/fitness-contracts/domain";
+import { loadAmount, loadWording } from "@bent/fitness-contracts/domain";
 import type { Settings, Workout } from "@bent/fitness-contracts/domain";
 import { holdEndsAt, holdPhase, phaseTitle } from "./hold";
 import type { Hold } from "./hold";
@@ -64,7 +64,7 @@ function nextSet(workout: Workout, units: Units) {
   const target =
     p.mode === "seconds"
       ? `${set.value} s hold${each}`
-      : `${set.loadKg > 0 && loadWording(p, units).weighed ? `${displayLoad(set.loadKg, units)} ${units} × ` : ""}${p.min === p.max ? p.min : `${p.min}–${p.max}`} reps${each}`;
+      : `${set.loadKg > 0 && loadWording(p, units).weighed ? `${loadAmount(set.loadKg, p, units)} × ` : ""}${p.min === p.max ? p.min : `${p.min}–${p.max}`} reps${each}`;
   return { ei, si, name: p.name, detail: `Set ${si + 1} of ${exercise.sets.length} · ${target}` };
 }
 

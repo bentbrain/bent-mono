@@ -158,6 +158,12 @@ describe("workout Live Activity", () => {
       ),
     };
     expect(activityContent("w1", banded, null, "kg", t0)?.state.detail).not.toContain("kg");
+    // Other weighed loads say what the weight measures.
+    const barred = {
+      ...banded,
+      exercises: banded.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...e.prescription, id: "custom-squat", load: "barbell" as const } } : e)),
+    };
+    expect(activityContent("w1", barred, null, "kg", t0)?.state.detail).toContain("4 kg on the bar × ");
     expect(activityContent("w1", { ...w, finishedAt: "2026-01-05T08:00:00.000Z" }, null, "kg", t0)).toBeNull();
   });
 

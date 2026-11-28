@@ -4,6 +4,7 @@ import { Button } from "@bent/ui/sdk/button";
 import {
   exercises,
   lastExercise,
+  loadTag,
   loadWording,
   setResult,
 } from "@bent/fitness-contracts/domain";
@@ -27,7 +28,8 @@ export function prescriptionText(exercise: Exercise) {
       : exercise.side
         ? "reps each side"
         : "reps";
-  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit} · ${formatDuration(exercise.rest)} rest`;
+  const tag = loadTag(exercise);
+  return `${exercise.sets} × ${exercise.min}–${exercise.max} ${unit}${tag ? ` · ${tag}` : ""} · ${formatDuration(exercise.rest)} rest`;
 }
 
 /** How to record the exercise, in plain words. */

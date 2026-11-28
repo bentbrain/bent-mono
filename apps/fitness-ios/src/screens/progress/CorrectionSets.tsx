@@ -94,7 +94,7 @@ export function CorrectionSets({ workout, inputs }: { workout: Workout; inputs: 
               tone="plain"
               size={32}
               label={`How to do ${p.name}`}
-              onPress={() => navigation.navigate("ExerciseGuide", { id: p.id })}
+              onPress={() => navigation.navigate("ExerciseGuide", { id: p.id, prescription: p })}
             />
           ) : null}
         </View>
