@@ -34,9 +34,17 @@ final class SyncFlowTests: XCTestCase {
     }
   }
 
+  /// Launches `app`, and ends the flow when XCTest has recorded a failure,
+  /// such as a launch that timed out, even when the app finishes launching
+  /// afterwards.
+  private func launch(_ app: XCUIApplication) throws {
+    app.launch()
+    try require((testRun?.totalFailureCount ?? 0) == 0, "Launching \(app.debugDescription) failed.")
+  }
+
   private func seed() throws {
     let seeder = XCUIApplication()
-    seeder.launch()
+    try launch(seeder)
     HealthSheet.seed(seeder)
     try wait(for: seeder.staticTexts["status"], label: "Seeded", timeout: 10)
     seeder.terminate()
@@ -78,7 +86,7 @@ final class SyncFlowTests: XCTestCase {
   /// after a relaunch at the consent screen, or after a relaunch at the
   /// Health step; each relaunch returns to the step it left.
   private func connect(_ app: XCUIApplication) async throws {
-    app.launch()
+    try launch(app)
     let signIn = element(app, "sign-in")
     try require(signIn.waitForExistence(timeout: 30), app.debugDescription)
     signIn.tap()
@@ -90,7 +98,7 @@ final class SyncFlowTests: XCTestCase {
     XCTAssertEqual(beforeConsent.imports, 0)
     // A relaunch while consent is pending comes back to consent.
     app.terminate()
-    app.launch()
+    try launch(app)
     try require(element(app, "consent-email").waitForExistence(timeout: 60), app.debugDescription)
     let afterRelaunch = try await serverState()
     XCTAssertEqual(afterRelaunch.imports, 0)
@@ -99,7 +107,7 @@ final class SyncFlowTests: XCTestCase {
     try require(element(app, "health-allow").waitForExistence(timeout: 30), app.debugDescription)
     // A relaunch before the Health step returns to it, and nothing syncs.
     app.terminate()
-    app.launch()
+    try launch(app)
     try require(element(app, "health-allow").waitForExistence(timeout: 60), app.debugDescription)
     let atHealthStep = try await serverState()
     XCTAssertEqual(atHealthStep.imports, 0)
