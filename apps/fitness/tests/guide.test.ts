@@ -100,3 +100,21 @@ test("the guide offers a connection only when assistants can use it", () => {
       expect(guide).not.toContain("A person can");
     });
 });
+
+test("permissions follow what sign-in can grant, and local endpoints skip hosted apps", () => {
+  const without = assistantGuide({ resource, planning: false, targets: false });
+  expect(without).not.toContain("fitness:targets");
+  expect(without).toContain("changes food targets and proposes training plans");
+  const all = assistantGuide({ resource, planning: true, targets: true });
+  expect(all).toContain(
+    "and log and remove runs.\n- `fitness:targets`: change daily calorie",
+  );
+  expect(all).toContain("- `fitness:plan`");
+  expect(all).toContain("custom connector");
+  const local = assistantGuide({
+    resource: "http://127.0.0.1:3025/api/mcp",
+    planning: true,
+  });
+  expect(local).toContain("local development server");
+  expect(local).not.toContain("help.openai.com");
+});

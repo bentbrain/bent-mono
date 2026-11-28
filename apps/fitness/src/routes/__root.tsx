@@ -24,7 +24,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Private tracker for strength sessions, runs, food and bodyweight. Access is by invitation. AI assistants can connect to it; instructions are at /llms.txt.",
+          "Private tracker for strength sessions, runs, food and bodyweight. Access is by invitation. Instructions for AI assistants are at /llms.txt.",
       },
       { name: "theme-color", content: "#0647ff" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
