@@ -609,22 +609,24 @@ test("an agent sees why settings didn't save", async ({ page }) => {
   const minimum = (await snapshot(page)).find((entry) =>
     /^Minimum \(1\. Goblet squat/.test(entry.label ?? ""),
   );
-  const result = z
-    .object({
-      appeared: z.array(
-        z.looseObject({ component: z.string(), label: z.string().optional() }),
-      ),
-    })
-    .parse(
-      await tool(page, "act", {
-        steps: [
-          { ref: minimum?.ref ?? "", action: "setValue", args: ["600"] },
-          { ref: "Save settings", action: "press" },
-        ],
-      }),
-    );
-  const field = result.appeared.find(
-    (entry) => entry.component === "field" && entry.label === minimum?.label,
-  );
-  expect(JSON.stringify(field?.text)).toContain("no larger than the maximum");
+  const range = await act(page, [
+    { ref: minimum?.ref ?? "", action: "setValue", args: ["600"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(range.ok).toBe(false);
+  expect(range.error?.step).toBe(1);
+  expect(range.error?.message).toContain("no larger than the maximum");
+
+  // A reason with no field on the page still reaches the agent.
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const many = await act(page, [
+    ...Array.from({ length: 7 }, () => ({
+      ref: "Add routine",
+      action: "press",
+    })),
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(many.ok).toBe(false);
+  expect(many.error?.message).toMatch(/8 routines/);
 });

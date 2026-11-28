@@ -23,7 +23,7 @@ import { z } from "zod";
 import type { Sync } from "../sync";
 import { Checkbox } from "@bent/ui/sdk/field";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@ui-sdk/react/menu";
-import { ChoiceField, download, Hidden, SaveError, TextField } from "./fields";
+import { ChoiceField, download, Hidden, TextField } from "./fields";
 import { deletePhoto, listPhotos, uploadPhoto } from "../server/photos";
 import { useAccount } from "./account-context";
 function formatDumbbells(values: number[], units: Settings["units"]) {
@@ -174,6 +174,40 @@ export function SettingsEditor({
     element?.closest("details")?.setAttribute("open", "");
     element?.focus();
   }
+  /** Saves the draft, or shows and returns why it can't be saved. */
+  function save(): string | undefined {
+    const dumbbells = parseDumbbells(dumbbellText, draft.units);
+    if (!dumbbells.values) {
+      setDumbbellError(dumbbells.error);
+      showError(dumbbells.error, "dumbbells");
+      return dumbbells.error;
+    }
+    setDumbbellError("");
+    const result = settingsSchema.safeParse({
+      ...draft,
+      dumbbellsKg: dumbbells.values,
+    });
+    if (!result.success) {
+      const issue = describeIssue(result.error.issues[0], draft);
+      showError(issue.text, issue.id);
+      return issue.text;
+    }
+    if (sync.put(result.data, settingsId, originRevision)) {
+      setOriginRevision(originRevision + 1);
+      setDraft(result.data);
+      setSavedDraft(result.data);
+      setDumbbellText(
+        formatDumbbells(result.data.dumbbellsKg, result.data.units),
+      );
+      setNotice("Settings queued for saving.");
+      setError("");
+      return;
+    }
+    const problem =
+      "Settings changed on another device or need attention. Check the message at the top of the page.";
+    showError(problem);
+    return problem;
+  }
   useEffect(() => {
     void listPhotos()
       .then(setPhotos)
@@ -221,610 +255,576 @@ export function SettingsEditor({
           </ul>
         </header>
       )}
-      <SaveError.Provider
-        value={{
-          // Dumbbell sizes show their own error under the field.
-          id: errorField === "dumbbells" ? undefined : errorField,
-          message: error,
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
         }}
       >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const dumbbells = parseDumbbells(dumbbellText, draft.units);
-            if (!dumbbells.values) {
-              setDumbbellError(dumbbells.error);
-              showError(dumbbells.error, "dumbbells");
-              return;
-            }
-            setDumbbellError("");
-            const result = settingsSchema.safeParse({
-              ...draft,
-              dumbbellsKg: dumbbells.values,
-            });
-            if (!result.success) {
-              const issue = describeIssue(result.error.issues[0], draft);
-              showError(issue.text, issue.id);
-              return;
-            }
-            if (sync.put(result.data, settingsId, originRevision)) {
-              setOriginRevision(originRevision + 1);
-              setDraft(result.data);
-              setSavedDraft(result.data);
-              setDumbbellText(
-                formatDumbbells(result.data.dumbbellsKg, result.data.units),
-              );
-              setNotice("Settings queued for saving.");
-              setError("");
-            } else
-              showError(
-                "Settings changed on another device or need attention. Check the message at the top of the page.",
-              );
-          }}
-        >
-          {section === "profile" ? (
-            <>
-              <div className="card form-grid">
-                <TextField
-                  label="Goal"
-                  id="goal"
-                  value={draft.goal}
-                  onValueChange={(value) => update({ goal: value })}
-                  maxLength={160}
-                  required
-                />
-                <TextField
-                  label="Timezone"
-                  id="timezone"
-                  accepts={(value) =>
-                    settingsSchema.shape.timezone.safeParse(value).success
-                  }
-                  value={draft.timezone}
-                  onValueChange={(value) => update({ timezone: value })}
-                  required
-                  list="timezones"
-                />
-                <datalist id="timezones">
-                  {[
-                    "Australia/Brisbane",
-                    "Australia/Sydney",
-                    "Europe/London",
-                    "America/New_York",
-                    "UTC",
-                  ].map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </datalist>
-                <TextField
-                  label="Age · optional"
-                  id="age"
-                  type="number"
-                  min={16}
-                  max={120}
-                  value={draft.age ?? ""}
-                  onValueChange={(value) =>
-                    update({
-                      age: value ? Number(value) : null,
-                    })
-                  }
-                />
-                <TextField
-                  label="Height · cm, optional"
-                  id="height"
-                  type="number"
-                  min={80}
-                  max={250}
-                  value={draft.heightCm ?? ""}
-                  onValueChange={(value) =>
-                    update({
-                      heightCm: value ? Number(value) : null,
-                    })
-                  }
-                />
-                <ChoiceField
-                  label="Display units"
-                  items={[
-                    { value: "kg", label: "Kilograms" },
-                    { value: "lb", label: "Pounds" },
-                  ]}
-                  value={draft.units}
-                  onValueChange={(value) => {
-                    const units = value === "lb" ? "lb" : "kg";
-                    const parsed = parseDumbbells(dumbbellText, draft.units);
-                    if (parsed.values)
-                      setDumbbellText(formatDumbbells(parsed.values, units));
-                    update({ units });
-                  }}
-                />
-                <TextField
-                  label="Daily calorie trial · kcal"
-                  id="calories"
-                  required
-                  type="number"
-                  min={800}
-                  max={10000}
-                  value={draft.calories}
-                  onValueChange={(value) => update({ calories: Number(value) })}
-                />
-                <TextField
-                  label="Daily protein target · g"
-                  id="protein"
-                  required
-                  type="number"
-                  min={20}
-                  max={400}
-                  value={draft.protein}
-                  onValueChange={(value) => update({ protein: Number(value) })}
-                />
-              </div>
-              <h2 className="section-label">Nutrients</h2>
-              <p>
-                Track carbs, fat or fibre alongside calories and protein.
-                Targets are optional.
-              </p>
-              <div className="card nutrient-settings">
-                {nutrients.map((nutrient) => {
-                  const { label, target } = nutrientInfo[nutrient];
-                  const setting = draft.nutrients?.[nutrient];
-                  return (
-                    <div className="nutrient-setting" key={nutrient}>
-                      <Checkbox
-                        label={`Track ${label.toLowerCase()}`}
-                        checked={Boolean(setting)}
-                        onCheckedChange={(checked) =>
-                          track(
-                            nutrient,
-                            checked ? (setting?.target ?? null) : false,
-                          )
-                        }
-                      />
-                      {setting && (
-                        <TextField
-                          label={`Daily ${label.toLowerCase()} target · g, optional`}
-                          id={`${nutrient}-target`}
-                          type="number"
-                          inputMode="decimal"
-                          min={target.min}
-                          max={target.max}
-                          step="any"
-                          value={setting.target ?? ""}
-                          onValueChange={(value) =>
-                            track(nutrient, value === "" ? null : Number(value))
-                          }
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <h2 className="section-label">Your equipment</h2>
-              <p>
-                Add only the sizes you have checked. A dumbbell weight in a
-                workout is for one dumbbell.
-              </p>
+        {section === "profile" ? (
+          <>
+            <div className="card form-grid">
               <TextField
-                label={`Dumbbell sizes · ${draft.units}, comma separated`}
-                id="dumbbells"
+                label="Goal"
+                id="goal"
+                value={draft.goal}
+                onValueChange={(value) => update({ goal: value })}
+                maxLength={160}
+                required
+              />
+              <TextField
+                label="Timezone"
+                id="timezone"
                 accepts={(value) =>
-                  Boolean(parseDumbbells(value, draft.units).values)
+                  settingsSchema.shape.timezone.safeParse(value).success
                 }
-                value={dumbbellText}
-                inputMode="decimal"
-                aria-invalid={Boolean(dumbbellError)}
-                aria-describedby={dumbbellError ? "dumbbell-error" : undefined}
+                value={draft.timezone}
+                onValueChange={(value) => update({ timezone: value })}
+                required
+                list="timezones"
+              />
+              <datalist id="timezones">
+                {[
+                  "Australia/Brisbane",
+                  "Australia/Sydney",
+                  "Europe/London",
+                  "America/New_York",
+                  "UTC",
+                ].map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </datalist>
+              <TextField
+                label="Age · optional"
+                id="age"
+                type="number"
+                min={16}
+                max={120}
+                value={draft.age ?? ""}
+                onValueChange={(value) =>
+                  update({
+                    age: value ? Number(value) : null,
+                  })
+                }
+              />
+              <TextField
+                label="Height · cm, optional"
+                id="height"
+                type="number"
+                min={80}
+                max={250}
+                value={draft.heightCm ?? ""}
+                onValueChange={(value) =>
+                  update({
+                    heightCm: value ? Number(value) : null,
+                  })
+                }
+              />
+              <ChoiceField
+                label="Display units"
+                items={[
+                  { value: "kg", label: "Kilograms" },
+                  { value: "lb", label: "Pounds" },
+                ]}
+                value={draft.units}
                 onValueChange={(value) => {
-                  setDumbbellText(value);
-                  setDumbbellError("");
-                  setNotice("Unsaved settings");
+                  const units = value === "lb" ? "lb" : "kg";
+                  const parsed = parseDumbbells(dumbbellText, draft.units);
+                  if (parsed.values)
+                    setDumbbellText(formatDumbbells(parsed.values, units));
+                  update({ units });
                 }}
               />
-              {dumbbellError && (
-                <p className="field-error" role="alert" id="dumbbell-error">
-                  {dumbbellError}
-                </p>
-              )}
-              {draft.equipment.map((item, i) => (
-                <div className="equipment-editor card" key={item.id}>
+              <TextField
+                label="Daily calorie trial · kcal"
+                id="calories"
+                required
+                type="number"
+                min={800}
+                max={10000}
+                value={draft.calories}
+                onValueChange={(value) => update({ calories: Number(value) })}
+              />
+              <TextField
+                label="Daily protein target · g"
+                id="protein"
+                required
+                type="number"
+                min={20}
+                max={400}
+                value={draft.protein}
+                onValueChange={(value) => update({ protein: Number(value) })}
+              />
+            </div>
+            <h2 className="section-label">Nutrients</h2>
+            <p>
+              Track carbs, fat or fibre alongside calories and protein. Targets
+              are optional.
+            </p>
+            <div className="card nutrient-settings">
+              {nutrients.map((nutrient) => {
+                const { label, target } = nutrientInfo[nutrient];
+                const setting = draft.nutrients?.[nutrient];
+                return (
+                  <div className="nutrient-setting" key={nutrient}>
+                    <Checkbox
+                      label={`Track ${label.toLowerCase()}`}
+                      checked={Boolean(setting)}
+                      onCheckedChange={(checked) =>
+                        track(
+                          nutrient,
+                          checked ? (setting?.target ?? null) : false,
+                        )
+                      }
+                    />
+                    {setting && (
+                      <TextField
+                        label={`Daily ${label.toLowerCase()} target · g, optional`}
+                        id={`${nutrient}-target`}
+                        type="number"
+                        inputMode="decimal"
+                        min={target.min}
+                        max={target.max}
+                        step="any"
+                        value={setting.target ?? ""}
+                        onValueChange={(value) =>
+                          track(nutrient, value === "" ? null : Number(value))
+                        }
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <h2 className="section-label">Your equipment</h2>
+            <p>
+              Add only the sizes you have checked. A dumbbell weight in a
+              workout is for one dumbbell.
+            </p>
+            <TextField
+              label={`Dumbbell sizes · ${draft.units}, comma separated`}
+              id="dumbbells"
+              accepts={(value) =>
+                Boolean(parseDumbbells(value, draft.units).values)
+              }
+              value={dumbbellText}
+              inputMode="decimal"
+              aria-invalid={Boolean(dumbbellError)}
+              aria-describedby={dumbbellError ? "dumbbell-error" : undefined}
+              onValueChange={(value) => {
+                setDumbbellText(value);
+                setDumbbellError("");
+                setNotice("Unsaved settings");
+              }}
+            />
+            {dumbbellError && (
+              <p className="field-error" role="alert" id="dumbbell-error">
+                {dumbbellError}
+              </p>
+            )}
+            {draft.equipment.map((item, i) => (
+              <div className="equipment-editor card" key={item.id}>
+                <TextField
+                  label="Equipment"
+                  context={`equipment ${i + 1}`}
+                  id={`equipment-${i}`}
+                  maxLength={160}
+                  keepFilled
+                  value={item.name}
+                  onValueChange={(value) =>
+                    update({
+                      equipment: draft.equipment.map((v, j) =>
+                        j === i ? { ...v, name: value } : v,
+                      ),
+                    })
+                  }
+                />
+                <TextField
+                  label="Notes and confirmed sizes"
+                  context={`equipment ${i + 1}`}
+                  id={`equipment-notes-${i}`}
+                  value={item.notes}
+                  maxLength={500}
+                  onValueChange={(value) =>
+                    update({
+                      equipment: draft.equipment.map((v, j) =>
+                        j === i ? { ...v, notes: value } : v,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  appearance="ghost"
+                  onClick={() =>
+                    window.confirm(
+                      `Remove ${item.name} from your equipment?`,
+                    ) &&
+                    update({
+                      equipment: draft.equipment.filter((_, j) => i !== j),
+                    })
+                  }
+                >
+                  Remove equipment<Hidden>{`equipment ${i + 1}`}</Hidden>
+                </Button>
+              </div>
+            ))}
+            <Button
+              appearance="outline"
+              onClick={() =>
+                update({
+                  equipment: [
+                    ...draft.equipment,
+                    {
+                      id: crypto.randomUUID(),
+                      name: "New equipment",
+                      notes: "",
+                    },
+                  ],
+                })
+              }
+            >
+              Add equipment
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="card form-grid">
+              <TextField
+                label="Plan start date"
+                id="start-date"
+                keepFilled
+                type="date"
+                value={draft.startDate}
+                onValueChange={(value) => update({ startDate: value })}
+              />
+              <TextField
+                label="Introduction · weeks at 2 sets"
+                id="introduction"
+                required
+                type="number"
+                min={0}
+                max={8}
+                value={draft.introductionWeeks}
+                onValueChange={(value) =>
+                  update({ introductionWeeks: Number(value) })
+                }
+              />
+            </div>
+            <h2 className="section-label">Days</h2>
+            <div className="schedule-editor">
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, i) => (
+                <ChoiceField
+                  key={d}
+                  label={d}
+                  items={dayTypes}
+                  value={draft.schedule[i]}
+                  onValueChange={(value) => {
+                    if (
+                      value === "run" ||
+                      value === "rest" ||
+                      value === "strength"
+                    )
+                      update({
+                        schedule: draft.schedule.map((s, j) =>
+                          i === j ? value : s,
+                        ),
+                      });
+                  }}
+                />
+              ))}
+            </div>
+            <RotationPreview draft={draft} />
+            <h2 className="section-label">Routines</h2>
+            <p>
+              Changes apply to new workouts. Sessions already started keep their
+              exercise list and targets.
+            </p>
+            {draft.routines.map((routine, ri) => {
+              const where = `${routine.name.trim() || `Routine ${ri + 1}`}, routine ${ri + 1}`;
+              function changeRoutine(next: typeof routine) {
+                update({
+                  routines: draft.routines.map((r, i) => (i === ri ? next : r)),
+                });
+              }
+              return (
+                <details className="card routine-editor" key={routine.id}>
+                  <summary>
+                    {routine.name} · {routine.exercises.length} exercises
+                  </summary>
                   <TextField
-                    label="Equipment"
-                    context={`equipment ${i + 1}`}
-                    id={`equipment-${i}`}
+                    label="Routine name"
+                    context={`routine ${ri + 1}`}
+                    id={`routine-${ri}`}
                     maxLength={160}
                     keepFilled
-                    value={item.name}
+                    value={routine.name}
                     onValueChange={(value) =>
-                      update({
-                        equipment: draft.equipment.map((v, j) =>
-                          j === i ? { ...v, name: value } : v,
-                        ),
-                      })
+                      changeRoutine({ ...routine, name: value })
                     }
                   />
-                  <TextField
-                    label="Notes and confirmed sizes"
-                    context={`equipment ${i + 1}`}
-                    id={`equipment-notes-${i}`}
-                    value={item.notes}
-                    maxLength={500}
-                    onValueChange={(value) =>
-                      update({
-                        equipment: draft.equipment.map((v, j) =>
-                          j === i ? { ...v, notes: value } : v,
+                  {routine.exercises.map((ex, ei) => {
+                    const at = `${ei + 1}. ${ex.name}, ${where}`;
+                    function change(patch: Partial<typeof ex>) {
+                      changeRoutine({
+                        ...routine,
+                        exercises: routine.exercises.map((v, j) =>
+                          j === ei ? { ...v, ...patch } : v,
                         ),
-                      })
+                      });
                     }
-                  />
+                    return (
+                      <fieldset key={`${ex.id}:${ei}`}>
+                        <legend>
+                          {ei + 1}. {ex.name}
+                        </legend>
+                        <div className="row">
+                          <Button
+                            appearance="ghost"
+                            disabled={ei === 0}
+                            onClick={() => {
+                              const next = [...routine.exercises];
+                              const before = next[ei - 1];
+                              if (before) {
+                                next[ei - 1] = ex;
+                                next[ei] = before;
+                                changeRoutine({
+                                  ...routine,
+                                  exercises: next,
+                                });
+                              }
+                            }}
+                          >
+                            Move up
+                            <Hidden>{at}</Hidden>
+                          </Button>
+                          <Button
+                            appearance="ghost"
+                            disabled={ei === routine.exercises.length - 1}
+                            onClick={() => {
+                              const next = [...routine.exercises];
+                              const after = next[ei + 1];
+                              if (after) {
+                                next[ei + 1] = ex;
+                                next[ei] = after;
+                                changeRoutine({
+                                  ...routine,
+                                  exercises: next,
+                                });
+                              }
+                            }}
+                          >
+                            Move down
+                            <Hidden>{at}</Hidden>
+                          </Button>
+                        </div>
+                        <div className="prescription-grid">
+                          <TextField
+                            label="Sets"
+                            context={at}
+                            id={`sets-${ri}-${ei}`}
+                            required
+                            type="number"
+                            min={1}
+                            max={8}
+                            value={ex.sets}
+                            onValueChange={(value) =>
+                              change({ sets: Number(value) })
+                            }
+                          />
+                          <TextField
+                            label="Minimum"
+                            context={at}
+                            id={`min-${ri}-${ei}`}
+                            required
+                            type="number"
+                            min={1}
+                            max={600}
+                            value={ex.min}
+                            onValueChange={(value) =>
+                              change({ min: Number(value) })
+                            }
+                          />
+                          <TextField
+                            label="Maximum"
+                            context={at}
+                            id={`max-${ri}-${ei}`}
+                            required
+                            type="number"
+                            min={1}
+                            max={600}
+                            value={ex.max}
+                            onValueChange={(value) =>
+                              change({ max: Number(value) })
+                            }
+                          />
+                          <TextField
+                            label="Rest · seconds"
+                            context={at}
+                            id={`rest-${ri}-${ei}`}
+                            required
+                            type="number"
+                            min={15}
+                            max={600}
+                            value={ex.rest}
+                            onValueChange={(value) =>
+                              change({ rest: Number(value) })
+                            }
+                          />
+                        </div>
+                        <ChoiceField
+                          label="Measure"
+                          context={at}
+                          items={[
+                            { value: "reps", label: "Reps" },
+                            { value: "seconds", label: "Seconds" },
+                          ]}
+                          value={ex.mode}
+                          onValueChange={(value) =>
+                            change({
+                              mode: value === "seconds" ? "seconds" : "reps",
+                            })
+                          }
+                        />
+                        <Checkbox
+                          label={
+                            <>
+                              Log both sides<Hidden>{at}</Hidden>
+                            </>
+                          }
+                          checked={ex.side}
+                          onCheckedChange={(side) => change({ side })}
+                        />
+                        <Button
+                          appearance="ghost"
+                          onClick={() =>
+                            window.confirm(
+                              `Remove ${ex.name} from this routine?`,
+                            ) &&
+                            changeRoutine({
+                              ...routine,
+                              exercises: routine.exercises.filter(
+                                (_, i) => i !== ei,
+                              ),
+                            })
+                          }
+                        >
+                          Remove exercise<Hidden>{at}</Hidden>
+                        </Button>
+                      </fieldset>
+                    );
+                  })}
+                  <Menu
+                    onAction={(value) => {
+                      const ex = exercises.find((v) => v.id === value);
+                      if (
+                        ex &&
+                        !routine.exercises.some((item) => item.id === ex.id)
+                      )
+                        changeRoutine({
+                          ...routine,
+                          exercises: [...routine.exercises, { ...ex }],
+                        });
+                    }}
+                  >
+                    <MenuTrigger className="bent-control bent-select-trigger add-exercise">
+                      Add an exercise<Hidden>{where}</Hidden>
+                    </MenuTrigger>
+                    <MenuContent
+                      className="bent-select-content"
+                      data-feedback-private
+                      data-feedback-redact
+                    >
+                      {exercises.map((ex) => {
+                        const added = routine.exercises.some(
+                          (item) => item.id === ex.id,
+                        );
+                        return (
+                          <MenuItem
+                            key={ex.id}
+                            value={ex.id}
+                            disabled={added}
+                            className="bent-select-item"
+                          >
+                            {added
+                              ? `${ex.name} · already in this routine`
+                              : ex.name}
+                          </MenuItem>
+                        );
+                      })}
+                    </MenuContent>
+                  </Menu>
                   <Button
                     appearance="ghost"
                     onClick={() =>
                       window.confirm(
-                        `Remove ${item.name} from your equipment?`,
+                        `Remove ${routine.name}? Recorded workouts keep their original exercises.`,
                       ) &&
                       update({
-                        equipment: draft.equipment.filter((_, j) => i !== j),
+                        routines: draft.routines.filter((_, i) => i !== ri),
                       })
                     }
                   >
-                    Remove equipment<Hidden>{`equipment ${i + 1}`}</Hidden>
+                    Remove routine<Hidden>{where}</Hidden>
                   </Button>
-                </div>
-              ))}
-              <Button
-                appearance="outline"
-                onClick={() =>
-                  update({
-                    equipment: [
-                      ...draft.equipment,
-                      {
-                        id: crypto.randomUUID(),
-                        name: "New equipment",
-                        notes: "",
-                      },
-                    ],
-                  })
-                }
-              >
-                Add equipment
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="card form-grid">
-                <TextField
-                  label="Plan start date"
-                  id="start-date"
-                  keepFilled
-                  type="date"
-                  value={draft.startDate}
-                  onValueChange={(value) => update({ startDate: value })}
-                />
-                <TextField
-                  label="Introduction · weeks at 2 sets"
-                  id="introduction"
-                  required
-                  type="number"
-                  min={0}
-                  max={8}
-                  value={draft.introductionWeeks}
-                  onValueChange={(value) =>
-                    update({ introductionWeeks: Number(value) })
-                  }
-                />
-              </div>
-              <h2 className="section-label">Days</h2>
-              <div className="schedule-editor">
-                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                  (d, i) => (
-                    <ChoiceField
-                      key={d}
-                      label={d}
-                      items={dayTypes}
-                      value={draft.schedule[i]}
-                      onValueChange={(value) => {
-                        if (
-                          value === "run" ||
-                          value === "rest" ||
-                          value === "strength"
-                        )
-                          update({
-                            schedule: draft.schedule.map((s, j) =>
-                              i === j ? value : s,
-                            ),
-                          });
-                      }}
-                    />
-                  ),
-                )}
-              </div>
-              <RotationPreview draft={draft} />
-              <h2 className="section-label">Routines</h2>
-              <p>
-                Changes apply to new workouts. Sessions already started keep
-                their exercise list and targets.
-              </p>
-              {draft.routines.map((routine, ri) => {
-                const where = `${routine.name.trim() || `Routine ${ri + 1}`}, routine ${ri + 1}`;
-                function changeRoutine(next: typeof routine) {
-                  update({
-                    routines: draft.routines.map((r, i) =>
-                      i === ri ? next : r,
-                    ),
-                  });
-                }
-                return (
-                  <details className="card routine-editor" key={routine.id}>
-                    <summary>
-                      {routine.name} · {routine.exercises.length} exercises
-                    </summary>
-                    <TextField
-                      label="Routine name"
-                      context={`routine ${ri + 1}`}
-                      id={`routine-${ri}`}
-                      maxLength={160}
-                      keepFilled
-                      value={routine.name}
-                      onValueChange={(value) =>
-                        changeRoutine({ ...routine, name: value })
-                      }
-                    />
-                    {routine.exercises.map((ex, ei) => {
-                      const at = `${ei + 1}. ${ex.name}, ${where}`;
-                      function change(patch: Partial<typeof ex>) {
-                        changeRoutine({
-                          ...routine,
-                          exercises: routine.exercises.map((v, j) =>
-                            j === ei ? { ...v, ...patch } : v,
-                          ),
-                        });
-                      }
-                      return (
-                        <fieldset key={`${ex.id}:${ei}`}>
-                          <legend>
-                            {ei + 1}. {ex.name}
-                          </legend>
-                          <div className="row">
-                            <Button
-                              appearance="ghost"
-                              disabled={ei === 0}
-                              onClick={() => {
-                                const next = [...routine.exercises];
-                                const before = next[ei - 1];
-                                if (before) {
-                                  next[ei - 1] = ex;
-                                  next[ei] = before;
-                                  changeRoutine({
-                                    ...routine,
-                                    exercises: next,
-                                  });
-                                }
-                              }}
-                            >
-                              Move up
-                              <Hidden>{at}</Hidden>
-                            </Button>
-                            <Button
-                              appearance="ghost"
-                              disabled={ei === routine.exercises.length - 1}
-                              onClick={() => {
-                                const next = [...routine.exercises];
-                                const after = next[ei + 1];
-                                if (after) {
-                                  next[ei + 1] = ex;
-                                  next[ei] = after;
-                                  changeRoutine({
-                                    ...routine,
-                                    exercises: next,
-                                  });
-                                }
-                              }}
-                            >
-                              Move down
-                              <Hidden>{at}</Hidden>
-                            </Button>
-                          </div>
-                          <div className="prescription-grid">
-                            <TextField
-                              label="Sets"
-                              context={at}
-                              id={`sets-${ri}-${ei}`}
-                              required
-                              type="number"
-                              min={1}
-                              max={8}
-                              value={ex.sets}
-                              onValueChange={(value) =>
-                                change({ sets: Number(value) })
-                              }
-                            />
-                            <TextField
-                              label="Minimum"
-                              context={at}
-                              id={`min-${ri}-${ei}`}
-                              required
-                              type="number"
-                              min={1}
-                              max={600}
-                              value={ex.min}
-                              onValueChange={(value) =>
-                                change({ min: Number(value) })
-                              }
-                            />
-                            <TextField
-                              label="Maximum"
-                              context={at}
-                              id={`max-${ri}-${ei}`}
-                              required
-                              type="number"
-                              min={1}
-                              max={600}
-                              value={ex.max}
-                              onValueChange={(value) =>
-                                change({ max: Number(value) })
-                              }
-                            />
-                            <TextField
-                              label="Rest · seconds"
-                              context={at}
-                              id={`rest-${ri}-${ei}`}
-                              required
-                              type="number"
-                              min={15}
-                              max={600}
-                              value={ex.rest}
-                              onValueChange={(value) =>
-                                change({ rest: Number(value) })
-                              }
-                            />
-                          </div>
-                          <ChoiceField
-                            label="Measure"
-                            context={at}
-                            items={[
-                              { value: "reps", label: "Reps" },
-                              { value: "seconds", label: "Seconds" },
-                            ]}
-                            value={ex.mode}
-                            onValueChange={(value) =>
-                              change({
-                                mode: value === "seconds" ? "seconds" : "reps",
-                              })
-                            }
-                          />
-                          <Checkbox
-                            label={
-                              <>
-                                Log both sides<Hidden>{at}</Hidden>
-                              </>
-                            }
-                            checked={ex.side}
-                            onCheckedChange={(side) => change({ side })}
-                          />
-                          <Button
-                            appearance="ghost"
-                            onClick={() =>
-                              window.confirm(
-                                `Remove ${ex.name} from this routine?`,
-                              ) &&
-                              changeRoutine({
-                                ...routine,
-                                exercises: routine.exercises.filter(
-                                  (_, i) => i !== ei,
-                                ),
-                              })
-                            }
-                          >
-                            Remove exercise<Hidden>{at}</Hidden>
-                          </Button>
-                        </fieldset>
-                      );
-                    })}
-                    <Menu
-                      onAction={(value) => {
-                        const ex = exercises.find((v) => v.id === value);
-                        if (
-                          ex &&
-                          !routine.exercises.some((item) => item.id === ex.id)
-                        )
-                          changeRoutine({
-                            ...routine,
-                            exercises: [...routine.exercises, { ...ex }],
-                          });
-                      }}
-                    >
-                      <MenuTrigger className="bent-control bent-select-trigger add-exercise">
-                        Add an exercise<Hidden>{where}</Hidden>
-                      </MenuTrigger>
-                      <MenuContent
-                        className="bent-select-content"
-                        data-feedback-private
-                        data-feedback-redact
-                      >
-                        {exercises.map((ex) => {
-                          const added = routine.exercises.some(
-                            (item) => item.id === ex.id,
-                          );
-                          return (
-                            <MenuItem
-                              key={ex.id}
-                              value={ex.id}
-                              disabled={added}
-                              className="bent-select-item"
-                            >
-                              {added
-                                ? `${ex.name} · already in this routine`
-                                : ex.name}
-                            </MenuItem>
-                          );
-                        })}
-                      </MenuContent>
-                    </Menu>
-                    <Button
-                      appearance="ghost"
-                      onClick={() =>
-                        window.confirm(
-                          `Remove ${routine.name}? Recorded workouts keep their original exercises.`,
-                        ) &&
-                        update({
-                          routines: draft.routines.filter((_, i) => i !== ri),
-                        })
-                      }
-                    >
-                      Remove routine<Hidden>{where}</Hidden>
-                    </Button>
-                  </details>
-                );
-              })}
-              <Button
-                appearance="outline"
-                onClick={() =>
-                  update({
-                    routines: [
-                      ...draft.routines,
-                      {
-                        id: crypto.randomUUID(),
-                        name: "New routine",
-                        exercises: exercises.slice(0, 1).map((e) => ({ ...e })),
-                      },
-                    ],
-                  })
-                }
-              >
-                Add routine
-              </Button>
-            </>
-          )}
-          <div className="save-settings">
-            <Button type="submit" appearance="primary">
-              Save settings
-            </Button>
-            <span role="status">
-              {notice === "Settings queued for saving."
-                ? sync.error
-                  ? "Settings need attention. See the save error above."
-                  : sync.pending || sync.saving
-                    ? "Settings pending sync."
-                    : "Settings saved."
-                : notice}
-            </span>
-            <div
-              className="settings-error"
-              ref={summary}
-              tabIndex={-1}
-              role={error ? "alert" : undefined}
+                </details>
+              );
+            })}
+            <Button
+              appearance="outline"
+              onClick={() =>
+                update({
+                  routines: [
+                    ...draft.routines,
+                    {
+                      id: crypto.randomUUID(),
+                      name: "New routine",
+                      exercises: exercises.slice(0, 1).map((e) => ({ ...e })),
+                    },
+                  ],
+                })
+              }
             >
-              {error && <p>{error}</p>}
-              {error && errorField && (
-                <Button
-                  appearance="ghost"
-                  onClick={() => goToField(errorField)}
-                >
-                  Go to this setting
-                </Button>
-              )}
-            </div>
+              Add routine
+            </Button>
+          </>
+        )}
+        <div className="save-settings">
+          <Button
+            type="submit"
+            appearance="primary"
+            onClick={(event) => {
+              // Saving here, not on submit, lets an agent's press fail with the reason.
+              event.preventDefault();
+              const problem = save();
+              if (problem) throw new Error(problem);
+            }}
+          >
+            Save settings
+          </Button>
+          <span role="status">
+            {notice === "Settings queued for saving."
+              ? sync.error
+                ? "Settings need attention. See the save error above."
+                : sync.pending || sync.saving
+                  ? "Settings pending sync."
+                  : "Settings saved."
+              : notice}
+          </span>
+          <div
+            className="settings-error"
+            ref={summary}
+            tabIndex={-1}
+            role={error ? "alert" : undefined}
+          >
+            {error && <p>{error}</p>}
+            {error && errorField && (
+              <Button appearance="ghost" onClick={() => goToField(errorField)}>
+                Go to this setting
+              </Button>
+            )}
           </div>
-        </form>
-      </SaveError.Provider>
+        </div>
+      </form>
       {section === "profile" && (
         <>
           <h2 className="section-label">Private equipment photos</h2>
