@@ -596,4 +596,35 @@ test("an agent can't enter a date or number the field doesn't take", async ({
     { ref: "Timezone", action: "setValue", args: ["Mars/Olympus"] },
   ]);
   expect(zone.ok).toBe(false);
+  const sizes = await act(page, [
+    { ref: "Dumbbell sizes", action: "setValue", args: ["wat"] },
+  ]);
+  expect(sizes.ok).toBe(false);
+});
+
+test("an agent sees why settings didn't save", async ({ page }) => {
+  await page.goto("/schedule");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.locator(".routine-editor > summary").first().click();
+  const minimum = (await snapshot(page)).find((entry) =>
+    /^Minimum \(1\. Goblet squat/.test(entry.label ?? ""),
+  );
+  const result = z
+    .object({
+      appeared: z.array(
+        z.looseObject({ component: z.string(), label: z.string().optional() }),
+      ),
+    })
+    .parse(
+      await tool(page, "act", {
+        steps: [
+          { ref: minimum?.ref ?? "", action: "setValue", args: ["600"] },
+          { ref: "Save settings", action: "press" },
+        ],
+      }),
+    );
+  const field = result.appeared.find(
+    (entry) => entry.component === "field" && entry.label === minimum?.label,
+  );
+  expect(JSON.stringify(field?.text)).toContain("no larger than the maximum");
 });

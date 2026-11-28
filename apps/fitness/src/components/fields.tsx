@@ -1,5 +1,15 @@
-import { Field, FieldLabel, Input, Segments } from "@bent/ui/sdk/field";
+import {
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Segments,
+} from "@bent/ui/sdk/field";
+import { createContext, useContext } from "react";
 import type { ComponentProps, ReactNode } from "react";
+
+/** A form's save error and the id of the field it belongs to, shown on that field. */
+export const SaveError = createContext<{ id?: string; message?: string }>({});
 
 /** Words that tell repeated controls apart for screen readers and agents, after the visible label. */
 export function Hidden({ children }: { children: ReactNode }) {
@@ -87,6 +97,8 @@ export function TextField({
   value?: string | number;
   defaultValue?: string | number;
 }) {
+  const failed = useContext(SaveError);
+  const message = id && failed.id === id ? failed.message : undefined;
   return (
     <Field>
       {/* An explicit id, which the settings error summary moves focus to, needs the label to follow it. */}
@@ -115,6 +127,11 @@ export function TextField({
           defaultValue === undefined ? undefined : String(defaultValue)
         }
       />
+      {message && (
+        <FieldError match className="field-error">
+          {message}
+        </FieldError>
+      )}
     </Field>
   );
 }
