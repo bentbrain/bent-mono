@@ -794,9 +794,7 @@ export function nutrientTotals(records: RecordEntry[], date: string) {
       grams += value;
       recorded++;
     }
-    // Sums of decimal grams carry floating-point noise, such as
-    // 10.1 + 10.2 + 9.7 = 29.999999999999996; a thousandth of a gram is plenty.
-    return { grams: Math.round(grams * 1000) / 1000, recorded };
+    return { grams, recorded };
   };
   return {
     meals: meals.length,
@@ -813,18 +811,29 @@ export function nutrientList(list: readonly Nutrient[]) {
     : (names[0] ?? "");
 }
 /** What the day's total means for a nutrient's target: "40g left", "12g over", "8g to go". */
+/**
+ * Where a day's grams sit against a target. Sums of decimal grams carry
+ * floating-point noise, such as 10.1 + 10.2 + 9.7 = 29.999999999999996, so
+ * a difference under a millionth of a gram counts as on target.
+ */
+export function targetStatus(grams: number, target: number) {
+  const difference = grams - target;
+  if (Math.abs(difference) < 1e-6) return "on";
+  return difference < 0 ? "under" : "over";
+}
 export function nutrientNote(nutrient: Nutrient, grams: number, target: number) {
-  // Compares grams to a thousandth, past floating-point noise, and rounds
-  // only the amount shown.
-  const left = Math.round((target - grams) * 1000) / 1000;
+  const status = targetStatus(grams, target);
+  // Rounds only the amount shown.
   const amount = (value: number) =>
     value < 0.5 ? "<1g" : `${Math.round(value)}g`;
   if (nutrientInfo[nutrient].aim === "least")
-    return left > 0
-      ? `${amount(left)} to go`
+    return status === "under"
+      ? `${amount(target - grams)} to go`
       : `${nutrientInfo[nutrient].label} target reached`;
-  if (left === 0) return "On target";
-  return left > 0 ? `${amount(left)} left` : `${amount(-left)} over`;
+  if (status === "on") return "On target";
+  return status === "under"
+    ? `${amount(target - grams)} left`
+    : `${amount(grams - target)} over`;
 }
 /**
  * The nutrient fields a meal form shows: every one it has shown since it

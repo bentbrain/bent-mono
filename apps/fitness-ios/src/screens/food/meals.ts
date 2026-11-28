@@ -13,6 +13,7 @@ import {
   regularSchema,
   sameData,
   sameNutrients,
+  targetStatus,
   totals,
   trackedNutrients,
 } from "@bent/fitness-contracts/domain";
@@ -186,8 +187,9 @@ export function daySummary(records: RecordEntry[], date: string, settings: Pick<
 /** Over a most to stay under, or a least reached. */
 function nutrientTone(aim: "most" | "least", grams: number, target: number | null): "default" | "done" | "missed" {
   if (target === null) return "default";
-  if (aim === "most") return grams > target ? "missed" : "default";
-  return grams >= target ? "done" : "default";
+  const status = targetStatus(grams, target);
+  if (aim === "most") return status === "over" ? "missed" : "default";
+  return status === "under" ? "default" : "done";
 }
 
 function progress(value: number, target: number) {

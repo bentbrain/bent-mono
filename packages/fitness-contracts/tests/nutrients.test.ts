@@ -14,6 +14,7 @@ import {
   regularSchema,
   sameNutrients,
   settingsSchema,
+  targetStatus,
   totals,
   trackedNutrients,
   withNutrient,
@@ -123,7 +124,13 @@ describe("nutrients", () => {
       [10.1, 10.2, 9.7].map((grams) => record({ ...meal, date: "2026-12-05", fibre: grams })),
       "2026-12-05",
     ).fibre.grams;
-    expect(fibre).toBe(30);
+    expect(fibre).toBeCloseTo(30);
+    expect(targetStatus(fibre, 30)).toBe("on");
+    // The note and the iPhone colour share this comparison, so they agree.
+    expect(targetStatus(70.0006, 70.0008)).toBe("under");
+    expect(nutrientNote("fat", 70.0006, 70.0008)).toBe("<1g left");
+    expect(targetStatus(29.5, 30)).toBe("under");
+    expect(targetStatus(30.5, 30)).toBe("over");
     expect(nutrientNote("fibre", fibre, 30)).toBe("Fibre target reached");
     expect(nutrientNote("fibre", 29.999999999999996, 30)).toBe("Fibre target reached");
     expect(nutrientNote("fat", 70.00000000000001, 70)).toBe("On target");
