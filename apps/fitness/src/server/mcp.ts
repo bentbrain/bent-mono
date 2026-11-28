@@ -21,10 +21,7 @@ import {
   updateSavedMeal,
 } from "./agent";
 import { nutrientInfo } from "@bent/fitness-contracts/domain";
-import {
-  planProfileSchema,
-  planProposalSchema,
-} from "@bent/fitness-contracts/proposal";
+import { planProposalSchema } from "@bent/fitness-contracts/proposal";
 import { StoreRuleError } from "./store";
 import type { AgentAccess } from "./auth";
 
@@ -418,24 +415,19 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       () => run(() => getTrainingPlan(owner)),
     );
 
-    const proposal = planProposalSchema.shape;
+    // Strict, so a field this connection isn't offered fails the call
+    // instead of being dropped. The planning profile is offered once Fitness
+    // can save it.
+    const proposalInput = planProposalSchema.extend({ requestId }).strict();
     server.registerTool(
       "fitness_propose_plan",
       {
         title: "Propose a training plan",
         description:
-          "Proposes a new repeating week and routines for the user to review and accept in Fitness. Each exercise names a catalogue id from fitness_list_exercises with its sets, rep range or seconds for timed exercises, and rest. Accepting the proposal replaces the routines, the repeating week and planned sessions from that day on; workouts already recorded keep their results. A new proposal replaces one still waiting. Fails with every problem listed when the plan doesn't fit; warnings describe choices to confirm with the user.",
-        inputSchema: {
-          requestId,
-          summary: proposal.summary,
-          goal: proposal.goal,
-          schedule: proposal.schedule,
-          routines: proposal.routines,
-          dumbbellsKg: proposal.dumbbellsKg,
-          ...(planningProfileSaved()
-            ? { profile: planProfileSchema.optional() }
-            : {}),
-        },
+          "Proposes a new repeating week and routines for the user to review and accept in Fitness. Each exercise names a catalogue id from fitness_list_exercises with its sets, rep range or seconds for timed exercises, and rest. Accepting the proposal replaces the routines, the repeating week and planned sessions from that day on; workouts already recorded keep their results. goal and dumbbellsKg replace the current values; leave them out to keep them. A new proposal replaces one still waiting. Fails with every problem listed when the plan doesn't fit; warnings describe choices to confirm with the user.",
+        inputSchema: planningProfileSaved()
+          ? proposalInput
+          : proposalInput.omit({ profile: true }),
         annotations: add,
       },
       (input) => run(() => proposePlan(owner, access, input)),

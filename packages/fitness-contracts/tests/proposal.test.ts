@@ -174,3 +174,25 @@ test("a plan's profile is checked with it", () => {
     "Full body: Supported one-arm row needs flat bench, which the equipment list does not include.",
   ]);
 });
+
+test("earlier dated routines the owner changed don't block a plan", () => {
+  const base = current();
+  const routine = base.routines[0];
+  if (!routine) throw new Error("Expected a routine.");
+  const edited = {
+    ...routine,
+    exercises: routine.exercises.map((e) =>
+      e.id === "squat" ? { ...e, side: true } : e,
+    ),
+  };
+  const withHistory = settingsSchema.parse({
+    ...base,
+    dayPlans: {
+      ...base.dayPlans,
+      "2026-11-25": { type: "strength", routine: edited },
+    },
+  });
+  const check = reviewPlan(withHistory, storePlan(proposal, ids), today);
+  if (!check.ok) throw new Error(JSON.stringify(check.errors));
+  expect(check.settings.dayPlans?.["2026-11-25"]?.routine).toEqual(edited);
+});

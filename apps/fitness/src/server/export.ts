@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { recordSchema } from "@bent/fitness-contracts/domain";
 import { database } from "./db";
+import { proposalOf } from "./store";
 
 /**
- * The owner's records and photos as one `bent-fitness-v1` JSON download,
+ * The owner's records, plan proposals and photos as one `bent-fitness-v1`
+ * JSON download,
  * streamed from a single read-only snapshot.
  */
 export function exportResponse(owner: string) {
@@ -39,7 +41,17 @@ export function exportResponse(owner: string) {
                 separator = ",";
               }
             }
-            controller.enqueue(encoder.encode('],"photos":['));
+            // Plan proposals assistants made, with their status, outside the
+            // synced records.
+            const proposals =
+              await sql`SELECT id,status,plan,created_at,decided_at FROM fitness_plan_proposals WHERE owner_id=${owner} ORDER BY created_at`;
+            controller.enqueue(
+              encoder.encode(
+                '],"planProposals":' +
+                  JSON.stringify(proposals.map(proposalOf)) +
+                  ',"photos":[',
+              ),
+            );
             separator = "";
             for await (const rows of sql`SELECT id,name,content_type,bytes FROM fitness_photos WHERE owner_id=${owner} ORDER BY created_at`.cursor(
               1,

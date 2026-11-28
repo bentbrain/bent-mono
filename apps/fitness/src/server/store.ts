@@ -82,7 +82,7 @@ const proposalRow = z.object({
   created_at: z.coerce.date(),
   decided_at: z.coerce.date().nullable(),
 });
-function proposalOf(row: unknown): PlanProposalRecord {
+export function proposalOf(row: unknown): PlanProposalRecord {
   const r = proposalRow.parse(row);
   return planProposalRecordSchema.parse({
     id: r.id,

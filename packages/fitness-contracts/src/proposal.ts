@@ -129,8 +129,9 @@ export function storePlan(
 }
 
 /**
- * The settings `plan` produces from `current` on `today`, checked as a whole
- * plan. Exercises take their name, mode and sides from the catalogue.
+ * The settings `plan` produces from `current` on `today`. The proposed
+ * routines and week get the full plan checks, and the result must be valid
+ * settings. Exercises take their name, mode and sides from the catalogue.
  */
 export function reviewPlan(
   current: Settings,
@@ -165,10 +166,9 @@ export function reviewPlan(
     }),
   }));
   if (errors.length) return { ok: false, errors, warnings: [] };
-  const dayPlans = Object.fromEntries(
-    Object.entries(current.dayPlans ?? {}).filter(([date]) => date < today),
-  );
-  return checkPlan({
+  // The plan's own routines get the full plan checks. Earlier dated plans
+  // stay as the owner recorded them and only need to remain valid settings.
+  const check = checkPlan({
     ...current,
     ...plan.profile,
     ...(plan.goal === undefined ? {} : { goal: plan.goal }),
@@ -177,6 +177,23 @@ export function reviewPlan(
       : { dumbbellsKg: plan.dumbbellsKg }),
     schedule: plan.schedule,
     routines,
-    dayPlans,
+    dayPlans: {},
   });
+  if (!check.ok) return check;
+  const merged = settingsSchema.safeParse({
+    ...check.settings,
+    dayPlans: Object.fromEntries(
+      Object.entries(current.dayPlans ?? {}).filter(([date]) => date < today),
+    ),
+  });
+  if (!merged.success)
+    return {
+      ok: false,
+      errors: merged.error.issues.map((issue) => ({
+        path: issue.path.map(String).join("."),
+        message: issue.message,
+      })),
+      warnings: check.warnings,
+    };
+  return { ok: true, settings: merged.data, warnings: check.warnings };
 }

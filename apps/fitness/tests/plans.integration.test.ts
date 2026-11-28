@@ -14,6 +14,7 @@ import {
   saveRecord,
 } from "../src/server/store";
 import { setMinimumAppContractForTests } from "../src/server/contract";
+import { exportResponse } from "../src/server/export";
 import {
   addDays,
   defaultSettings,
@@ -212,6 +213,10 @@ test.skipIf(!configured)(
     const input = tools.find((t) => t.name === "fitness_propose_plan")
       ?.inputSchema.properties;
     expect(Object.keys(input ?? {})).not.toContain("profile");
+    expect(
+      tools.find((t) => t.name === "fitness_propose_plan")?.inputSchema
+        .additionalProperties,
+    ).toBe(false);
     expect(instructions()).toContain("fitness_propose_plan");
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name);
     expect(prompts).toEqual(["set_up_training"]);
@@ -439,6 +444,30 @@ test.skipIf(!configured)("dismissing a proposal keeps the plan", async () => {
   expect(dismissed.status).toBe("dismissed");
   expect(await settingsOf(dismisser)).toEqual(before);
   expect(await pendingProposal(dismisser)).toBeNull();
+
+  // Another account can't read or decide this account's proposals.
+  const stranger = await connect(planner);
+  expect(
+    await stranger.failure("fitness_get_plan_proposal", {
+      id: second.proposal.id,
+    }),
+  ).toBe("No plan proposal has this ID.");
+  expect(
+    decideProposal(planner, second.proposal.id, "accepted"),
+  ).rejects.toThrow(
+    new StoreRuleError("This plan proposal is no longer available."),
+  );
+
+  // The account export includes its proposals with their status.
+  const exported = (await exportResponse(dismisser).json()) as {
+    planProposals: { id: string; status: string }[];
+  };
+  expect(
+    exported.planProposals.map(({ id, status }) => ({ id, status })),
+  ).toEqual([
+    { id: first.proposal.id, status: "replaced" },
+    { id: second.proposal.id, status: "dismissed" },
+  ]);
 });
 
 test.skipIf(!configured)(
@@ -453,16 +482,16 @@ test.skipIf(!configured)(
         limitations: "Sore left shoulder overhead.",
       },
     };
-    // Below contract 3 the tool doesn't offer a profile, so a profile sent
-    // anyway is left out of the proposal.
+    // Below contract 3 the tool doesn't offer a profile and refuses one sent
+    // anyway, so an assistant never reports a profile Fitness didn't keep.
     const early = await connect(profiler);
-    const without = await early.call(
-      "fitness_propose_plan",
-      { requestId: key(), ...withProfile },
-      proposed,
-    );
-    expect((await pendingProposal(profiler))?.plan.profile).toBeUndefined();
-    await decideProposal(profiler, without.proposal.id, "dismissed");
+    expect(
+      await early.failure("fitness_propose_plan", {
+        requestId: key(),
+        ...withProfile,
+      }),
+    ).toContain("profile");
+    expect(await pendingProposal(profiler)).toBeNull();
 
     setMinimumAppContractForTests(3);
     const { call } = await connect(profiler);

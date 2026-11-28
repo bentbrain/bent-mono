@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@bent/ui/button";
-import { catalogueEntry } from "@bent/fitness-contracts/catalogue";
 import {
+  catalogueEntry,
+  equipmentNames,
+} from "@bent/fitness-contracts/catalogue";
+import {
+  displayLoad,
   formatDate,
   localDate,
   sessionMinutes,
 } from "@bent/fitness-contracts/domain";
-import type { Exercise } from "@bent/fitness-contracts/domain";
+import type { Exercise, Settings } from "@bent/fitness-contracts/domain";
 import type { StoredPlan } from "@bent/fitness-contracts/proposal";
 import { decidePlanProposal, planProposal } from "../server/proposals";
 import { useAccount } from "./account-context";
@@ -45,6 +49,82 @@ function usePendingProposal() {
     };
   }, []);
   return { review, error };
+}
+
+const experienceNames = {
+  new: "New to training",
+  returning: "Returning to training",
+  experienced: "Experienced",
+} as const;
+
+/**
+ * The settings besides the week and routines that accepting `plan` changes,
+ * as they read now and after, so the owner sees every change before
+ * accepting it.
+ */
+function otherChanges(plan: StoredPlan, settings: Settings) {
+  const units = settings.units;
+  const weights = (values: number[] | undefined) =>
+    values?.length
+      ? values.map((kg) => `${displayLoad(kg, units)}`).join(", ") + ` ${units}`
+      : "None";
+  const profile = plan.profile ?? {};
+  const changes: { label: string; from: string; to: string }[] = [];
+  const add = (label: string, from: string, to: string) => {
+    if (from !== to) changes.push({ label, from, to });
+  };
+  if (plan.goal !== undefined) add("Goal", settings.goal, plan.goal);
+  if (plan.dumbbellsKg !== undefined)
+    add("Dumbbells", weights(settings.dumbbellsKg), weights(plan.dumbbellsKg));
+  if (profile.experience !== undefined)
+    add(
+      "Experience",
+      settings.experience ? experienceNames[settings.experience] : "Not set",
+      experienceNames[profile.experience],
+    );
+  if (profile.sessionMinutes !== undefined)
+    add(
+      "Session length",
+      settings.sessionMinutes ? `${settings.sessionMinutes} min` : "Not set",
+      `${profile.sessionMinutes} min`,
+    );
+  if (profile.limitations !== undefined)
+    add(
+      "Injuries and limits",
+      settings.limitations || "None",
+      profile.limitations || "None",
+    );
+  if (profile.availableEquipment !== undefined) {
+    const names = (items: Settings["availableEquipment"]) =>
+      items?.length
+        ? items.map((item) => equipmentNames[item]).join(", ")
+        : "None";
+    add(
+      "Equipment",
+      settings.availableEquipment
+        ? names(settings.availableEquipment)
+        : "Not set",
+      names(profile.availableEquipment),
+    );
+  }
+  if (profile.kettlebellsKg !== undefined)
+    add(
+      "Kettlebells",
+      weights(settings.kettlebellsKg),
+      weights(profile.kettlebellsKg),
+    );
+  if (profile.incrementsKg !== undefined) {
+    const steps = (value: Settings["incrementsKg"]) =>
+      Object.entries(value ?? {})
+        .map(([kind, kg]) => `${kind} ${displayLoad(kg, units)} ${units}`)
+        .join(", ") || "Not set";
+    add(
+      "Weight steps",
+      steps(settings.incrementsKg),
+      steps(profile.incrementsKg),
+    );
+  }
+  return changes;
 }
 
 /** Exercises as the plan records them, with names and modes from the catalogue. */
@@ -94,19 +174,22 @@ export function ProposalScreen() {
   async function decide(id: string, decision: "accepted" | "dismissed") {
     setBusy(true);
     setError("");
+    const message = await settle(id, decision);
+    setBusy(false);
+    if (message) setError(message);
+    else await navigate({ to: "/" });
+  }
+  /** Records the decision and reloads the plan; returns a message on failure. */
+  async function settle(id: string, decision: "accepted" | "dismissed") {
     try {
       const result = await decidePlanProposal({ data: { id, decision } });
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      if (decision === "accepted") await sync.retry();
-      await navigate({ to: "/" });
+      if (result.error) return result.error;
     } catch {
-      setError("This change was not saved. Check your connection and retry.");
-    } finally {
-      setBusy(false);
+      return "Fitness couldn't confirm this change. Reload to see whether your plan changed.";
     }
+    if (decision === "accepted" && !(await sync.retry()))
+      return "Your new plan is saved. Reload to see it.";
+    return "";
   }
   const head = (
     <Link className="back-link" to="/">
@@ -137,6 +220,7 @@ export function ProposalScreen() {
   const { plan } = proposal;
   const blocked = !check?.ok;
   const unsaved = sync.pending > 0;
+  const changes = otherChanges(plan, settings);
   return (
     <section
       className="proposal-screen"
@@ -196,6 +280,22 @@ export function ProposalScreen() {
           </section>
         );
       })}
+      {changes.length > 0 && (
+        <div className="proposal-changes card">
+          <h2>Also changes</h2>
+          <dl>
+            {changes.map((change) => (
+              <div key={change.label}>
+                <dt>{change.label}</dt>
+                <dd>
+                  {change.to}
+                  <span>Now: {change.from}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
       {check && check.warnings.length > 0 && (
         <div className="proposal-warnings card">
           <h2>Worth checking</h2>
