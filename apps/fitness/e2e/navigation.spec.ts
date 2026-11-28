@@ -2329,8 +2329,8 @@ test("reorganise closes when the week changes and scrolls while dragging by touc
   isMobile,
 }) => {
   const monday = addDays(mondayOf(localDate("UTC")), 7);
-  await page.locator("#view-date").fill(monday);
-  await page.locator("#view-date").fill(addDays(monday, 14));
+  await page.getByLabel("Choose date").fill(monday);
+  await page.getByLabel("Choose date").fill(addDays(monday, 14));
   await page
     .getByRole("button", { name: "Reorganise week", exact: true })
     .click();
@@ -2481,7 +2481,9 @@ test("reorganise keeps long sessions steady, ignores a release outside the list 
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
-  await page.locator("#view-date").fill(addDays(mondayOf(localDate("UTC")), 7));
+  await page
+    .getByLabel("Choose date")
+    .fill(addDays(mondayOf(localDate("UTC")), 7));
   const panel = page.getByRole("dialog", { name: "Reorganise week" });
   const rows = panel.getByRole("listitem");
   const center = async (target: Locator) => {
