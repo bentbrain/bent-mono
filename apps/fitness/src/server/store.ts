@@ -17,6 +17,15 @@ import type {
   SaveResult,
   Workout,
 } from "@bent/fitness-contracts/domain";
+import {
+  planProposalRecordSchema,
+  proposalStatuses,
+  reviewPlan,
+} from "@bent/fitness-contracts/proposal";
+import type {
+  PlanProposalRecord,
+  StoredPlan,
+} from "@bent/fitness-contracts/proposal";
 import { z } from "zod";
 import type { Sql, TransactionSql } from "postgres";
 const rowSchema = z.object({
@@ -58,7 +67,117 @@ export type AccountChange = {
   records(): Promise<RecordEntry[]>;
   /** Saves a change, or throws BatchConflict to roll back the request. */
   save(input: Mutation): Promise<RecordEntry | null>;
+  proposals: PlanProposals;
 };
+/** The account's plan proposals within an open transaction. */
+type PlanProposals = {
+  get(id: string): Promise<PlanProposalRecord | null>;
+  /** Records `plan` as the pending proposal, replacing any earlier one. */
+  propose(plan: StoredPlan): Promise<PlanProposalRecord>;
+};
+const proposalRow = z.object({
+  id: z.string(),
+  status: z.enum(proposalStatuses),
+  plan: z.unknown(),
+  created_at: z.coerce.date(),
+  decided_at: z.coerce.date().nullable(),
+});
+function proposalOf(row: unknown): PlanProposalRecord {
+  const r = proposalRow.parse(row);
+  return planProposalRecordSchema.parse({
+    id: r.id,
+    status: r.status,
+    plan: r.plan,
+    createdAt: r.created_at.toISOString(),
+    decidedAt: r.decided_at?.toISOString() ?? null,
+  });
+}
+const proposalColumns = (sql: Sql | TransactionSql) =>
+  sql`id, status, plan, created_at, decided_at`;
+function planProposals(sql: TransactionSql, owner: string): PlanProposals {
+  return {
+    async get(id) {
+      const [row] =
+        await sql`SELECT ${proposalColumns(sql)} FROM fitness_plan_proposals WHERE owner_id=${owner} AND id=${id}`;
+      return row ? proposalOf(row) : null;
+    },
+    async propose(plan) {
+      await sql`UPDATE fitness_plan_proposals SET status='replaced', decided_at=now() WHERE owner_id=${owner} AND status='pending'`;
+      const [row] =
+        await sql`INSERT INTO fitness_plan_proposals(owner_id,id,plan) VALUES(${owner},${crypto.randomUUID()},${sql.json(plan)}) RETURNING ${proposalColumns(sql)}`;
+      return proposalOf(row);
+    },
+  };
+}
+/** The account's pending plan proposal, if any. */
+export async function pendingProposal(owner: string) {
+  const sql = database();
+  const [row] =
+    await sql`SELECT ${proposalColumns(sql)} FROM fitness_plan_proposals WHERE owner_id=${owner} AND status='pending'`;
+  return row ? proposalOf(row) : null;
+}
+/** One of the account's plan proposals, by id. */
+export async function proposalById(owner: string, id: string) {
+  const sql = database();
+  const [row] =
+    await sql`SELECT ${proposalColumns(sql)} FROM fitness_plan_proposals WHERE owner_id=${owner} AND id=${id}`;
+  return row ? proposalOf(row) : null;
+}
+const decisionNames = {
+  accepted: "accepted",
+  dismissed: "dismissed",
+  replaced: "replaced by a newer proposal",
+} as const;
+/**
+ * Accepts or dismisses a pending proposal. Accepting checks the plan against
+ * the settings as they are now and saves them in the same transaction.
+ * Repeating a decision already made returns the same result.
+ */
+export async function decideProposal(
+  owner: string,
+  id: string,
+  decision: "accepted" | "dismissed",
+): Promise<PlanProposalRecord> {
+  return database().begin(async (sql) => {
+    await lockAccount(sql, owner);
+    const proposal = await planProposals(sql, owner).get(id);
+    if (!proposal)
+      throw new StoreRuleError("This plan proposal is no longer available.");
+    if (proposal.status === decision) return proposal;
+    if (proposal.status !== "pending")
+      throw new StoreRuleError(
+        `This plan proposal was ${decisionNames[proposal.status]}.`,
+      );
+    if (decision === "accepted") {
+      const [row] =
+        await sql`SELECT id,revision,data,updated_at FROM fitness_records WHERE owner_id=${owner} AND id=${settingsId} AND deleted=false`;
+      const record = row ? entry(row) : null;
+      if (record?.data.kind !== "settings")
+        throw new StoreRuleError("Set up Fitness before accepting a plan.");
+      const settings = record.data;
+      const check = reviewPlan(
+        settings,
+        proposal.plan,
+        localDate(settings.timezone),
+      );
+      if (!check.ok)
+        throw new StoreRuleError(
+          `This plan no longer fits your account: ${check.errors.map((e) => e.message).join(" ")}`,
+        );
+      const saved = await saveWithin(sql, owner, {
+        operationId: crypto.randomUUID(),
+        id: settingsId,
+        revision: record.revision,
+        data: check.settings,
+      });
+      if (saved.status === "conflict")
+        throw new StoreRuleError("Your settings changed. Try again.");
+    }
+    const [row] =
+      await sql`UPDATE fitness_plan_proposals SET status=${decision}, decided_at=now() WHERE owner_id=${owner} AND id=${id} RETURNING ${proposalColumns(sql)}`;
+    return proposalOf(row);
+  });
+}
 /**
  * An Apple Health sample and the record it became, or matched when one
  * already existed. `date` and `revision` are the record's when they were
@@ -90,6 +209,7 @@ export type HealthChange = AccountChange & {
 };
 function accountChange(sql: TransactionSql, owner: string): AccountChange {
   return {
+    proposals: planProposals(sql, owner),
     records: () => loadRecords(owner, sql),
     async save(input) {
       const outcome = await saveWithin(sql, owner, mutationSchema.parse(input));

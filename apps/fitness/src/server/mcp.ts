@@ -8,14 +8,23 @@ import {
   deleteEntries,
   getDay,
   getHistory,
+  getPlanProposal,
+  getTrainingPlan,
+  listExercises,
   listSavedMeals,
   logRun,
   logWeight,
+  planningProfileSaved,
+  proposePlan,
   updateFoodTargets,
   updateMeal,
   updateSavedMeal,
 } from "./agent";
 import { nutrientInfo } from "@bent/fitness-contracts/domain";
+import {
+  planProfileSchema,
+  planProposalSchema,
+} from "@bent/fitness-contracts/proposal";
 import { StoreRuleError } from "./store";
 import type { AgentAccess } from "./auth";
 
@@ -152,7 +161,12 @@ export function instructions(access: AgentAccess) {
     lines.push(
       "Use fitness_update_food_targets when the user wants to change their calorie or protein target, or start or stop tracking carbs, fat or fibre and set their daily targets.",
     );
-  if (access.write || access.targets)
+  if (access.plan)
+    lines.push(
+      "To set up or change the user's training, ask about their goal, training experience, the days a week and minutes a session they have, the equipment they can use and any injuries or movements to avoid. Then call fitness_get_training_plan and fitness_list_exercises, build a plan from catalogue exercises that fit their equipment and time, and call fitness_propose_plan.",
+      "A proposal changes nothing until the user accepts it in Fitness. Tell them what the plan contains and any warnings it returned, and give them the review link.",
+    );
+  if (access.write || access.targets || access.plan)
     lines.push(
       "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
     );
@@ -379,5 +393,93 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
     );
   }
 
+  if (access.plan) {
+    server.registerTool(
+      "fitness_list_exercises",
+      {
+        title: "List exercises",
+        description:
+          "Lists the exercises a plan can use, with the equipment each needs, how its load is measured, its movement pattern, muscles, level, whether it is timed or done for each side, and its starting sets, range and rest. Also lists the equipment types an account can have.",
+        inputSchema: {},
+        annotations: read,
+      },
+      () => run(async () => listExercises()),
+    );
+
+    server.registerTool(
+      "fitness_get_training_plan",
+      {
+        title: "Get the training plan",
+        description:
+          "Returns the user's goal, repeating week from Monday, routines with their exercises, dumbbell weights, planning profile and any plan proposal waiting for review. profileSaved says whether fitness_propose_plan accepts a planning profile.",
+        inputSchema: {},
+        annotations: read,
+      },
+      () => run(() => getTrainingPlan(owner)),
+    );
+
+    const proposal = planProposalSchema.shape;
+    server.registerTool(
+      "fitness_propose_plan",
+      {
+        title: "Propose a training plan",
+        description:
+          "Proposes a new repeating week and routines for the user to review and accept in Fitness. Each exercise names a catalogue id from fitness_list_exercises with its sets, rep range or seconds for timed exercises, and rest. Accepting the proposal replaces the routines, the repeating week and planned sessions from that day on; workouts already recorded keep their results. A new proposal replaces one still waiting. Fails with every problem listed when the plan doesn't fit; warnings describe choices to confirm with the user.",
+        inputSchema: {
+          requestId,
+          summary: proposal.summary,
+          goal: proposal.goal,
+          schedule: proposal.schedule,
+          routines: proposal.routines,
+          dumbbellsKg: proposal.dumbbellsKg,
+          ...(planningProfileSaved()
+            ? { profile: planProfileSchema.optional() }
+            : {}),
+        },
+        annotations: add,
+      },
+      (input) => run(() => proposePlan(owner, access, input)),
+    );
+
+    server.registerTool(
+      "fitness_get_plan_proposal",
+      {
+        title: "Get a plan proposal",
+        description:
+          "Returns whether a plan proposal is pending, accepted, dismissed or replaced by a newer one.",
+        inputSchema: { id: id.describe("Proposal ID") },
+        annotations: read,
+      },
+      (input) => run(() => getPlanProposal(owner, input)),
+    );
+
+    server.registerPrompt(
+      "set_up_training",
+      {
+        title: "Set up my training",
+        description:
+          "Interview me about my goals, time and equipment, then propose a training plan in Fitness.",
+      },
+      () => ({
+        messages: [
+          { role: "user", content: { type: "text", text: setUpTraining } },
+        ],
+      }),
+    );
+  }
+
   return server;
 }
+
+/** The interview the set_up_training prompt starts. */
+export const setUpTraining = [
+  "Help me set up my strength training in Fitness.",
+  "First call fitness_get_training_plan to see my current plan, then ask me, one or two questions at a time:",
+  "- what I want from training, such as strength, muscle, fitness or general health",
+  "- how much training I've done before",
+  "- how many days a week I can train and how long each session can be",
+  "- what equipment I can use, including dumbbell weights",
+  "- any injuries, conditions or movements to avoid",
+  "Then call fitness_list_exercises and build a plan from catalogue exercises that suit my answers and equipment.",
+  "Show me the plan and explain it briefly. When I'm happy with it, call fitness_propose_plan and give me the link to review and accept it in Fitness.",
+].join("\n");

@@ -33,7 +33,27 @@ import type {
   RecordEntry,
   Settings,
 } from "@bent/fitness-contracts/domain";
-import { BatchConflict, changeOnce, loadRecords } from "./store";
+import {
+  catalogue,
+  equipmentNames,
+  equipmentTypes,
+} from "@bent/fitness-contracts/catalogue";
+import { requiredContract } from "@bent/fitness-contracts";
+import { reviewPlan, storePlan } from "@bent/fitness-contracts/proposal";
+import type {
+  PlanProfile,
+  PlanProposal,
+  PlanProposalRecord,
+} from "@bent/fitness-contracts/proposal";
+import { minimumAppContract } from "./contract";
+import { mcpResource } from "./config";
+import {
+  BatchConflict,
+  changeOnce,
+  loadRecords,
+  pendingProposal,
+  proposalById,
+} from "./store";
 import type { AccountChange } from "./store";
 import type { AgentAccess } from "./auth";
 
@@ -726,4 +746,154 @@ export function updateFoodTargets(
       receipt: { saved: true },
     };
   });
+}
+
+/**
+ * Whether proposals can set the planning profile. Fitness saves it once
+ * every app build it serves reads it (records contract 3).
+ */
+export function planningProfileSaved() {
+  return minimumAppContract() >= 3;
+}
+
+const profileKeys = [
+  "experience",
+  "sessionMinutes",
+  "limitations",
+  "availableEquipment",
+  "kettlebellsKg",
+  "incrementsKg",
+] as const satisfies readonly (keyof PlanProfile)[];
+
+/** The exercise catalogue and the equipment an account can list. */
+export function listExercises() {
+  return {
+    exercises: catalogue.map((e) => ({
+      id: e.id,
+      name: e.name,
+      equipment: e.equipment,
+      load: e.load,
+      pattern: e.pattern,
+      muscles: e.muscles,
+      level: e.level,
+      mode: e.mode,
+      eachSide: e.side,
+      sets: e.sets,
+      min: e.min,
+      max: e.max,
+      rest: e.rest,
+    })),
+    equipment: equipmentTypes.map((id) => ({ id, name: equipmentNames[id] })),
+  };
+}
+
+function proposalSummary(proposal: PlanProposalRecord) {
+  return {
+    id: proposal.id,
+    status: proposal.status,
+    createdAt: proposal.createdAt,
+    decidedAt: proposal.decidedAt,
+    summary: proposal.plan.summary,
+  };
+}
+
+/** Where the owner reviews a proposal on the website. */
+function reviewUrl() {
+  const resource = mcpResource();
+  return resource ? new URL("/proposal", resource).href : null;
+}
+
+/** The current training plan, planning profile and any pending proposal. */
+export async function getTrainingPlan(owner: string) {
+  const a = account(await loadRecords(owner));
+  const pending = await pendingProposal(owner);
+  const settings = a.settings;
+  return {
+    today: a.today,
+    units: a.settings?.units ?? "kg",
+    plan: settings
+      ? {
+          goal: settings.goal,
+          startDate: settings.startDate,
+          schedule: settings.schedule,
+          routines: settings.routines.map((routine) => ({
+            name: routine.name,
+            exercises: routine.exercises.map((e) => ({
+              id: e.id,
+              name: e.name,
+              sets: e.sets,
+              min: e.min,
+              max: e.max,
+              mode: e.mode,
+              eachSide: e.side,
+              rest: e.rest,
+            })),
+          })),
+          dumbbellsKg: settings.dumbbellsKg,
+          profile: Object.fromEntries(
+            profileKeys.flatMap((key) =>
+              settings[key] === undefined ? [] : [[key, settings[key]]],
+            ),
+          ),
+        }
+      : null,
+    profileSaved: planningProfileSaved(),
+    pendingProposal: pending ? proposalSummary(pending) : null,
+  };
+}
+
+/**
+ * Records a plan for the owner to review. The plan is checked as it would
+ * apply today; errors stop it and warnings return with the proposal. A new
+ * proposal replaces one still pending.
+ */
+export function proposePlan(
+  owner: string,
+  access: AgentAccess,
+  { requestId, ...proposal }: PlanProposal & { requestId: string },
+) {
+  return once(
+    owner,
+    access,
+    "propose_plan",
+    { requestId, ...proposal },
+    async (change) => {
+      const a = account(await change.records());
+      if (!a.settings)
+        throw new AgentError(
+          "Set up Fitness in the app before proposing a plan.",
+        );
+      if (proposal.profile && !planningProfileSaved())
+        throw new AgentError(
+          "Fitness can't save the planning profile yet. Propose the plan without profile.",
+        );
+      const plan = storePlan(proposal);
+      const check = reviewPlan(a.settings, plan, a.today);
+      if (!check.ok)
+        throw new AgentError(
+          check.errors
+            .map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))
+            .join("\n"),
+        );
+      if (requiredContract(check.settings) > minimumAppContract())
+        throw new AgentError(
+          "This plan uses fields Fitness can't save yet. Remove them and try again.",
+        );
+      const stored = await change.proposals.propose(plan);
+      const result = {
+        proposal: proposalSummary(stored),
+        warnings: check.warnings,
+        reviewUrl: reviewUrl(),
+      };
+      // A plan connection can read the plan, so both replies are the same.
+      return { full: result, receipt: result };
+    },
+  );
+}
+
+/** A proposal's status, by id. */
+export async function getPlanProposal(owner: string, input: { id: string }) {
+  const proposal = await proposalById(owner, input.id);
+  if (!proposal) throw new AgentError("No plan proposal has this ID.");
+  return proposalSummary(proposal);
 }

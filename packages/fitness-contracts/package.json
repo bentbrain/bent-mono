@@ -11,7 +11,8 @@
     "./guides": "./src/guides.ts",
     "./timing": "./src/timing.ts",
     "./catalogue": "./src/catalogue.ts",
-    "./plan": "./src/plan.ts"
+    "./plan": "./src/plan.ts",
+    "./proposal": "./src/proposal.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -30,5 +31,5 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"
   },
-  "description": "Shared Fitness schemas, domain rules, exercise catalogue, plan checks, progress summaries, exercise guides and API contracts."
+  "description": "Shared Fitness schemas, domain rules, exercise catalogue, plan checks and proposals, progress summaries, exercise guides and API contracts."
 }

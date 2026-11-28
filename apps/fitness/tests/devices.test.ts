@@ -148,7 +148,7 @@ describe("bare API keys", () => {
     fake.addKey({ secret: "ak_other", scopes: ["other:scope"] });
     expect(await auth.requireAgentOwner(bare("ak_owner"))).toEqual({
       owner: syntheticOwner.id,
-      access: { read: true, write: true, targets: true },
+      access: { read: true, write: true, targets: true, plan: true },
     });
     // Verified, then refused only for its scope, as before.
     const scoped = await handleHealthImport(
@@ -186,7 +186,7 @@ describe("MCP", () => {
     ).rejects.toBeInstanceOf(auth.AgentScopeError);
     expect(await auth.requireAgentOwner(bearer("ak_owner"))).toEqual({
       owner: syntheticOwner.id,
-      access: { read: true, write: true, targets: true },
+      access: { read: true, write: true, targets: true, plan: true },
     });
     const response = await handleMcp(
       bearer("ak_device", { method: "POST", body: "{}" }),
