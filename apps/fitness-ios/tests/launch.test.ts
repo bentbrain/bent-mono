@@ -233,4 +233,18 @@ describe("taps while the app loads", () => {
     expect(forLaunchSignIn(link, 0, 2)).toBeNull();
     expect(forLaunchSignIn(null, 0, 0)).toBeNull();
   });
+
+  test("a launch lookup that finishes after its sign-in ended opens nothing", async () => {
+    let generation = 0;
+    const router = new LaunchRouter<Link>(() => generation === 0);
+    const link = deferred<Link | null>();
+    const result = router.resolve(sources({ widget: () => link.promise }).value);
+    // The session expires (1) and the person signs in again (2) while the lookup waits.
+    generation = 2;
+    link.resolve({ tab: "food", day: "2026-12-01" });
+    const target = await result;
+    const opened: LaunchTarget<Link>[] = [];
+    router.openIfCurrent(target, (next) => opened.push(next));
+    expect(opened).toEqual([]);
+  });
 });

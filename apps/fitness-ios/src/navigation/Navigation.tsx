@@ -162,7 +162,7 @@ function useLaunchRouting() {
   const [generation] = useState(() => session.generation());
   const reminder = useOpenReminder();
   const openWidgetLink = useOpenWidgetLink();
-  const [router] = useState(() => new LaunchRouter<WidgetLink>());
+  const [router] = useState(() => new LaunchRouter<WidgetLink>(() => session.generation() === generation));
   const openTarget = useCallback(
     (target: LaunchTarget<WidgetLink>) => {
       if (target.kind === "reminder") reminder.open(target.day);

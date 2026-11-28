@@ -31,6 +31,9 @@ export type LaunchSources<Link> = {
 
 /** Works out the launch destination once, unless a newer tap replaces it. */
 export class LaunchRouter<Link> {
+  /** `live` says whether the sign-in this router serves is still the current one. */
+  constructor(private readonly live: () => boolean = () => true) {}
+
   private replaced = false;
   /** Rises with each tap that replaces the destination. */
   private version = 0;
@@ -65,9 +68,13 @@ export class LaunchRouter<Link> {
     return { kind: "health", version: this.version };
   }
 
-  /** Runs `open` for the destination unless a newer tap replaced it after it was worked out. */
+  /**
+   * Runs `open` for the destination unless a newer tap replaced it after it
+   * was worked out, or the sign-in it was worked out for has ended, as when
+   * a slow lookup finishes after the session expired.
+   */
   openIfCurrent(target: LaunchTarget<Link> | null, open: (target: LaunchTarget<Link>) => void) {
-    if (target && (target.version ?? 0) === this.version) open(target);
+    if (target && this.live() && (target.version ?? 0) === this.version) open(target);
   }
 }
 
