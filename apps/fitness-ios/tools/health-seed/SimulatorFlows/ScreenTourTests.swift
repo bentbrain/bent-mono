@@ -176,25 +176,106 @@ final class ScreenTourTests: XCTestCase {
     }
   }
 
-  /// Sets the open compact time picker to `date`'s hour and minute.
-  private func setTime(_ date: Date) {
+  /// Turns a picker wheel towards `target`. A wheel can stop a row away
+  /// from the value asked for, so it is read back and turned again.
+  private func turn(_ wheel: XCUIElement, to target: String) {
+    for _ in 0..<5 {
+      wheel.adjust(toPickerWheelValue: target)
+      let shown = (wheel.value as? String) ?? ""
+      if shown == target || shown.hasPrefix("\(target) ") || shown.lowercased() == target.lowercased() { return }
+    }
+  }
+
+  /// The leading number a wheel shows, such as 1 for "1 o'clock".
+  private func number(_ wheel: XCUIElement) -> Int? {
+    Int(((wheel.value as? String) ?? "").prefix { $0.isNumber })
+  }
+
+  /// Sets the open compact time picker as close to `date` as the wheels
+  /// allow, and returns today at the time they show.
+  private func setTime(_ date: Date) -> Date? {
     let wheels = app.pickerWheels
     guard wheels.firstMatch.waitForExistence(timeout: 5) else {
       XCTFail("The time picker shows no wheels.")
-      return
+      return nil
     }
     let calendar = Calendar.current
     let hour = calendar.component(.hour, from: date)
     let minute = calendar.component(.minute, from: date)
     let twelveHour = wheels.count > 2
     let shownHour = twelveHour ? (hour % 12 == 0 ? 12 : hour % 12) : hour
-    wheels.element(boundBy: 0).adjust(toPickerWheelValue: twelveHour ? "\(shownHour)" : String(format: "%02d", shownHour))
-    wheels.element(boundBy: 1).adjust(toPickerWheelValue: String(format: "%02d", minute))
-    if twelveHour { wheels.element(boundBy: 2).adjust(toPickerWheelValue: hour < 12 ? "AM" : "PM") }
+    var afternoon = hour >= 12
+    if twelveHour {
+      // The wheel lists "AM" and "PM" in the case the locale writes them.
+      let period = wheels.element(boundBy: 2)
+      let value = (period.value as? String) ?? ""
+      let target = hour < 12 ? "AM" : "PM"
+      turn(period, to: value == value.lowercased() ? target.lowercased() : target)
+      afternoon = ((period.value as? String) ?? "").lowercased().hasPrefix("p")
+    }
+    turn(wheels.element(boundBy: 0), to: twelveHour ? "\(shownHour)" : String(format: "%02d", shownHour))
+    turn(wheels.element(boundBy: 1), to: String(format: "%02d", minute))
+    guard let setHour = number(wheels.element(boundBy: 0)), let setMinute = number(wheels.element(boundBy: 1)) else {
+      XCTFail("The time picker's wheels can't be read.")
+      return nil
+    }
+    let hour24 = twelveHour ? setHour % 12 + (afternoon ? 12 : 0) : setHour
+    return calendar.date(bySettingHour: hour24, minute: setMinute, second: 0, of: date)
   }
 
-  /// Settings with the Reminders row, the Reminders screen off and on, and a
-  /// reminder delivered a few minutes ahead, then tapped to open the Week tab.
+  /// Sets the reminder a few minutes ahead from the Reminders screen and
+  /// returns when it fires.
+  private func remindSoon() -> Date? {
+    guard tap("reminders-time") else {
+      XCTFail("The Reminders screen has no time picker.")
+      return nil
+    }
+    let set = setTime(Date().addingTimeInterval(180))
+    // Closes the picker.
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+    sleep(2)
+    guard let set, set.timeIntervalSinceNow > 20 else {
+      XCTFail("The reminder time could not be set a few minutes ahead.")
+      return nil
+    }
+    return set
+  }
+
+  /// The delivered reminder SpringBoard shows, as a banner or in Notification Center.
+  private func shownReminder() -> XCUIElement {
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    let views = springboard.descendants(matching: .any).matching(identifier: "NotificationShortLookView")
+    let labelled = views.matching(NSPredicate(format: "label CONTAINS %@", "Today:")).firstMatch
+    return labelled.exists ? labelled : views.firstMatch
+  }
+
+  /// Waits on the Home Screen until the reminder's banner shows.
+  private func waitForReminder(_ fireAt: Date) -> Bool {
+    Thread.sleep(forTimeInterval: max(0, fireAt.timeIntervalSinceNow))
+    for _ in 0..<60 {
+      if shownReminder().exists { return true }
+      sleep(1)
+    }
+    XCTFail("No reminder was delivered.")
+    return false
+  }
+
+  /// Checks that the Week tab shows today, the day of the tapped reminder.
+  private func assertWeekShowsToday(_ name: String) {
+    // Coming forward from a tap, the app answers queries only once it is in front.
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "Tapping the reminder did not open the app.")
+    sleep(5)
+    XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90), "The app shows no tab bar.")
+    let panel = element("day-panel")
+    XCTAssertTrue(panel.waitForExistence(timeout: 20), "The Week tab is not showing a day.")
+    XCTAssertTrue(app.tabBars.buttons["Week"].isSelected, "The reminder did not open the Week tab.")
+    // The day panel and the date bar both say "Today" for today's date.
+    XCTAssertTrue(app.staticTexts["Today"].exists, "The Week tab is not showing the reminder's day.")
+    capture(name)
+  }
+
+  /// Settings with the Reminders row and the Reminders screen off and on.
+  /// Run `testRemindersDelivery` next, after restarting the Simulator.
   func testRemindersTour() throws {
     app.launch()
     if element("sign-in").waitForExistence(timeout: 30) { element("sign-in").tap() }
@@ -207,11 +288,17 @@ final class ScreenTourTests: XCTestCase {
     let toggle = app.switches["reminders-enabled"]
     XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The Reminders screen has no switch.")
     toggle.tap()
-    // The permission alert can take a few seconds to appear.
+    // On a newly booted Simulator the permission alert can take most of a
+    // minute to appear. It shows from SpringBoard, or in the app's window.
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-    let allow = springboard.buttons["Allow"]
-    if allow.waitForExistence(timeout: 15) { allow.tap() }
-    XCTAssertTrue(element("reminders-next").waitForExistence(timeout: 10), "Turning reminders on shows no next reminder.")
+    for _ in 0..<60 {
+      if let allow = [app.buttons["Allow"], springboard.buttons["Allow"]].first(where: { $0.exists }) {
+        allow.tap()
+        break
+      }
+      sleep(1)
+    }
+    XCTAssertTrue(element("reminders-next").waitForExistence(timeout: 20), "Turning reminders on shows no next reminder.")
     capture("reminders-03-on")
     let restDays = app.switches["reminders-rest-days"]
     if restDays.exists {
@@ -219,37 +306,43 @@ final class ScreenTourTests: XCTestCase {
       capture("reminders-04-rest-days")
       restDays.tap()
     }
+  }
 
-    // Today's planned session, a couple of minutes from now.
-    let seconds = Calendar.current.component(.second, from: Date())
-    let fireAt = Date().addingTimeInterval(seconds > 40 ? 180 : 120)
-    guard tap("reminders-time") else {
-      XCTFail("The Reminders screen has no time picker.")
-      return
-    }
-    setTime(fireAt)
-    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
-    sleep(2)
+  /// Reminders delivered a few minutes ahead: one banner tapped while the
+  /// app is in the background, and one tapped after the app was closed, each
+  /// opening the Week tab at its day. Run it after `testRemindersTour` and a
+  /// Simulator restart: SpringBoard delivers an app's local notifications
+  /// only once it has started with the app's permission in place.
+  func testRemindersDelivery() throws {
+    app.launch()
+    XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90), app.debugDescription)
+    sleep(3)
+    openTab("Settings")
+    if !element("reminders-time").waitForExistence(timeout: 3) { tap("open-reminders") }
+    let toggle = app.switches["reminders-enabled"]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The Reminders screen has no switch.")
+    XCTAssertEqual(toggle.value as? String, "1", "Reminders were not on after a restart.")
+
+    // A tap on the banner while the app is in the background.
+    guard let first = remindSoon() else { return }
     capture("reminders-05-time")
     XCUIDevice.shared.press(.home)
-    let start = Calendar.current.date(bySetting: .second, value: 0, of: fireAt) ?? fireAt
-    let wait = max(0, start.timeIntervalSinceNow) + 2
-    Thread.sleep(forTimeInterval: wait)
+    guard waitForReminder(first) else { return }
     captureScreen("reminders-06-banner")
-    // Notification Center, opened from the top of the Home Screen.
-    let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.005))
-    top.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)))
-    sleep(2)
-    captureScreen("reminders-07-notification-center")
-    let reminder = springboard.descendants(matching: .any)
-      .matching(NSPredicate(format: "label CONTAINS %@", "Today:")).firstMatch
-    if reminder.waitForExistence(timeout: 5) {
-      reminder.tap()
-      sleep(3)
-      capture("reminders-08-opened-week")
-    } else {
-      XCTFail("No reminder was delivered.")
-    }
+    shownReminder().tap()
+    assertWeekShowsToday("reminders-07-opened-week")
+
+    // A tap on the banner that launches the app. A tap in Notification
+    // Center doesn't open apps in the iOS 27 Simulator, so the tour taps banners.
+    openTab("Settings")
+    if !element("reminders-time").waitForExistence(timeout: 3) { tap("open-reminders") }
+    guard let second = remindSoon() else { return }
+    XCUIDevice.shared.press(.home)
+    app.terminate()
+    guard waitForReminder(second) else { return }
+    captureScreen("reminders-08-banner-closed-app")
+    shownReminder().tap()
+    assertWeekShowsToday("reminders-09-cold-launch-week")
   }
 
   func testScreenTour() throws {
