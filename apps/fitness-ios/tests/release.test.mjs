@@ -15,7 +15,16 @@ import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
-import { checkAppContents, checkHealthEntitlements, checkInfoPlist, otoolSectionBytes } from "../scripts/artifact.mjs";
+import {
+  appGroup,
+  checkAppContents,
+  checkAppEntitlements,
+  checkExtensionContents,
+  checkExtensionEntitlements,
+  checkHealthEntitlements,
+  checkInfoPlist,
+  otoolSectionBytes,
+} from "../scripts/artifact.mjs";
 import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
 import { replayScope } from "../scripts/native.mjs";
 import {
@@ -56,6 +65,7 @@ import {
   checkProtectedResource,
   checkReadiness,
   checkSignedEntitlements,
+  checkSignedExtensionEntitlements,
   checkXcodeLog,
   logText,
   effectiveIosProfile,
@@ -86,6 +96,7 @@ const healthKit = {
   "com.apple.developer.healthkit": true,
   "com.apple.developer.healthkit.background-delivery": true,
 };
+const productionGroup = { "com.apple.security.application-groups": ["group.build.bent.fitness"] };
 
 describe("committed release settings", () => {
   const easJson = JSON.parse(readFileSync(new URL("../eas.json", import.meta.url), "utf8"));
@@ -657,8 +668,13 @@ describe("the built app", () => {
     ).toThrow("embedded app config");
   });
 
-  test("the signed app has exactly the HealthKit entitlements and no debugging", () => {
-    const signed = { ...healthKit, "application-identifier": "TEAM123456.build.bent.fitness", "get-task-allow": false };
+  test("the signed app has exactly the HealthKit entitlements and the App Group, and no debugging", () => {
+    const signed = {
+      ...healthKit,
+      ...productionGroup,
+      "application-identifier": "TEAM123456.build.bent.fitness",
+      "get-task-allow": false,
+    };
     expect(checkSignedEntitlements(signed)).toEqual(Object.keys(healthKit));
     expect(() => checkSignedEntitlements({ ...signed, "get-task-allow": true })).toThrow("debugging");
     expect(() =>
@@ -667,6 +683,45 @@ describe("the built app", () => {
     expect(() =>
       checkHealthEntitlements({ ...healthKit, "com.apple.developer.healthkit.access": ["health-records"] }),
     ).toThrow("Unexpected HealthKit");
+    const withoutGroup = { ...signed };
+    delete withoutGroup["com.apple.security.application-groups"];
+    expect(() => checkSignedEntitlements(withoutGroup)).toThrow("exactly the App Group group.build.bent.fitness");
+    for (const groups of [["group.build.bent.fitness.dev"], ["group.build.bent.fitness", "group.other"], [], "group.build.bent.fitness"])
+      expect(() => checkSignedEntitlements({ ...signed, "com.apple.security.application-groups": groups })).toThrow(
+        "exactly the App Group",
+      );
+  });
+
+  test("the App Group is the variant's bundle ID after group.", () => {
+    expect(appGroup("production")).toBe("group.build.bent.fitness");
+    expect(appGroup("development")).toBe("group.build.bent.fitness.dev");
+    const development = { ...healthKit, "com.apple.security.application-groups": ["group.build.bent.fitness.dev"] };
+    expect(checkAppEntitlements(development, "development")).toEqual(Object.keys(healthKit));
+    expect(() => checkAppEntitlements(development, "production")).toThrow("exactly the App Group");
+  });
+
+  test("the signed widget extension has exactly the App Group, no HealthKit and no debugging", () => {
+    const signed = {
+      ...productionGroup,
+      "application-identifier": "TEAM123456.build.bent.fitness.workout-activity",
+      "get-task-allow": false,
+    };
+    expect(() => checkSignedExtensionEntitlements(signed)).not.toThrow();
+    expect(() => checkSignedExtensionEntitlements({ ...signed, "get-task-allow": true })).toThrow("debugging");
+    expect(() =>
+      checkSignedExtensionEntitlements({
+        ...signed,
+        "application-identifier": "TEAM123456.build.bent.fitness.dev.workout-activity",
+      }),
+    ).toThrow("extension bundle ID");
+    expect(() => checkSignedExtensionEntitlements({ ...signed, ...healthKit })).toThrow("must not have HealthKit");
+    expect(() =>
+      checkSignedExtensionEntitlements({ ...signed, "com.apple.security.application-groups": ["group.build.bent.fitness.dev"] }),
+    ).toThrow("widget extension must have exactly the App Group");
+    expect(() => checkExtensionEntitlements({}, "development")).toThrow("group.build.bent.fitness.dev");
+    expect(() => checkExtensionContents("WorkoutActivityWidget TodayWidget")).not.toThrow();
+    expect(() => checkExtensionContents("WorkoutActivityWidget")).toThrow("Today widget");
+    expect(() => checkExtensionContents("TodayWidget")).toThrow("Live Activity");
   });
 
   test("reads a Simulator binary's entitlements section from either slice", () => {
@@ -690,8 +745,12 @@ describe("the built app", () => {
       NSHealthShareUsageDescription: shareDescription,
       NSHealthUpdateUsageDescription: updateDescription,
       NSSupportsLiveActivities: true,
+      FitnessAppGroup: "group.build.bent.fitness",
     };
     expect(() => checkInfoPlist(plist, "production")).not.toThrow();
+    expect(() => checkInfoPlist({ ...plist, FitnessAppGroup: "group.build.bent.fitness.dev" }, "production")).toThrow(
+      "FitnessAppGroup",
+    );
     expect(() => checkInfoPlist({ ...plist, NSHealthUpdateUsageDescription: "Saves workouts." }, "production")).toThrow(
       "doesn't write",
     );
@@ -706,7 +765,7 @@ describe("the built app", () => {
     ).toThrow("local networking");
     expect(() => checkInfoPlist({ ...plist, NSSupportsLiveActivities: false }, "production")).toThrow("Live");
     const extension = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
-    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule";
+    const code = "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule WorkoutWidgetModule";
     expect(() => checkAppContents({ files: ["Info.plist", extension], code })).not.toThrow();
     expect(() => checkAppContents({ files: [`/tmp/derived/bentFitness.app/${extension}`], code })).not.toThrow();
     expect(() => checkAppContents({ files: ["HealthSeed.bundle", extension], code })).toThrow("seeder");
@@ -723,7 +782,14 @@ describe("the built app", () => {
     expect(() =>
       checkAppContents({ files: [extension], code: "FitnessHealthModule FitnessChartsModule WorkoutActivityModule" }),
     ).toThrow("workout reminders module is not linked");
+    expect(() =>
+      checkAppContents({
+        files: [extension],
+        code: "FitnessHealthModule FitnessChartsModule WorkoutActivityModule WorkoutRemindersModule",
+      }),
+    ).toThrow("widget snapshot module is not linked");
     expect(() => checkAppContents({ files: ["Info.plist"], code })).toThrow("Live Activity extension");
+    expect(() => checkAppContents({ files: [`Other${extension}`], code })).toThrow("Live Activity extension");
   });
 });
 

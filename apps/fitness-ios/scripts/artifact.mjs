@@ -44,6 +44,40 @@ export function checkHealthEntitlements(entitlements) {
   return health;
 }
 
+/** The App Group the app shares with its extension for the Today widget: `group.` followed by the bundle ID. */
+export function appGroup(variant) {
+  return `group.${bundleIds[variant]}`;
+}
+
+const appGroupsKey = "com.apple.security.application-groups";
+
+/** Throws unless the entitlements name exactly the variant's App Group. */
+function checkAppGroup(entitlements, variant, what) {
+  const groups = entitlements[appGroupsKey];
+  if (!Array.isArray(groups) || groups.length !== 1 || groups[0] !== appGroup(variant))
+    throw new Error(`${what} must have exactly the App Group ${appGroup(variant)}: ${JSON.stringify(groups ?? null)}`);
+}
+
+/**
+ * Throws unless the app has exactly the HealthKit keys and exactly the
+ * variant's App Group. Returns the HealthKit keys.
+ */
+export function checkAppEntitlements(entitlements, variant) {
+  const health = checkHealthEntitlements(entitlements);
+  checkAppGroup(entitlements, variant, "The app");
+  return health;
+}
+
+/** Throws unless the widget extension has exactly the variant's App Group and no HealthKit access. */
+export function checkExtensionEntitlements(entitlements, variant) {
+  checkAppGroup(entitlements, variant, "The widget extension");
+  if (Object.keys(entitlements).some((key) => key.startsWith("com.apple.developer.healthkit")))
+    throw new Error("The widget extension must not have HealthKit entitlements.");
+}
+
+/** The extension's executable inside the app bundle. */
+export const extensionBinary = "PlugIns/WorkoutActivityExtension.appex/WorkoutActivityExtension";
+
 /**
  * Throws unless the Info.plist reads Health data only and matches the variant.
  * Apple requires a write purpose string, so it must be the one that says the
@@ -59,12 +93,14 @@ export function checkInfoPlist(plist, variant) {
   if (variant === "production" && plist.NSAppTransportSecurity?.NSAllowsLocalNetworking)
     throw new Error("Production builds must not allow local networking.");
   if (plist.NSSupportsLiveActivities !== true) throw new Error("NSSupportsLiveActivities must be true.");
+  if (plist.FitnessAppGroup !== appGroup(variant))
+    throw new Error(`FitnessAppGroup must be ${appGroup(variant)}, found ${plist.FitnessAppGroup}.`);
 }
 
 /**
  * Throws if the seeder shipped in the app, or the fitness-health module, the
- * fitness-charts module, the workout-activity module with its reminders or
- * the Live Activity extension is missing. `files` are the app bundle's paths; `code` is text
+ * fitness-charts module, the workout-activity module with its reminders and
+ * widget snapshot, or the widget extension is missing. `files` are the app bundle's paths; `code` is text
  * from the main binary, such as its symbol table or its raw bytes.
  */
 export function checkAppContents({ files, code }) {
@@ -76,6 +112,13 @@ export function checkAppContents({ files, code }) {
   if (!/FitnessChartsModule/.test(code)) throw new Error("The fitness-charts module is not linked.");
   if (!/WorkoutActivityModule/.test(code)) throw new Error("The workout-activity module is not linked.");
   if (!/WorkoutRemindersModule/.test(code)) throw new Error("The workout reminders module is not linked.");
-  if (!files.some((file) => /(^|\/)PlugIns\/WorkoutActivityExtension\.appex\/WorkoutActivityExtension$/.test(file)))
+  if (!/WorkoutWidgetModule/.test(code)) throw new Error("The widget snapshot module is not linked.");
+  if (!files.some((file) => file === extensionBinary || file.endsWith(`/${extensionBinary}`)))
     throw new Error("The Live Activity extension is not in the app.");
+}
+
+/** Throws unless the extension's binary, read as raw bytes, holds the Live Activity and the Today widget. */
+export function checkExtensionContents(code) {
+  if (!/WorkoutActivityWidget/.test(code)) throw new Error("The Live Activity is not in the widget extension.");
+  if (!/TodayWidget/.test(code)) throw new Error("The Today widget is not in the widget extension.");
 }

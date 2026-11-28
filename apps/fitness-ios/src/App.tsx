@@ -16,6 +16,7 @@ import { Notice } from "./ui/Layout";
 import { AppText } from "./ui/Text";
 import { endAllWorkoutActivities } from "./screens/week/workout/useWorkoutActivity";
 import { reminders } from "./data/reminders";
+import { widget } from "./data/widget";
 
 export default function App() {
   return (
@@ -42,12 +43,14 @@ function Root() {
   }, []);
   // When the session ends, by signing out or because Fitness ended the
   // sign-in, the workout leaves the Lock Screen, its timer alert goes and
-  // no workout reminders stay scheduled. The reminder settings stay.
+  // no workout reminders stay scheduled. The reminder settings stay. The
+  // widget shows a sign-in prompt and no account data.
   const closed = state.status === "signedOut" || state.status === "signingOut";
   useEffect(() => {
     if (!closed) return;
     endAllWorkoutActivities();
     void reminders.cancel();
+    void widget.signOut();
   }, [closed]);
   switch (state.status) {
     case "loading":

@@ -20,7 +20,15 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkAppContents, checkHealthEntitlements, checkInfoPlist, otoolSectionBytes } from "./artifact.mjs";
+import {
+  checkAppContents,
+  checkAppEntitlements,
+  checkExtensionContents,
+  checkExtensionEntitlements,
+  checkInfoPlist,
+  extensionBinary,
+  otoolSectionBytes,
+} from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Build output stays in this user's caches unless NATIVE_BUILD_DIR names another place.
@@ -207,15 +215,23 @@ const commands = {
     const binary = join(appPath(), project());
     // Simulator builds carry their entitlements in a section of the binary.
     // otool prints the section as bytes for x86_64 and as words for arm64.
-    const section = output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", binary]);
-    const entitlements = JSON.parse(
-      output("plutil", ["-convert", "json", "-o", "-", "-"], { input: Buffer.from(otoolSectionBytes(section)) }),
-    );
-    const health = checkHealthEntitlements(entitlements);
+    const entitlementsOf = (file) =>
+      JSON.parse(
+        output("plutil", ["-convert", "json", "-o", "-", "-"], {
+          input: Buffer.from(otoolSectionBytes(output("xcrun", ["otool", "-X", "-s", "__TEXT", "__entitlements", file]))),
+        }),
+      );
+    const health = checkAppEntitlements(entitlementsOf(binary), variant);
     const plist = JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "Info.plist")]));
     checkInfoPlist(plist, variant);
     checkAppContents({ files: output("find", [appPath()]).split("\n"), code: output("nm", ["-U", binary]) });
-    console.log(`Artifact: ${plist.CFBundleIdentifier} reads Health data only, with ${health.join(", ")}.`);
+    const extension = join(appPath(), extensionBinary);
+    checkExtensionEntitlements(entitlementsOf(extension), variant);
+    // The widget types are named in the binary's Swift metadata, not its exported symbols.
+    checkExtensionContents(readFileSync(extension).toString("latin1"));
+    console.log(
+      `Artifact: ${plist.CFBundleIdentifier} reads Health data only, with ${health.join(", ")}, and shares ${plist.FitnessAppGroup} with its widget extension.`,
+    );
   },
 
   flows([filter]) {

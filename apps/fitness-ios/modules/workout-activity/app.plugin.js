@@ -1,15 +1,25 @@
-// Native settings for the workout Live Activity: the app's Live Activities
-// Info.plist key, and a widget extension target that compiles the Swift in
-// this module's ios/Extension and ios/Shared folders where they are, so the
-// generated project holds only the extension's Info.plist. The extension has
-// no entitlements; ActivityKit passes the activity's content to it directly.
-const { withDangerousMod, withInfoPlist, withXcodeProject } = require("expo/config-plugins");
+// Native settings for the workout Live Activity and the Today widget: the
+// app's Live Activities Info.plist key, and a widget extension target that
+// compiles the Swift in this module's ios/Extension and ios/Shared folders
+// where they are, so the generated project holds only the extension's
+// Info.plist and entitlements. ActivityKit passes the activity's content to
+// the extension directly. The Today widget reads the snapshot the app writes
+// to their shared App Group, `group.` followed by the app's bundle ID, which
+// both Info.plists name under `FitnessAppGroup`.
+const { withDangerousMod, withEntitlementsPlist, withInfoPlist, withXcodeProject } = require("expo/config-plugins");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const targetName = "WorkoutActivityExtension";
-const sources = ["Extension/WorkoutActivityWidget.swift", "Shared/WorkoutActivityAttributes.swift"];
+const sources = [
+  "Extension/WorkoutActivityWidget.swift",
+  "Extension/TodayWidget.swift",
+  "Shared/WorkoutActivityAttributes.swift",
+  "Shared/TodaySnapshot.swift",
+];
 const deploymentTarget = "16.4";
+const appGroupsKey = "com.apple.security.application-groups";
+const entitlementsFile = `${targetName}.entitlements`;
 
 /** The extension's bundle ID: the app's, followed by `.workout-activity`. */
 function extensionBundleId(config) {
@@ -18,8 +28,31 @@ function extensionBundleId(config) {
   return `${app}.workout-activity`;
 }
 
-/** The extension's Info.plist, with the app's version and build number. */
-function infoPlist(version, buildNumber) {
+/** The App Group the app and the extension share: `group.` followed by the app's bundle ID. */
+function appGroup(config) {
+  const app = config.ios?.bundleIdentifier;
+  if (!app) throw new Error("workout-activity needs ios.bundleIdentifier.");
+  return `group.${app}`;
+}
+
+/** The extension's entitlements: the shared App Group only. */
+function entitlementsPlist(group) {
+  const escape = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>${appGroupsKey}</key>
+  <array>
+    <string>${escape(group)}</string>
+  </array>
+</dict>
+</plist>
+`;
+}
+
+/** The extension's Info.plist, with the app's version and build number and the App Group. */
+function infoPlist(version, buildNumber, group) {
   const escape = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -43,6 +76,8 @@ function infoPlist(version, buildNumber) {
   <string>${escape(version)}</string>
   <key>CFBundleVersion</key>
   <string>${escape(buildNumber)}</string>
+  <key>FitnessAppGroup</key>
+  <string>${escape(group)}</string>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key>
@@ -71,6 +106,7 @@ function addExtensionTarget(project, { bundleId, version, buildNumber, moduleDir
     PRODUCT_NAME: '"$(TARGET_NAME)"',
     PRODUCT_BUNDLE_IDENTIFIER: `"${bundleId}"`,
     INFOPLIST_FILE: `${targetName}/Info.plist`,
+    CODE_SIGN_ENTITLEMENTS: `${targetName}/${entitlementsFile}`,
     GENERATE_INFOPLIST_FILE: "NO",
     MARKETING_VERSION: `"${version}"`,
     CURRENT_PROJECT_VERSION: `"${buildNumber}"`,
@@ -118,7 +154,7 @@ function addExtensionTarget(project, { bundleId, version, buildNumber, moduleDir
   project.addTargetDependency(app, [target.uuid]);
 
   // The extension's sources, in a group that points at this module.
-  const group = project.addPbxGroup([...files, "Info.plist"], targetName, targetName);
+  const group = project.addPbxGroup([...files, "Info.plist", entitlementsFile], targetName, targetName);
   const main = project.getFirstProject().firstProject.mainGroup;
   project.addToPbxGroup(group.uuid, main);
   // The xcode package writes unset file properties as "undefined"; leave them out.
@@ -146,13 +182,22 @@ function withWorkoutActivity(config) {
   const bundleId = extensionBundleId(config);
   const version = config.ios?.version ?? config.version ?? "1.0.0";
   const buildNumber = config.ios?.buildNumber ?? "1";
+  const group = appGroup(config);
 
   config = withInfoPlist(config, (mod) => {
     mod.modResults.NSSupportsLiveActivities = true;
+    mod.modResults.FitnessAppGroup = group;
     return mod;
   });
 
-  // EAS Build signs the extension with its own App Store profile.
+  // The app writes the widget's snapshot to the App Group's container.
+  config = withEntitlementsPlist(config, (mod) => {
+    mod.modResults[appGroupsKey] = [group];
+    return mod;
+  });
+
+  // EAS Build signs the extension with its own App Store profile, which
+  // carries the App Group.
   const ios = config.extra?.eas?.build?.experimental?.ios ?? {};
   const extensions = (ios.appExtensions ?? []).filter((item) => item.targetName !== targetName);
   config.extra = {
@@ -163,7 +208,7 @@ function withWorkoutActivity(config) {
         ...config.extra?.eas?.build,
         experimental: {
           ...config.extra?.eas?.build?.experimental,
-          ios: { ...ios, appExtensions: [...extensions, { targetName, bundleIdentifier: bundleId, entitlements: {} }] },
+          ios: { ...ios, appExtensions: [...extensions, { targetName, bundleIdentifier: bundleId, entitlements: { [appGroupsKey]: [group] } }] },
         },
       },
     },
@@ -174,7 +219,8 @@ function withWorkoutActivity(config) {
     async (mod) => {
       const dir = path.join(mod.modRequest.platformProjectRoot, targetName);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, "Info.plist"), infoPlist(version, buildNumber));
+      fs.writeFileSync(path.join(dir, "Info.plist"), infoPlist(version, buildNumber, group));
+      fs.writeFileSync(path.join(dir, entitlementsFile), entitlementsPlist(group));
       return mod;
     },
   ]);
@@ -194,4 +240,5 @@ function withWorkoutActivity(config) {
 
 module.exports = withWorkoutActivity;
 module.exports.extensionBundleId = extensionBundleId;
+module.exports.appGroup = appGroup;
 module.exports.targetName = targetName;

@@ -1,15 +1,7 @@
 import { z } from "zod";
-import {
-  addDays,
-  completedActivity,
-  formatShortDate,
-  localDate,
-  nextSession,
-  sessionMinutes,
-  trainingRecords,
-} from "@bent/fitness-contracts/domain";
+import { addDays, completedActivity, localDate, trainingRecords } from "@bent/fitness-contracts/domain";
 import type { RecordEntry, Settings } from "@bent/fitness-contracts/domain";
-import { dayInfo, isDay } from "../screens/week/logic";
+import { dayInfo, isDay, nextSessionText, sessionText } from "../screens/week/logic";
 
 /*
  * Daily workout reminders: what each day's notification says and when it
@@ -98,24 +90,11 @@ export function reminderText(
   // A day with a recorded or started session needs no reminder.
   if (info.state === "done") return null;
   if (training.some(({ data }) => data.kind === "workout" && data.date === day)) return null;
-  const { plan } = info;
-  if (plan.type === "strength") {
-    if (!plan.routine) return { title: `Today: ${info.name}`, body: "Strength session" };
-    const count = plan.routine.exercises.length;
-    return {
-      title: `Today: ${plan.routine.name}`,
-      body: `${count} ${count === 1 ? "exercise" : "exercises"} · about ${sessionMinutes(plan.routine, plan.intro)} min`,
-    };
-  }
-  if (plan.type === "run") return { title: "Today: Easy run", body: "Keep it comfortable enough to talk in sentences." };
+  const { title, detail } = sessionText(info);
+  if (info.plan.type === "strength") return { title: `Today: ${title}`, body: detail ?? "Strength session" };
+  if (info.plan.type === "run") return { title: "Today: Easy run", body: "Keep it comfortable enough to talk in sentences." };
   if (!restDays) return null;
-  const upcoming = nextSession(settings, addDays(day, 1), records);
-  const next =
-    upcoming?.plan.type === "strength" ? (upcoming.plan.routine?.name ?? "Strength") : upcoming ? "Easy run" : null;
-  return {
-    title: "Today: Rest day",
-    body: upcoming && next ? `Next: ${formatShortDate(upcoming.date)} · ${next}` : "Nothing planned in the next two weeks.",
-  };
+  return { title: "Today: Rest day", body: nextSessionText(settings, records, day) ?? "Nothing planned in the next two weeks." };
 }
 
 /**

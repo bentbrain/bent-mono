@@ -1,7 +1,7 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["WorkoutActivityModule", "WorkoutRemindersModule"],
+    "modules": ["WorkoutActivityModule", "WorkoutRemindersModule", "WorkoutWidgetModule"],
     "appDelegateSubscribers": ["WorkoutActivityAppDelegate"]
   }
 }

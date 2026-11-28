@@ -15,6 +15,7 @@ import { settingsScreens } from "../screens/settings";
 import { weekScreens } from "../screens/week";
 import { rootScreens } from "../screens/root";
 import { takeOpenedReminder, useReminderSchedule, useReminderTaps } from "./reminders";
+import { takeLaunchWidgetLink, useWidgetLinks, useWidgetSnapshot } from "./widget";
 
 /*
  * The route table. Each tab has its own native stack, so pushed screens
@@ -138,12 +139,34 @@ function useOpenReminder() {
   );
   useReminderTaps(owner, open);
   return {
+    /** Opens the reminder that launched the app, if any, then resumes a waiting Health step unless a launch tap opened a screen. True when a reminder opened. */
     ready: () => {
       const day = takeOpenedReminder(owner);
       if (day) open(day);
       resumeHealthStep(() => opened.current);
+      return Boolean(day);
+    },
+    /** Records that a widget tap opened a screen at launch, so the Health step leaves it in place. */
+    markOpened: () => {
+      opened.current = true;
     },
   };
+}
+
+/** Opens the Week or Food tab at the day a widget tap names. */
+function useOpenWidgetLink() {
+  const { setDate } = useAccount();
+  const open = useCallback(
+    ({ tab, day }: { tab: "week" | "food"; day: string }) => {
+      setDate(day);
+      if (!navigationRef.isReady()) return;
+      if (tab === "food") navigationRef.navigate("Tabs", { screen: "FoodTab", params: { screen: "Food" } });
+      else navigationRef.navigate("Tabs", { screen: "WeekTab", params: { screen: "Week" } });
+    },
+    [setDate],
+  );
+  useWidgetLinks(open);
+  return open;
 }
 
 function useColor(name: string, fallback: string) {
@@ -155,7 +178,17 @@ function useColor(name: string, fallback: string) {
 export function Navigation() {
   useConflictReview();
   useReminderSchedule();
-  const { ready } = useOpenReminder();
+  useWidgetSnapshot();
+  const launch = useOpenReminder();
+  const openWidgetLink = useOpenWidgetLink();
+  const ready = () => {
+    if (launch.ready()) return;
+    void takeLaunchWidgetLink().then((link) => {
+      if (!link) return;
+      launch.markOpened();
+      openWidgetLink(link);
+    });
+  };
   const dark = useColorScheme() === "dark";
   const base = dark ? DarkTheme : DefaultTheme;
   const theme = {
