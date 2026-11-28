@@ -466,7 +466,8 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
 /** The interview the set_up_training prompt starts. */
 export const setUpTraining = [
   "Help me set up my strength training in Fitness.",
-  "First call fitness_get_training_plan to see my current plan, then ask me, one or two questions at a time:",
+  "First call fitness_get_training_plan to see my current plan. If plan is null, ask me to open Fitness, choose Set up my plan and tell you once it has saved, then call it again.",
+  "Then ask me, one or two questions at a time:",
   "- what I want from training, such as strength, muscle, fitness or general health",
   "- how much training I've done before",
   "- how many days a week I can train and how long each session can be",

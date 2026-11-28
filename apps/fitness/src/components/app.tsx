@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Link,
   Outlet,
+  useLoaderData,
   useLocation,
   useRouter,
   useSearch,
@@ -31,6 +32,7 @@ export function AuthenticatedApp() {
   return userId ? <Account key={userId} owner={userId} /> : <Welcome />;
 }
 function Welcome() {
+  const { assistantPlans } = useLoaderData({ from: "__root__" });
   return (
     <main className="landing">
       <div className="wordmark">
@@ -55,12 +57,14 @@ function Welcome() {
           <strong>Progress</strong>
           Sessions by week, strength by exercise and your bodyweight trend.
         </li>
-        <li>
-          <strong>Your AI assistant</strong>
-          Send this website to Claude, ChatGPT or another assistant and ask it
-          to set up your training. It reads how to connect at{" "}
-          <a href="/llms.txt">/llms.txt</a>.
-        </li>
+        {assistantPlans && (
+          <li>
+            <strong>Your AI assistant</strong>
+            Send this website to an assistant that supports custom connectors,
+            such as Claude or ChatGPT, and ask it to set up your training. It
+            reads how to connect at <a href="/llms.txt">/llms.txt</a>.
+          </li>
+        )}
       </ul>
       <SignInButton mode="modal">
         <Button appearance="primary">Sign in</Button>
