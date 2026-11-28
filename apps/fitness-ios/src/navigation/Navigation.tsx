@@ -17,8 +17,9 @@ import { progressScreens } from "../screens/progress";
 import { settingsScreens } from "../screens/settings";
 import { weekScreens } from "../screens/week";
 import { rootScreens } from "../screens/root";
-import { takeOpenedReminder, useReminderSchedule, useReminderTaps } from "./reminders";
-import { takeLaunchWidgetLink, useWidgetLinks, useWidgetSnapshot } from "./widget";
+import { takeOpenedReminder, useReminderSchedule } from "./reminders";
+import { useAppTaps } from "./taps";
+import { takeLaunchWidgetLink, useWidgetSnapshot } from "./widget";
 
 /*
  * The route table. Each tab has its own native stack, so pushed screens
@@ -176,11 +177,7 @@ function useLaunchRouting() {
     },
     [router, openTarget],
   );
-  useReminderTaps(
-    reminder.owner,
-    useCallback((day: string) => tapped({ kind: "reminder", day }), [tapped]),
-  );
-  useWidgetLinks(useCallback((link: WidgetLink) => tapped({ kind: "widget", link }), [tapped]));
+  useAppTaps(reminder.owner, tapped);
   /** Opens the launch destination once navigation is ready. */
   return () => {
     void router

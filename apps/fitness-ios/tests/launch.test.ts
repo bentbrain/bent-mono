@@ -190,4 +190,28 @@ describe("taps while the app loads", () => {
     router.openIfCurrent(target, (next) => opened.push(next));
     expect(opened).toEqual([]);
   });
+
+  test("the latest tap during startup wins, whichever kind it is", async () => {
+    type Tap = { kind: "reminder"; day: string } | { kind: "widget"; link: Link };
+    const widgetTap: Tap = { kind: "widget", link: { tab: "food", day: "2026-12-01" } };
+    const reminderTap: Tap = { kind: "reminder", day: "2026-12-02" };
+    const orders: [Tap, Tap][] = [
+      [widgetTap, reminderTap],
+      [reminderTap, widgetTap],
+    ];
+    for (const [first, last] of orders) {
+      // Both kinds share one buffer, filled from app start.
+      const taps = new TapBuffer<Tap>();
+      taps.push(first);
+      taps.push(last);
+      const router = new LaunchRouter<Link>();
+      taps.listen((tap) => router.replace(tap));
+      // A reminder that launched the app comes before both.
+      const target = await router.resolve(sources({ reminder: () => "2026-11-30" }).value);
+      const opened: LaunchTarget<Link>[] = [];
+      router.openIfCurrent(target, (next) => opened.push(next));
+      expect(opened).toMatchObject([{ ...last, early: true }]);
+    }
+  });
 });
+

@@ -42,26 +42,6 @@ export function useReminderSchedule() {
   }, [session]);
 }
 
-/**
- * Opens a tapped reminder's day while the app runs. Taps for another
- * account, such as one signed out since, are ignored.
- */
-export function useReminderTaps(owner: string, open: (day: string) => void) {
-  const handler = useRef({ owner, open });
-  useEffect(() => {
-    handler.current = { owner, open };
-  }, [owner, open]);
-  useEffect(() => {
-    const native = WorkoutReminders;
-    if (!native) return;
-    const subscription = native.addListener("onReminderOpened", (tap) => {
-      const day = openedDay(tap, handler.current.owner);
-      if (day) handler.current.open(day);
-    });
-    return () => subscription.remove();
-  }, []);
-}
-
 /** The day of the reminder that opened the app, once, if it belongs to `owner`. */
 export function takeOpenedReminder(owner: string) {
   return openedDay(WorkoutReminders?.takeOpened(), owner);
