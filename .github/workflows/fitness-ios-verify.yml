@@ -523,13 +523,13 @@ jobs:
           "$pg/createdb" -h 127.0.0.1 -p 55432 -U test fitness_test
           echo "POSTGRES_BIN=$pg" >> "$GITHUB_ENV"
           echo "FITNESS_TEST_DATABASE_URL=postgres://test@127.0.0.1:55432/fitness_test" >> "$GITHUB_ENV"
-      # Each attempt has 8 minutes for the Simulator's boot, the install and
-      # the test, so a stuck first attempt leaves time for the retry within
-      # the job's limit.
+      # The flow has 15 of the job's 20 minutes: each attempt keeps time for
+      # its cleanup, and a retry starts only with enough time left for a whole
+      # attempt, so the job's limit never cuts an attempt or its cleanup short.
       - name: Run the Simulator flow against the local harness
         env:
           FLOW: ${{ matrix.flow }}
-          FITNESS_FLOW_ATTEMPT_SECONDS: '480'
+          FITNESS_FLOW_BUDGET_SECONDS: '900'
         run: node scripts/flows.mjs --prebuilt "$FLOW"
       - name: Retain the Simulator flow results
         if: failure()

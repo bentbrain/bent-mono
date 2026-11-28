@@ -169,8 +169,8 @@ test("Fitness iOS Verification runs every native check in parallel jobs with pin
     ["partial", "testPartialHealthAccessHoldsRunsWithoutDistance"]]) {
     assert.ok(flows.includes(`          - label: ${label}\n            flow: ${flow}\n`));
   }
-  // Each attempt has a deadline, so a stuck first attempt leaves time for the retry within the 20-minute limit.
-  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_ATTEMPT_SECONDS: '480'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
+  // The flow has a time budget inside the 20-minute limit, so the limit never cuts an attempt or its cleanup short.
+  assert.ok(flows.includes("FLOW: ${{ matrix.flow }}\n          FITNESS_FLOW_BUDGET_SECONDS: '900'\n        run: node scripts/flows.mjs --prebuilt \"$FLOW\"\n"));
   // No flow shard builds the app or runs the module's checks; each runs the flow build's app and seeder.
   assert.ok(!/native\.mjs (prebuild|build|seeder|lint|core-test)\n|roundtrip\.mjs/.test(flows));
   assert.ok(flows.includes("          name: fitness-ios-sim-build\n"));
