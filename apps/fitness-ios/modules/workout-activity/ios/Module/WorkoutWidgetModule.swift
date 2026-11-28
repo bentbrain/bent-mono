@@ -13,5 +13,11 @@ public final class WorkoutWidgetModule: Module {
       try TodayStore.write(Data(json.utf8))
       WidgetCenter.shared.reloadAllTimelines()
     }
+
+    // Deletes the snapshot, as when the signed-out snapshot can't be written.
+    AsyncFunction("clear") { () throws in
+      try TodayStore.remove()
+      WidgetCenter.shared.reloadAllTimelines()
+    }
   }
 }

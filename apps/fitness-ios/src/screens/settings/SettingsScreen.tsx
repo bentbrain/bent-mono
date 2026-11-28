@@ -7,6 +7,7 @@ import { ActivityIndicator, Alert } from "react-native";
 import { session, useConfiguredAccount } from "../../account/AccountProvider";
 import { useReminderSettings } from "../../data/reminders";
 import { forgetAccount } from "../../data/storage";
+import { widget } from "../../data/widget";
 import { clockText } from "../../logic/reminders";
 import { useTabNavigation } from "../../navigation/hooks";
 import { haptic } from "../../ui/haptics";
@@ -71,6 +72,9 @@ export function SettingsScreen() {
             forgetAccount(owner);
             clearPickerCopies();
             await Promise.all([Image.clearMemoryCache(), Image.clearDiskCache()]);
+            // The session cleared the widget when it closed; this waits for that and reports a failure.
+            if ((await widget.signOut(session.generation())) === "failed")
+              throw new Error("The widget still shows this account.");
           });
         },
       },

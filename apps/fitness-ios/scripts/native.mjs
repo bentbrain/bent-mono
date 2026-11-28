@@ -25,6 +25,7 @@ import {
   checkAppEntitlements,
   checkExtensionContents,
   checkExtensionEntitlements,
+  checkExtensionInfoPlist,
   checkInfoPlist,
   extensionBinary,
   otoolSectionBytes,
@@ -227,6 +228,10 @@ const commands = {
     checkAppContents({ files: output("find", [appPath()]).split("\n"), code: output("nm", ["-U", binary]) });
     const extension = join(appPath(), extensionBinary);
     checkExtensionEntitlements(entitlementsOf(extension), variant);
+    checkExtensionInfoPlist(
+      JSON.parse(output("plutil", ["-convert", "json", "-o", "-", join(appPath(), "PlugIns/WorkoutActivityExtension.appex/Info.plist")])),
+      variant,
+    );
     // The widget types are named in the binary's Swift metadata, not its exported symbols.
     checkExtensionContents(readFileSync(extension).toString("latin1"));
     console.log(

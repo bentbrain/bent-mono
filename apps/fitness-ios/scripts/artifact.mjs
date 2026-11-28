@@ -58,21 +58,78 @@ function checkAppGroup(entitlements, variant, what) {
     throw new Error(`${what} must have exactly the App Group ${appGroup(variant)}: ${JSON.stringify(groups ?? null)}`);
 }
 
+/** The widget extension's bundle ID: the app's, followed by `.workout-activity`. */
+export function extensionBundleId(variant) {
+  return `${bundleIds[variant]}.workout-activity`;
+}
+
 /**
- * Throws unless the app has exactly the HealthKit keys and exactly the
- * variant's App Group. Returns the HealthKit keys.
+ * Keys Apple's signing adds besides the capabilities: the application and
+ * team identifiers, the debugging flag, TestFlight's flag and the keychain
+ * group. Any other key is a capability the app must not have.
+ */
+const signingKeys = [
+  "application-identifier",
+  "com.apple.developer.team-identifier",
+  "get-task-allow",
+  "beta-reports-active",
+  "keychain-access-groups",
+];
+
+const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Throws unless the entitlements hold only `capabilities` and Apple's signing
+ * keys, `get-task-allow` is absent or a Boolean, and the application
+ * identifier, when present, is exactly a team ID followed by `bundleId` and
+ * agrees with the team identifier. Returns the team ID, or null without an
+ * application identifier.
+ */
+function checkSigning(entitlements, capabilities, bundleId, what) {
+  const extra = Object.keys(entitlements).filter((key) => !capabilities.includes(key) && !signingKeys.includes(key));
+  if (extra.length) throw new Error(`${what} has unexpected entitlements: ${extra.sort().join(", ")}`);
+  const debug = entitlements["get-task-allow"];
+  if (debug !== undefined && typeof debug !== "boolean") throw new Error(`${what} has a get-task-allow that is not a Boolean.`);
+  const identifier = entitlements["application-identifier"];
+  if (identifier === undefined) return null;
+  const match = new RegExp(`^([A-Z0-9]{10})\\.${escape(bundleId)}$`).exec(String(identifier));
+  if (typeof identifier !== "string" || !match)
+    throw new Error(`${what} has the application identifier ${JSON.stringify(identifier)}, not <team ID>.${bundleId}.`);
+  const team = entitlements["com.apple.developer.team-identifier"];
+  if (team !== undefined && team !== match[1]) throw new Error(`${what} has a team identifier that differs from its application identifier.`);
+  return match[1] ?? null;
+}
+
+/**
+ * Throws unless the app has exactly the HealthKit keys, exactly the
+ * variant's App Group and no other capability, with the variant's
+ * application identifier when it has one. Returns the HealthKit keys.
  */
 export function checkAppEntitlements(entitlements, variant) {
   const health = checkHealthEntitlements(entitlements);
   checkAppGroup(entitlements, variant, "The app");
+  checkSigning(entitlements, [...healthEntitlements, appGroupsKey], bundleIds[variant], "The app");
   return health;
 }
 
-/** Throws unless the widget extension has exactly the variant's App Group and no HealthKit access. */
+/**
+ * Throws unless the widget extension has exactly the variant's App Group
+ * and no other capability, with the extension's application identifier
+ * when it has one. Returns its team ID, or null without an application identifier.
+ */
 export function checkExtensionEntitlements(entitlements, variant) {
   checkAppGroup(entitlements, variant, "The widget extension");
   if (Object.keys(entitlements).some((key) => key.startsWith("com.apple.developer.healthkit")))
     throw new Error("The widget extension must not have HealthKit entitlements.");
+  return checkSigning(entitlements, [appGroupsKey], extensionBundleId(variant), "The widget extension");
+}
+
+/** Throws unless the extension's Info.plist names the variant's extension bundle ID and App Group, which the widget reads. */
+export function checkExtensionInfoPlist(plist, variant) {
+  if (plist.CFBundleIdentifier !== extensionBundleId(variant))
+    throw new Error(`Expected the widget extension bundle ID ${extensionBundleId(variant)}, found ${plist.CFBundleIdentifier}.`);
+  if (plist.FitnessAppGroup !== appGroup(variant))
+    throw new Error(`The widget extension's FitnessAppGroup must be ${appGroup(variant)}, found ${plist.FitnessAppGroup}.`);
 }
 
 /** The extension's executable inside the app bundle. */

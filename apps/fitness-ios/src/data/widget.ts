@@ -10,7 +10,9 @@ import { WidgetPublisher } from "../logic/widget";
 const native = WorkoutWidget;
 
 /** The one widget publisher for this app process. Without the native module, as in unit tests, it writes nothing. */
-export const widget = new WidgetPublisher(native ? { save: (json) => native.save(json) } : null);
+export const widget = new WidgetPublisher(
+  native ? { save: (json) => native.save(json), clear: () => native.clear() } : null,
+);
 
 const scheme = Constants.expoConfig?.scheme;
 /** The app's URL scheme, which the widget's links use. */

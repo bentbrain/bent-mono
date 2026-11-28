@@ -32,8 +32,10 @@ import {
   checkAppEntitlements,
   checkExtensionContents,
   checkExtensionEntitlements,
+  checkExtensionInfoPlist,
   checkInfoPlist,
   extensionBinary,
+  extensionBundleId,
 } from "./artifact.mjs";
 
 const app = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -491,21 +493,31 @@ export function checkEmbeddedConfig(config, { issuer, clientId }) {
     fail("The build's embedded app config is not the production app with the checked OAuth issuer and client.");
 }
 
-/** Device code-signing entitlements: HealthKit and the App Group exactly, and no debugging. */
+/**
+ * Device code-signing entitlements: HealthKit and the App Group exactly, no
+ * other capability, no debugging, and exactly the production application
+ * identifier. Returns the HealthKit keys and the signing team.
+ */
 export function checkSignedEntitlements(entitlements) {
   const health = checkAppEntitlements(entitlements, "production");
-  if (entitlements["get-task-allow"] === true) fail("A TestFlight build must not allow debugging.");
-  if (!String(entitlements["application-identifier"] ?? "").endsWith(`.${bundleIds.production}`))
-    fail("The signed application identifier is not the production bundle ID.");
-  return health;
+  if (entitlements["get-task-allow"] !== undefined && entitlements["get-task-allow"] !== false)
+    fail("A TestFlight build must not allow debugging.");
+  const team = /^([A-Z0-9]{10})\./.exec(String(entitlements["application-identifier"] ?? ""))?.[1];
+  if (!team) fail("The signed application identifier is not the production bundle ID.");
+  return { health, team };
 }
 
-/** The widget extension's signed entitlements: the App Group exactly, no HealthKit and no debugging. */
-export function checkSignedExtensionEntitlements(entitlements) {
+/**
+ * The widget extension's signed entitlements: the App Group exactly, no
+ * other capability, no debugging, and exactly the production extension
+ * identifier under the app's team.
+ */
+export function checkSignedExtensionEntitlements(entitlements, team) {
   checkExtensionEntitlements(entitlements, "production");
-  if (entitlements["get-task-allow"] === true) fail("A TestFlight build must not allow debugging.");
-  if (!String(entitlements["application-identifier"] ?? "").endsWith(`.${bundleIds.production}.workout-activity`))
-    fail("The signed widget extension identifier is not the production extension bundle ID.");
+  if (entitlements["get-task-allow"] !== undefined && entitlements["get-task-allow"] !== false)
+    fail("A TestFlight build must not allow debugging.");
+  if (entitlements["application-identifier"] !== `${team}.${extensionBundleId("production")}`)
+    fail("The signed widget extension identifier is not the production extension bundle ID under the app's team.");
 }
 
 async function files(directory) {
@@ -531,13 +543,15 @@ async function checkArchive(archive, directory, oauth) {
         input: tool("codesign", ["-d", "--entitlements", "-", "--xml", path]),
       }),
     );
-  const health = checkSignedEntitlements(signedEntitlements(bundle));
+  const { health, team } = checkSignedEntitlements(signedEntitlements(bundle));
   const plist = JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", join(bundle, "Info.plist")]));
   checkInfoPlist(plist, "production");
   const binary = join(bundle, plist.CFBundleExecutable);
   const contents = (await files(bundle)).map((path) => relative(bundle, path));
   checkAppContents({ files: contents, code: (await readFile(binary)).toString("latin1") });
-  checkSignedExtensionEntitlements(signedEntitlements(join(bundle, "PlugIns/WorkoutActivityExtension.appex")));
+  const extension = join(bundle, "PlugIns/WorkoutActivityExtension.appex");
+  checkSignedExtensionEntitlements(signedEntitlements(extension), team);
+  checkExtensionInfoPlist(JSON.parse(tool("plutil", ["-convert", "json", "-o", "-", join(extension, "Info.plist")])), "production");
   checkExtensionContents((await readFile(join(bundle, extensionBinary))).toString("latin1"));
   const configs = contents.filter((path) => path.endsWith("EXConstants.bundle/app.config"));
   if (configs.length !== 1) fail("The archive must embed exactly one app config.");

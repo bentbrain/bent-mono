@@ -113,6 +113,16 @@ public enum TodayStore {
     try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
   }
 
+  /// Deletes the snapshot. A missing file is already deleted.
+  public static func remove() throws {
+    let url = try file()
+    do {
+      try FileManager.default.removeItem(at: url)
+    } catch CocoaError.fileNoSuchFile {
+      return
+    }
+  }
+
   /// Excludes a directory from backups and checks that it is.
   static func excludeFromBackup(_ directory: URL) throws {
     var url = directory

@@ -43,15 +43,18 @@ struct TodayProvider: TimelineProvider {
 
   func getSnapshot(in context: Context, completion: @escaping (TodayEntry) -> Void) {
     let entry = TodayTimeline.entries(TodayStore.read(), now: Date())[0]
-    var hasDay = false
-    if case .day = entry.content { hasDay = true }
     // The widget gallery shows a sample day until the app has written one.
-    completion(context.isPreview && !hasDay ? placeholder(in: context) : entry)
+    completion(context.isPreview && !entry.content.showsAccount ? placeholder(in: context) : entry)
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<TodayEntry>) -> Void) {
-    // The app reloads the timeline each time it writes a snapshot.
-    completion(Timeline(entries: TodayTimeline.entries(TodayStore.read(), now: Date()), policy: .never))
+    let now = Date()
+    let entries = TodayTimeline.entries(TodayStore.read(), now: now)
+    // The app reloads the timeline each time it writes a snapshot. A snapshot
+    // that can't be read yet, as before the first unlock after a restart, is
+    // read again in 15 minutes.
+    let unreadable = entries.first?.content == .missing
+    completion(Timeline(entries: entries, policy: unreadable ? .after(now.addingTimeInterval(15 * 60)) : .never))
   }
 }
 
@@ -84,24 +87,32 @@ struct TodayFamilyView: View {
 
   var body: some View {
     let palette = TodayPalette(scheme)
+    // The account's plan and food are redacted where iOS hides private
+    // content, such as on the Lock Screen while the iPhone is locked.
+    let sensitive = content.showsAccount
     switch family {
     case .systemMedium:
       TodayMedium(content: content, palette: palette)
+        .privacySensitive(sensitive)
         .todayBackground(palette.card, padded: true)
         .widgetURL(content.link(\.week))
     case .accessoryRectangular:
       TodayRectangular(content: content)
+        .privacySensitive(sensitive)
         .todayBackground(Color.clear, padded: false)
         .widgetURL(content.link(\.week))
     case .accessoryCircular:
       TodayCircular(content: content)
+        .privacySensitive(sensitive)
         .todayBackground(Color.clear, padded: false)
         .widgetURL(content.link(\.food))
     case .accessoryInline:
       TodayInline(content: content)
+        .privacySensitive(sensitive)
         .widgetURL(content.link(\.week))
     default:
       TodaySmall(content: content, palette: palette)
+        .privacySensitive(sensitive)
         .todayBackground(palette.card, padded: true)
         .widgetURL(content.link(\.week))
     }
@@ -306,16 +317,19 @@ struct AmountRow: View {
   }
 }
 
+/// A bar of progress to a target. Where iOS redacts private content, only the track shows.
 struct ProgressBar: View {
+  @Environment(\.redactionReasons) private var redaction
   let progress: Double
   let fill: Color
   let track: Color
 
   var body: some View {
+    let shown = redaction.contains(.privacy) ? 0 : progress
     GeometryReader { proxy in
       ZStack(alignment: .leading) {
         Capsule().fill(track)
-        Capsule().fill(fill).frame(width: max(proxy.size.width * progress, progress > 0 ? 4 : 0)).widgetAccentable()
+        Capsule().fill(fill).frame(width: max(proxy.size.width * shown, shown > 0 ? 4 : 0)).widgetAccentable()
       }
     }
     .frame(height: 4)
@@ -377,6 +391,12 @@ struct TodayPalette {
 }
 
 extension TodayEntry.Content {
+  /// Whether the widget shows the account's plan and food.
+  var showsAccount: Bool {
+    if case .day = self { return true }
+    return false
+  }
+
   var message: String {
     switch self {
     case .signedOut: return "Sign in to see today's plan and food."

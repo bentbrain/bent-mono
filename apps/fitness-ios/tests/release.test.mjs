@@ -21,8 +21,10 @@ import {
   checkAppEntitlements,
   checkExtensionContents,
   checkExtensionEntitlements,
+  checkExtensionInfoPlist,
   checkHealthEntitlements,
   checkInfoPlist,
+  extensionBundleId,
   otoolSectionBytes,
 } from "../scripts/artifact.mjs";
 import { coverageArguments, swiftFilesFor } from "../scripts/codeql-coverage.mjs";
@@ -673,13 +675,40 @@ describe("the built app", () => {
       ...healthKit,
       ...productionGroup,
       "application-identifier": "TEAM123456.build.bent.fitness",
+      "com.apple.developer.team-identifier": "TEAM123456",
+      "keychain-access-groups": ["TEAM123456.*"],
+      "beta-reports-active": true,
       "get-task-allow": false,
     };
-    expect(checkSignedEntitlements(signed)).toEqual(Object.keys(healthKit));
-    expect(() => checkSignedEntitlements({ ...signed, "get-task-allow": true })).toThrow("debugging");
-    expect(() =>
-      checkSignedEntitlements({ ...signed, "application-identifier": "TEAM123456.build.bent.fitness.dev" }),
-    ).toThrow("production bundle ID");
+    expect(checkSignedEntitlements(signed)).toEqual({ health: Object.keys(healthKit), team: "TEAM123456" });
+    const withoutDebugFlag = { ...signed };
+    delete withoutDebugFlag["get-task-allow"];
+    expect(checkSignedEntitlements(withoutDebugFlag).team).toBe("TEAM123456");
+    for (const debug of [true, "false", 0, null])
+      expect(() => checkSignedEntitlements({ ...signed, "get-task-allow": debug })).toThrow(/debugging|get-task-allow/);
+    for (const identifier of [
+      "TEAM123456.build.bent.fitness.dev",
+      "TEAM123456.other.build.bent.fitness",
+      "TEAM123456.build.bent.fitnessXdev",
+      "SHORT.build.bent.fitness",
+      "build.bent.fitness",
+    ])
+      expect(() => checkSignedEntitlements({ ...signed, "application-identifier": identifier })).toThrow(
+        "application identifier",
+      );
+    const withoutIdentifier = { ...signed };
+    delete withoutIdentifier["application-identifier"];
+    expect(() => checkSignedEntitlements(withoutIdentifier)).toThrow("production bundle ID");
+    expect(() => checkSignedEntitlements({ ...signed, "com.apple.developer.team-identifier": "OTHER12345" })).toThrow(
+      "team identifier",
+    );
+    // Any capability beyond HealthKit and the App Group is refused.
+    for (const extra of [
+      { "aps-environment": "production" },
+      { "com.apple.developer.associated-domains": ["applinks:fitness.bent.build"] },
+      { "com.apple.security.application-groups.extra": true },
+    ])
+      expect(() => checkSignedEntitlements({ ...signed, ...extra })).toThrow("unexpected entitlements");
     expect(() =>
       checkHealthEntitlements({ ...healthKit, "com.apple.developer.healthkit.access": ["health-records"] }),
     ).toThrow("Unexpected HealthKit");
@@ -695,33 +724,82 @@ describe("the built app", () => {
   test("the App Group is the variant's bundle ID after group.", () => {
     expect(appGroup("production")).toBe("group.build.bent.fitness");
     expect(appGroup("development")).toBe("group.build.bent.fitness.dev");
-    const development = { ...healthKit, "com.apple.security.application-groups": ["group.build.bent.fitness.dev"] };
+    // A Simulator build carries a placeholder team in its application identifier.
+    const development = {
+      ...healthKit,
+      "com.apple.security.application-groups": ["group.build.bent.fitness.dev"],
+      "application-identifier": "FAKETEAMID.build.bent.fitness.dev",
+    };
     expect(checkAppEntitlements(development, "development")).toEqual(Object.keys(healthKit));
     expect(() => checkAppEntitlements(development, "production")).toThrow("exactly the App Group");
+    expect(() =>
+      checkAppEntitlements({ ...development, "application-identifier": "FAKETEAMID.build.bent.fitness" }, "development"),
+    ).toThrow("application identifier");
+    expect(() => checkAppEntitlements({ ...development, "get-task-allow": "yes" }, "development")).toThrow("Boolean");
   });
 
-  test("the signed widget extension has exactly the App Group, no HealthKit and no debugging", () => {
+  test("the signed widget extension has exactly the App Group under the app's team, no HealthKit and no debugging", () => {
     const signed = {
       ...productionGroup,
       "application-identifier": "TEAM123456.build.bent.fitness.workout-activity",
+      "com.apple.developer.team-identifier": "TEAM123456",
+      "keychain-access-groups": ["TEAM123456.*"],
+      "beta-reports-active": true,
       "get-task-allow": false,
     };
-    expect(() => checkSignedExtensionEntitlements(signed)).not.toThrow();
-    expect(() => checkSignedExtensionEntitlements({ ...signed, "get-task-allow": true })).toThrow("debugging");
+    expect(() => checkSignedExtensionEntitlements(signed, "TEAM123456")).not.toThrow();
+    for (const debug of [true, "false", 1])
+      expect(() => checkSignedExtensionEntitlements({ ...signed, "get-task-allow": debug }, "TEAM123456")).toThrow(
+        /debugging|get-task-allow/,
+      );
+    expect(() => checkSignedExtensionEntitlements(signed, "OTHER12345")).toThrow("under the app's team");
+    for (const identifier of [
+      "TEAM123456.build.bent.fitness.dev.workout-activity",
+      "TEAM123456.other.build.bent.fitness.workout-activity",
+      "TEAM123456.build.bent.fitness",
+    ])
+      expect(() =>
+        checkSignedExtensionEntitlements({ ...signed, "application-identifier": identifier }, "TEAM123456"),
+      ).toThrow("application identifier");
+    const withoutIdentifier = { ...signed };
+    delete withoutIdentifier["application-identifier"];
+    expect(() => checkSignedExtensionEntitlements(withoutIdentifier, "TEAM123456")).toThrow("extension bundle ID");
+    expect(() => checkSignedExtensionEntitlements({ ...signed, ...healthKit }, "TEAM123456")).toThrow("must not have HealthKit");
     expect(() =>
-      checkSignedExtensionEntitlements({
-        ...signed,
-        "application-identifier": "TEAM123456.build.bent.fitness.dev.workout-activity",
-      }),
-    ).toThrow("extension bundle ID");
-    expect(() => checkSignedExtensionEntitlements({ ...signed, ...healthKit })).toThrow("must not have HealthKit");
+      checkSignedExtensionEntitlements({ ...signed, "aps-environment": "production" }, "TEAM123456"),
+    ).toThrow("unexpected entitlements");
     expect(() =>
-      checkSignedExtensionEntitlements({ ...signed, "com.apple.security.application-groups": ["group.build.bent.fitness.dev"] }),
+      checkSignedExtensionEntitlements(
+        { ...signed, "com.apple.security.application-groups": ["group.build.bent.fitness.dev"] },
+        "TEAM123456",
+      ),
     ).toThrow("widget extension must have exactly the App Group");
     expect(() => checkExtensionEntitlements({}, "development")).toThrow("group.build.bent.fitness.dev");
     expect(() => checkExtensionContents("WorkoutActivityWidget TodayWidget")).not.toThrow();
     expect(() => checkExtensionContents("WorkoutActivityWidget")).toThrow("Today widget");
     expect(() => checkExtensionContents("TodayWidget")).toThrow("Live Activity");
+  });
+
+  test("the widget extension's Info.plist names its bundle ID and the App Group the widget reads", () => {
+    const plist = { CFBundleIdentifier: "build.bent.fitness.workout-activity", FitnessAppGroup: "group.build.bent.fitness" };
+    expect(extensionBundleId("production")).toBe("build.bent.fitness.workout-activity");
+    expect(extensionBundleId("development")).toBe("build.bent.fitness.dev.workout-activity");
+    expect(() => checkExtensionInfoPlist(plist, "production")).not.toThrow();
+    expect(() =>
+      checkExtensionInfoPlist(
+        { CFBundleIdentifier: "build.bent.fitness.dev.workout-activity", FitnessAppGroup: "group.build.bent.fitness.dev" },
+        "development",
+      ),
+    ).not.toThrow();
+    expect(() => checkExtensionInfoPlist({ ...plist, CFBundleIdentifier: "build.bent.fitness" }, "production")).toThrow(
+      "widget extension bundle ID",
+    );
+    expect(() => checkExtensionInfoPlist({ ...plist, FitnessAppGroup: "group.build.bent.fitness.dev" }, "production")).toThrow(
+      "FitnessAppGroup",
+    );
+    const withoutGroup = { ...plist };
+    delete withoutGroup.FitnessAppGroup;
+    expect(() => checkExtensionInfoPlist(withoutGroup, "production")).toThrow("FitnessAppGroup");
   });
 
   test("reads a Simulator binary's entitlements section from either slice", () => {

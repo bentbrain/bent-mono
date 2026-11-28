@@ -1,7 +1,7 @@
 import "../global.css";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, AppState, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AccountProvider, api, session, useAccount, useSession } from "./account/AccountProvider";
 import { ApiError } from "./data/api";
@@ -44,13 +44,17 @@ function Root() {
   // When the session ends, by signing out or because Fitness ended the
   // sign-in, the workout leaves the Lock Screen, its timer alert goes and
   // no workout reminders stay scheduled. The reminder settings stay. The
-  // widget shows a sign-in prompt and no account data.
+  // session clears the widget when it closes; a clear that failed is tried
+  // again each time the app comes to the foreground while signed out.
   const closed = state.status === "signedOut" || state.status === "signingOut";
   useEffect(() => {
     if (!closed) return;
     endAllWorkoutActivities();
     void reminders.cancel();
-    void widget.signOut();
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") void widget.signOut(session.generation());
+    });
+    return () => subscription.remove();
   }, [closed]);
   switch (state.status) {
     case "loading":

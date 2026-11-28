@@ -194,75 +194,111 @@ describe("widget links", () => {
 });
 
 describe("WidgetPublisher", () => {
+  /** A synthetic snapshot file: `fail` makes the next writes or deletes throw, `hold` holds the next write. */
   function store() {
-    const saved: string[] = [];
+    const files: (string | null)[] = [];
+    const calls: string[] = [];
     let release: (() => void) | null = null;
-    let hold = false;
-    const value: WidgetStore & { saved: string[]; holdNext: () => void; release: () => void } = {
-      saved,
-      holdNext: () => {
-        hold = true;
-      },
-      release: () => release?.(),
+    const state = { hold: false, failSave: false, failClear: false };
+    const value: WidgetStore = {
       save: async (json) => {
-        if (hold) {
-          hold = false;
+        calls.push("save");
+        if (state.hold) {
+          state.hold = false;
           await new Promise<void>((resolve) => {
             release = resolve;
           });
         }
-        saved.push(json);
+        if (state.failSave) throw new Error("Synthetic write failure");
+        files.push(json);
+      },
+      clear: async () => {
+        calls.push("clear");
+        if (state.failClear) throw new Error("Synthetic delete failure");
+        files.push(null);
       },
     };
-    return value;
+    return { value, files, calls, state, release: () => release?.(), current: () => files.at(-1) };
   }
   const snapshot = (now: number) => widgetSnapshot(settings, [], now, scheme);
+  const signedOut = JSON.stringify(signedOutSnapshot);
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   test("writes each new snapshot once", async () => {
     const target = store();
-    const publisher = new WidgetPublisher(target);
-    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")))).toBe("saved");
-    expect(await publisher.publish(snapshot(at("2026-11-23T07:00:00Z")))).toBe("unchanged");
-    expect(await publisher.publish(snapshot(at("2026-11-24T06:00:00Z")))).toBe("saved");
-    expect(target.saved).toHaveLength(2);
+    const publisher = new WidgetPublisher(target.value);
+    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1)).toBe("saved");
+    expect(await publisher.publish(snapshot(at("2026-11-23T07:00:00Z")), 1)).toBe("unchanged");
+    expect(await publisher.publish(snapshot(at("2026-11-24T06:00:00Z")), 1)).toBe("saved");
+    expect(target.files).toHaveLength(2);
   });
 
-  test("signing out drops a waiting snapshot and writes the signed-out one last", async () => {
+  test("signing out drops waiting snapshots and writes the signed-out one last", async () => {
     const target = store();
-    const publisher = new WidgetPublisher(target);
-    target.holdNext();
-    const slow = publisher.publish(snapshot(at("2026-11-23T06:00:00Z")));
+    const publisher = new WidgetPublisher(target.value);
+    target.state.hold = true;
+    const slow = publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1);
     // The first write has started and waits.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const waiting = publisher.publish(snapshot(at("2026-11-24T06:00:00Z")));
-    const signOut = publisher.signOut();
+    await tick();
+    const waiting = publisher.publish(snapshot(at("2026-11-24T06:00:00Z")), 1);
+    const signOut = publisher.signOut(2);
     target.release();
     expect(await slow).toBe("saved");
     expect(await waiting).toBe("unchanged");
     expect(await signOut).toBe("saved");
-    expect(target.saved.at(-1)).toBe(JSON.stringify(signedOutSnapshot));
-    expect(target.saved).toHaveLength(2);
-    // The next sign-in writes its snapshot again.
-    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")))).toBe("saved");
+    expect(target.current()).toBe(signedOut);
+    expect(target.files).toHaveLength(2);
+  });
+
+  test("never writes a snapshot from an ended sign-in, even one built after signing out", async () => {
+    const target = store();
+    const publisher = new WidgetPublisher(target.value);
+    expect(await publisher.signOut(2)).toBe("saved");
+    // The outgoing account's screens can still build a snapshot before they close.
+    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1)).toBe("unchanged");
+    expect(target.current()).toBe(signedOut);
+    // The next sign-in writes its snapshot.
+    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 3)).toBe("saved");
+    expect(target.current()).not.toBe(signedOut);
+  });
+
+  test("deletes the snapshot when the signed-out one can't be written", async () => {
+    const target = store();
+    const publisher = new WidgetPublisher(target.value);
+    await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1);
+    target.state.failSave = true;
+    expect(await publisher.signOut(2)).toBe("cleared");
+    expect(target.current()).toBeNull();
+    expect(target.calls).toEqual(["save", "save", "clear"]);
+  });
+
+  test("reports a sign-out that left the snapshot, and tries again on the next call", async () => {
+    const target = store();
+    const publisher = new WidgetPublisher(target.value);
+    await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1);
+    target.state.failSave = true;
+    target.state.failClear = true;
+    expect(await publisher.signOut(2)).toBe("failed");
+    expect(target.current()).toContain('"signedIn"');
+    // At the next foreground or launch, writing works again.
+    target.state.failSave = false;
+    expect(await publisher.signOut(2)).toBe("saved");
+    expect(target.current()).toBe(signedOut);
+    expect(await publisher.signOut(2)).toBe("unchanged");
   });
 
   test("writes again after a failed write", async () => {
-    let fail = true;
-    const saved: string[] = [];
-    const publisher = new WidgetPublisher({
-      save: async (json) => {
-        if (fail) throw new Error("Synthetic write failure");
-        saved.push(json);
-      },
-    });
-    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")))).toBe("unchanged");
-    fail = false;
-    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")))).toBe("saved");
-    expect(saved).toHaveLength(1);
+    const target = store();
+    const publisher = new WidgetPublisher(target.value);
+    target.state.failSave = true;
+    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1)).toBe("unchanged");
+    target.state.failSave = false;
+    expect(await publisher.publish(snapshot(at("2026-11-23T06:00:00Z")), 1)).toBe("saved");
+    expect(target.files).toHaveLength(1);
   });
 
   test("writes nothing without the native module", async () => {
-    expect(await new WidgetPublisher(null).publish(snapshot(at("2026-11-23T06:00:00Z")))).toBe("unchanged");
-    expect(await new WidgetPublisher(null).signOut()).toBe("unchanged");
+    expect(await new WidgetPublisher(null).publish(snapshot(at("2026-11-23T06:00:00Z")), 1)).toBe("unchanged");
+    expect(await new WidgetPublisher(null).signOut(1)).toBe("unchanged");
   });
 });

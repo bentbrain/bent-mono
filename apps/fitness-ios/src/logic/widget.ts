@@ -55,8 +55,11 @@ function link(scheme: string, tab: WidgetTab, day: string) {
 
 type WidgetTab = "week" | "food";
 
+/** The tab and day a widget link opens. */
+export type WidgetLink = { tab: WidgetTab; day: string };
+
 /** The Week or Food tab and day a widget link opens, or null for any other URL. */
-export function widgetLink(url: string, scheme: string): { tab: WidgetTab; day: string } | null {
+export function widgetLink(url: string, scheme: string): WidgetLink | null {
   const prefix = `${scheme}://`;
   if (!url.startsWith(prefix)) return null;
   const match = /^(week|food)\?day=(\d{4}-\d{2}-\d{2})$/.exec(url.slice(prefix.length));
@@ -139,46 +142,80 @@ export function widgetSnapshot(settings: Settings, records: RecordEntry[], now: 
   return { version: snapshotVersion, status: "signedIn", timezone, days };
 }
 
-/** Writes the snapshot where the widget reads it, and asks iOS to refresh the widget. */
-export type WidgetStore = { save(json: string): Promise<void> };
+/** The widget's snapshot file. Each change asks iOS to refresh the widget. */
+export type WidgetStore = {
+  /** Replaces the snapshot. */
+  save(json: string): Promise<void>;
+  /** Deletes the snapshot. */
+  clear(): Promise<void>;
+};
+
+type SignOutResult = "saved" | "cleared" | "unchanged" | "failed";
 
 /**
- * Writes snapshots one at a time, in order. Signing out drops snapshots
- * still waiting before it and writes the signed-out snapshot, so a slow
- * write never brings account data back afterwards. A snapshot the same as
- * the last one written is skipped.
+ * Writes snapshots one at a time, in order. Each snapshot belongs to the
+ * sign-in generation that built it. Signing out raises the lowest
+ * generation allowed to write, so snapshots still waiting from the
+ * outgoing sign-in are dropped, then replaces the file with the signed-out
+ * snapshot. If that write fails it deletes the file instead, and if that
+ * fails too the next sign-out call tries again. A snapshot the same as the
+ * last one written is skipped.
  */
 export class WidgetPublisher {
   private chain: Promise<unknown> = Promise.resolve();
-  private generation = 0;
+  /** Snapshots from a sign-in generation below this one are never written. */
+  private minimum = 0;
   private last: string | null = null;
 
   constructor(private readonly store: WidgetStore | null) {}
 
-  publish(snapshot: WidgetSnapshot): Promise<"saved" | "unchanged"> {
-    const generation = this.generation;
-    return this.write(snapshot, () => generation === this.generation);
-  }
-
-  signOut(): Promise<"saved" | "unchanged"> {
-    this.generation += 1;
-    return this.write(signedOutSnapshot, () => true);
-  }
-
-  private write(snapshot: WidgetSnapshot, current: () => boolean): Promise<"saved" | "unchanged"> {
+  /** Writes the snapshot of the sign-in `generation` unless that sign-in has ended. */
+  publish(snapshot: WidgetSnapshot, generation: number): Promise<"saved" | "unchanged"> {
     const json = JSON.stringify(snapshot);
-    const run = this.chain.then(async (): Promise<"saved" | "unchanged"> => {
-      if (!this.store || !current() || json === this.last) return "unchanged";
+    return this.enqueue(async (store) => {
+      if (generation < this.minimum || json === this.last) return "unchanged";
       try {
-        await this.store.save(json);
+        await store.save(json);
         this.last = json;
         return "saved";
       } catch {
         this.last = null;
         return "unchanged";
       }
-    });
-    this.chain = run;
+    }, "unchanged");
+  }
+
+  /**
+   * Removes account data from the widget for every sign-in before
+   * `generation`, the first generation after the session closed. Resolves
+   * "failed" when neither the signed-out snapshot nor deleting the file
+   * worked, so the caller can report it and try again later.
+   */
+  signOut(generation: number): Promise<SignOutResult> {
+    this.minimum = Math.max(this.minimum, generation);
+    const json = JSON.stringify(signedOutSnapshot);
+    return this.enqueue(async (store): Promise<SignOutResult> => {
+      if (json === this.last) return "unchanged";
+      try {
+        await store.save(json);
+        this.last = json;
+        return "saved";
+      } catch {
+        this.last = null;
+      }
+      try {
+        await store.clear();
+        return "cleared";
+      } catch {
+        return "failed";
+      }
+    }, "unchanged");
+  }
+
+  private enqueue<T>(work: (store: WidgetStore) => Promise<T>, without: T): Promise<T> {
+    const store = this.store;
+    const run = this.chain.then(() => (store ? work(store) : without));
+    this.chain = run.catch(() => undefined);
     return run;
   }
 }

@@ -58,6 +58,8 @@ type WorkoutRemindersNative = {
 type WorkoutWidgetNative = {
   /** Writes the snapshot JSON for the widget and reloads its timelines. Rejects JSON the widget can't read. */
   save(json: string): Promise<void>;
+  /** Deletes the snapshot and reloads the widget's timelines. */
+  clear(): Promise<void>;
 };
 
 /** The native module, or null where it isn't linked, such as in unit tests. */
