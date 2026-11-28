@@ -154,9 +154,12 @@ function createBridge(): Bridge {
         );
       const caller = invocation.safeParse(options ?? {});
       const cancel = caller.success ? caller.data.signal : undefined;
-      const { signal, release } = cancel
-        ? either(cancel, lifetime.signal)
-        : { signal: lifetime.signal, release: () => undefined };
+      // Each call gets a signal of its own, linked to the account until the
+      // call settles, so the account's signal keeps no listeners from it.
+      const { signal, release } = either(
+        cancel ?? new AbortController().signal,
+        lifetime.signal,
+      );
       let started = false;
       let stopWaiting: () => void = () => undefined;
       const run = inTurn(async () => {
@@ -200,7 +203,7 @@ function createBridge(): Bridge {
 function registerBrowserTools(bridge: Bridge, signal: AbortSignal) {
   const context = document.modelContext;
   if (typeof context?.registerTool !== "function" || signal.aborted) return;
-  const id = (bridge.id ??= crypto.randomUUID().slice(0, 8));
+  const id = (bridge.id ??= crypto.randomUUID().replaceAll("-", ""));
   for (const tool of agentTools) {
     const execute = bridge.tools[tool.name];
     if (!execute) continue;

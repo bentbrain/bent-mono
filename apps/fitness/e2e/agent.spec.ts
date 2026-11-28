@@ -286,7 +286,7 @@ test("each page load registers tools under names of its own", async ({
   await expect.poll(async () => (await toolNames(page)).length).toBe(3);
   const first = await toolNames(page);
   for (const name of first)
-    expect(name).toMatch(/^(act|query|snapshot)_[0-9a-f]{8}$/);
+    expect(name).toMatch(/^(act|query|snapshot)_[0-9a-f]{32}$/);
   await page.reload();
   await expect(page.locator(".sync-state")).toHaveText("Saved");
   await expect.poll(async () => (await toolNames(page)).length).toBe(3);
@@ -411,4 +411,24 @@ test("a cancelled agent call reports the steps it finished", async ({
   expect(result.error?.step).toBe(1);
   expect(result.steps).toHaveLength(1);
   await expect(equipment).toHaveCount(before + 1);
+});
+
+test("tool names stay distinct when ids share a prefix", async ({ page }) => {
+  await page.addInitScript(() => {
+    const random = crypto.randomUUID.bind(crypto);
+    // Every id this page makes starts the same way, as two can by chance.
+    Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => `aaaaaaaa${random().slice(8)}`,
+    });
+  });
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const first = await toolNames(page);
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect.poll(async () => (await toolNames(page)).length).toBe(3);
+  const second = await toolNames(page);
+  expect(second.filter((name) => first.includes(name))).toEqual([]);
 });
