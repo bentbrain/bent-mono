@@ -36,10 +36,11 @@ final class SyncFlowTests: XCTestCase {
 
   /// Launches `app`, and ends the flow when XCTest has recorded a failure,
   /// such as a launch that timed out, even when the app finishes launching
-  /// afterwards.
+  /// afterwards. XCTest has already reported that failure, so the flow ends
+  /// without reading the app's hierarchy, which can block on a slow app.
   private func launch(_ app: XCUIApplication) throws {
     app.launch()
-    try require((testRun?.totalFailureCount ?? 0) == 0, "Launching \(app.debugDescription) failed.")
+    if (testRun?.totalFailureCount ?? 0) > 0 { throw FlowStopped() }
   }
 
   private func seed() throws {
