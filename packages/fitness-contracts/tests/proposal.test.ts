@@ -3,6 +3,7 @@ import { defaultSettings, settingsSchema } from "../src/domain";
 import type { Settings } from "../src/domain";
 import {
   planChanges,
+  planningProfile,
   planProposalSchema,
   reviewPlan,
   storePlan,
@@ -327,4 +328,30 @@ test("distinct weights never share a label", () => {
     ids,
   );
   expect(planChanges(base, empty)).toEqual([]);
+});
+
+test("the planning profile lists the fields settings hold", () => {
+  const base = current();
+  expect(planningProfile(base)).toEqual([]);
+  expect(
+    planningProfile({
+      ...base,
+      experience: "returning",
+      sessionMinutes: 45,
+      limitations: "",
+      availableEquipment: ["dumbbells", "flat-bench"],
+      kettlebellsKg: [8, 12],
+      incrementsKg: { machine: 1 },
+    }),
+  ).toEqual([
+    { label: "Experience", value: "Returning to training" },
+    { label: "Session length", value: "45 min" },
+    { label: "Injuries and limits", value: "None" },
+    { label: "Equipment", value: "Dumbbells, Flat bench" },
+    { label: "Kettlebells", value: "8, 12 kg" },
+    {
+      label: "Weight steps",
+      value: "barbell default (2.5 kg), machine 1 kg, cable default (2.5 kg)",
+    },
+  ]);
 });

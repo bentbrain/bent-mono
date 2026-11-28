@@ -806,7 +806,12 @@ export function progression(
     return next
       ? { text: `Try the next available ${item}. ${restart}`, loadKg: next }
       : {
-          text: `Top of range reached. Add an available ${item} size in Settings before increasing.`,
+          // Dumbbell sizes are edited in Settings; kettlebell sizes come
+          // from the planning profile an assistant proposes.
+          text:
+            type === "dumbbell"
+              ? "Top of range reached. Add an available dumbbell size in Settings before increasing."
+              : "Top of range reached. Keep this kettlebell and slow the lowering, or move to a harder variation, until a heavier one is in your planning profile.",
           loadKg: load,
         };
   }
@@ -1045,10 +1050,36 @@ export function setResult(
     return exercise.side
       ? `${set.value} reps left / ${set.right ?? 0} right`
       : `${set.value} reps`;
-  const load = `${displayLoad(set.loadKg, units)} ${units}`;
+  const load = loadAmount(set.loadKg, exercise, units);
   return exercise.side
     ? `${load} × ${set.value} left / ${set.right ?? 0} right`
     : `${load} × ${set.value} reps`;
+}
+
+/**
+ * A weight with what it measures, such as "40 kg on the bar". Dumbbell
+ * weights, the usual case, read as the plain weight.
+ */
+export function loadAmount(
+  kg: number,
+  exercise: Pick<Exercise, "id" | "load" | "mode">,
+  units: Settings["units"],
+) {
+  const type = loadTypeOf(exercise);
+  return `${displayLoad(kg, units)} ${
+    type === "dumbbell" ? units : loadTypeWording(type, units).unit
+  }`;
+}
+
+/**
+ * The load tag for a prescription that records weight some way other than
+ * per dumbbell, such as "Whole bar" or "Band". Empty for dumbbell and timed
+ * exercises.
+ */
+export function loadTag(exercise: Pick<Exercise, "id" | "load" | "mode">) {
+  if (exercise.mode !== "reps") return "";
+  const type = loadTypeOf(exercise);
+  return type === "dumbbell" ? "" : loadTypeWording(type, "kg").tag;
 }
 
 /**

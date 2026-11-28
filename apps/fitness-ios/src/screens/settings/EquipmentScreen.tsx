@@ -8,6 +8,7 @@ import { AppText } from "../../ui/Text";
 import { InputField, SaveBar, useDiscardGuard, useFieldFocus, useSettingsEditor } from "./parts";
 import { PhotoLibrary } from "./PhotoLibrary";
 import { formatDumbbells, newEquipment, parseDumbbells } from "./rules";
+import { planningProfile } from "@bent/fitness-contracts/proposal";
 
 export function EquipmentScreen() {
   const { sync } = useConfiguredAccount();
@@ -43,6 +44,24 @@ function EquipmentEditor() {
   return (
     <Screen testID="screen-equipment">
       <View className="gap-3">
+        <SectionTitle>Planning profile</SectionTitle>
+        {planningProfile(draft).length > 0 ? (
+          <Card testID="planning-profile">
+            {planningProfile(draft).map((row) => (
+              <View key={row.label} className="gap-0.5 py-1">
+                <AppText textRole="footnote" tone="secondary">
+                  {row.label}
+                </AppText>
+                <AppText textRole="body">{row.value}</AppText>
+              </View>
+            ))}
+          </Card>
+        ) : null}
+        <AppText textRole="footnote" tone="secondary" className="px-1">
+          {planningProfile(draft).length > 0
+            ? "Your assistant keeps this up to date when it plans your training with you."
+            : "Your assistant fills this in when it plans your training with you."}
+        </AppText>
         <SectionTitle>Your equipment</SectionTitle>
         <AppText textRole="footnote" tone="secondary" className="px-1">
           Add only the sizes you have checked. A dumbbell weight in a workout is for one dumbbell.

@@ -172,7 +172,7 @@ export function DayPanel({ day }: { day: string }) {
               label={exercise.name}
               description={prescriptionText(effectivePrescription(exercise, plan.intro))}
               leading={<ExerciseThumb id={exercise.id} width={64} />}
-              trailing={<ExerciseHelp id={exercise.id} />}
+              trailing={<ExerciseHelp id={exercise.id} prescription={effectivePrescription(exercise, plan.intro)} />}
             />
           ))}
         </ListSection>

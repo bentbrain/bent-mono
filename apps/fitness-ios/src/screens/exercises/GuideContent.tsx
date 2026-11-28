@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { openBrowserAsync } from "expo-web-browser";
 import { useNavigation } from "@react-navigation/native";
 import { useCSSVariable } from "uniwind";
+import type { Exercise } from "@bent/fitness-contracts/domain";
 import type { Guide } from "@bent/fitness-contracts/guides";
 import { useAccount } from "../../account/AccountProvider";
 import { haptic } from "../../ui/haptics";
@@ -25,11 +26,17 @@ const thumbRatio = 512 / 206;
  * The Exercise screen shows it in full; the guide sheet shows it compact,
  * with the illustration's middle frames in place of the full picture.
  */
-export function GuideContent({ id, compact = false }: { id: string; compact?: boolean }) {
+export function GuideContent({ id, prescription, compact = false }: { id: string; prescription?: Exercise; compact?: boolean }) {
   const guide = guideFor(id);
   if (!guide)
     return (
-      <Card testID="exercise-guide-fallback">
+      <Card testID="exercise-guide-fallback" className="gap-2">
+        {prescription ? (
+          <>
+            <AppText weight="semibold">{prescriptionText(prescription)}</AppText>
+            <AppText>{recordingNotes(prescription)}</AppText>
+          </>
+        ) : null}
         <AppText>Use a familiar movement and a light practice set. Ask a qualified trainer for setup and form guidance.</AppText>
       </Card>
     );

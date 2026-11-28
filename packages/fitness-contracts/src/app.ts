@@ -20,7 +20,7 @@ import type { Entity, Exercise, Routine } from "./domain";
  * field it adds, since Fitness serves those records to any build that
  * declares it. A build declaring 3 declares everything 2 adds.
  */
-export const appContract = 2;
+export const appContract = 3;
 export const appContractHeader = "X-Fitness-Contract";
 /** The contract a request declares, or 1 when it names none or an invalid one. */
 export function requestContract(value: string | null) {

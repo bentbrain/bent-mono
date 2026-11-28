@@ -18,6 +18,7 @@ import {
   toKg,
   withNutrient,
 } from "@bent/fitness-contracts/domain";
+import { planningProfile } from "@bent/fitness-contracts/proposal";
 import type { Nutrient, Settings } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sync } from "../sync";
@@ -388,6 +389,22 @@ export function SettingsEditor({
                 );
               })}
             </div>
+            <h2 className="section-label">Planning profile</h2>
+            {planningProfile(draft).length > 0 && (
+              <dl className="profile-list card">
+                {planningProfile(draft).map((row) => (
+                  <div key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            <p className="input-help">
+              {planningProfile(draft).length > 0
+                ? "Your assistant keeps this up to date when it plans your training with you."
+                : "Your assistant fills this in when it plans your training with you."}
+            </p>
             <h2 className="section-label">Your equipment</h2>
             <p>
               Add only the sizes you have checked. A dumbbell weight in a workout
