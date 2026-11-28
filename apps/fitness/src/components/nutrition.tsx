@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import {
   addDays,
   dateSearch,
@@ -25,11 +25,7 @@ import type { Entity, Settings } from "@bent/fitness-contracts/domain";
 import type { Sync } from "../sync";
 import { useAccount } from "./account-context";
 import { foodDayDetail } from "./chart-details";
-import {
-  ChartCard,
-  spokenDetail,
-  useDismiss,
-} from "./chart-popover";
+import { ChartCard, spokenDetail, useDismiss } from "./chart-popover";
 import { DateBar } from "./date-bar";
 import { TextField } from "./fields";
 import { Icon } from "./icons";
@@ -256,8 +252,7 @@ export function Nutrition({
         <ul className="quick-meals">
           {regulars.map((r) => (
             <li key={r.id}>
-              <button
-                type="button"
+              <Button
                 className="quick-add"
                 aria-label={`Add ${r.data.name} to ${formatDate(date)}`}
                 onClick={() => {
@@ -270,7 +265,7 @@ export function Nutrition({
                   {r.data.name}
                 </strong>
                 <small>{foodSummary(r.data, tracked)}</small>
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -434,9 +429,9 @@ export function Nutrition({
           Bars show calories logged each day. The dashed line is your{" "}
           {settings.calories} kcal target. Hover over or focus a day to see its
           calories, protein and what is left.{" "}
-          <Link to="/settings" search={{}}>
+          <Button render={<Link to="/settings" search={{}} />}>
             Change targets
-          </Link>
+          </Button>
         </p>
         {regulars.length > 0 && (
           <details className="manage-meals">
@@ -514,13 +509,17 @@ function DayStrip({
               onFocus={() => setActive(index)}
               onBlur={() => setActive(null)}
             >
-              <Link
-                to="/food"
-                search={dateSearch(day, today)}
-                activeOptions={{ exact: true }}
-                aria-current={day === date ? "page" : undefined}
-                aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
-                aria-describedby={`${described}-${index}`}
+              <Button
+                render={
+                  <Link
+                    to="/food"
+                    search={dateSearch(day, today)}
+                    activeOptions={{ exact: true }}
+                    aria-current={day === date ? "page" : undefined}
+                    aria-label={`${formatDate(day)}: ${Math.round(value)} kcal`}
+                    aria-describedby={`${described}-${index}`}
+                  />
+                }
               >
                 <span className="bar">
                   <span
@@ -535,7 +534,7 @@ function DayStrip({
                   />
                 </span>
                 {formatShortDate(day).split(" ")[0]}
-              </Link>
+              </Button>
               <span id={`${described}-${index}`} className="visually-hidden">
                 {spokenDetail(foodDayDetail(day, eaten, target))}
               </span>

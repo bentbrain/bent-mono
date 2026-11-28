@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { Button } from "@bent/ui/sdk/button";
 import {
   addDays,
   completedActivity,
@@ -128,27 +129,35 @@ function WeekBoard({ monday }: { monday: string }) {
   return (
     <nav className="week-board" aria-label="Training week">
       <div className="board-head">
-        <Link
+        <Button
           className="icon-button"
-          to="/"
-          search={dateSearch(addDays(date, -7), today)}
-          activeOptions={{ exact: true }}
+          render={
+            <Link
+              to="/"
+              search={dateSearch(addDays(date, -7), today)}
+              activeOptions={{ exact: true }}
+            />
+          }
         >
           <Icon name="back" />
           <span className="visually-hidden">Previous week</span>
-        </Link>
+        </Button>
         <p className="board-range">
           {formatShortDate(monday)} – {formatShortDate(addDays(monday, 6))}
         </p>
-        <Link
+        <Button
           className="icon-button"
-          to="/"
-          search={dateSearch(addDays(date, 7), today)}
-          activeOptions={{ exact: true }}
+          render={
+            <Link
+              to="/"
+              search={dateSearch(addDays(date, 7), today)}
+              activeOptions={{ exact: true }}
+            />
+          }
         >
           <span className="visually-hidden">Next week</span>
           <Icon name="forward" />
-        </Link>
+        </Button>
       </div>
       <ol className="board-days">
         {Array.from({ length: 7 }, (_, index) => {
@@ -158,13 +167,17 @@ function WeekBoard({ monday }: { monday: string }) {
           const weekday = formatShortDate(day).split(" ")[0];
           return (
             <li key={day}>
-              <Link
+              <Button
                 className={`board-day type-${info.plan.type} state-${info.state}${day === today ? " is-today" : ""}`}
-                to="/"
-                search={dateSearch(day, today)}
-                activeOptions={{ exact: true }}
-                aria-current={day === date ? "page" : undefined}
-                aria-label={`${formatDate(day)}${day === today ? ", today" : ""}: ${info.name}, ${info.status}`}
+                render={
+                  <Link
+                    to="/"
+                    search={dateSearch(day, today)}
+                    activeOptions={{ exact: true }}
+                    aria-current={day === date ? "page" : undefined}
+                    aria-label={`${formatDate(day)}${day === today ? ", today" : ""}: ${info.name}, ${info.status}`}
+                  />
+                }
               >
                 <span className="day-name">{weekday}</span>
                 <span className="day-number">{Number(day.slice(8))}</span>
@@ -187,7 +200,7 @@ function WeekBoard({ monday }: { monday: string }) {
                     <Icon name="minus" size={12} />
                   ) : null}
                 </i>
-              </Link>
+              </Button>
             </li>
           );
         })}
@@ -227,13 +240,12 @@ function ResumePanel({ record }: { record: RecordEntry }) {
         Your timers and results are saved. Pick up where you left off.
       </p>
       <div className="now-actions">
-        <Link
+        <Button
           className="bent-button bent-button--primary"
-          to="/workout"
-          search={{ workoutId: record.id }}
+          render={<Link to="/workout" search={{ workoutId: record.id }} />}
         >
           Resume workout
-        </Link>
+        </Button>
       </div>
     </aside>
   );
@@ -251,31 +263,36 @@ function DayPanel({ day }: { day: string }) {
   const routine = plan.type === "strength" ? plan.routine : undefined;
   const recorded = info.completed || info.other;
   const results = (
-    <Link
+    <Button
       className="bent-button bent-button--outline"
-      to="/history"
-      search={dateSearch(day, today)}
+      render={<Link to="/history" search={dateSearch(day, today)} />}
     >
       View results
-    </Link>
+    </Button>
   );
   const next = following && (
     <p className="now-next">
       Next: {formatDate(following.date)} ·{" "}
       {following.plan.type === "strength" && following.plan.routine ? (
-        <Link
-          to="/plan"
-          search={{
-            ...dateSearch(following.date, today),
-            routineId: following.plan.routine.id,
-          }}
+        <Button
+          render={
+            <Link
+              to="/plan"
+              search={{
+                ...dateSearch(following.date, today),
+                routineId: following.plan.routine.id,
+              }}
+            />
+          }
         >
           {following.plan.routine.name}
-        </Link>
+        </Button>
       ) : (
-        <Link to="/run" search={dateSearch(following.date, today)}>
+        <Button
+          render={<Link to="/run" search={dateSearch(following.date, today)} />}
+        >
           Easy run
-        </Link>
+        </Button>
       )}
     </p>
   );
@@ -313,22 +330,28 @@ function DayPanel({ day }: { day: string }) {
               </p>
               <div className="now-actions">
                 {day === today && (
-                  <button
-                    type="button"
+                  <Button
                     className="bent-button bent-button--primary"
                     disabled={starting}
                     onClick={() => start(routine, today)}
                   >
                     {starting ? "Opening workout…" : "Start workout"}
-                  </button>
+                  </Button>
                 )}
-                <Link
+                <Button
                   className={`bent-button ${day === today ? "bent-button--outline" : "bent-button--primary"}`}
-                  to="/plan"
-                  search={{ ...dateSearch(day, today), routineId: routine.id }}
+                  render={
+                    <Link
+                      to="/plan"
+                      search={{
+                        ...dateSearch(day, today),
+                        routineId: routine.id,
+                      }}
+                    />
+                  }
                 >
                   View workout plan
-                </Link>
+                </Button>
               </div>
               {day > today && (
                 <p className="now-note">
@@ -347,13 +370,12 @@ function DayPanel({ day }: { day: string }) {
             <>
               <p>Keep it comfortable enough to talk in sentences.</p>
               <div className="now-actions">
-                <Link
+                <Button
                   className="bent-button bent-button--primary"
-                  to="/run"
-                  search={dateSearch(day, today)}
+                  render={<Link to="/run" search={dateSearch(day, today)} />}
                 >
                   {day > today ? "View run plan" : "Record run"}
-                </Link>
+                </Button>
               </div>
             </>
           ) : (
@@ -366,13 +388,12 @@ function DayPanel({ day }: { day: string }) {
               {next}
               {day <= today && (
                 <div className="now-actions">
-                  <Link
+                  <Button
                     className="bent-button bent-button--outline"
-                    to="/run"
-                    search={dateSearch(day, today)}
+                    render={<Link to="/run" search={dateSearch(day, today)} />}
                   >
                     Record an unscheduled run
-                  </Link>
+                  </Button>
                 </div>
               )}
             </>
@@ -442,11 +463,13 @@ function WeekTotals({
         <div>
           <dt>Food · {date === today ? "today" : formatShortDate(date)}</dt>
           <dd>
-            <Link to="/food" search={dateSearch(date, today)}>
+            <Button
+              render={<Link to="/food" search={dateSearch(date, today)} />}
+            >
               <strong>{Math.round(food.calories)}</strong> of{" "}
               {settings.calories} kcal · {Math.round(food.protein)} of{" "}
               {settings.protein} g protein
-            </Link>
+            </Button>
           </dd>
         </div>
       </dl>
@@ -454,9 +477,9 @@ function WeekTotals({
         Repeating strength days take turns through{" "}
         {settings.routines.map((routine) => routine.name).join(", ")} in
         calendar order. Reorganised sessions keep their chosen routine.{" "}
-        <Link to="/schedule" search={{}}>
+        <Button render={<Link to="/schedule" search={{}} />}>
           Edit repeating week
-        </Link>
+        </Button>
       </p>
     </section>
   );

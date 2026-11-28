@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import {
   addDays,
   formatDate,
@@ -52,8 +52,7 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
       : null;
   return (
     <div className="reorganise-week">
-      <button
-        type="button"
+      <Button
         className="text-link"
         disabled={
           movable.length < 2 ||
@@ -78,9 +77,8 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
         }}
       >
         Reorganise week
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
         className="text-link"
         disabled={!days.some((day) => settings.dayPlans?.[day])}
         onClick={() => {
@@ -107,7 +105,7 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
         }}
       >
         Reset week to repeating plan
-      </button>
+      </Button>
       <p role="status">{notice}</p>
       <dialog
         ref={dialog}
@@ -118,14 +116,13 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
         <div className="sheet-body">
           <div className="sheet-head">
             <h2 id="reorganise-title">Move a planned session</h2>
-            <button
-              type="button"
+            <Button
               className="icon-button"
               aria-label="Close reorganisation"
               onClick={() => dialog.current?.close()}
             >
               <Icon name="close" />
-            </button>
+            </Button>
           </div>
           <p>
             Choose where this session goes. If that day has a session, the two
@@ -235,13 +232,17 @@ export function ReorganiseWeek({ monday }: { monday: string }) {
               Apply move
             </Button>
           </form>
-          <Link
-            to="/schedule"
-            search={{}}
-            onClick={() => dialog.current?.close()}
+          <Button
+            render={
+              <Link
+                to="/schedule"
+                search={{}}
+                onClick={() => dialog.current?.close()}
+              />
+            }
           >
             Edit the repeating schedule →
-          </Link>
+          </Button>
         </div>
       </dialog>
     </div>

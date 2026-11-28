@@ -1,0 +1,187 @@
+import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import {
+  clerk,
+  clerkSetup,
+  setupClerkTestingToken,
+} from "@clerk/testing/playwright";
+import postgres from "postgres";
+import { z } from "zod";
+import { settleWrites, trackWrites } from "./quiescence";
+
+const email = "fitness-a+clerk_test@example.com";
+const entrySchema = z.object({
+  ref: z.string(),
+  component: z.string(),
+  label: z.string().optional(),
+  offPage: z.boolean().optional(),
+  confirm: z.string().optional(),
+});
+const actSchema = z.object({
+  ok: z.boolean(),
+  error: z.object({ message: z.string() }).optional(),
+});
+type Tool = { execute: (input: object) => Promise<unknown> | unknown };
+declare global {
+  interface Window {
+    webmcpTools?: Map<string, Tool>;
+  }
+}
+
+/** Stands in for a browser's WebMCP API, so the test calls the tools the app registers. */
+async function installModelContext(page: Page) {
+  await page.addInitScript(() => {
+    const tools = new Map<string, Tool>();
+    window.webmcpTools = tools;
+    Object.defineProperty(document, "modelContext", {
+      configurable: true,
+      value: {
+        registerTool: async (tool: Tool & { name: string }) => {
+          tools.set(tool.name, tool);
+        },
+        unregisterTool: async (name: string) => {
+          tools.delete(name);
+        },
+      },
+    });
+  });
+}
+async function tool(page: Page, name: string, input: object = {}) {
+  await expect
+    .poll(() => page.evaluate((key) => !!window.webmcpTools?.has(key), name))
+    .toBe(true);
+  return page.evaluate(
+    ([key, value]) => window.webmcpTools?.get(key)?.execute(value),
+    [name, input] as const,
+  );
+}
+async function snapshot(page: Page) {
+  return z
+    .array(entrySchema)
+    .parse(await tool(page, "snapshot"))
+    .filter((entry) => !entry.offPage && entry.component !== "more");
+}
+function act(page: Page, steps: object[]) {
+  return tool(page, "act", { steps }).then((result) => actSchema.parse(result));
+}
+
+test.beforeAll(async () => {
+  await clerkSetup({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY });
+});
+test.beforeEach(async ({ page, context }) => {
+  trackWrites(context);
+  page.setDefaultTimeout(10000);
+  const secret = process.env.CLERK_SECRET_KEY;
+  const url = process.env.DATABASE_URL;
+  if (!secret?.startsWith("sk_test_") || !url)
+    throw Error("Dedicated development configuration is required");
+  const response = await fetch(
+    "https://api.clerk.com/v1/users?email_address=" + encodeURIComponent(email),
+    { headers: { Authorization: `Bearer ${secret}` } },
+  );
+  if (!response.ok) throw Error("Synthetic account lookup failed");
+  const users = z
+    .array(z.object({ id: z.string() }))
+    .parse(await response.json());
+  const sql = postgres(url, { ssl: "verify-full", max: 1, prepare: false });
+  try {
+    for (const user of users) {
+      await sql`DELETE FROM fitness_photos WHERE owner_id=${user.id}`;
+      await sql`DELETE FROM fitness_operations WHERE owner_id=${user.id}`;
+      await sql`DELETE FROM fitness_records WHERE owner_id=${user.id}`;
+      await sql`DELETE FROM fitness_accounts WHERE owner_id=${user.id}`;
+    }
+  } finally {
+    await sql.end();
+  }
+  await installModelContext(page);
+  await setupClerkTestingToken({ page });
+  await page.goto("/");
+  await clerk.signIn({ page, emailAddress: email });
+  await page.reload();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const setup = page.getByRole("button", { name: "Set up my plan" });
+  if (await setup.isVisible()) await setup.click();
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+});
+test.afterEach(async ({ context }) => {
+  await settleWrites(context);
+});
+
+test("an agent finds every control by name on each screen", async ({
+  page,
+}) => {
+  const screens: [string, string[]][] = [
+    ["/", ["Week", "Exercises", "Food", "Progress", "Settings"]],
+    ["/guides", ["Goblet squat"]],
+    ["/food", ["Add food"]],
+    ["/progress", ["Sessions", "Bodyweight"]],
+    ["/history", ["Overview"]],
+    ["/body", ["Save weigh-in"]],
+    ["/settings", ["Save settings", "Export account data and photos"]],
+    ["/schedule", ["Save settings"]],
+  ];
+  for (const [path, expected] of screens) {
+    await page.goto(path);
+    await expect(page.locator(".sync-state")).toHaveText("Saved");
+    const entries = await snapshot(page);
+    for (const entry of entries)
+      expect(
+        entry.label,
+        `${path}: ${entry.component} ${entry.ref} has no name`,
+      ).toBeTruthy();
+    const labels = entries.map((entry) => entry.label ?? "");
+    for (const label of expected)
+      expect(
+        labels.some((name) => name.startsWith(label)),
+        `${path}: ${label} is missing from the snapshot`,
+      ).toBe(true);
+  }
+});
+
+test("an agent moves between sections by pressing links", async ({ page }) => {
+  const press = await act(page, [{ ref: "Food", action: "press" }]);
+  expect(press.ok, press.error?.message).toBe(true);
+  await expect(page).toHaveURL(/\/food$/);
+  await expect(
+    page.getByRole("link", { name: "Food", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  const settings = await act(page, [{ ref: "Settings", action: "press" }]);
+  expect(settings.ok, settings.error?.message).toBe(true);
+  await expect(page).toHaveURL(/\/settings$/);
+});
+
+test("an agent's export waits for the person to allow it", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const exportLabel = "Export account data and photos";
+  const marked = (await snapshot(page)).find(
+    (entry) => entry.label === exportLabel,
+  );
+  expect(marked?.confirm).toBe(
+    "Downloads a copy of all your Fitness data and photos to this device",
+  );
+  const step = [{ ref: exportLabel, action: "press" }];
+  const ask = page.getByRole("alertdialog", {
+    name: "Allow your assistant to do this?",
+  });
+
+  const refused = act(page, step);
+  await expect(ask).toBeVisible();
+  await expect(ask).toContainText(
+    "Downloads a copy of all your Fitness data and photos to this device",
+  );
+  expect(
+    (await snapshot(page)).some((entry) => entry.label === "Allow"),
+    "the confirmation is hidden from the agent",
+  ).toBe(false);
+  await ask.getByRole("button", { name: "Not now" }).click();
+  expect((await refused).ok).toBe(false);
+  await expect(ask).toBeHidden();
+
+  const download = page.waitForEvent("download");
+  const allowed = act(page, step);
+  await ask.getByRole("button", { name: "Allow" }).click();
+  expect((await allowed).ok).toBe(true);
+  expect((await download).suggestedFilename()).toBe("fitness-export.json");
+});

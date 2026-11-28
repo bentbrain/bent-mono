@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker } from "@tanstack/react-router";
-import { Button } from "@bent/ui/button";
+import { Button } from "@bent/ui/sdk/button";
 import {
   addDays,
   defaultSettings,
@@ -202,13 +202,13 @@ export function SettingsEditor({
           <h1>Settings</h1>
           <ul className="settings-links">
             <li>
-              <Link to="/schedule" search={{}}>
+              <Button render={<Link to="/schedule" search={{}} />}>
                 <span>
                   Repeating week and routines
                   <small>Training days, rotation, sets and rest</small>
                 </span>
                 <span aria-hidden>→</span>
-              </Link>
+              </Button>
             </li>
           </ul>
         </header>
@@ -876,6 +876,7 @@ export function SettingsEditor({
             <Button
               appearance="outline"
               disabled={exporting}
+              data-agent-confirm="Downloads a copy of all your Fitness data and photos to this device"
               onClick={async () => {
                 setExporting(true);
                 setError("");

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { Link } from "@tanstack/react-router";
+import { Button } from "@bent/ui/sdk/button";
 import {
   exercises,
   lastExercise,
@@ -93,10 +94,14 @@ function ExerciseDetail({
       data-feedback-redact
     >
       <figure className="exercise-illustration">
-        <a
-          href={`/exercise-guides/${guide.id}.png`}
-          target="_blank"
-          rel="noreferrer"
+        <Button
+          render={
+            <a
+              href={`/exercise-guides/${guide.id}.png`}
+              target="_blank"
+              rel="noreferrer"
+            />
+          }
         >
           <img
             src={`/exercise-guides/${guide.id}.png`}
@@ -107,18 +112,22 @@ function ExerciseDetail({
             decoding="async"
           />
           <span>Open illustration at full size ↗</span>
-        </a>
+        </Button>
         <figcaption>
           AI-generated reference. Compare both views with the written cues and
           video demonstration.
         </figcaption>
       </figure>
       <div className="exercise-copy">
-        <a
+        <Button
           className="video-link"
-          href={`https://www.youtube.com/watch?v=${guide.video}`}
-          target="_blank"
-          rel="noreferrer"
+          render={
+            <a
+              href={`https://www.youtube.com/watch?v=${guide.video}`}
+              target="_blank"
+              rel="noreferrer"
+            />
+          }
         >
           <Icon name="play" size={16} />
           <span className="video-link-label">
@@ -128,7 +137,7 @@ function ExerciseDetail({
             </span>
             <span className="video-link-credit">{guide.credit}</span>
           </span>
-        </a>
+        </Button>
         <p className="muted">
           Tutorial opens on YouTube. Start light and stop if a movement hurts.
         </p>
@@ -190,8 +199,7 @@ export function ExerciseHelp({ id }: { id: string }) {
   }, []);
   return (
     <>
-      <button
-        type="button"
+      <Button
         className="help-button"
         aria-label={`How to do ${name}`}
         aria-haspopup="dialog"
@@ -199,7 +207,7 @@ export function ExerciseHelp({ id }: { id: string }) {
       >
         <Icon name="info" size={16} />
         How to
-      </button>
+      </Button>
       <dialog
         ref={dialog}
         className="sheet"
@@ -211,24 +219,27 @@ export function ExerciseHelp({ id }: { id: string }) {
         <div className="sheet-body">
           <div className="sheet-head">
             <h2 id={title}>{name}</h2>
-            <button
-              type="button"
+            <Button
               className="icon-button"
               aria-label="Close guide"
               onClick={() => dialog.current?.close()}
             >
               <Icon name="close" />
-            </button>
+            </Button>
           </div>
           <ExerciseDetail id={id} headingLevel={3} />
-          <Link
+          <Button
             className="text-link"
-            to="/guides"
-            search={{ exercise: id }}
-            onClick={() => dialog.current?.close()}
+            render={
+              <Link
+                to="/guides"
+                search={{ exercise: id }}
+                onClick={() => dialog.current?.close()}
+              />
+            }
           >
             Open in Exercises
-          </Link>
+          </Button>
         </div>
       </dialog>
     </>
@@ -242,9 +253,12 @@ export function ExercisesScreen({ exercise }: { exercise?: string }) {
   if (selected)
     return (
       <section className="exercise-page">
-        <Link className="back-link" to="/guides" search={{}}>
+        <Button
+          className="back-link"
+          render={<Link to="/guides" search={{}} />}
+        >
           <Icon name="back" size={16} /> All exercises
-        </Link>
+        </Button>
         <p className="eyebrow">Exercise guide</p>
         <h1>{nameFor(selected.id)}</h1>
         <ExerciseDetail id={selected.id} />
@@ -277,10 +291,9 @@ export function ExercisesScreen({ exercise }: { exercise?: string }) {
             .map((routine) => routine.name);
           return (
             <li key={id}>
-              <Link
+              <Button
                 className="exercise-tile"
-                to="/guides"
-                search={{ exercise: id }}
+                render={<Link to="/guides" search={{ exercise: id }} />}
               >
                 <ExerciseThumb id={id} />
                 <span className="tile-text">
@@ -300,7 +313,7 @@ export function ExercisesScreen({ exercise }: { exercise?: string }) {
                       : "Not in your routines"}
                   </small>
                 </span>
-              </Link>
+              </Button>
             </li>
           );
         })}

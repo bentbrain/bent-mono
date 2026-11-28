@@ -1,4 +1,5 @@
 import { Link, useLocation } from "@tanstack/react-router";
+import { Button } from "@bent/ui/sdk/button";
 import {
   dateSearch,
   displayLoad,
@@ -32,14 +33,20 @@ export function ProgressTabs() {
   return (
     <nav className="segmented" aria-label="Progress sections">
       {sections.map((section) => (
-        <Link
+        <Button
           key={section.to}
-          to={section.to}
-          search={{}}
-          aria-current={location.pathname === section.to ? "page" : undefined}
+          render={
+            <Link
+              to={section.to}
+              search={{}}
+              aria-current={
+                location.pathname === section.to ? "page" : undefined
+              }
+            />
+          }
         >
           {section.name}
-        </Link>
+        </Button>
       ))}
     </nav>
   );
@@ -80,9 +87,7 @@ function Sparkline({
       height={height}
       label={label}
       points={values.map((v, i) => ({ x: x(i), y: y(v.value) }))}
-      detail={(index) =>
-        values[index]?.detail() ?? { title: "", rows: [] }
-      }
+      detail={(index) => values[index]?.detail() ?? { title: "", rows: [] }}
     >
       <line
         className="baseline"
@@ -333,8 +338,7 @@ export function ProgressScreen() {
                 values={daily.slice(-30).map((point, index, shownDays) => ({
                   key: point.id,
                   value: point.kg,
-                  detail: () =>
-                    weighInDetail(shownDays, index, settings.units),
+                  detail: () => weighInDetail(shownDays, index, settings.units),
                 }))}
               />
             )}
@@ -344,9 +348,9 @@ export function ProgressScreen() {
             No weigh-ins yet. Record one to start your trend.
           </p>
         )}
-        <Link className="text-link" to="/body" search={{}}>
+        <Button className="text-link" render={<Link to="/body" search={{}} />}>
           Bodyweight details and weigh-ins
-        </Link>
+        </Button>
       </section>
       <section className="panel" aria-labelledby="strength">
         <h2 id="strength" className="section-label">
@@ -377,9 +381,13 @@ export function ProgressScreen() {
           <ul className="session-list">
             {recent.map((session) => (
               <li key={session.id}>
-                <Link
-                  to="/history"
-                  search={dateSearch(session.data.date, today)}
+                <Button
+                  render={
+                    <Link
+                      to="/history"
+                      search={dateSearch(session.data.date, today)}
+                    />
+                  }
                 >
                   <span className="session-date">
                     {formatShortDate(session.data.date)}
@@ -394,7 +402,7 @@ export function ProgressScreen() {
                       ? `${session.data.minutes} min · ${session.data.distanceKm} km`
                       : `${session.data.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} sets done`}
                   </small>
-                </Link>
+                </Button>
               </li>
             ))}
           </ul>
@@ -403,9 +411,12 @@ export function ProgressScreen() {
             Your completed workouts and runs will appear here.
           </p>
         )}
-        <Link className="text-link" to="/history" search={{}}>
+        <Button
+          className="text-link"
+          render={<Link to="/history" search={{}} />}
+        >
           All sessions
-        </Link>
+        </Button>
       </section>
       <p className="muted">
         Weeks run Monday to Sunday. Today is {formatDate(today)}.

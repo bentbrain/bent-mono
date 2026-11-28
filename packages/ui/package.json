@@ -7,7 +7,8 @@
     "./button": "./src/button.tsx",
     "./utils": "./src/utils.ts",
     "./field": "./src/field.tsx",
-    "./controls.css": "./src/controls.css"
+    "./controls.css": "./src/controls.css",
+    "./sdk/button": "./src/sdk/button.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -15,6 +16,8 @@
   "dependencies": {
     "@base-ui/react": "^1.9.0",
     "@bent/design-tokens": "workspace:*",
+    "@ui-sdk/core": "0.1.0-beta.18",
+    "@ui-sdk/react": "0.1.0-beta.18",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.7.0"
   },
