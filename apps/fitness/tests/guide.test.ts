@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { assistantEndpoint } from "../src/server/config";
 import { assistantGuide } from "../src/server/guide";
 import { setUpTraining } from "../src/server/mcp";
 
@@ -40,4 +41,62 @@ test("the guide follows the configured endpoint, or says it isn't configured", (
   const missing = assistantGuide({ resource: null, planning: true });
   expect(missing).toContain("assistant connection isn't configured");
   expect(missing).not.toContain("/api/mcp");
+});
+
+const configKeys = [
+  "DATABASE_URL",
+  "CLERK_SECRET_KEY",
+  "VITE_CLERK_PUBLISHABLE_KEY",
+  "FITNESS_ALLOWED_EMAILS",
+  "FITNESS_MCP_URL",
+] as const;
+function withConfig(
+  values: Partial<Record<(typeof configKeys)[number], string>>,
+  run: () => void,
+) {
+  const before = Object.fromEntries(
+    configKeys.map((key) => [key, process.env[key]]),
+  );
+  try {
+    for (const key of configKeys) {
+      const value = values[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    run();
+  } finally {
+    for (const key of configKeys) {
+      const value = before[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+const synthetic = {
+  DATABASE_URL: "postgres://fitness@127.0.0.1:5432/fitness",
+  CLERK_SECRET_KEY: "sk_test_synthetic",
+  VITE_CLERK_PUBLISHABLE_KEY:
+    "pk_test_" + Buffer.from("example.clerk.accounts.dev$").toString("base64"),
+  FITNESS_ALLOWED_EMAILS: "person@example.com",
+  FITNESS_MCP_URL: "http://127.0.0.1:3025/api/mcp",
+};
+
+test("the guide offers a connection only when assistants can use it", () => {
+  withConfig(synthetic, () => {
+    expect(assistantEndpoint()).toBe("http://127.0.0.1:3025/api/mcp");
+    expect(assistantGuide({ planning: true })).toContain(
+      "`http://127.0.0.1:3025/api/mcp`",
+    );
+  });
+  // Account services aren't configured, or the endpoint isn't valid.
+  for (const values of [
+    { ...synthetic, CLERK_SECRET_KEY: undefined },
+    { ...synthetic, FITNESS_MCP_URL: "http://127.0.0.1:3025/api/mcp/" },
+  ])
+    withConfig(values, () => {
+      expect(assistantEndpoint()).toBeNull();
+      const guide = assistantGuide({ planning: true });
+      expect(guide).toContain("assistant connection isn't configured");
+      expect(guide).not.toContain("A person can");
+    });
 });

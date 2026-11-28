@@ -93,3 +93,16 @@ export function clerkKeysValid() {
     /^sk_(?:test|live)_\S+$/.test(secret)
   );
 }
+/**
+ * The MCP endpoint when assistants can connect to it: the endpoint is valid
+ * and account services and Clerk are configured. Otherwise null.
+ */
+export function assistantEndpoint() {
+  const resource = mcpResource();
+  return resource &&
+    configurationReady() &&
+    clerkKeysValid() &&
+    authorizationServer()
+    ? resource
+    : null;
+}
