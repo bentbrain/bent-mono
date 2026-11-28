@@ -128,12 +128,13 @@ describe("progress summary", () => {
     expect(summary?.measure).toBe("Heaviest completed set, kg per dumbbell");
     expect(summary?.change).toBe("+2.5 kg");
     expect(summary?.values).toEqual([10, 12.5]);
-    expect(summary?.chip).toBe("Reps");
+    expect(summary?.chip).toBe("Reps · Per dumbbell");
 
     const [first] = byLoad.points;
     if (!first) throw new Error("The series has a first point.");
     const byReps: StrengthSeries = { ...byLoad, points: [first, { date: "2026-11-09", loadKg: 10, value: 12 }] };
-    expect(strengthSummary(byReps, "kg")?.measure).toBe("Reps at 10 kg");
+    expect(strengthSummary(byReps, "kg")?.measure).toBe("Reps at 10 kg per dumbbell");
+    expect(strengthSummary({ ...byReps, load: "barbell" }, "kg")).toMatchObject({ measure: "Reps at 10 kg on the bar", chip: "Reps · Whole bar" });
     expect(strengthSummary(byReps, "kg")?.change).toBe("+2 reps");
 
     const hold: StrengthSeries = {

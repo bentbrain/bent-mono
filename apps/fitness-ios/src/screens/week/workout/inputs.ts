@@ -125,13 +125,20 @@ export function migrateLegacy(legacy: Record<string, { text: string; base: strin
 
 /** Whether a background save keeps the value for the person to review. */
 export function holdInBackground(workout: Workout, key: string, entry: Buffered) {
-  return entry.base === null || savedBase(workout, key) !== entry.base;
+  return !hiddenField(workout, key) && (entry.base === null || savedBase(workout, key) !== entry.base);
 }
 
-/** Weights kept without units, waiting for the person to confirm them. */
-export function unconfirmedKeys(buffer: InputBuffer) {
+/** Whether `key` is a field the editor doesn't show, such as a weight typed for an exercise that now records none. Saving drops it. */
+export function hiddenField(workout: Workout, key: string) {
+  const match = fieldPattern.exec(key);
+  const prescription = workout.exercises[Number(match?.[1])]?.prescription;
+  return match?.[3] === "loadKg" && prescription !== undefined && !loadWording(prescription, "kg").weighed;
+}
+
+/** Weights kept without units, waiting for the person to confirm them. Hidden fields don't count. */
+export function unconfirmedKeys(buffer: InputBuffer, workout: Workout) {
   return Object.entries(buffer)
-    .filter(([, entry]) => entry.base === null)
+    .filter(([key, entry]) => entry.base === null && !hiddenField(workout, key))
     .map(([key]) => key);
 }
 

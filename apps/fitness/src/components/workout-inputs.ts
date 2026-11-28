@@ -175,7 +175,24 @@ export function holdInBackground(
   key: string,
   entry: Buffered,
 ) {
-  return entry.base === null || savedBase(workout, key) !== entry.base;
+  return (
+    !hiddenField(workout, key) &&
+    (entry.base === null || savedBase(workout, key) !== entry.base)
+  );
+}
+
+/**
+ * Whether `key` is a field the editor doesn't show, such as a weight typed
+ * for an exercise that now records none. Saving drops it.
+ */
+export function hiddenField(workout: Workout, key: string) {
+  const match = fieldPattern.exec(key);
+  const prescription = workout.exercises[Number(match?.[1])]?.prescription;
+  return (
+    match?.[3] === "loadKg" &&
+    prescription !== undefined &&
+    !loadWording(prescription, "kg").weighed
+  );
 }
 
 const sameEntry = (a: Buffered | undefined, b: Buffered | undefined) =>
@@ -505,7 +522,9 @@ export function useWorkoutInputs({
     held,
     /** Weights kept without units, waiting for the person to confirm them. */
     unconfirmed: Object.entries(buffer)
-      .filter(([, entry]) => entry.base === null)
+      .filter(
+        ([key, entry]) => entry.base === null && !hiddenField(workout, key),
+      )
       .map(([key]) => key),
     units,
     message,

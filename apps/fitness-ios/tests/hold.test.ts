@@ -150,6 +150,14 @@ describe("workout Live Activity", () => {
     expect(row?.exercise).toBe(p?.name);
     expect(row?.detail).toMatch(/^Set 1 of \d · (\d+(\.\d+)? kg × )?\d+(–\d+)? reps( each side)?$/);
     expect(row?.completed).toBe(4);
+    // A band exercise shows no weight, even when a saved draft holds one.
+    const banded = {
+      ...w,
+      exercises: w.exercises.map((e, i) =>
+        i === 0 ? { ...e, prescription: { ...e.prescription, id: "custom-band", mode: "reps" as const, load: "band" as const }, sets: e.sets.map((set) => ({ ...set, loadKg: 4 })) } : e,
+      ),
+    };
+    expect(activityContent("w1", banded, null, "kg", t0)?.state.detail).not.toContain("kg");
     expect(activityContent("w1", { ...w, finishedAt: "2026-01-05T08:00:00.000Z" }, null, "kg", t0)).toBeNull();
   });
 

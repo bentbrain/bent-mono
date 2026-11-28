@@ -140,7 +140,7 @@ export function useWorkoutInputs({
     errors,
     held,
     /** Weights kept without units, waiting for the person to confirm them. */
-    unconfirmed: unconfirmedKeys(buffer),
+    unconfirmed: unconfirmedKeys(buffer, workout),
     units,
     message,
     storageError,

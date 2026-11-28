@@ -142,7 +142,7 @@ export function strengthSummary(series: StrengthSeries, units: Units) {
         ? `Heaviest completed set, ${loadTypeWording(series.load, units).unit}`
         : series.load === "band"
           ? "Reps with a band"
-          : `Reps at ${displayLoad(first.loadKg, units)} ${units}`;
+          : `Reps at ${displayLoad(first.loadKg, units)} ${loadTypeWording(series.load, units).unit}`;
   let change = "";
   if (series.points.length > 1) {
     if (byLoad) {
@@ -158,7 +158,7 @@ export function strengthSummary(series: StrengthSeries, units: Units) {
     latest,
     measure,
     change,
-    chip: `${series.mode === "seconds" ? "Timed" : "Reps"}${series.side ? " · each side" : ""}`,
+    chip: `${series.mode === "seconds" ? "Timed" : `Reps · ${loadTypeWording(series.load, units).tag}`}${series.side ? " · each side" : ""}`,
     values: series.points.map((point) => (byLoad ? displayLoad(point.loadKg, units) : point.value)),
     spoken: `${series.name}: ${measure}, ${series.points.length} sessions from ${pointText(first, series, units)} to ${pointText(latest, series, units)}.`,
   };

@@ -148,7 +148,7 @@ describe("typed workout values", () => {
     if (!load) throw new Error("Expected weight");
     expect(holdInBackground(workout, "0:0:loadKg", load)).toBe(true);
     expect(shownText("0:0:loadKg", load, "lb")).toBe("10");
-    expect(unconfirmedKeys(migrated)).toEqual(["0:0:loadKg"]);
+    expect(unconfirmedKeys(migrated, workout)).toEqual(["0:0:loadKg"]);
   });
   test("set keys cover each number field of a set", () => {
     expect(setKeys(1, 2)).toEqual(["1:2:loadKg", "1:2:value", "1:2:right", "1:2:rir"]);
@@ -185,6 +185,16 @@ describe("typed workout values", () => {
     const banded = { ...workout, exercises: workout.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } } : e)) };
     expect(applyText(banded, "0:0:loadKg", "4", "kg")).toBeNull();
     expect(applyText(banded, "0:0:value", "12", "kg")).not.toBeNull();
+  });
+  test("a hidden band weight is neither held back nor waiting for confirmation", () => {
+    const base = workout.exercises[0]?.prescription;
+    if (!base) throw new Error("Missing exercise");
+    const banded = { ...workout, exercises: workout.exercises.map((e, i) => (i === 0 ? { ...e, prescription: { ...base, id: "custom-band", mode: "reps" as const, load: "band" as const } } : e)) };
+    const entry = { text: "4", base: null, units: null };
+    expect(holdInBackground(banded, "0:0:loadKg", entry)).toBe(false);
+    expect(unconfirmedKeys({ "0:0:loadKg": entry, "1:0:loadKg": entry }, banded)).toEqual(["1:0:loadKg"]);
+    const plan = planCommit(banded, { "0:0:loadKg": entry }, "kg", { background: true });
+    expect(plan).toMatchObject({ kept: [], done: ["0:0:loadKg"] });
   });
 });
 
