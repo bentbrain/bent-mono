@@ -21,11 +21,19 @@ const actSchema = z.object({
   ok: z.boolean(),
   error: z.object({ message: z.string() }).optional(),
 });
-type Tool = { execute: (input: object) => Promise<unknown> | unknown };
+type Tool = {
+  execute: (
+    input: object,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown> | unknown;
+};
 declare global {
   interface Window {
     webmcpTools?: Map<string, Tool>;
     staleTools?: Map<string, Tool>;
+    firstSignedOutSnapshot?: Promise<unknown> | unknown;
+    cancelled?: Promise<unknown> | unknown;
+    cancel?: () => void;
   }
 }
 
@@ -206,6 +214,17 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   const queued = tool(page, "query", { text: "Sign in" });
   await page.evaluate(() => {
     window.staleTools = new Map(window.webmcpTools);
+    const snapshot = window.webmcpTools?.get("snapshot");
+    // Reads the earlier registration the moment the signed-out page appears.
+    const watcher = new MutationObserver(() => {
+      const signIn = [...document.querySelectorAll("button")].some(
+        (button) => button.textContent === "Sign in",
+      );
+      if (!signIn) return;
+      watcher.disconnect();
+      window.firstSignedOutSnapshot = snapshot?.execute({});
+    });
+    watcher.observe(document.body, { childList: true, subtree: true });
   });
   await clerk.signOut({ page });
   expect(await waiting).toMatchObject({
@@ -217,6 +236,7 @@ test("signing out ends the agent's access to the page", async ({ page }) => {
   await expect(ask).toBeHidden();
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   expect(await page.evaluate(() => window.webmcpTools?.size)).toBe(0);
+  expect(await page.evaluate(() => window.firstSignedOutSnapshot)).toEqual([]);
 
   const stale = (name: string, input: object) =>
     page.evaluate(
@@ -248,4 +268,42 @@ test("an agent's marked step is refused while a native modal is open", async ({
   ]);
   expect(result.ok).toBe(false);
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
+});
+
+test("a cancelled agent call closes its question", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect
+    .poll(() => page.evaluate(() => window.webmcpTools?.size))
+    .toBe(3);
+  await page.evaluate(() => {
+    const controller = new AbortController();
+    window.cancel = () => controller.abort();
+    window.cancelled = window.webmcpTools
+      ?.get("act")
+      ?.execute(
+        { steps: [{ ref: "Export account data and photos", action: "press" }] },
+        { signal: controller.signal },
+      );
+  });
+  const ask = page.getByRole("alertdialog", {
+    name: "Allow your assistant to do this?",
+  });
+  await expect(ask).toBeVisible();
+  await page.evaluate(() => window.cancel?.());
+  await expect(ask).toBeHidden();
+  expect(actSchema.parse(await page.evaluate(() => window.cancelled)).ok).toBe(
+    false,
+  );
+});
+
+test("an agent step with fields it doesn't take is refused", async ({
+  page,
+}) => {
+  const result = await act(page, [
+    { ref: "Food", action: "press", value: "Food" },
+  ]);
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toContain("put values in args");
+  await expect(page).toHaveURL(/\/$/);
 });
