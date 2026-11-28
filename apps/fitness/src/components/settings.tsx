@@ -9,12 +9,16 @@ import {
   mondayOf,
   scheduled,
   exercises,
+  isNutrient,
   localDate,
+  nutrientInfo,
+  nutrients,
   settingsId,
   settingsSchema,
   toKg,
+  withNutrient,
 } from "@bent/fitness-contracts/domain";
-import type { Settings } from "@bent/fitness-contracts/domain";
+import type { Nutrient, Settings } from "@bent/fitness-contracts/domain";
 import { z } from "zod";
 import type { Sync } from "../sync";
 import { download, SelectField, TextField } from "./fields";
@@ -100,6 +104,13 @@ function describeIssue(
     return { text: `${name}: keep 1 to 15 exercises.` };
   }
   if (field === "routines") return { text: "Keep 1 to 8 routines." };
+  if (field === "nutrients" && isNutrient(index)) {
+    const { label, target } = nutrientInfo[index];
+    return {
+      id: `${index}-target`,
+      text: `Daily ${label.toLowerCase()} target: enter ${target.min} to ${target.max} g, or leave it empty.`,
+    };
+  }
   if (field === "equipment" && typeof index === "number")
     return {
       id: `equipment-${index}`,
@@ -164,6 +175,10 @@ export function SettingsEditor({
   }, []);
   function update(patch: Partial<Settings>) {
     setDraft((current) => ({ ...current, ...patch }));
+    setNotice("Unsaved settings");
+  }
+  function track(nutrient: Nutrient, target: number | null | false) {
+    setDraft((current) => withNutrient(current, nutrient, target));
     setNotice("Unsaved settings");
   }
   return (
@@ -321,6 +336,57 @@ export function SettingsEditor({
                 value={draft.protein}
                 onChange={(e) => update({ protein: Number(e.target.value) })}
               />
+            </div>
+            <h2 className="section-label">Nutrients</h2>
+            <p>
+              Track carbs, fat or fibre alongside calories and protein. Targets
+              are optional.
+            </p>
+            <div className="card nutrient-settings">
+              {nutrients.map((nutrient) => {
+                const { label, target } = nutrientInfo[nutrient];
+                const setting = draft.nutrients?.[nutrient];
+                return (
+                  <div className="nutrient-setting" key={nutrient}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        id={`track-${nutrient}`}
+                        checked={Boolean(setting)}
+                        onChange={(e) =>
+                          track(
+                            nutrient,
+                            e.target.checked
+                              ? (setting?.target ?? null)
+                              : false,
+                          )
+                        }
+                      />{" "}
+                      Track {label.toLowerCase()}
+                    </label>
+                    {setting && (
+                      <TextField
+                        label={`Daily ${label.toLowerCase()} target · g, optional`}
+                        id={`${nutrient}-target`}
+                        type="number"
+                        inputMode="decimal"
+                        min={target.min}
+                        max={target.max}
+                        step="any"
+                        value={setting.target ?? ""}
+                        onChange={(e) =>
+                          track(
+                            nutrient,
+                            e.target.value === ""
+                              ? null
+                              : Number(e.target.value),
+                          )
+                        }
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <h2 className="section-label">Your equipment</h2>
             <p>

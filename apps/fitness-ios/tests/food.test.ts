@@ -6,7 +6,6 @@ import {
   editStatus,
   hasRegular,
   lastSevenDays,
-  mealError,
   mealFromRegular,
   mealInput,
   mealSummary,
@@ -31,6 +30,13 @@ const yesterday = record({ kind: "meal", date: "2026-11-19", name: "Soup", calor
 const regular = record({ kind: "regular", name: "Yoghurt and berries", calories: 250, protein: 20 });
 const records = [breakfast, lunch, yesterday, regular];
 const targets = { calories: 2400, protein: 150 };
+const typed = (values: { name: string; calories: string; protein: string; carbs?: string; fat?: string; fibre?: string }) => ({
+  carbs: "",
+  fat: "",
+  fibre: "",
+  ...values,
+});
+const plainError = "Enter a meal name, calories and protein.";
 
 describe("meal form", () => {
   test("reads typed amounts, with a comma as the decimal mark", () => {
@@ -41,10 +47,24 @@ describe("meal form", () => {
   });
 
   test("builds a meal for the day", () => {
-    expect(parseMeal({ name: " Toast ", calories: "300", protein: "9" }, day)).toEqual({
+    expect(parseMeal(typed({ name: " Toast ", calories: "300", protein: "9" }), day)).toEqual({
       meal: { kind: "meal", date: day, name: "Toast", calories: 300, protein: 9 },
     });
-    expect(parseMeal({ name: "Toast", calories: "0", protein: "0" }, day)).toHaveProperty("meal");
+    expect(parseMeal(typed({ name: "Toast", calories: "0", protein: "0" }), day)).toHaveProperty("meal");
+  });
+
+  test("records the tracked nutrients typed, and keeps the others", () => {
+    const previous = { kind: "meal" as const, date: day, name: "Toast", calories: 300, protein: 9, carbs: 40, fat: 6, fibre: 3 };
+    expect(parseMeal(typed({ name: "Toast", calories: "300", protein: "9", carbs: "45,5", fat: "" }), day, ["carbs", "fat"], previous)).toEqual({
+      meal: { ...previous, carbs: 45.5, fat: undefined, fibre: 3 },
+    });
+    // Values typed for nutrients the account doesn't track are left out.
+    expect(parseMeal(typed({ name: "Toast", calories: "300", protein: "9", carbs: "45" }), day)).toEqual({
+      meal: { kind: "meal", date: day, name: "Toast", calories: 300, protein: 9 },
+    });
+    expect(parseMeal(typed({ name: "Toast", calories: "300", protein: "9", fibre: "-1" }), day, ["fibre"])).toEqual({
+      error: "Enter a meal name, calories and protein. Fibre is optional: enter grams or leave it empty.",
+    });
   });
 
   test("asks for a name, calories and protein", () => {
@@ -58,13 +78,15 @@ describe("meal form", () => {
       { name: "Toast", calories: "300", protein: "501" },
       { name: "x".repeat(161), calories: "300", protein: "9" },
     ])
-      expect(parseMeal(input, day)).toEqual({ error: mealError });
-    expect(mealError).toBe("Enter a meal name, calories and protein.");
+      expect(parseMeal(typed(input), day)).toEqual({ error: plainError });
   });
 
   test("opens a saved meal as text", () => {
-    expect(mealInput(undefined)).toEqual({ name: "", calories: "", protein: "" });
-    expect(mealInput({ name: "Porridge", calories: 420.4, protein: 18.6 })).toEqual({ name: "Porridge", calories: "420.4", protein: "18.6" });
+    expect(mealInput(undefined)).toEqual(typed({ name: "", calories: "", protein: "" }));
+    expect(mealInput({ name: "Porridge", calories: 420.4, protein: 18.6 })).toEqual(typed({ name: "Porridge", calories: "420.4", protein: "18.6" }));
+    expect(mealInput({ name: "Porridge", calories: 420, protein: 18, carbs: 60.5, fibre: 0 })).toEqual(
+      typed({ name: "Porridge", calories: "420", protein: "18", carbs: "60.5", fibre: "0" }),
+    );
   });
 });
 
@@ -87,12 +109,15 @@ describe("saved meals", () => {
     expect(hasRegular(records, { name: "yoghurt AND berries", calories: 250, protein: 20 })).toBe(true);
     expect(hasRegular(records, { name: "Yoghurt and berries", calories: 251, protein: 20 })).toBe(false);
     expect(hasRegular(records, { name: "Porridge", calories: 420.4, protein: 18.6 })).toBe(false);
+    expect(hasRegular(records, { name: "Yoghurt and berries", calories: 250, protein: 20, carbs: 30 })).toBe(false);
   });
 
   test("convert between meals and saved meals", () => {
     const meal = { kind: "meal" as const, date: day, name: "Toast", calories: 300, protein: 9 };
     expect(regularFor(meal)).toEqual({ kind: "regular", name: "Toast", calories: 300, protein: 9 });
     expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9 }, "2026-11-21")).toEqual({ ...meal, date: "2026-11-21" });
+    expect(regularFor({ ...meal, fat: 4 })).toEqual({ kind: "regular", name: "Toast", calories: 300, protein: 9, fat: 4 });
+    expect(mealFromRegular({ kind: "regular", name: "Toast", calories: 300, protein: 9, fibre: 2 }, day)).toEqual({ ...meal, fibre: 2 });
   });
 
   test("list saved meals and the day's meals", () => {
@@ -111,6 +136,7 @@ describe("messages", () => {
   });
   test("summarise rounded amounts", () => {
     expect(mealSummary(meal)).toBe("300 kcal · 10g protein");
+    expect(mealSummary({ ...meal, carbs: 30.4, fat: 2 }, ["carbs", "fibre"])).toBe("300 kcal · 10g protein · 30g carbs");
   });
 });
 
@@ -125,6 +151,20 @@ describe("day totals", () => {
     const summary = daySummary(records, "2026-11-19", { calories: 2400, protein: 30 });
     expect(summary.calories).toMatchObject({ over: true, note: "200 kcal over", progress: 1 });
     expect(summary.protein).toMatchObject({ reached: true, note: "Protein target reached", progress: 1 });
+  });
+  test("show tracked nutrients against their targets", () => {
+    const day2 = "2026-11-22";
+    const meals = [
+      record({ kind: "meal", date: day2, name: "Oats", calories: 400, protein: 20, carbs: 60, fat: 80, fibre: 31 }),
+      record({ kind: "meal", date: day2, name: "Apple", calories: 95, protein: 0, carbs: 25 }),
+    ];
+    const settings = { ...targets, nutrients: { fibre: { target: 30 }, carbs: { target: null }, fat: { target: 70 } } };
+    expect(daySummary(meals, day2, settings).nutrients).toEqual([
+      { nutrient: "carbs", label: "Carbs", value: 85, target: null, progress: null, tone: "default", note: "", coverage: "" },
+      { nutrient: "fat", label: "Fat", value: 80, target: 70, progress: 1, tone: "missed", note: "10g over", coverage: "from 1 of 2 meals" },
+      { nutrient: "fibre", label: "Fibre", value: 31, target: 30, progress: 1, tone: "done", note: "Fibre target reached", coverage: "from 1 of 2 meals" },
+    ]);
+    expect(daySummary(meals, day2, targets).nutrients).toEqual([]);
   });
   test("an empty day starts at zero", () => {
     expect(daySummary([], day, targets).calories).toMatchObject({ value: 0, progress: 0, note: "2400 kcal left" });

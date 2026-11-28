@@ -14,6 +14,55 @@ const daySchema = z.iso.date();
 const label = z.string().trim().min(1).max(160);
 const identifier = z.string().uuid();
 export const experienceLevels = ["new", "returning", "experienced"] as const;
+/**
+ * Nutrients an account can choose to track besides calories and protein,
+ * each in grams. `mealMax` limits one meal; `target` limits a daily target.
+ */
+export const nutrients = ["carbs", "fat", "fibre"] as const;
+export type Nutrient = (typeof nutrients)[number];
+export const nutrientInfo: Record<
+  Nutrient,
+  {
+    label: string;
+    mealMax: number;
+    target: { min: number; max: number };
+    /** Whether the target is a most to stay under or a least to reach. */
+    aim: "most" | "least";
+  }
+> = {
+  carbs: {
+    label: "Carbs",
+    mealMax: 1000,
+    target: { min: 20, max: 1000 },
+    aim: "most",
+  },
+  fat: { label: "Fat", mealMax: 500, target: { min: 10, max: 400 }, aim: "most" },
+  fibre: {
+    label: "Fibre",
+    mealMax: 200,
+    target: { min: 5, max: 150 },
+    aim: "least",
+  },
+};
+export function isNutrient(value: unknown): value is Nutrient {
+  return nutrients.some((nutrient) => nutrient === value);
+}
+const trackedNutrient = (nutrient: Nutrient) =>
+  z
+    .object({
+      /** The daily target in grams, or null to track without one. */
+      target: finite
+        .min(nutrientInfo[nutrient].target.min)
+        .max(nutrientInfo[nutrient].target.max)
+        .nullable(),
+    })
+    .strict();
+/** A meal's grams of each nutrient. A missing value was not recorded. */
+const mealNutrients = {
+  carbs: finite.max(nutrientInfo.carbs.mealMax).optional(),
+  fat: finite.max(nutrientInfo.fat.mealMax).optional(),
+  fibre: finite.max(nutrientInfo.fibre.mealMax).optional(),
+};
 const exerciseSchema = z
   .object({
     id: label,
@@ -55,6 +104,16 @@ export const settingsSchema = z
     units: z.enum(["kg", "lb"]),
     calories: z.number().int().min(800).max(10000),
     protein: finite.min(20).max(400),
+    /** The nutrients tracked besides calories and protein. Missing ones aren't tracked. */
+    nutrients: z
+      .object({
+        carbs: trackedNutrient("carbs"),
+        fat: trackedNutrient("fat"),
+        fibre: trackedNutrient("fibre"),
+      })
+      .partial()
+      .strict()
+      .optional(),
     age: z.number().int().min(16).max(120).nullable().default(null),
     heightCm: finite.min(80).max(250).nullable().default(null),
     goal: label,
@@ -205,6 +264,7 @@ export const mealSchema = z
     name: label,
     calories: finite.max(10000),
     protein: finite.max(500),
+    ...mealNutrients,
   })
   .strict();
 export const regularSchema = z
@@ -213,6 +273,7 @@ export const regularSchema = z
     name: label,
     calories: finite.max(10000),
     protein: finite.max(500),
+    ...mealNutrients,
   })
   .strict();
 export const weightSchema = z
@@ -677,6 +738,115 @@ export function totals(records: RecordEntry[], date: string) {
         : a,
     { calories: 0, protein: 0 },
   );
+}
+/** The nutrients `settings` tracks besides calories and protein, in a fixed order. */
+export function trackedNutrients(settings: Pick<Settings, "nutrients">) {
+  return nutrients.filter((nutrient) => settings.nutrients?.[nutrient]);
+}
+/**
+ * Settings that track `nutrient` with `target` grams a day (null for no
+ * target), or stop tracking it with `false`. Settings that track none leave
+ * `nutrients` out.
+ */
+export function withNutrient<T extends Pick<Settings, "nutrients">>(
+  settings: T,
+  nutrient: Nutrient,
+  target: number | null | false,
+): T {
+  const next = { ...settings.nutrients };
+  if (target === false) delete next[nutrient];
+  else next[nutrient] = { target };
+  const rest = { ...settings };
+  delete rest.nutrients;
+  return Object.keys(next).length ? { ...rest, nutrients: next } : rest;
+}
+type MealValues = Partial<Record<Nutrient, number>>;
+/** The nutrient values a meal or saved meal records. */
+export function mealNutrientValues(meal: MealValues): MealValues {
+  const values: MealValues = {};
+  for (const nutrient of nutrients) {
+    const value = meal[nutrient];
+    if (value !== undefined) values[nutrient] = value;
+  }
+  return values;
+}
+/** Whether two meals record the same nutrient values. */
+export function sameNutrients(a: MealValues, b: MealValues) {
+  return nutrients.every((nutrient) => a[nutrient] === b[nutrient]);
+}
+export type NutrientTotal = {
+  /** Grams eaten across the meals that recorded it. */
+  grams: number;
+  /** How many of the day's meals recorded it. */
+  recorded: number;
+};
+/** Each nutrient's grams on `date`, and how many of the day's meals recorded it. */
+export function nutrientTotals(records: RecordEntry[], date: string) {
+  const meals = records.flatMap((r) =>
+    r.data.kind === "meal" && r.data.date === date ? [r.data] : [],
+  );
+  const total = (nutrient: Nutrient): NutrientTotal => {
+    let grams = 0;
+    let recorded = 0;
+    for (const meal of meals) {
+      const value = meal[nutrient];
+      if (value === undefined) continue;
+      grams += value;
+      recorded++;
+    }
+    return { grams, recorded };
+  };
+  return {
+    meals: meals.length,
+    carbs: total("carbs"),
+    fat: total("fat"),
+    fibre: total("fibre"),
+  };
+}
+/** "carbs", "carbs and fat", "carbs, fat and fibre" */
+export function nutrientList(list: readonly Nutrient[]) {
+  const names = list.map((n) => nutrientInfo[n].label.toLowerCase());
+  return names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : (names[0] ?? "");
+}
+/** What the day's total means for a nutrient's target: "40g left", "12g over", "8g to go". */
+export function nutrientNote(nutrient: Nutrient, grams: number, target: number) {
+  const left = Math.round(target - grams);
+  if (nutrientInfo[nutrient].aim === "least")
+    return left > 0
+      ? `${left}g to go`
+      : `${nutrientInfo[nutrient].label} target reached`;
+  return left >= 0 ? `${left}g left` : `${-left}g over`;
+}
+/** "450 kcal · 30g protein · 40g carbs", listing the tracked nutrients the meal recorded. */
+export function foodSummary(
+  meal: { calories: number; protein: number } & MealValues,
+  tracked: readonly Nutrient[],
+) {
+  return [
+    `${Math.round(meal.calories)} kcal`,
+    `${Math.round(meal.protein)}g protein`,
+    ...tracked.flatMap((n) => {
+      const value = meal[n];
+      return value === undefined
+        ? []
+        : [`${Math.round(value)}g ${nutrientInfo[n].label.toLowerCase()}`];
+    }),
+  ].join(" · ");
+}
+/** The message for a meal form that doesn't validate. */
+export function mealEntryError(tracked: readonly Nutrient[]) {
+  const base = "Enter a meal name, calories and protein.";
+  if (!tracked.length) return base;
+  const names = nutrientList(tracked);
+  return `${base} ${names[0]?.toUpperCase()}${names.slice(1)} ${tracked.length === 1 ? "is" : "are"} optional: enter grams or leave ${tracked.length === 1 ? "it" : "them"} empty.`;
+}
+/** "from 3 of 5 meals" when some of the day's meals didn't record the nutrient, else "". */
+export function nutrientCoverage(total: NutrientTotal, meals: number) {
+  return total.recorded < meals
+    ? `from ${total.recorded} of ${meals} ${meals === 1 ? "meal" : "meals"}`
+    : "";
 }
 
 function dateParts(date: string) {

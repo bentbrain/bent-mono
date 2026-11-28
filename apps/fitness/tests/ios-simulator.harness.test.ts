@@ -40,6 +40,11 @@ const devices = await import("../src/server/devices");
 const app = await import("../src/server/app-api");
 const { handleHealthImport } = await import("../src/server/health");
 const { loadRecords, saveRecord } = await import("../src/server/store");
+const { setMinimumAppContractForTests } = await import("../src/server/contract");
+const { appContract } = await import("@bent/fitness-contracts");
+// Serves the records contract this app build declares, so the seed holds
+// everything the build reads.
+setMinimumAppContractForTests(appContract);
 const { addDays, createWorkout, defaultSettings, localDate, settingsId } =
   await import("@bent/fitness-contracts/domain");
 
@@ -62,6 +67,8 @@ async function seed() {
     // Today is a strength day with a timed exercise, so the screen tours
     // reach the workout logger, its hold timer and the Live Activity.
     dayPlans: { [today]: { type: "strength" as const, routine: defaults.routines[0] ?? null } },
+    // Carbs and fibre are tracked and fat isn't, so the tours show both.
+    nutrients: { carbs: { target: 250 }, fibre: { target: 30 } },
   };
   const history: RecordEntry[] = [];
   const put = async (id: string, revision: number, data: Entity) => {
@@ -75,8 +82,8 @@ async function seed() {
   };
   await put(settingsId, 1, settings);
   const regulars = [
-    { name: "Greek yoghurt and berries", calories: 320, protein: 24 },
-    { name: "Chicken rice bowl", calories: 640, protein: 48 },
+    { name: "Greek yoghurt and berries", calories: 320, protein: 24, carbs: 34, fat: 8, fibre: 5 },
+    { name: "Chicken rice bowl", calories: 640, protein: 48, carbs: 78, fat: 14, fibre: 6 },
   ];
   for (const meal of regulars)
     await put(crypto.randomUUID(), 0, { kind: "regular", ...meal });

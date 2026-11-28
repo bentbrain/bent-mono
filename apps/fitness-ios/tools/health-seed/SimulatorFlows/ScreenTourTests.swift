@@ -238,6 +238,8 @@ final class ScreenTourTests: XCTestCase {
     capture("15-settings")
     if tap("open-profile") {
       capture("16-profile")
+      app.swipeUp()
+      capture("16-profile-nutrients")
       back()
     }
     if tap("open-plan-settings") {

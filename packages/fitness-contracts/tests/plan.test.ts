@@ -485,8 +485,8 @@ describe("plan check", () => {
 
 describe("app contract", () => {
   test("reads the declared contract and treats a missing one as 1", () => {
-    // Builds declare 2 only once their screens handle every load type.
-    expect(appContract).toBe(1);
+    // Builds declare 3 only once their screens handle every load type.
+    expect(appContract).toBe(2);
     expect(requestContract(null)).toBe(1);
     expect(requestContract("2")).toBe(2);
     expect(requestContract("two")).toBe(1);
@@ -495,7 +495,29 @@ describe("app contract", () => {
   test("names the oldest contract that can read a record", () => {
     const settings = base();
     expect(requiredContract(settings)).toBe(1);
-    expect(requiredContract({ ...settings, sessionMinutes: 45 })).toBe(2);
+    expect(
+      requiredContract({ ...settings, nutrients: { fibre: { target: null } } }),
+    ).toBe(2);
+    expect(
+      requiredContract({
+        ...settings,
+        nutrients: { carbs: { target: 200 } },
+        sessionMinutes: 45,
+      }),
+    ).toBe(3);
+    const meal = {
+      kind: "meal" as const,
+      date: "2026-11-30",
+      name: "Oats",
+      calories: 400,
+      protein: 20,
+    };
+    expect(requiredContract(meal)).toBe(1);
+    expect(requiredContract({ ...meal, fat: 0 })).toBe(2);
+    expect(
+      requiredContract({ ...meal, kind: "regular" as const, carbs: 60 }),
+    ).toBe(2);
+    expect(requiredContract({ ...settings, sessionMinutes: 45 })).toBe(3);
     const routine = present(settings.routines[0], "routines");
     const loaded = {
       ...routine,
@@ -506,13 +528,13 @@ describe("app contract", () => {
         },
       ],
     };
-    expect(requiredContract({ ...settings, routines: [loaded] })).toBe(2);
+    expect(requiredContract({ ...settings, routines: [loaded] })).toBe(3);
     expect(
       requiredContract({
         ...settings,
         dayPlans: { "2026-12-01": { type: "strength", routine: loaded } },
       }),
-    ).toBe(2);
+    ).toBe(3);
     const workout = createWorkout(settings, routine, "2026-11-30", false, []);
     expect(requiredContract(workout)).toBe(1);
     const first = present(workout.exercises[0], "exercises");
@@ -526,7 +548,7 @@ describe("app contract", () => {
           },
         ],
       }),
-    ).toBe(2);
+    ).toBe(3);
   });
   test("keeps the message of an error code this build does not know", () => {
     expect(ApiError.parse({ error: "Update", code: "future_code" })).toEqual({

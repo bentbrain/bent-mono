@@ -11,9 +11,11 @@ import {
   listSavedMeals,
   logRun,
   logWeight,
+  updateFoodTargets,
   updateMeal,
   updateSavedMeal,
 } from "./agent";
+import { nutrientInfo } from "@bent/fitness-contracts/domain";
 import { StoreRuleError } from "./store";
 import type { AgentAccess } from "./auth";
 
@@ -44,8 +46,39 @@ const mealInput = {
   calories: z.number().nonnegative().max(10000).describe("Calories (kcal)"),
   protein: z.number().nonnegative().max(500).describe("Protein in grams"),
 };
+const grams = (label: string, max: number) =>
+  z.number().nonnegative().max(max).describe(`${label} in grams`);
+const mealNutrients = {
+  carbs: grams("Carbohydrate", nutrientInfo.carbs.mealMax).optional(),
+  fat: grams("Fat", nutrientInfo.fat.mealMax).optional(),
+  fibre: grams("Fibre", nutrientInfo.fibre.mealMax).optional(),
+};
+/** In an update, null removes a nutrient's value. */
+const nutrientChanges = {
+  carbs: mealNutrients.carbs.unwrap().nullable().optional(),
+  fat: mealNutrients.fat.unwrap().nullable().optional(),
+  fibre: mealNutrients.fibre.unwrap().nullable().optional(),
+};
+const tracking = (nutrient: keyof typeof nutrientInfo) => {
+  const { label, target } = nutrientInfo[nutrient];
+  return z
+    .object({
+      track: z.boolean().describe(`Whether to track ${label.toLowerCase()}`),
+      target: z
+        .number()
+        .min(target.min)
+        .max(target.max)
+        .nullable()
+        .optional()
+        .describe(
+          `Daily target in grams, ${target.min} to ${target.max}, or null for no target. Omit to keep the current target. Leave out when track is false.`,
+        ),
+    })
+    .optional();
+};
 const savedMealInput = {
   ...mealInput,
+  ...mealNutrients,
   name: mealInput.name.describe("Saved meal name, e.g. 'Usual breakfast'"),
 };
 
@@ -105,14 +138,15 @@ export function instructions(access: AgentAccess) {
   if (access.write)
     lines.push(
       access.read
-        ? "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged and the day's totals."
-        : "When the user describes what they ate, estimate calories and protein for each item, call fitness_add_meals once with every item, then tell them what you logged.",
+        ? "When the user describes what they ate, estimate calories and protein for each item, and grams of each nutrient in trackedNutrients from fitness_get_day, call fitness_add_meals once with every item, then tell them what you logged and the day's totals."
+        : "When the user describes what they ate, estimate calories and protein for each item, and grams of carbs, fat or fibre when the user tracks them, call fitness_add_meals once with every item, then tell them what you logged.",
       access.read
-        ? "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. A meal already saved with the same name, calories and protein is not saved again."
+        ? "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. A meal already saved with the same name, calories, protein and nutrients is not saved again."
         : "When the user wants a meal kept for reuse, save it with fitness_add_saved_meals. This connection cannot see saved meals, so each call saves every distinct meal it lists. Save each meal once.",
       access.read
         ? "Before editing or removing entries, call fitness_get_day, or fitness_list_saved_meals for saved meals, to find their IDs and revisions. Do not add a meal that is already logged for that day unless the user ate it again."
         : "This connection can change entries but not read them. Edit or remove only entries this connection saved, using the IDs and revisions from their receipts. Report what each call saved.",
+      "Use fitness_update_food_targets when the user wants to change their calorie or protein target, or start or stop tracking carbs, fat or fibre and set their daily targets.",
       "Give every change a new requestId. Reuse a requestId only to retry the same call after a failed connection.",
       "Weights are stored in kilograms; pass the unit the user gave.",
     );
@@ -134,7 +168,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Get a day",
         description:
-          "Returns one day's meals with IDs, calorie and protein totals against targets, bodyweight, planned training, workouts and runs.",
+          "Returns one day's meals with IDs, totals of calories, protein and each tracked nutrient against targets, bodyweight, planned training, workouts and runs. trackedNutrients lists the nutrients the user tracks besides calories and protein; recordedIn counts the meals that recorded each one.",
         inputSchema: { date: date.optional() },
         annotations: read,
       },
@@ -146,7 +180,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Get history",
         description:
-          "Summarises each day in a date range of up to 62 days: calories, protein, meal count, bodyweight, workouts and runs.",
+          "Summarises each day in a date range of up to 62 days: calories, protein, each tracked nutrient, meal count, bodyweight, workouts and runs.",
         inputSchema: {
           from: z.iso.date().describe("First date, YYYY-MM-DD"),
           to: date.optional(),
@@ -161,7 +195,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "List saved meals",
         description:
-          "Lists the user's saved meals with their IDs, revisions, calories and protein. Use these values when the user mentions one of them.",
+          "Lists the user's saved meals with their IDs, revisions, calories, protein and any recorded carbs, fat and fibre. Use these values when the user mentions one of them.",
         inputSchema: {},
         annotations: read,
       },
@@ -179,7 +213,10 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
         inputSchema: {
           requestId,
           date: date.optional(),
-          meals: z.array(z.object(mealInput)).min(1).max(30),
+          meals: z
+            .array(z.object({ ...mealInput, ...mealNutrients }))
+            .min(1)
+            .max(30),
         },
         annotations: add,
       },
@@ -191,7 +228,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Update a meal",
         description:
-          "Changes a logged food entry's name, calories, protein or date. Omitted fields keep their current values. Fails if the entry changed after it was read.",
+          "Changes a logged food entry's name, calories, protein, carbs, fat, fibre or date. Omitted fields keep their current values, and a null nutrient removes its value. Fails if the entry changed after it was read.",
         inputSchema: {
           requestId,
           id: id.describe("Meal ID"),
@@ -199,6 +236,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
           name: mealInput.name.optional(),
           calories: mealInput.calories.optional(),
           protein: mealInput.protein.optional(),
+          ...nutrientChanges,
           date: z.iso.date().optional().describe("Move the entry to this date"),
         },
         annotations: { ...replace, idempotentHint: true },
@@ -230,8 +268,8 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Add saved meals",
         description: access.read
-          ? "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Skips a meal already saved with the same name, calories and protein. To record food eaten on a day, use fitness_add_meals."
-          : "Saves one or more meals with their calories and protein, ready to log in one tap from the app's Food section. Saves each distinct meal in the request once. To record food eaten on a day, use fitness_add_meals.",
+          ? "Saves one or more meals with their calories, protein and nutrients, ready to log in one tap from the app's Food section. Skips a meal already saved with the same name, calories, protein and nutrients. To record food eaten on a day, use fitness_add_meals."
+          : "Saves one or more meals with their calories, protein and nutrients, ready to log in one tap from the app's Food section. Saves each distinct meal in the request once. To record food eaten on a day, use fitness_add_meals.",
         inputSchema: {
           requestId,
           savedMeals: z.array(z.object(savedMealInput)).min(1).max(30),
@@ -246,7 +284,7 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
       {
         title: "Update a saved meal",
         description:
-          "Changes a saved meal's name, calories or protein. Omitted fields keep their current values. Meals already logged keep their values. Fails if the saved meal changed after it was read.",
+          "Changes a saved meal's name, calories, protein, carbs, fat or fibre. Omitted fields keep their current values, and a null nutrient removes its value. Meals already logged keep their values. Fails if the saved meal changed after it was read.",
         inputSchema: {
           requestId,
           id: id.describe("Saved meal ID"),
@@ -254,10 +292,45 @@ export function createFitnessMcpServer(owner: string, access: AgentAccess) {
           name: savedMealInput.name.optional(),
           calories: mealInput.calories.optional(),
           protein: mealInput.protein.optional(),
+          ...nutrientChanges,
         },
         annotations: { ...replace, idempotentHint: true },
       },
       (input) => run(() => updateSavedMeal(owner, access, input)),
+    );
+
+    server.registerTool(
+      "fitness_update_food_targets",
+      {
+        title: "Update food targets",
+        description:
+          "Changes the daily calorie and protein targets, and which of carbs, fat and fibre the user tracks with their daily targets. Omitted values keep their current settings. Tracked nutrients show on the Food screen and in day totals.",
+        inputSchema: {
+          requestId,
+          calories: z
+            .number()
+            .int()
+            .min(800)
+            .max(10000)
+            .optional()
+            .describe("Daily calorie target (kcal)"),
+          protein: z
+            .number()
+            .min(20)
+            .max(400)
+            .optional()
+            .describe("Daily protein target in grams"),
+          nutrients: z
+            .object({
+              carbs: tracking("carbs"),
+              fat: tracking("fat"),
+              fibre: tracking("fibre"),
+            })
+            .optional(),
+        },
+        annotations: { ...replace, idempotentHint: true },
+      },
+      (input) => run(() => updateFoodTargets(owner, access, input)),
     );
 
     server.registerTool(

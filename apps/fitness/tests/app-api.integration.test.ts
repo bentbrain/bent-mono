@@ -7,7 +7,7 @@ import {
   test,
 } from "bun:test";
 import {
-  bearer,
+  bearer as fakeBearer,
   configure,
   installClerkFake,
   iosClient,
@@ -26,13 +26,22 @@ if (configured) configure(process.env.FITNESS_TEST_DATABASE_URL ?? "");
 const environment = { ...process.env };
 const { database } = await import("../src/server/db");
 const api = await import("../src/server/app-api");
-const { AppRecords, PhotoList } = await import("@bent/fitness-contracts");
+const { AppRecords, PhotoList, appContract } =
+  await import("@bent/fitness-contracts");
 const { defaultSettings, settingsId } =
   await import("@bent/fitness-contracts/domain");
 const { saveRecord } = await import("../src/server/store");
 const { bearerOnlyPath } = await import("../src/start");
 const { setMinimumAppContractForTests } =
   await import("../src/server/contract");
+
+/** An app request that names this build's records contract unless it names one. */
+function bearer(token: string, init: RequestInit = {}, path = "/") {
+  const headers = new Headers(init.headers);
+  if (!headers.has("X-Fitness-Contract"))
+    headers.set("X-Fitness-Contract", String(appContract));
+  return fakeBearer(token, { ...init, headers }, path);
+}
 
 const owner = syntheticOwner.id;
 const timezone = "Australia/Brisbane";
@@ -108,15 +117,15 @@ test("app routes take bearer tokens only", () => {
 });
 
 test("app routes ask builds older than the minimum contract to update", async () => {
-  setMinimumAppContractForTests(2);
+  setMinimumAppContractForTests(3);
   try {
-    for (const contract of [null, "1", "not-a-number"]) {
+    for (const contract of [null, "1", "2", "not-a-number"]) {
       const init: RequestInit =
         contract === null
           ? {}
           : { headers: { "X-Fitness-Contract": contract } };
       const response = await api.handleRecordsLoad(
-        bearer(token(), init, "/api/app/records"),
+        fakeBearer(token(), init, "/api/app/records"),
       );
       expect(response.status).toBe(426);
       const reply = await body(response);
@@ -181,23 +190,34 @@ describe.skipIf(!configured)("app API", () => {
 
   test("refuses saves that older app builds could not read until the minimum contract allows them", async () => {
     const settings = defaultSettings("2026-11-01", timezone);
-    const save = (data: unknown) =>
+    const save = (data: unknown, revision = 1, contract = "1") =>
       api.handleRecordSave(
         bearer(
           token(),
-          json({
-            id: settingsId,
-            revision: 1,
-            operationId: crypto.randomUUID(),
-            data,
-          }),
+          {
+            ...json({
+              id: settingsId,
+              revision,
+              operationId: crypto.randomUUID(),
+              data,
+            }),
+            headers: {
+              "content-type": "application/json",
+              "X-Fitness-Contract": contract,
+            },
+          },
           "/api/app/records",
         ),
       );
     const routine = settings.routines[0];
     if (!routine) throw new Error("Missing routine");
+    const nutrients = { ...settings, nutrients: { fibre: { target: 30 } } };
+    const profile = { ...settings, experience: "new" };
+    // A minimum of 1 keeps every stored record readable by contract 1 builds.
+    setMinimumAppContractForTests(1);
     for (const data of [
-      { ...settings, experience: "new" },
+      nutrients,
+      profile,
       {
         ...settings,
         routines: [
@@ -212,27 +232,18 @@ describe.skipIf(!configured)("app API", () => {
       expect(refused.status).toBe(422);
       expect((await body(refused)).error).toContain("can't read yet");
     }
-    setMinimumAppContractForTests(2);
+    setMinimumAppContractForTests();
     try {
-      const saved = await api.handleRecordSave(
-        bearer(
-          token(),
-          {
-            ...json({
-              id: settingsId,
-              revision: 1,
-              operationId: crypto.randomUUID(),
-              data: { ...settings, experience: "new" },
-            }),
-            headers: {
-              "content-type": "application/json",
-              "X-Fitness-Contract": "2",
-            },
-          },
-          "/api/app/records",
-        ),
+      const saved = await body(await save(nutrients, 1, "2"));
+      expect(saved.status).toBe("saved");
+      const refused = await save({ ...nutrients, experience: "new" }, 2, "2");
+      expect(refused.status).toBe(422);
+      expect((await body(refused)).error).toContain("can't read yet");
+      setMinimumAppContractForTests(3);
+      const later = await body(
+        await save({ ...nutrients, experience: "new" }, 2, "3"),
       );
-      expect((await body(saved)).status).toBe("saved");
+      expect(later.status).toBe("saved");
     } finally {
       setMinimumAppContractForTests();
     }
@@ -279,7 +290,9 @@ describe.skipIf(!configured)("app API", () => {
     const load = (value: string | null) =>
       api.handleRecordsLoad(
         value === null
-          ? new Request("http://127.0.0.1:3025/api/app/records")
+          ? new Request("http://127.0.0.1:3025/api/app/records", {
+              headers: { "X-Fitness-Contract": String(appContract) },
+            })
           : bearer(value, {}, "/api/app/records"),
       );
     const missing = await load(null);

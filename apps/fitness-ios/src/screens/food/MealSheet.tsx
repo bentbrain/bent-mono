@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { useLayoutEffect, useState } from "react";
 import { View } from "react-native";
 import type { StaticScreenProps } from "@react-navigation/native";
+import { nutrientInfo, trackedNutrients } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { Button, IconButton } from "../../ui/Button";
 import { NumberField, TextField } from "../../ui/Form";
@@ -22,7 +23,8 @@ export type FoodMealParams = { date: string; mealId?: string };
  */
 export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JSX.Element {
   const { date, mealId } = route.params;
-  const { sync } = useConfiguredAccount();
+  const { sync, settings } = useConfiguredAccount();
+  const tracked = trackedNutrients(settings);
   const navigation = useFoodNavigation();
   const [editing, setEditing] = useState<Opened<Meal> | undefined>(() => {
     const record = mealId ? sync.records.find((item) => item.id === mealId) : undefined;
@@ -61,7 +63,7 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
   }
 
   function save(target: Opened<Meal> | undefined) {
-    const result = parseMeal(input, target?.data.date ?? date);
+    const result = parseMeal(input, target?.data.date ?? date, tracked, target?.data);
     if ("error" in result) {
       setError(result.error);
       haptic("error");
@@ -123,6 +125,22 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
             testID="meal-protein"
           />
         </View>
+        {tracked.length ? (
+          <View className="flex-row gap-3">
+            {tracked.map((nutrient) => (
+              <NumberField
+                key={nutrient}
+                label={nutrientInfo[nutrient].label}
+                unit="g"
+                value={input[nutrient]}
+                onChangeText={(text) => setInput((value) => ({ ...value, [nutrient]: text }))}
+                hint="Optional"
+                className="flex-1"
+                testID={`meal-${nutrient}`}
+              />
+            ))}
+          </View>
+        ) : null}
       </View>
       <ListSection footer="Saved meals appear on the Food screen, ready to add with one tap.">
         <ListToggleRow label="Add to Saved meals" value={keep} onValueChange={setKeep} testID="meal-save-regular" />
@@ -153,7 +171,7 @@ export function FoodMealScreen({ route }: StaticScreenProps<FoodMealParams>): JS
           }
         >
           {status === "changed"
-            ? `This food changed on another device after you opened it. Saved version: ${saved ? `${saved.name} · ${mealSummary(saved)}` : "unavailable"}. Your changes are still in the form.`
+            ? `This food changed on another device after you opened it. Saved version: ${saved ? `${saved.name} · ${mealSummary(saved, tracked)}` : "unavailable"}. Your changes are still in the form.`
             : "This food was removed on another device. Your changes are still in the form."}
         </Notice>
       ) : null}

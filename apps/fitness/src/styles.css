@@ -1750,6 +1750,46 @@ small,
   font-size: 0.8125rem;
   font-weight: 600;
 }
+.food-totals.is-nutrients {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+.food-totals.is-nutrients .food-total {
+  padding: 12px;
+}
+.food-totals.is-nutrients .food-total strong {
+  font-size: 1.375rem;
+}
+.food-totals.is-nutrients .food-total span {
+  font-size: 0.8125rem;
+}
+.food-totals.is-nutrients .food-total .coverage {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.food-totals.is-nutrients .food-total progress {
+  height: 6px;
+  margin: 8px 0 6px;
+}
+.food-totals.is-nutrients .food-total small {
+  font-size: 0.75rem;
+}
+.food-totals.is-nutrients .food-total progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.food-totals.is-nutrients .food-total progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.nutrient-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.nutrient-setting {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
 .food-notice {
   margin: 0 0 8px;
   font-size: 0.875rem;
@@ -1829,6 +1869,12 @@ small,
 .food-form > [role="alert"],
 .food-form > .form-actions {
   grid-column: 1 / -1;
+}
+.food-form > .food-nutrient-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
 }
 .food-form > h2.section-label {
   margin: 0;

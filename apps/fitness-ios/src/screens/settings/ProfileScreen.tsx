@@ -1,8 +1,10 @@
 import { Pressable, View } from "react-native";
+import { nutrientInfo, nutrients } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { Segmented } from "../../ui/Form";
 import { haptic } from "../../ui/haptics";
 import { Card, Screen, SectionTitle } from "../../ui/Layout";
+import { ListSection, ListToggleRow } from "../../ui/List";
 import { AppText } from "../../ui/Text";
 import { cn } from "../../ui/typography";
 import { InputField, NumberInput, SaveBar, useDiscardGuard, useFieldFocus, useSettingsEditor } from "./parts";
@@ -14,7 +16,7 @@ export function ProfileScreen() {
   return <ProfileEditor key={sync.editorReset} />;
 }
 
-/** Goal, timezone, body details, display units and the daily food targets. */
+/** Goal, timezone, body details, display units, the daily food targets and the nutrients to track. */
 function ProfileEditor() {
   const editor = useSettingsEditor();
   const { draft, update } = editor;
@@ -125,6 +127,43 @@ function ProfileEditor() {
             testID="profile-protein"
           />
         </Card>
+      </View>
+
+      <View className="gap-3">
+        <SectionTitle>Nutrients</SectionTitle>
+        <ListSection footer="Track carbs, fat or fibre alongside calories and protein. Targets are optional." testID="profile-nutrients">
+          {nutrients.map((nutrient) => (
+            <ListToggleRow
+              key={nutrient}
+              label={`Track ${nutrientInfo[nutrient].label.toLowerCase()}`}
+              value={Boolean(draft.nutrients?.[nutrient])}
+              onValueChange={(on) => editor.track(nutrient, on ? (draft.nutrients?.[nutrient]?.target ?? null) : false)}
+              testID={`profile-track-${nutrient}`}
+            />
+          ))}
+        </ListSection>
+        {nutrients.some((nutrient) => draft.nutrients?.[nutrient]) ? (
+          <Card>
+            {nutrients.map((nutrient) => {
+              const setting = draft.nutrients?.[nutrient];
+              if (!setting) return null;
+              const { label, target } = nutrientInfo[nutrient];
+              return (
+                <NumberInput
+                  key={nutrient}
+                  label={`Daily ${label.toLowerCase()} target · optional`}
+                  unit="g"
+                  value={setting.target}
+                  optional
+                  hint={`${target.min} to ${target.max} g`}
+                  onChange={(value) => editor.track(nutrient, value)}
+                  inputRef={fields.register(`${nutrient}-target`)}
+                  testID={`profile-${nutrient}-target`}
+                />
+              );
+            })}
+          </Card>
+        ) : null}
       </View>
 
       <SaveBar

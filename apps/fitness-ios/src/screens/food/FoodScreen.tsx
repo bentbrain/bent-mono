@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Alert, View } from "react-native";
-import { formatDate, formatShortDate } from "@bent/fitness-contracts/domain";
+import { formatDate, formatShortDate, trackedNutrients } from "@bent/fitness-contracts/domain";
 import { useCSSVariable } from "uniwind";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { Button, IconButton } from "../../ui/Button";
@@ -51,6 +51,7 @@ export function FoodScreen(): JSX.Element {
   }, [navigation, date]);
 
   const summary = daySummary(sync.records, date, settings);
+  const tracked = trackedNutrients(settings);
   const meals = mealsOn(sync.records, date);
   const saved = regulars(sync.records);
   const week = lastSevenDays(sync.records, date, settings.calories);
@@ -109,6 +110,25 @@ export function FoodScreen(): JSX.Element {
             testID="food-protein"
           />
         </View>
+        {summary.nutrients.length ? <View className="h-px bg-separator" /> : null}
+        {summary.nutrients.length ? (
+          <View className="flex-row gap-3" testID="food-nutrients">
+            {summary.nutrients.map((item) => (
+              <Total
+                key={item.nutrient}
+                compact
+                label={item.label}
+                value={`${item.value}g`}
+                target={item.target === null ? "No target" : `of ${item.target}g`}
+                progress={item.progress}
+                note={item.note}
+                detail={item.coverage}
+                tone={item.tone}
+                testID={`food-${item.nutrient}`}
+              />
+            ))}
+          </View>
+        ) : null}
       </Card>
 
       {notice ? (
@@ -129,7 +149,7 @@ export function FoodScreen(): JSX.Element {
               <ListRow
                 key={meal.id}
                 label={meal.data.name}
-                description={mealSummary(meal.data)}
+                description={mealSummary(meal.data, tracked)}
                 trailing={
                   <View className="flex-row gap-2">
                     <IconButton
@@ -189,7 +209,7 @@ export function FoodScreen(): JSX.Element {
               icon="plus.circle.fill"
               tone="primary"
               label={item.data.name}
-              description={mealSummary(item.data)}
+              description={mealSummary(item.data, tracked)}
               accessibilityHint={`Adds it to ${formatDate(date)}`}
               onPress={() => {
                 if (attempt(sync.put(mealFromRegular(item.data, date)))) {
@@ -240,47 +260,65 @@ export function FoodScreen(): JSX.Element {
   );
 }
 
+/**
+ * One total against its target. `compact` totals sit three to a row for
+ * tracked nutrients; one without a target shows no bar or note.
+ */
 function Total({
   label,
   value,
   target,
   progress,
   note,
+  detail,
   tone,
+  compact,
   testID,
 }: {
   label: string;
   value: string;
   target: string;
-  progress: number;
+  progress: number | null;
   note: string;
+  detail?: string;
   tone: "default" | "done" | "missed";
+  compact?: boolean;
   testID: string;
 }) {
+  const spoken = [`${label}: ${value} ${target}`, note, detail].filter(Boolean).join(". ");
   return (
-    <View className="min-w-0 flex-1 gap-1.5" accessible accessibilityLabel={`${label}: ${value} ${target}. ${note}.`} testID={testID}>
+    <View className={cn("min-w-0 flex-1", compact ? "gap-1" : "gap-1.5")} accessible accessibilityLabel={`${spoken}.`} testID={testID}>
       <AppText textRole="caption" weight="medium" tone="muted" className="uppercase">
         {label}
       </AppText>
-      <AppText textRole="display" weight="bold" style={{ fontVariant: ["tabular-nums"] }}>
+      <AppText textRole={compact ? "title" : "display"} weight="bold" style={{ fontVariant: ["tabular-nums"] }}>
         {value}
       </AppText>
-      <AppText textRole="footnote" tone="muted">
+      <AppText textRole={compact ? "caption" : "footnote"} tone="muted">
         {target}
       </AppText>
-      <View
-        className="h-2 overflow-hidden rounded-full bg-card-alt"
-        accessibilityRole="progressbar"
-        accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
-      >
+      {progress === null ? null : (
         <View
-          className={cn("h-full rounded-full", tone === "missed" ? "bg-missed" : tone === "done" ? "bg-done" : "bg-primary")}
-          style={{ width: `${progress * 100}%` }}
-        />
-      </View>
-      <AppText textRole="footnote" weight="semibold" tone={tone}>
-        {note}
-      </AppText>
+          className={cn("overflow-hidden rounded-full bg-card-alt", compact ? "h-1.5" : "h-2")}
+          accessibilityRole="progressbar"
+          accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
+        >
+          <View
+            className={cn("h-full rounded-full", tone === "missed" ? "bg-missed" : tone === "done" ? "bg-done" : "bg-primary")}
+            style={{ width: `${progress * 100}%` }}
+          />
+        </View>
+      )}
+      {note ? (
+        <AppText textRole={compact ? "caption" : "footnote"} weight="semibold" tone={tone}>
+          {note}
+        </AppText>
+      ) : null}
+      {detail ? (
+        <AppText textRole="caption" tone="muted">
+          {detail}
+        </AppText>
+      ) : null}
     </View>
   );
 }

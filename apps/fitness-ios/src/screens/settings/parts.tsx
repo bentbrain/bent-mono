@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Alert, View } from "react-native";
 import type { TextInputInstance, TextInputProps } from "react-native";
-import { settingsId } from "@bent/fitness-contracts/domain";
-import type { Settings } from "@bent/fitness-contracts/domain";
+import { settingsId, withNutrient } from "@bent/fitness-contracts/domain";
+import type { Nutrient, Settings } from "@bent/fitness-contracts/domain";
 import { useConfiguredAccount } from "../../account/AccountProvider";
 import { Button } from "../../ui/Button";
 import { Field } from "../../ui/Form";
@@ -45,6 +45,12 @@ export function useSettingsEditor(extraDirty: (saved: Settings) => boolean = () 
     setNotice(unsavedNotice);
   }, []);
 
+  /** Tracks a nutrient with a daily target in grams or none, or stops tracking it with false. */
+  const track = useCallback((nutrient: Nutrient, target: number | null | false) => {
+    setDraft((current) => withNutrient(current, nutrient, target));
+    setNotice(unsavedNotice);
+  }, []);
+
   function fail(text: string, id?: string) {
     haptic("error");
     setError({ text, id });
@@ -76,6 +82,7 @@ export function useSettingsEditor(extraDirty: (saved: Settings) => boolean = () 
     saved,
     dirty,
     update,
+    track,
     save,
     fail,
     error,
