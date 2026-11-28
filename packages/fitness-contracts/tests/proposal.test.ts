@@ -274,3 +274,45 @@ test("each changed weight stays visible however it rounds", () => {
     ],
   );
 });
+
+test("distinct weights never share a label", () => {
+  const base = { ...current(), dumbbellsKg: [8, 8.004] };
+  const plan = (dumbbellsKg: number[], incrementsKg?: { barbell: number }) =>
+    storePlan(
+      {
+        ...proposal,
+        goal: base.goal,
+        dumbbellsKg,
+        ...(incrementsKg ? { profile: { incrementsKg } } : {}),
+      },
+      ids,
+    );
+  // A weight both lists share can't hide one that is removed.
+  expect(planChanges(base, plan([8.004, 8.004]))).toEqual([
+    { label: "Dumbbells", from: "8, 8.004 kg", to: "8.004, 8.004 kg" },
+  ]);
+  expect(
+    planChanges(
+      { ...base, incrementsKg: { barbell: 2.5 } },
+      plan(base.dumbbellsKg, { barbell: 2.500000000000001 }),
+    )[0]?.to,
+  ).toStartWith("barbell 2.500000000000001 kg");
+  // In lb, weights whose conversions match show their stored kg too.
+  const pounds = { ...base, units: "lb" as const, dumbbellsKg: [8] };
+  const [change] = planChanges(pounds, plan([8.000000000000002]));
+  expect(change?.from).not.toBe(change?.to);
+  // Every weight step that stays the same shows no change.
+  expect(planChanges({ ...base }, plan(base.dumbbellsKg, undefined))).toEqual(
+    [],
+  );
+  const empty = storePlan(
+    {
+      ...proposal,
+      goal: base.goal,
+      dumbbellsKg: base.dumbbellsKg,
+      profile: { incrementsKg: {} },
+    },
+    ids,
+  );
+  expect(planChanges(base, empty)).toEqual([]);
+});

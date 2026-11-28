@@ -206,41 +206,48 @@ const experienceNames = {
 
 export type PlanChange = { label: string; from: string; to: string };
 
-/** A weight in the account's units, rounded as the app shows weights. */
-const shownWeight = (kg: number, units: Settings["units"]) =>
-  String(displayLoad(kg, units));
-/** A weight in the account's units with every stored digit. */
-const exactWeight = (kg: number, units: Settings["units"]) =>
-  String(Number((units === "lb" ? kg * 2.2046226218 : kg).toPrecision(15)));
-
 /**
- * Two weight lists as the owner reads them. A weight that differs from the
- * other list's weights but rounds to the same text as one of them shows
- * every stored digit, so each change stays visible.
+ * Labels for every weight in `values` in the account's units. Weights get
+ * the rounded text the app shows, except that distinct weights never share
+ * a label: those that would get the full value in the account's units, and
+ * in lb also their stored kg when even that matches.
  */
+function weightLabels(values: readonly number[], units: Settings["units"]) {
+  const distinct = [...new Set(values)];
+  const unique = (label: (kg: number) => string) => {
+    const counts = new Map<string, number>();
+    for (const kg of distinct)
+      counts.set(label(kg), (counts.get(label(kg)) ?? 0) + 1);
+    return (kg: number) => counts.get(label(kg)) === 1;
+  };
+  const shown = (kg: number) => String(displayLoad(kg, units));
+  const full = (kg: number) => String(units === "lb" ? kg * 2.2046226218 : kg);
+  const shownUnique = unique(shown);
+  const fullUnique = unique(full);
+  return new Map(
+    distinct.map((kg) => [
+      kg,
+      shownUnique(kg)
+        ? shown(kg)
+        : fullUnique(kg)
+          ? full(kg)
+          : `${full(kg)} (${String(kg)} kg)`,
+    ]),
+  );
+}
+
+/** Two weight lists as the owner reads them, with every change visible. */
 function weightTexts(
   from: readonly number[] | undefined,
   to: readonly number[] | undefined,
   units: Settings["units"],
 ) {
-  const text = (
-    values: readonly number[] | undefined,
-    other: readonly number[] | undefined,
-  ) => {
-    if (!values?.length) return "None";
-    const otherShown = new Set(other?.map((kg) => shownWeight(kg, units)));
-    return (
-      values
-        .map((kg) => {
-          const shown = shownWeight(kg, units);
-          return !other?.includes(kg) && otherShown.has(shown)
-            ? exactWeight(kg, units)
-            : shown;
-        })
-        .join(", ") + ` ${units}`
-    );
-  };
-  return [text(from, to), text(to, from)] as const;
+  const labels = weightLabels([...(from ?? []), ...(to ?? [])], units);
+  const text = (values: readonly number[] | undefined) =>
+    values?.length
+      ? values.map((kg) => labels.get(kg)).join(", ") + ` ${units}`
+      : "None";
+  return [text(from), text(to)] as const;
 }
 
 const sameValues = (a: unknown, b: unknown) =>
@@ -315,7 +322,9 @@ export function planChanges(current: Settings, plan: StoredPlan): PlanChange[] {
   weights("Kettlebells", current.kettlebellsKg, profile.kettlebellsKg);
   if (
     profile.incrementsKg !== undefined &&
-    !sameValues(current.incrementsKg, profile.incrementsKg)
+    (["barbell", "machine", "cable"] as const).some(
+      (kind) => current.incrementsKg?.[kind] !== profile.incrementsKg?.[kind],
+    )
   ) {
     // A kind without its own step uses the step progression defaults to.
     const before = current.incrementsKg ?? {};
