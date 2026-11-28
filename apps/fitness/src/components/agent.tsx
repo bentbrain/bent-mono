@@ -67,7 +67,6 @@ export function AgentBridge() {
   }, [bridge]);
   if (!bridge) return null;
   const { ask } = bridge;
-  if (!ask) return null;
   return (
     <AlertDialog controller={ask.controller}>
       <AlertDialogBackdrop className="agent-confirm-backdrop" />
