@@ -142,11 +142,19 @@ test("an agent finds every control by name on each screen", async ({
   const screens: [string, string[]][] = [
     ["/", ["Week", "Exercises", "Food", "Progress", "Settings"]],
     ["/guides", ["Goblet squat"]],
-    ["/food", ["Add food"]],
+    ["/food", ["Add food", "Meal or snack", "Save as a regular meal"]],
     ["/progress", ["Sessions", "Bodyweight"]],
     ["/history", ["Overview"]],
     ["/body", ["Save weigh-in"]],
-    ["/settings", ["Save settings", "Export account data and photos"]],
+    [
+      "/settings",
+      [
+        "Save settings",
+        "Export account data and photos",
+        "Goal",
+        "Display units",
+      ],
+    ],
     ["/schedule", ["Save settings"]],
   ];
   for (const [path, expected] of screens) {
@@ -472,4 +480,45 @@ test("an agent tells saved meals with the same name apart", async ({
     .filter((data) => data.kind === "meal" && data.name === "Oats");
   expect(meals.filter((data) => data.protein === 12.4)).toHaveLength(2);
   expect(meals.filter((data) => data.protein === 12.1)).toHaveLength(1);
+});
+
+test("an agent fills in and submits the food form", async ({ page }) => {
+  await page.goto("/food");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const result = await act(page, [
+    { ref: "Meal or snack", action: "setValue", args: ["Agent porridge"] },
+    { ref: "Calories · kcal", action: "setValue", args: ["320"] },
+    { ref: "Protein · g", action: "setValue", args: ["11"] },
+    { ref: "Save as a regular meal", action: "setChecked", args: [true] },
+    { ref: "Add food", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await expect(page.locator(".food-screen > .entries .list-row")).toContainText(
+    "Agent porridge",
+  );
+  await expect(
+    page.getByRole("button", { name: /^Add saved meal \d+: Agent porridge/ }),
+  ).toHaveCount(1);
+});
+
+test("an agent changes settings and saves them", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  const result = await act(page, [
+    { ref: "Goal", action: "setValue", args: ["Agent-set goal"] },
+    { ref: "Display units", action: "setValue", args: ["Pounds"] },
+    { ref: "Save settings", action: "press" },
+  ]);
+  expect(result.ok, result.error?.message).toBe(true);
+  await expect(page.locator(".sync-state")).toHaveText("Saved");
+  await page.reload();
+  await expect(page.getByLabel("Goal", { exact: true })).toHaveValue(
+    "Agent-set goal",
+  );
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Display units" })
+      .getByRole("radio", { name: "Pounds" }),
+  ).toHaveAttribute("aria-checked", "true");
 });

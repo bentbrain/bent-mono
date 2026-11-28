@@ -8,7 +8,8 @@
     "./utils": "./src/utils.ts",
     "./field": "./src/field.tsx",
     "./controls.css": "./src/controls.css",
-    "./sdk/button": "./src/sdk/button.tsx"
+    "./sdk/button": "./src/sdk/button.tsx",
+    "./sdk/field": "./src/sdk/field.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

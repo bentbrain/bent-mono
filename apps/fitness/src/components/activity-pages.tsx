@@ -340,7 +340,6 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
         <h2>{run ? "Edit your run" : "Record your completed run"}</h2>
         <TextField
           label="Date"
-          id="run-date"
           name="date"
           type="date"
           defaultValue={day > today ? today : day}
@@ -349,7 +348,6 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
         />
         <TextField
           label="Duration · minutes"
-          id="run-minutes"
           defaultValue={run?.minutes}
           name="minutes"
           type="number"
@@ -360,7 +358,6 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
         />
         <TextField
           label="Distance · km"
-          id="run-distance"
           defaultValue={run?.distanceKm}
           name="distance"
           type="number"
@@ -371,7 +368,6 @@ export function RunScreen({ date, runId }: { date: string; runId?: string }) {
         />
         <TextField
           label="Notes"
-          id="run-notes"
           defaultValue={run?.notes}
           name="notes"
           maxLength={2000}

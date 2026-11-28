@@ -1,24 +1,56 @@
-import { Field, Input, Select } from "@bent/ui/field";
+import { Field, FieldLabel, Input, Segments, Select } from "@bent/ui/sdk/field";
 import type { ComponentProps } from "react";
+
+/** A labelled text field. Its label names it for screen readers and agents. */
 export function TextField({
   label,
-  id,
+  value,
+  defaultValue,
   ...props
-}: ComponentProps<"input"> & { label: string; id: string }) {
+}: Omit<
+  ComponentProps<typeof Input>,
+  "id" | "onChange" | "value" | "defaultValue"
+> & {
+  label: string;
+  value?: string | number;
+  defaultValue?: string | number;
+}) {
   return (
-    <Field label={label} htmlFor={id}>
-      <Input id={id} {...props} />
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      <Input
+        {...props}
+        value={value === undefined ? undefined : String(value)}
+        defaultValue={
+          defaultValue === undefined ? undefined : String(defaultValue)
+        }
+      />
     </Field>
   );
 }
+
+/** A labelled list of choices in a popup. */
 export function SelectField({
   label,
-  id,
   ...props
-}: ComponentProps<"select"> & { label: string; id: string }) {
+}: ComponentProps<typeof Select> & { label: string }) {
   return (
-    <Field label={label} htmlFor={id}>
-      <Select id={id} {...props} />
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      <Select {...props} />
+    </Field>
+  );
+}
+
+/** A labelled row of a few choices, all visible. */
+export function ChoiceField({
+  label,
+  ...props
+}: ComponentProps<typeof Segments> & { label: string }) {
+  return (
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      <Segments {...props} />
     </Field>
   );
 }
